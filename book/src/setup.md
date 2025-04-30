@@ -36,7 +36,7 @@ pdm install -v # this will automatically create a virtual environment and instal
 ```bash
 pdm run python check.py
 # The reference solution should pass all the tests
-pdm run test_ref_impl_week1
+pdm run test-week1-ref
 ```
 
 ## Run Unit Tests
