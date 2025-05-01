@@ -32,9 +32,7 @@ To make the journey as interesting as possible, we will skip a few things for no
 
 ## Basic Matrix APIs
 
-MLX doesn't have a basic guide for beginners, while MLX has a Python API that closely follows NumPy. So you can refer to
-[NumPy: the absolute basic for beginners](https://numpy.org/doc/stable/user/absolute_beginners.html) to learn the basic
-matrix operations.
+Although MLX does not offer an introductory guide for beginners, its Python API is designed to be highly compatible with NumPy. To get started, you can refer to [NumPy: The Absolute Basic for Beginners](https://numpy.org/doc/stable/user/absolute_beginners.html) to learn essential matrix operations.
 
 You can also refer to the [MLX Operations API](https://ml-explore.github.io/mlx/build/html/python/ops.html#operations)
 for more details.
