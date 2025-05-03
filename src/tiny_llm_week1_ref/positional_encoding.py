@@ -24,7 +24,7 @@ class RoPE:
 
     def __call__(
         self, x: mx.array, offset: slice | None = None
-    ) -> tuple[mx.array, mx.array]:
+    ) -> mx.array:
         N, S, H, D = x.shape
         # if offset is not None:
         #     assert len(offset) == S, f"offset {len(offset)} must be of length {s}"

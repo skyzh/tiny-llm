@@ -13,5 +13,5 @@ class RoPE:
 
     def __call__(
         self, x: mx.array, offset: slice | None = None
-    ) -> tuple[mx.array, mx.array]:
+    ) -> mx.array:
         pass
