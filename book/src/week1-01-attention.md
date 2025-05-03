@@ -44,7 +44,7 @@ TODO: fix test case names, do not do same dims in this chapter: instead, introdu
 * [MLX Scaled Dot Product Attention API](https://ml-explore.github.io/mlx/build/html/python/_autosummary/mlx.core.fast.scaled_dot_product_attention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
 * [Attention is All You Need](https://arxiv.org/abs/1706.03762)
 
-Implement `scaled_dot_product_attention` following the below attention function. The function takes key, value, and query of the same dimensions, and a optional mask matrix `M`.
+Implement `scaled_dot_product_attention` following the below attention function. The function takes key, value, and query of the same dimensions, and an optional mask matrix `M`.
 
 $$
   \text{Attention} = \text{softmax}(\frac{QK^T}{\sqrt{d_k}} + M)V
