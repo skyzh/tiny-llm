@@ -29,7 +29,7 @@ def assert_allclose(
     elif precision == np.float16:
         rtol = rtol or 3.0e-2
         atol = atol or 1.0e-5
-    assert a.shape == b.shape
+    assert a.shape == b.shape, f"shape mismatch: {a.shape} vs {b.shape}"
     if not np.allclose(a, b, rtol=rtol, atol=atol):
         print("a=", a)
         print("b=", b)

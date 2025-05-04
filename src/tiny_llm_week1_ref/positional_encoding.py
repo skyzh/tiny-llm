@@ -9,6 +9,7 @@ class RoPE:
         base: int = 10000,
         traditional: bool = False,
     ):
+        assert dims % 2 == 0, "dims must be even"
         self.dims = dims
         self.seq_len = seq_len
         half_dims = dims // 2
