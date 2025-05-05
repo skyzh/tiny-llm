@@ -27,16 +27,16 @@ def scaled_dot_product_attention_grouped(
     factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
     factor = factor.astype(query.dtype)
     expected_shape = query.shape
-    query = query.reshape(-1, query.shape[-3], query.shape[-2], query.shape[-1])
-    key = key.reshape(-1, key.shape[-3], key.shape[-2], key.shape[-1])
-    value = value.reshape(-1, value.shape[-3], value.shape[-2], value.shape[-1])
-    B, H_q, L, E = query.shape
-    _, H, S, _ = key.shape
+  
+    H_q, L, D = query.shape[-3:]
+    H, S, _ = key.shape[-3:]
     assert H_q % H == 0
     n_repeats = H_q // H
-    query = query.reshape((B, H, n_repeats, L, E))
-    key = key.reshape((B, H, 1, S, E))
-    value = value.reshape((B, H, 1, S, E))
+
+    query = query.reshape(-1, H, n_repeats, L, D)
+    key = key.reshape(-1, H, 1, S, D)
+    value = value.reshape(-1, H, 1, S, D)
+    
     scores = mx.matmul(query, key.swapaxes(-2, -1)) * factor
     if mask is not None:
         if mask == "causal":

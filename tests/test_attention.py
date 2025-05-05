@@ -134,28 +134,28 @@ def test_multi_head_attention_week_1_day_1_task_2(
     "batch_dimension", [0, 1, 2], ids=["batch_0", "batch_1", "batch_2"]
 )
 @pytest.mark.parametrize("scale", [None, 0.8])
-def test_attention_grouped(
+def test_attention_grouped_week_1_day_3_task_1(
     stream: mx.Stream, precision: np.dtype, batch_dimension: int, scale: float | None
 ):
     with mx.stream(stream):
         H_q = 18
         H = 6
         L = 7
-        E = 5
+        D = 5
         S = 3
         BATCH = 10
         BATCH_2 = 2
         if batch_dimension == 0:
-            q_shape = (H_q, L, E)
-            kv_shape = (H, S, E)
+            q_shape = (H_q, L, D)
+            kv_shape = (H, S, D)
             mask_shape = (H_q, L, S)
         elif batch_dimension == 1:
-            q_shape = (BATCH, H_q, L, E)
-            kv_shape = (BATCH, H, S, E)
+            q_shape = (BATCH, H_q, L, D)
+            kv_shape = (BATCH, H, S, D)
             mask_shape = (BATCH, H_q, L, S)
         elif batch_dimension == 2:
-            q_shape = (BATCH_2, BATCH, H_q, L, E)
-            kv_shape = (BATCH_2, BATCH, H, S, E)
+            q_shape = (BATCH_2, BATCH, H_q, L, D)
+            kv_shape = (BATCH_2, BATCH, H, S, D)
             mask_shape = (BATCH_2, BATCH, H_q, L, S)
         for _ in range(100):
             query = np.random.rand(*q_shape).astype(precision)

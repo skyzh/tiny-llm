@@ -54,9 +54,9 @@ $$
 L is seq_len, in PyTorch API it's S (source len)
 D is head_dim
 
-K: N.. x L x D
-V: N.. x L x D
-Q: N.. x L x D
+key: N.. x L x D
+value: N.. x L x D
+query: N.. x L x D
 output: N.. x L x D
 ```
 
@@ -66,9 +66,9 @@ Because we are always using the attention layer within the multi-head attention 
 the model will be:
 
 ```
-K: 1 x H x L x D
-V: 1 x H x L x D
-Q: 1 x H x L x D
+key: 1 x H x L x D
+value: 1 x H x L x D
+query: 1 x H x L x D
 output: 1 x H x L x D
 mask: 1 x H x L x L
 ```
@@ -113,7 +113,7 @@ Now, you have a tensor of the shape `N.. x L x H x D` for each of the key, value
 * This makes each attention head an independent batch, so that attention can be calculated separately for each head across the sequence `L`.
 * If you kept `H` behind `L`, attention calculation would mix head and sequence dimensions, which is not what we want — each head should focus only on the relationships between tokens in its own subspace.
 
-Then, the attention function produces output for each of the head of the token. Then, you can transpose it back into `N.. x L x H x D` and reshape it
+The attention function produces output for each of the head of the token. Then, you can transpose it back into `N.. x L x H x D` and reshape it
 so that all heads get merged back together with a shape of `N.. x L x (H x D)`. Map it through the output weight matrix to get
 the final output.
 
