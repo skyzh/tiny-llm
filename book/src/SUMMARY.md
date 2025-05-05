@@ -8,7 +8,7 @@
 - [Week 1: From Matmul to Text](./week1-overview.md)
     - [Attention and Multi-Head Attention](./week1-01-attention.md)
     - [Positional Encodings and RoPE](./week1-02-positional-encodings.md)
-    - [Grouped/Multi Query Attention]()
+    - [Grouped/Multi Query Attention](./week1-03-gqa.md)
     - [Multilayer Perceptron Layer and Transformer]()
     - [Wiring the Qwen2 Model]()
     - [Loading the Model]()
