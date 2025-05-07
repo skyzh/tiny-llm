@@ -11,3 +11,6 @@ renderer = ["html"]
 
 [output.html]
 git-repository-url = "https://github.com/skyzh/tiny-llm"
+
+[preprocessor.katex]
+after = ["links"]
