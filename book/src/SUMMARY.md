@@ -9,7 +9,7 @@
     - [Attention and Multi-Head Attention](./week1-01-attention.md)
     - [Positional Encodings and RoPE](./week1-02-positional-encodings.md)
     - [Grouped/Multi Query Attention](./week1-03-gqa.md)
-    - [Multilayer Perceptron Layer and Transformer]()
+    - [RMSNorm and Multilayer Perceptron Layer](./week1-04-rmsnorm-and-mlp.md)
     - [Wiring the Qwen2 Model]()
     - [Loading the Model]()
     - [Generating the Response]()
