@@ -29,7 +29,7 @@ You may join skyzh's Discord server and study with the tiny-llm community.
 | 1.1            | Attention                                                   | ✅    | ✅   | ✅  |
 | 1.2            | RoPE                                                        | ✅    | ✅   | ✅  |
 | 1.3            | Grouped Query Attention                                     | ✅    | ✅   | ✅  |
-| 1.4            | RMSNorm and MLP                                             | ✅    | 🚧   | 🚧  |
+| 1.4            | RMSNorm and MLP                                             | ✅    | ✅   | ✅  |
 | 1.5            | Transformer Block                                           | ✅    | 🚧   | 🚧  |
 | 1.6            | Load the Model                                              | ✅    | 🚧   | 🚧  |
 | 1.7            | Generate Responses (aka Decoding)                           | ✅    | ✅   | 🚧  |
