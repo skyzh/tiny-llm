@@ -100,7 +100,7 @@ src/tiny_llm/attention.py
 Implement `MultiHeadAttention`. The layer takes a batch of vectors, maps it through the K, V, Q weight matrixes, and use the attention function we implemented in task 1 to compute the result. The output needs to be mapped using the O
 weight matrix.
 
-You will also need to implement the `linear` function first. For `linear`, it takes a tensor of the shape `N.. x I`, a weight matrix of the shape `O x I`, and a bias vector of the shape `O`. The output is of the shape `N.. x O`. `I` is the input dimension and `O` is the output dimension.
+You will also need to implement the `linear` function in `basics.py` first. For `linear`, it takes a tensor of the shape `N.. x I`, a weight matrix of the shape `O x I`, and a bias vector of the shape `O`. The output is of the shape `N.. x O`. `I` is the input dimension and `O` is the output dimension.
 
 For the `MultiHeadAttention` layer, the input tensors `query`, `key`, `value` have the shape `N x L x E`, where `E` is the dimension of the
 embedding for a given token in the sequence. The `K/Q/V` weight matrixes will map the tensor into key, value, and query
@@ -123,9 +123,9 @@ H is num_heads
 D is head_dim
 L is seq_len, in PyTorch API it's S (source len)
 
-W_q/W_k/W_v: E x (H x D)
+w_q/w_k/w_v: E x (H x D)
 output/input: N x L x E
-W_o: (H x D) x E
+w_o: (H x D) x E
 ```
 
 At the end of the day, you should be able to pass the following tests:

@@ -6,5 +6,5 @@ from .positional_encoding import *
 from .quantize import *
 from .generate import *
 from .kv_cache import *
-from .qwen2_week1 import Qwen2ModelWeek1
+from .qwen2_week1 import *
 from .qwen2_week2 import Qwen2ModelWeek2

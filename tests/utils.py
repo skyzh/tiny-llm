@@ -31,12 +31,13 @@ def assert_allclose(
         atol = atol or 1.0e-5
     assert a.shape == b.shape, f"shape mismatch: {a.shape} vs {b.shape}"
     if not np.allclose(a, b, rtol=rtol, atol=atol):
-        print("a=", a)
-        print("b=", b)
-        diff = np.invert(np.isclose(a, b, rtol=rtol, atol=atol))
-        print("diff_a=", a * diff)
-        print("diff_b=", b * diff)
-        assert False, f"result mismatch"
+        with np.printoptions(precision=3, suppress=True):
+            print("a=", a)
+            print("b=", b)
+            diff = np.invert(np.isclose(a, b, rtol=rtol, atol=atol))
+            print("diff_a=", a * diff)
+            print("diff_b=", b * diff)
+            assert False, f"result mismatch"
 
 
 def np_type_to_mx_type(np_type: np.dtype) -> mx.Dtype:

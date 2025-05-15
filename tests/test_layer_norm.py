@@ -9,7 +9,9 @@ from .utils import *
 @pytest.mark.parametrize("target", ["torch", "mlx"])
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
-def test_rms_norm_week_1_day_4_task_1(stream: mx.Stream, precision: np.dtype, target: str):
+def test_rms_norm_week_1_day_4_task_1(
+    stream: mx.Stream, precision: np.dtype, target: str
+):
     SIZE = 100
     SIZE_Y = 111
     with mx.stream(stream):
