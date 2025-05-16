@@ -3,13 +3,17 @@ from .basics import softmax, linear
 from extensions_ref import tiny_llm_ext_ref
 
 
-def scaled_dot_product_attention(
+def scaled_dot_product_attention_simple(
     query: mx.array,
     key: mx.array,
     value: mx.array,
     scale: float | None = None,
     mask: mx.array | None = None,
 ) -> mx.array:
+    """
+    A simple implementation of scaled dot product attention. Assuming Q,K,V are of the same shape.
+    Assuming mask is always a float array.
+    """
     factor = mx.rsqrt(query.shape[-1]) if scale is None else scale
     scores = mx.matmul(query, key.swapaxes(-2, -1)) * factor
     if mask is not None:
@@ -41,7 +45,7 @@ def scaled_dot_product_attention_grouped(
     if mask is not None:
         if mask == "causal":
             mask = mx.tril(mx.ones((L, S)), k=S - L)
-            mask = mx.where(mask, mx.array(0), mx.array(-mx.inf))
+            mask = mx.where(mask, mx.array(0), mx.array(-mx.inf)).astype(scores.dtype)
             scores = scores + mask
         else:
             mask = mask.reshape(-1, H, n_repeats, mask.shape[-2], mask.shape[-1])
@@ -119,7 +123,7 @@ class MultiHeadAttention:
             .reshape(N, L, self.num_heads, self.head_dim)
             .transpose(0, 2, 1, 3)
         )
-        x = scaled_dot_product_attention(
+        x = scaled_dot_product_attention_simple(
             projection_q,
             projection_k,
             projection_v,

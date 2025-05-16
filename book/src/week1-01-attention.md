@@ -29,13 +29,9 @@ we will pass a tensor of the shape `N.. x 1024 x 512` to the attention layer.
 
 ## Task 1: Implement `scaled_dot_product_attention`
 
-In this task, we will implement the scaled dot product attention function.
-
-```
-pdm run test -k week_1_day_1_task_1 -v
-```
-
-TODO: fix test case names, do not do same dims in this chapter: instead, introduce S, L, H, D, etc.
+In this task, we will implement the scaled dot product attention function. We assume the input tensors (Q, K, V) have
+the same dimensions. In the next few chapters, we will support more variants of attentions that might not have the same
+dimensions for all tensors.
 
 **📚 Readings**
 
@@ -78,8 +74,7 @@ mask: 1 x H x L x L
 At the end of this task, you should be able to pass the following tests:
 
 ```
-pdm run test -k test_attention_simple
-pdm run test -k test_attention_with_mask
+pdm run test --week 1 --day 1 -- -k task_1
 ```
 
 ## Task 2: Implement `MultiHeadAttention`
@@ -128,10 +123,16 @@ output/input: N x L x E
 w_o: (H x D) x E
 ```
 
-At the end of the day, you should be able to pass the following tests:
+At the end of the task, you should be able to pass the following tests:
 
 ```
-pdm run test -k week_1_day_1_task_2 -v
+pdm run test --week 1 --day 1 -- -k task_2
+```
+
+You can run all tests for the day with:
+
+```
+pdm run test --week 1 --day 1
 ```
 
 {{#include copyright.md}}
