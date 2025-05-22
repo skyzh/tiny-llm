@@ -29,9 +29,9 @@ and MLX's implementation to ensure correctness.
 
 This course is divided into 3 weeks. We will serve the Qwen2-7B-Instruct model and optimize it throughout the course.
 
-* Week 1: serve Qwen2 with purely matrix manipulation APIs. Just Python.
-* Week 2: optimizations, implement C++/Metal custom kernels to make the model run faster.
-* Week 3: more optimizations, batch the requests to serve the model with high throughput.
+- Week 1: serve Qwen2 with purely matrix manipulation APIs. Just Python.
+- Week 2: optimizations, implement C++/Metal custom kernels to make the model run faster.
+- Week 3: more optimizations, batch the requests to serve the model with high throughput.
 
 ## How to Use This Book
 
@@ -49,6 +49,10 @@ This course is created by [Chi](https://github.com/skyzh) and [Connor](https://g
 
 Chi is a systems software engineer at [Neon](https://neon.tech), acquired by Databricks, focusing on storage systems.
 Fascinated by the vibe of large language models (LLMs), he created this course to explore how LLM inference works.
+
+Connor is a software engineer at [PingCAP](https://pingcap.com), developing the TiKV distributed key-value database.
+Curious about the internals of LLMs, he joined this course to practice how to build a high-performance LLM serving system
+from scratch, and contributed to building the course for the community.
 
 ## Community
 
