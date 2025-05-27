@@ -26,7 +26,26 @@ def test_task_1_rms_norm(
                 eps=eps,
             )
             user_output = RMSNorm(SIZE_Y, mx.array(weight), eps=eps)(mx.array(data))
+            assert user_output.dtype == mx.array(data).dtype, (
+                "Output dtype mismatch, perhaps you forgot to cast the output to the original dtype?"
+            )
             assert_allclose(user_output, reference_output, precision)
+
+
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+def test_task_1_rms_norm_cast_to_float32(stream: mx.Stream):
+    precision = np.float16
+    SIZE, SIZE_Y = 32, 64
+
+    data = (np.random.uniform(-1000, 1000, size=(SIZE, SIZE_Y))).astype(precision)
+    weight = (np.random.uniform(-1000, 1000, size=(SIZE_Y,))).astype(precision)
+    eps = np.finfo(precision).eps
+
+    with mx.stream(stream):
+        user_out = RMSNorm(SIZE_Y, mx.array(weight), eps=eps)(mx.array(data))
+        ref_out = mx.fast.rms_norm(mx.array(data), mx.array(weight), eps=eps)
+
+    assert_allclose(user_out, ref_out, precision)
 
 
 @pytest.mark.parametrize("target", ["torch", "mlx"])

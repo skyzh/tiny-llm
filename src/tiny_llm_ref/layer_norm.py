@@ -8,7 +8,6 @@ class RMSNorm:
         self.weight = weight.astype(mx.float32)
 
     def __call__(self, x: mx.array) -> mx.array:
-        # TODO: tests to ensure the precision of this function
         orig_dtype = x.dtype
         x = x.astype(mx.float32)
         return (
