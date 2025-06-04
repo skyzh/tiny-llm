@@ -18,7 +18,7 @@ def test_task_1_rms_norm(
         for _ in range(100):
             data = mx.random.uniform(shape=(SIZE, SIZE_Y), dtype=precision)
             weight = mx.random.uniform(shape=(SIZE_Y,), dtype=precision)
-            eps = 1e-6 if precision == mx.float32 else 1e-4
+            eps = mx.finfo(precision).eps
             reference_output = mx.fast.rms_norm(
                 data,
                 weight,
@@ -35,7 +35,7 @@ def test_task_1_rms_norm_cast_to_float32(stream: mx.Stream):
 
     data = mx.random.uniform(-1000, 1000, shape=(SIZE, SIZE_Y), dtype=precision)
     weight = mx.random.uniform(-1000, 1000, shape=(SIZE_Y,), dtype=precision)
-    eps = 1e-4
+    eps = mx.finfo(precision).eps
 
     with mx.stream(stream):
         user_out = RMSNorm(SIZE_Y, weight, eps=eps)(data)
