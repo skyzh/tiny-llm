@@ -1,14 +1,12 @@
 import pytest
 import mlx.core as mx
-import torch
 from .tiny_llm_base import *
-import numpy as np
 from .utils import *
 
 
 def grouped_attention_helper(
     stream: mx.Stream,
-    precision: np.dtype,
+    precision: mx.Dtype,
     batch_dimension: int,
     scale: float | None,
     is_causal_mask: bool,
@@ -34,30 +32,28 @@ def grouped_attention_helper(
             kv_shape = (BATCH_2, BATCH, H, S, D)
             mask_shape = (BATCH_2, BATCH, H_q, L, S)
         for _ in range(100):
-            query = np.random.rand(*q_shape).astype(precision)
-            key = np.random.rand(*kv_shape).astype(precision)
-            value = np.random.rand(*kv_shape).astype(precision)
-            mask = np.random.rand(*mask_shape).astype(precision)
-            reference_output = torch.nn.functional.scaled_dot_product_attention(
-                torch.tensor(query, device=TORCH_DEVICE),
-                torch.tensor(key, device=TORCH_DEVICE),
-                torch.tensor(value, device=TORCH_DEVICE),
-                scale=scale,
-                attn_mask=torch.tensor(mask, device=TORCH_DEVICE)
-                if not is_causal_mask
-                else torch.tensor(
-                    np.array(causal_mask(L, S, np_type_to_mx_type(precision))),
-                    device=TORCH_DEVICE,
-                ),
-                enable_gqa=True,
+            query = mx.random.uniform(shape=q_shape, dtype=precision)
+            key = mx.random.uniform(shape=kv_shape, dtype=precision)
+            value = mx.random.uniform(shape=kv_shape, dtype=precision)
+            mask = mx.random.uniform(shape=mask_shape, dtype=precision)
+
+            reference_output = mx.fast.scaled_dot_product_attention(
+                q=query.reshape(-1, H_q, L, D),
+                k=key.reshape(-1, H, S, D),
+                v=value.reshape(-1, H, S, D),
+                scale=scale if scale is not None else (1.0 / (D ** 0.5)),
+                mask=mask.reshape(-1, H_q, L, S) if not is_causal_mask else "causal",
             )
+            # Reshape reference output back to original shape
+            reference_output = reference_output.reshape(query.shape)
             user_output = scaled_dot_product_attention_grouped(
-                mx.array(query),
-                mx.array(key),
-                mx.array(value),
+                query,
+                key,
+                value,
                 scale=scale,
-                mask=mx.array(mask) if not is_causal_mask else "causal",
+                mask=mask if not is_causal_mask else "causal",
             )
+           
             assert_allclose(user_output, reference_output, precision=precision)
 
 
@@ -68,7 +64,7 @@ def grouped_attention_helper(
 )
 @pytest.mark.parametrize("scale", [None, 0.8])
 def test_task_1_grouped_attention(
-    stream: mx.Stream, precision: np.dtype, batch_dimension: int, scale: float | None
+    stream: mx.Stream, precision: mx.Dtype, batch_dimension: int, scale: float | None
 ):
     grouped_attention_helper(stream, precision, batch_dimension, scale, False)
 
@@ -89,12 +85,12 @@ def test_task_2_mask_only_same_dim(
             user_output,
             mx.array(
                 [
-                    [0, -np.inf, -np.inf],
-                    [0, 0, -np.inf],
+                    [0, -mx.inf, -mx.inf],
+                    [0, 0, -mx.inf],
                     [0, 0, 0],
                 ]
             ),
-            precision=np.float32,
+            precision=mx.float32,
         )
 
 
@@ -114,12 +110,12 @@ def test_task_2_mask_only_different_dim(
             user_output,
             mx.array(
                 [
-                    [0, 0, 0, -np.inf, -np.inf],
-                    [0, 0, 0, 0, -np.inf],
+                    [0, 0, 0, -mx.inf, -mx.inf],
+                    [0, 0, 0, 0, -mx.inf],
                     [0, 0, 0, 0, 0],
                 ]
             ),
-            precision=np.float32,
+            precision=mx.float32,
         )
 
 
@@ -130,7 +126,7 @@ def test_task_2_mask_only_different_dim(
 )
 @pytest.mark.parametrize("scale", [None, 0.8])
 def test_task_2_grouped_attention_causal_mask(
-    stream: mx.Stream, precision: np.dtype, batch_dimension: int, scale: float | None
+    stream: mx.Stream, precision: mx.Dtype, batch_dimension: int, scale: float | None
 ):
     grouped_attention_helper(stream, precision, batch_dimension, scale, True)
 

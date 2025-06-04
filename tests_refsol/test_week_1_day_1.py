@@ -1,27 +1,20 @@
 import pytest
 import mlx.core as mx
-import torch
+import mlx.nn as nn
 from .tiny_llm_base import *
-import numpy as np
 from .utils import *
 
 
-@pytest.mark.parametrize("target", ["torch", "mlx"])
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
-def test_task_1_softmax(stream: mx.Stream, precision: np.dtype, target: str):
+def test_task_1_softmax(stream: mx.Stream, precision: mx.Dtype):
     with mx.stream(stream):
         BATCH_SIZE = 10
         DIM = 10
         for _ in range(100):
-            x = np.random.rand(BATCH_SIZE, DIM).astype(precision)
-            user_output = softmax(mx.array(x), axis=-1)
-            if target == "torch":
-                reference_output = torch.nn.functional.softmax(
-                    torch.tensor(x, device=TORCH_DEVICE), dim=-1
-                )
-            else:
-                reference_output = mx.softmax(mx.array(x), axis=-1)
+            x = mx.random.uniform(shape=(BATCH_SIZE, DIM), dtype=precision)
+            user_output = softmax(x, axis=-1)
+            reference_output = mx.softmax(x, axis=-1)
             assert_allclose(user_output, reference_output, precision=precision)
 
 
@@ -31,7 +24,7 @@ def test_task_1_softmax(stream: mx.Stream, precision: np.dtype, target: str):
     "batch_dimension", [0, 1, 2], ids=["batch_0", "batch_1", "batch_2"]
 )
 def test_task_1_simple_attention(
-    stream: mx.Stream, precision: np.dtype, batch_dimension: int
+    stream: mx.Stream, precision: mx.Dtype, batch_dimension: int
 ):
     """
     Test if `scaled_dot_product_attention_simple` can process Q/K/V correctly.
@@ -47,19 +40,19 @@ def test_task_1_simple_attention(
         DIM_L = 4
         DIM_D = 5
         for _ in range(100):
-            query = np.random.rand(*BATCH_SIZE, DIM_L, DIM_D).astype(precision)
-            key = np.random.rand(*BATCH_SIZE, DIM_L, DIM_D).astype(precision)
-            value = np.random.rand(*BATCH_SIZE, DIM_L, DIM_D).astype(precision)
+            query = mx.random.uniform(shape=(*BATCH_SIZE, DIM_L, DIM_D), dtype=precision)
+            key = mx.random.uniform(shape=(*BATCH_SIZE, DIM_L, DIM_D), dtype=precision)
+            value = mx.random.uniform(shape=(*BATCH_SIZE, DIM_L, DIM_D), dtype=precision)
             reference_output = mx.fast.scaled_dot_product_attention(
-                q=mx.array(query).reshape(1, -1, DIM_L, DIM_D),
-                k=mx.array(key).reshape(1, -1, DIM_L, DIM_D),
-                v=mx.array(value).reshape(1, -1, DIM_L, DIM_D),
-                scale=mx.rsqrt(DIM_D),
+                q=query.reshape(1, -1, DIM_L, DIM_D),
+                k=key.reshape(1, -1, DIM_L, DIM_D),
+                v=value.reshape(1, -1, DIM_L, DIM_D),
+                scale=1.0 / (DIM_D ** 0.5),
             ).reshape(*BATCH_SIZE, DIM_L, DIM_D)
             user_output = scaled_dot_product_attention_simple(
-                mx.array(query),
-                mx.array(key),
-                mx.array(value),
+                query,
+                key,
+                value,
             )
             assert_allclose(user_output, reference_output, precision=precision)
 
@@ -70,7 +63,7 @@ def test_task_1_simple_attention(
     "batch_dimension", [0, 1, 2], ids=["batch_0", "batch_1", "batch_2"]
 )
 def test_task_1_simple_attention_scale_mask(
-    stream: mx.Stream, precision: np.dtype, batch_dimension: int
+    stream: mx.Stream, precision: mx.Dtype, batch_dimension: int
 ):
     """
     Test if `scaled_dot_product_attention_simple` can process scale and mask correctly.
@@ -85,58 +78,50 @@ def test_task_1_simple_attention_scale_mask(
         DIM_L = 4
         DIM_D = 5
         for _ in range(100):
-            query = np.random.rand(*BATCH_SIZE, DIM_L, DIM_D).astype(precision)
-            key = np.random.rand(*BATCH_SIZE, DIM_L, DIM_D).astype(precision)
-            value = np.random.rand(*BATCH_SIZE, DIM_L, DIM_D).astype(precision)
-            mask = np.random.rand(*BATCH_SIZE, DIM_L, DIM_L).astype(precision)
+            query = mx.random.uniform(shape=(*BATCH_SIZE, DIM_L, DIM_D), dtype=precision)
+            key = mx.random.uniform(shape=(*BATCH_SIZE, DIM_L, DIM_D), dtype=precision)
+            value = mx.random.uniform(shape=(*BATCH_SIZE, DIM_L, DIM_D), dtype=precision)
+            mask = mx.random.uniform(shape=(*BATCH_SIZE, DIM_L, DIM_L), dtype=precision)
             scale = 0.5
             reference_output = mx.fast.scaled_dot_product_attention(
-                q=mx.array(query).reshape(1, -1, DIM_L, DIM_D),
-                k=mx.array(key).reshape(1, -1, DIM_L, DIM_D),
-                v=mx.array(value).reshape(1, -1, DIM_L, DIM_D),
+                q=query.reshape(1, -1, DIM_L, DIM_D),
+                k=key.reshape(1, -1, DIM_L, DIM_D),
+                v=value.reshape(1, -1, DIM_L, DIM_D),
                 scale=scale,
-                mask=mx.array(mask).reshape(1, -1, DIM_L, DIM_L),
+                mask=mask.reshape(1, -1, DIM_L, DIM_L),
             ).reshape(*BATCH_SIZE, DIM_L, DIM_D)
             user_output = scaled_dot_product_attention_simple(
-                mx.array(query),
-                mx.array(key),
-                mx.array(value),
+                query,
+                key,
+                value,
                 scale=scale,
-                mask=mx.array(mask),
+                mask=mask,
             )
             assert_allclose(user_output, reference_output, precision=precision)
 
 
-@pytest.mark.parametrize("target", ["torch", "mlx"])
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
-def test_task_2_linear(stream: mx.Stream, precision: np.dtype, target: str):
+def test_task_2_linear(stream: mx.Stream, precision: mx.Dtype):
     with mx.stream(stream):
         BATCH_SIZE = 10
         DIM_Y = 10
         DIM_X = 12
         for _ in range(100):
-            x = np.random.rand(BATCH_SIZE, DIM_X).astype(precision)
-            w = np.random.rand(DIM_Y, DIM_X).astype(precision)
-            b = np.random.rand(DIM_Y).astype(precision)
-            user_output = linear(mx.array(x), mx.array(w), mx.array(b))
-            if target == "torch":
-                reference_output = torch.nn.functional.linear(
-                    torch.tensor(x, device=TORCH_DEVICE),
-                    torch.tensor(w, device=TORCH_DEVICE),
-                    torch.tensor(b, device=TORCH_DEVICE),
-                )
-            else:
-                if precision == np.float16 and stream == mx.cpu:
-                    # unsupported
-                    break
-                reference_output = mx.addmm(mx.array(b), mx.array(x), mx.array(w).T)
+            x = mx.random.uniform(shape=(BATCH_SIZE, DIM_X), dtype=precision)
+            w = mx.random.uniform(shape=(DIM_Y, DIM_X), dtype=precision)
+            b = mx.random.uniform(shape=(DIM_Y,), dtype=precision)
+            user_output = linear(x, w, b)
+            if precision == mx.float16 and stream == mx.cpu:
+                # unsupported
+                break
+            reference_output = mx.addmm(b, x, w.T)
             assert_allclose(user_output, reference_output, precision=precision)
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
-def test_task_2_simple_multi_head_attention(stream: mx.Stream, precision: np.dtype):
+def test_task_2_simple_multi_head_attention(stream: mx.Stream, precision: mx.Dtype):
     """
     Test if `MultiHeadAttention` can process everything correctly. We assume Q/K/V are of the same dimensions.
     """
@@ -146,46 +131,37 @@ def test_task_2_simple_multi_head_attention(stream: mx.Stream, precision: np.dty
         H = 3
         BATCH_SIZE = 10
         for _ in range(100):
-            query = np.random.rand(BATCH_SIZE, L, H * D).astype(precision)
-            key = np.random.rand(BATCH_SIZE, L, H * D).astype(precision)
-            value = np.random.rand(BATCH_SIZE, L, H * D).astype(precision)
-            q_proj_weight = np.random.rand(H * D, H * D).astype(precision)
-            k_proj_weight = np.random.rand(H * D, H * D).astype(precision)
-            v_proj_weight = np.random.rand(H * D, H * D).astype(precision)
-            out_proj_weight = np.random.rand(H * D, H * D).astype(precision)
-            mask = np.random.rand(L, L).astype(precision)
-            reference_output, _ = torch.nn.functional.multi_head_attention_forward(
-                torch.tensor(query, device=TORCH_DEVICE).transpose(0, 1),
-                torch.tensor(key, device=TORCH_DEVICE).transpose(0, 1),
-                torch.tensor(value, device=TORCH_DEVICE).transpose(0, 1),
-                num_heads=H,
-                q_proj_weight=torch.tensor(q_proj_weight, device=TORCH_DEVICE),
-                k_proj_weight=torch.tensor(k_proj_weight, device=TORCH_DEVICE),
-                v_proj_weight=torch.tensor(v_proj_weight, device=TORCH_DEVICE),
-                out_proj_weight=torch.tensor(out_proj_weight, device=TORCH_DEVICE),
-                embed_dim_to_check=H * D,
-                in_proj_weight=None,
-                in_proj_bias=None,
-                bias_k=None,
-                bias_v=None,
-                add_zero_attn=False,
-                dropout_p=0.0,
-                out_proj_bias=None,
-                use_separate_proj_weight=True,
-                attn_mask=torch.tensor(mask, device=TORCH_DEVICE),
-            )
-            reference_output = reference_output.transpose(0, 1)
+            query = mx.random.uniform(shape=(BATCH_SIZE, L, H * D), dtype=precision)
+            key = mx.random.uniform(shape=(BATCH_SIZE, L, H * D), dtype=precision)
+            value = mx.random.uniform(shape=(BATCH_SIZE, L, H * D), dtype=precision)
+            q_proj_weight = mx.random.uniform(shape=(H * D, H * D), dtype=precision)
+            k_proj_weight = mx.random.uniform(shape=(H * D, H * D), dtype=precision)
+            v_proj_weight = mx.random.uniform(shape=(H * D, H * D), dtype=precision)
+            out_proj_weight = mx.random.uniform(shape=(H * D, H * D), dtype=precision)
+            mask = mx.random.uniform(shape=(L, L), dtype=precision)
+            
+            # Use MLX built-in MultiHeadAttention as reference
+            reference_mha = nn.MultiHeadAttention(H * D, H)
+            
+            # Set the weights manually to match our test case
+            reference_mha.query_proj.weight = q_proj_weight
+            reference_mha.key_proj.weight = k_proj_weight
+            reference_mha.value_proj.weight = v_proj_weight
+            reference_mha.out_proj.weight = out_proj_weight
+            
+            reference_output = reference_mha(query, key, value, mask=mask)
+            
             user_output = SimpleMultiHeadAttention(
                 H * D,
                 H,
-                mx.array(q_proj_weight),
-                mx.array(k_proj_weight),
-                mx.array(v_proj_weight),
-                mx.array(out_proj_weight),
+                q_proj_weight,
+                k_proj_weight,
+                v_proj_weight,
+                out_proj_weight,
             )(
-                mx.array(query),
-                mx.array(key),
-                mx.array(value),
-                mask=mx.array(mask),
+                query,
+                key,
+                value,
+                mask=mask,
             )
             assert_allclose(user_output, reference_output, precision=precision)

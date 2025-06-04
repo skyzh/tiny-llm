@@ -1,33 +1,26 @@
 import numpy as np
 import mlx.core as mx
-import torch
 import huggingface_hub
 
 AVAILABLE_STREAMS = [mx.cpu, mx.gpu]
 AVAILABLE_STREAMS_IDS = ["cpu", "gpu"]
-PRECISIONS = [np.float32, np.float16]
+PRECISIONS = [mx.float32, mx.float16]
 PRECISION_IDS = ["f32", "f16"]
-TORCH_DEVICE = torch.device("cpu")
 
 
 def assert_allclose(
     a: mx.array,
-    b: torch.Tensor | mx.array,
-    precision: np.dtype,
+    b: mx.array,
+    precision: mx.Dtype,
     rtol: float | None = None,
     atol: float | None = None,
 ):
     a = np.array(a)
-    if isinstance(b, torch.Tensor):
-        b = b.cpu().numpy()
-    elif isinstance(b, mx.array):
-        b = np.array(b)
-    else:
-        raise ValueError(f"Unsupported type: {type(b)}")
-    if precision == np.float32:
+    b = np.array(b)
+    if precision == mx.float32:
         rtol = rtol or 1.0e-5
         atol = atol or 1.0e-8
-    elif precision == np.float16:
+    elif precision == mx.float16:
         rtol = rtol or 3.0e-2
         atol = atol or 1.0e-5
     assert a.shape == b.shape, f"shape mismatch: {a.shape} vs {b.shape}"

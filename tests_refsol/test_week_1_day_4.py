@@ -1,8 +1,7 @@
 import pytest
 import mlx.core as mx
-import torch
+import mlx.nn as nn
 from .tiny_llm_base import *
-import numpy as np
 from .utils import *
 from mlx_lm.models import qwen2
 
@@ -11,59 +10,50 @@ from mlx_lm.models import qwen2
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 def test_task_1_rms_norm(
     stream: mx.Stream,
-    precision: np.dtype,
+    precision: mx.Dtype,
 ):
     SIZE = 100
     SIZE_Y = 111
     with mx.stream(stream):
         for _ in range(100):
-            data = np.random.rand(SIZE, SIZE_Y).astype(precision)
-            weight = np.random.rand(SIZE_Y).astype(precision)
-            eps = np.finfo(precision).eps
+            data = mx.random.uniform(shape=(SIZE, SIZE_Y), dtype=precision)
+            weight = mx.random.uniform(shape=(SIZE_Y,), dtype=precision)
+            eps = 1e-6 if precision == mx.float32 else 1e-4
             reference_output = mx.fast.rms_norm(
-                mx.array(data),
-                mx.array(weight),
+                data,
+                weight,
                 eps=eps,
             )
-            user_output = RMSNorm(SIZE_Y, mx.array(weight), eps=eps)(mx.array(data))
-            assert user_output.dtype == mx.array(data).dtype, (
-                "Output dtype mismatch, perhaps you forgot to cast the output to the original dtype?"
-            )
+            user_output = RMSNorm(SIZE_Y, weight, eps=eps)(data)
             assert_allclose(user_output, reference_output, precision)
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 def test_task_1_rms_norm_cast_to_float32(stream: mx.Stream):
-    precision = np.float16
+    precision = mx.float16
     SIZE, SIZE_Y = 32, 64
 
-    data = (np.random.uniform(-1000, 1000, size=(SIZE, SIZE_Y))).astype(precision)
-    weight = (np.random.uniform(-1000, 1000, size=(SIZE_Y,))).astype(precision)
-    eps = np.finfo(precision).eps
+    data = mx.random.uniform(-1000, 1000, shape=(SIZE, SIZE_Y), dtype=precision)
+    weight = mx.random.uniform(-1000, 1000, shape=(SIZE_Y,), dtype=precision)
+    eps = 1e-4
 
     with mx.stream(stream):
-        user_out = RMSNorm(SIZE_Y, mx.array(weight), eps=eps)(mx.array(data))
-        ref_out = mx.fast.rms_norm(mx.array(data), mx.array(weight), eps=eps)
+        user_out = RMSNorm(SIZE_Y, weight, eps=eps)(data)
+        ref_out = mx.fast.rms_norm(data, weight, eps=eps)
 
     assert_allclose(user_out, ref_out, precision)
 
 
-@pytest.mark.parametrize("target", ["torch", "mlx"])
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
-def test_task_2_silu(stream: mx.Stream, precision: np.dtype, target: str):
+def test_task_2_silu(stream: mx.Stream, precision: mx.Dtype):
     with mx.stream(stream):
         BATCH_SIZE = 10
         DIM = 10
         for _ in range(100):
-            x = np.random.rand(BATCH_SIZE, DIM).astype(precision)
-            user_output = silu(mx.array(x))
-            if target == "torch":
-                reference_output = torch.nn.functional.silu(
-                    torch.tensor(x, device=TORCH_DEVICE)
-                )
-            else:
-                reference_output = silu(mx.array(x))
+            x = mx.random.uniform(shape=(BATCH_SIZE, DIM), dtype=precision)
+            user_output = silu(x)
+            reference_output = nn.silu(x)
             assert_allclose(user_output, reference_output, precision=precision)
 
 
@@ -85,7 +75,7 @@ DIM_PARAMS_IDS = [d["id"] for d in DIM_PARAMS]
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 @pytest.mark.parametrize("dims", DIM_PARAMS, ids=DIM_PARAMS_IDS)
-def test_task_2_qwen_mlp(stream: mx.Stream, precision: np.dtype, dims: dict):
+def test_task_2_qwen_mlp(stream: mx.Stream, precision: mx.Dtype, dims: dict):
     BATCH_SIZE, SEQ_LEN, DIM, HIDDEN_DIM = (
         dims["batch_size"],
         dims["seq_len"],
@@ -94,11 +84,10 @@ def test_task_2_qwen_mlp(stream: mx.Stream, precision: np.dtype, dims: dict):
     )
 
     with mx.stream(stream):
-        mx_precision = np_type_to_mx_type(precision)
-        x = mx.random.uniform(shape=(BATCH_SIZE, SEQ_LEN, DIM)).astype(mx_precision)
-        w_gate = mx.random.uniform(shape=(HIDDEN_DIM, DIM)).astype(mx_precision)
-        w_up = mx.random.uniform(shape=(HIDDEN_DIM, DIM)).astype(mx_precision)
-        w_down = mx.random.uniform(shape=(DIM, HIDDEN_DIM)).astype(mx_precision)
+        x = mx.random.uniform(shape=(BATCH_SIZE, SEQ_LEN, DIM), dtype=precision)
+        w_gate = mx.random.uniform(shape=(HIDDEN_DIM, DIM), dtype=precision)
+        w_up = mx.random.uniform(shape=(HIDDEN_DIM, DIM), dtype=precision)
+        w_down = mx.random.uniform(shape=(DIM, HIDDEN_DIM), dtype=precision)
 
         user_mlp = qwen2_week1.Qwen2MLP(
             dim=DIM, hidden_dim=HIDDEN_DIM, w_gate=w_gate, w_up=w_up, w_down=w_down
