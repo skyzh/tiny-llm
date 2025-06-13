@@ -41,10 +41,10 @@ Note that, practically, D can be even or odd. In the case of D being odd, the la
 and is typically left untouched in most implementations. For simplicity, we just assume that D is always even.
 
 ```
-output[0] = x[0] * cos_freqs[0] + x[1] * sin_freqs[0]
-output[1] = x[0] * -sin_freqs[0] + x[1] * cos_freqs[0]
-output[2] = x[2] * cos_freqs[1] + x[3] * sin_freqs[1]
-output[3] = x[2] * -sin_freqs[1] + x[3] * cos_freqs[1]
+output[0] = x[0] * cos_freqs[0] + x[1] * -sin_freqs[0]
+output[1] = x[0] * sin_freqs[0] + x[1] * cos_freqs[0]
+output[2] = x[2] * cos_freqs[1] + x[3] * -sin_freqs[1]
+output[3] = x[2] * sin_freqs[1] + x[3] * cos_freqs[1]
 ...and so on
 ```
 
@@ -67,10 +67,10 @@ The Qwen2 model uses a non-traditional form of RoPE. In this form, the head embe
 and the two halves are applied with different frequencies. Let's say `x1 = x[.., :HALF_DIM]` and `x2 = x[.., HALF_DIM:]`.
 
 ```
-output[0] = x1[0] * cos_freqs[0] + x2[0] * sin_freqs[0]
-output[HALF_DIM] = x1[0] * -sin_freqs[0] + x2[0] * cos_freqs[0]
-output[1] = x1[1] * cos_freqs[1] + x2[1] * sin_freqs[1]
-output[HALF_DIM + 1] = x1[1] * -sin_freqs[1] + x2[1] * cos_freqs[1]
+output[0] = x1[0] * cos_freqs[0] + x2[0] * -sin_freqs[0]
+output[HALF_DIM] = x1[0] * sin_freqs[0] + x2[0] * cos_freqs[0]
+output[1] = x1[1] * cos_freqs[1] + x2[1] * -sin_freqs[1]
+output[HALF_DIM + 1] = x1[1] * sin_freqs[1] + x2[1] * cos_freqs[1]
 ...and so on
 ```
 
