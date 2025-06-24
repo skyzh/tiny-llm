@@ -30,6 +30,7 @@ build-ext-test.working_dir = "src/extensions"
 build-ext-ref.cmd = "python build.py"
 build-ext-ref.working_dir = "src/extensions_ref"
 main.cmd = "python main.py"
+main.env = {PYTHONPATH = "src"}
 main-week1.cmd = "python main.py --loader week1"
 main-week2.cmd = "python main.py --loader week2"
 batch-main.cmd = "python batch-main.py"
