@@ -130,45 +130,50 @@ def test_task_2_grouped_attention_causal_mask(
 ):
     grouped_attention_helper(stream, precision, batch_dimension, scale, True)
 
+
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
-@pytest.mark.parametrize("mask", [None,"causal"], ids=["no_mask", "causal_mask"])
-def test_task_3_qwen2_grouped_query_attention(stream: mx.Stream, precision: mx.Dtype, mask: str | None):
-    with mx.stream(stream): 
+@pytest.mark.parametrize("mask", [None, "causal"], ids=["no_mask", "causal_mask"])
+def test_task_3_qwen2_grouped_query_attention(
+    stream: mx.Stream, precision: mx.Dtype, mask: str | None
+):
+    with mx.stream(stream):
         batch_size = 1
         seq_len = 4
         hidden_size = 32
         num_heads = 4
-        num_kv_heads = 2 
+        num_kv_heads = 2
         max_seq_len = 64
         theta = 10000
-        
+
         from mlx_lm.models import qwen2
-        
+
         args = qwen2.ModelArgs(
             model_type="qwen2",
             hidden_size=hidden_size,
-            num_hidden_layers=2, 
-            intermediate_size=hidden_size * 4,  
+            num_hidden_layers=2,
+            intermediate_size=hidden_size * 4,
             num_attention_heads=num_heads,
             num_key_value_heads=num_kv_heads,
             rms_norm_eps=1e-6,
-            vocab_size=1000, 
+            vocab_size=1000,
             rope_theta=theta,
             rope_traditional=False,
-            max_position_embeddings=max_seq_len
+            max_position_embeddings=max_seq_len,
         )
-        
+
         mlx_attention = qwen2.Attention(args)
         wq = mlx_attention.q_proj.weight
         wk = mlx_attention.k_proj.weight
         wv = mlx_attention.v_proj.weight
-        wo = mlx_attention.o_proj.weight        
+        wo = mlx_attention.o_proj.weight
         bq = mlx_attention.q_proj.bias
         bk = mlx_attention.k_proj.bias
         bv = mlx_attention.v_proj.bias
         mx.random.seed(42)
-        x = mx.random.uniform(-1.0, 1.0, shape=(batch_size, seq_len, hidden_size), dtype=precision)
+        x = mx.random.uniform(
+            -1.0, 1.0, shape=(batch_size, seq_len, hidden_size), dtype=precision
+        )
 
         user_attention = qwen2_week1.Qwen2MultiHeadAttention(
             hidden_size=hidden_size,
@@ -189,5 +194,3 @@ def test_task_3_qwen2_grouped_query_attention(stream: mx.Stream, precision: mx.D
         mlx_output = mlx_attention(x, mask=mask, cache=None)
 
         assert_allclose(user_output, mlx_output, precision=precision)
-        
-
