@@ -9,7 +9,7 @@ from .quantize import dequantize_linear, QuantizedWeights
 from .kv_cache import TinyKvCache
 
 
-class Qwen2MultiHeadAttention:
+class Qwen3MultiHeadAttention:
     def __init__(
         self,
         hidden_size: int,
@@ -37,7 +37,7 @@ class Qwen2MultiHeadAttention:
         pass
 
 
-class Qwen2MLP:
+class Qwen3MLP:
     def __init__(
         self,
         dim: int,
@@ -52,7 +52,7 @@ class Qwen2MLP:
         pass
 
 
-class Qwen2TransformerBlock:
+class Qwen3TransformerBlock:
     def __init__(
         self,
         num_attention_heads: int,
@@ -87,7 +87,7 @@ class Qwen2TransformerBlock:
         pass
 
 
-class Qwen2ModelWeek2:
+class Qwen3ModelWeek2:
     def __init__(self, mlx_model: Any):
         pass
 

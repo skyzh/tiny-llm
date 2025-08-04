@@ -6,7 +6,7 @@ import argparse
 import mlx_lm.sample_utils
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model", type=str, default="Qwen/Qwen2-7B-Instruct-MLX")
+parser.add_argument("--model", type=str, default="mlx-community/Qwen3-8B-4bit")
 parser.add_argument(
     "--prompt",
     type=str,
@@ -18,14 +18,17 @@ parser.add_argument("--device", type=str, default="gpu")
 parser.add_argument("--sampler-temp", type=float, default=0)
 parser.add_argument("--sampler-top-p", type=float, default=None)
 parser.add_argument("--sampler-top-k", type=int, default=None)
+parser.add_argument("--enable-thinking", type=bool, default=False)
+parser.add_argument("--enable-flash-attn", type=bool, default=False)
+
 args = parser.parse_args()
 
 use_mlx = False
 if args.solution == "tiny_llm":
     print("Using your tiny_llm solution")
     from tiny_llm import (
-        Qwen2ModelWeek1,
-        Qwen2ModelWeek2,
+        Qwen3ModelWeek1,
+        Qwen3ModelWeek2,
         simple_generate,
         simple_generate_with_kv_cache,
         sampler,
@@ -34,8 +37,8 @@ if args.solution == "tiny_llm":
 elif args.solution == "tiny_llm_ref" or args.solution == "ref":
     print("Using tiny_llm_ref solution")
     from tiny_llm_ref import (
-        Qwen2ModelWeek1,
-        Qwen2ModelWeek2,
+        Qwen3ModelWeek1,
+        Qwen3ModelWeek2,
         simple_generate,
         simple_generate_with_kv_cache,
         sampler,
@@ -56,11 +59,13 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         tiny_llm_model = mlx_model
     else:
         if args.loader == "week1":
-            print("Using Qwen2ModelWeek1 loader")
-            tiny_llm_model = Qwen2ModelWeek1(mlx_model)
+            print("Using Qwen3ModelWeek1 loader")
+            tiny_llm_model = Qwen3ModelWeek1(mlx_model)
         elif args.loader == "week2":
-            print("Using Qwen2ModelWeek2 loader")
-            tiny_llm_model = Qwen2ModelWeek2(mlx_model)
+            print("Using Qwen3ModelWeek2 loader")
+            tiny_llm_model = Qwen3ModelWeek2(
+                mlx_model, enable_flash_attn=args.enable_flash_attn
+            )
         else:
             raise ValueError(f"Loader {args.loader} not supported")
     messages = [
@@ -68,7 +73,10 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         {"role": "user", "content": args.prompt},
     ]
     prompt = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=args.enable_thinking,
     )
     if not use_mlx:
         sampler = sampler.make_sampler(

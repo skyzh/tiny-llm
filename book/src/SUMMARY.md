@@ -23,7 +23,7 @@
     - [Generating the Response](./week1-07-generate.md)
     -->
 
-- [Week 2: Optimizing]()
+- [Week 2: A Tiny Inference System]()
 
 - [Week 3: Serving]()
 

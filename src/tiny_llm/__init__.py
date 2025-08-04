@@ -5,7 +5,7 @@ from .layer_norm import *
 from .positional_encoding import *
 from .quantize import *
 from .generate import *
-from .qwen2_week1 import Qwen2ModelWeek1
-from .qwen2_week2 import Qwen2ModelWeek2
+from .Qwen3_week1 import Qwen3ModelWeek1
+from .Qwen3_week2 import Qwen3ModelWeek2
 from .sampler import *
 from .kv_cache import *

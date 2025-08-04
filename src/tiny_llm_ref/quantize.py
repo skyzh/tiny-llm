@@ -21,8 +21,8 @@ class QuantizedWeights:
     @staticmethod
     def from_mlx_layer(mlx_layer: Any) -> "QuantizedWeights":
         return QuantizedWeights(
-            scales=mlx_layer.scales,
-            biases=mlx_layer.biases,
+            scales=mlx_layer.scales.astype(mx.float16),
+            biases=mlx_layer.biases.astype(mx.float16),
             group_size=mlx_layer.group_size,
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,

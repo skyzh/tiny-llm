@@ -1,35 +1,36 @@
 import pytest
 from .utils import *
-from .tiny_llm_base import Qwen2ModelWeek1, Embedding, dequantize_linear, qwen2_week1
+from .tiny_llm_base import Qwen3ModelWeek1, Embedding, dequantize_linear, qwen3_week1
 from mlx_lm import load
 
 # TODO: task 1 tests
 
 
 @pytest.mark.skipif(
-    not qwen_2_05b_model_exists(), reason="Qwen2-0.5B-Instruct-MLX model not found"
+    not qwen_3_06b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
-def test_utils_qwen_2_05b():
+def test_utils_qwen_3_06b():
     pass
 
 
 @pytest.mark.skipif(
-    not qwen_2_7b_model_exists(), reason="Qwen2-7B-Instruct-MLX model not found"
+    not qwen_3_8b_model_exists(), reason="Qwen3-8B-4bit model not found"
 )
-def test_utils_qwen_2_7b():
+def test_utils_qwen_3_8b():
     pass
 
 
 @pytest.mark.skipif(
-    not qwen_2_15b_model_exists(), reason="Qwen2-1.5B-Instruct-MLX model not found"
+    not qwen_3_17b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
 )
-def test_utils_qwen_2_15b():
+def test_utils_qwen_3_17b():
     pass
 
 
 def helper_test_task_3(model_name: str, iters: int = 10):
     mlx_model, tokenizer = load(model_name)
-    model = Qwen2ModelWeek1(mlx_model)
+    model = Qwen3ModelWeek1(mlx_model)
+    force_convert_bf16_to(mlx_model, mx.float16)
     for _ in range(iters):
         input = mx.random.randint(low=0, high=tokenizer.vocab_size, shape=(1, 10))
         user_output = model(input, 0)
@@ -40,10 +41,10 @@ def helper_test_task_3(model_name: str, iters: int = 10):
 
 
 @pytest.mark.skipif(
-    not qwen_2_05b_model_exists(), reason="Qwen2-0.5B-Instruct-MLX model not found"
+    not qwen_3_06b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
 def test_task_2_embedding_call():
-    mlx_model, _ = load("Qwen/Qwen2-0.5B-Instruct-MLX")
+    mlx_model, _ = load("mlx-community/Qwen3-0.6B-4bit")
     embedding = Embedding(
         mlx_model.args.vocab_size,
         mlx_model.args.hidden_size,
@@ -57,10 +58,10 @@ def test_task_2_embedding_call():
 
 
 @pytest.mark.skipif(
-    not qwen_2_05b_model_exists(), reason="Qwen2-0.5B-Instruct-MLX model not found"
+    not qwen_3_06b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
 def test_task_2_embedding_as_linear():
-    mlx_model, _ = load("Qwen/Qwen2-0.5B-Instruct-MLX")
+    mlx_model, _ = load("mlx-community/Qwen3-0.6B-4bit")
     embedding = Embedding(
         mlx_model.args.vocab_size,
         mlx_model.args.hidden_size,
@@ -74,21 +75,21 @@ def test_task_2_embedding_as_linear():
 
 
 @pytest.mark.skipif(
-    not qwen_2_05b_model_exists(), reason="Qwen2-0.5B-Instruct-MLX model not found"
+    not qwen_3_06b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
-def test_task_3_qwen_2_05b():
-    helper_test_task_3("Qwen/Qwen2-0.5B-Instruct-MLX", 5)
+def test_task_3_qwen_3_06b():
+    helper_test_task_3("mlx-community/Qwen3-0.6B-4bit", 5)
 
 
 @pytest.mark.skipif(
-    not qwen_2_7b_model_exists(), reason="Qwen2-7B-Instruct-MLX model not found"
+    not qwen_3_8b_model_exists(), reason="Qwen3-8B-4bit model not found"
 )
-def test_task_3_qwen_2_7b():
-    helper_test_task_3("Qwen/Qwen2-7B-Instruct-MLX", 1)
+def test_task_3_qwen_3_8b():
+    helper_test_task_3("mlx-community/Qwen3-8B-4bit", 1)
 
 
 @pytest.mark.skipif(
-    not qwen_2_15b_model_exists(), reason="Qwen2-1.5B-Instruct-MLX model not found"
+    not qwen_3_17b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
 )
-def test_task_3_qwen_2_15b():
-    helper_test_task_3("Qwen/Qwen2-1.5B-Instruct-MLX", 3)
+def test_task_3_qwen_3_17b():
+    helper_test_task_3("mlx-community/Qwen3-1.7B-4bit", 3)
