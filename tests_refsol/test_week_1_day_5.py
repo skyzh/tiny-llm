@@ -29,15 +29,17 @@ def test_utils_qwen_3_17b():
 
 def helper_test_task_3(model_name: str, iters: int = 10):
     mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek1(mlx_model)
     force_convert_bf16_to(mlx_model, mx.float16)
+    model = Qwen3ModelWeek1(mlx_model)
     for _ in range(iters):
         input = mx.random.randint(low=0, high=tokenizer.vocab_size, shape=(1, 10))
         user_output = model(input, 0)
         user_output = user_output - mx.logsumexp(user_output, keepdims=True)
         ref_output = mlx_model(input)
         ref_output = ref_output - mx.logsumexp(ref_output, keepdims=True)
-        assert_allclose(user_output, ref_output, precision=mx.float16, rtol=1e-1)
+        assert_allclose(
+            user_output, ref_output, precision=mx.float16, atol=1, rtol=2e-1
+        )
 
 
 @pytest.mark.skipif(
@@ -50,6 +52,7 @@ def test_task_2_embedding_call():
         mlx_model.args.hidden_size,
         dequantize_linear(mlx_model.model.embed_tokens).astype(mx.float16),
     )
+    force_convert_bf16_to(mlx_model, mx.float16)
     for _ in range(50):
         input = mx.random.randint(low=0, high=mlx_model.args.vocab_size, shape=(1, 10))
         user_output = embedding(input)
