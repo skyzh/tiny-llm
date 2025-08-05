@@ -148,7 +148,8 @@ void Axpby::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array
     kname << type_to_name(out);
 
     // Make a kernel from this metal library
-    auto kernel = d.get_kernel(kname.str(), "tiny_llm_ext");
+    auto library = d.get_library("tiny_llm_ext");
+    auto kernel = d.get_kernel(kname.str(), library);
 
     // Prepare to encode kernel
     auto &compute_encoder = d.get_command_encoder(s.index);

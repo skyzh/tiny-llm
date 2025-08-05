@@ -63,7 +63,7 @@ public:
                                                              const std::vector<int> &axes) override;
 
     /** Print the primitive. */
-    void print(std::ostream &os) override { os << "Axpby"; }
+    const char* name() const override { return "Axpby"; }
 
     /** Equivalence check **/
     bool is_equivalent(const mx::Primitive &other) const override;

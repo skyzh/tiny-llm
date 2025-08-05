@@ -4,7 +4,7 @@ import argparse
 import random
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model", type=str, default="Qwen/Qwen2-7B-Instruct-MLX")
+parser.add_argument("--model", type=str, default="Qwen/Qwen2-0.5B-Instruct-MLX")
 
 shanghai_wikipedia = """
 Shanghai[a] is a direct-administered municipality and the most populous urban area in China. The city is located on the Chinese shoreline on the southern estuary of the Yangtze River, with the Huangpu River flowing through it. The population of the city proper is the second largest in the world after Chongqing, with around 24.87 million inhabitants in 2023, while the urban area is the most populous in China, with 29.87 million residents. As of 2022, the Greater Shanghai metropolitan area was estimated to produce a gross metropolitan product (nominal) of nearly 13 trillion RMB ($1.9 trillion).[13] Shanghai is one of the world's major centers for finance, business and economics, research, science and technology, manufacturing, transportation, tourism, and culture. The Port of Shanghai is the world's busiest container port.
@@ -76,5 +76,6 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         prefill_step=args.prefill_step,
     )
     for prompt_idx, text in result:
+        print(f"--- {prompt_idx} ---")
         print(f"Q: {prompts[prompt_idx]}")
         print(f"A: {text}")

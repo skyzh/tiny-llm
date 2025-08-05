@@ -15,8 +15,10 @@ def make_sampler(temp: float, top_p: float, top_k: int | None):
         if top_p is not None and top_p > 0:
             sorted_idx = mx.argsort(-logprobs, axis=-1)
             sorted_logprobs = logprobs[:, sorted_idx]
-            cumsum = mx.cumsum(sorted_logprobs, axis=-1)
-            logprobs[:, sorted_idx] = mx.where(cumsum < top_p, sorted_logprobs, -mx.inf)
+            cumsum = mx.cumsum(mx.exp(sorted_logprobs), axis=-1)
+            mask_elements = cumsum < top_p
+            mask_elements[..., 0] = True
+            logprobs[:, sorted_idx] = mx.where(mask_elements, sorted_logprobs, -mx.inf)
         logprobs = logprobs / temp
         return mx.random.categorical(logprobs, axis=-1)
 

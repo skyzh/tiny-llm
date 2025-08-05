@@ -8,6 +8,8 @@ can build the model serving infrastructure from scratch and dig into the optimiz
 
 The goal is to learn the techniques behind efficiently serving a large language model (e.g., Qwen2 models).
 
+In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen2 model to generate responses (e.g., attention, RoPE, etc). In week 2, you will implement the inference system which is similar to but a much simpler version of vLLM (e.g., KV cache, continuous batching, flash attention, etc). In week 3, we will cover more advanced topics and how the model interacts with the outside world.
+
 Why MLX: nowadays it's easier to get a macOS-based local development environment than setting up an NVIDIA GPU.
 
 Why Qwen2: this was the first LLM I've interacted with -- it's the go-to example in the vllm documentation. I spent some time looking at the vllm source code and built some knowledge around it.
@@ -28,6 +30,7 @@ Week 1 is complete. Week 2 is in progress.
 
 | Week + Chapter | Topic                                                       | Code | Test | Doc |
 | -------------- | ----------------------------------------------------------- | ---- | ---- | --- |
+|                | Goal: wire up Qwen and make it generate text                |  | | |
 | 1.1            | Attention                                                   | ✅    | ✅   | ✅  |
 | 1.2            | RoPE                                                        | ✅    | ✅   | ✅  |
 | 1.3            | Grouped Query Attention                                     | ✅    | ✅   | ✅  |
@@ -36,18 +39,18 @@ Week 1 is complete. Week 2 is in progress.
 | 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
 | 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
 | 2.1            | Key-Value Cache                                             | ✅    | 🚧   | 🚧  |
-| 2.2            | Quantized Matmul and Linear - CPU                           | ✅    | 🚧   | 🚧  |
-| 2.3            | Quantized Matmul and Linear - GPU                           | ✅    | 🚧   | 🚧  |
-| 2.4            | Flash Attention 2 - CPU                                     | ✅    | 🚧   | 🚧  |
-| 2.5            | Flash Attention 2 - GPU                                     | ✅    | 🚧   | 🚧  |
+| 2.2            | Quantized Matmul and Linear - CPU                           | ✅    | ✅   | 🚧  |
+| 2.3            | Quantized Matmul and Linear - GPU                           | ✅    | ✅   | 🚧  |
+| 2.4            | Flash Attention 2 - CPU                                     | ✅    | ✅   | 🚧  |
+| 2.5            | Flash Attention 2 - GPU                                     | ✅    | ✅   | 🚧  |
 | 2.6            | Continuous Batching                                         | ✅    | 🚧   | 🚧  |
 | 2.7            | Chunked Prefill                                             | ✅    | 🚧   | 🚧  |
 | 3.1            | Paged Attention - Part 1                                    | 🚧    | 🚧   | 🚧  |
 | 3.2            | Paged Attention - Part 2                                    | 🚧    | 🚧   | 🚧  |
 | 3.3            | MoE (Mixture of Experts)                                    | 🚧    | 🚧   | 🚧  |
 | 3.4            | Speculative Decoding                                        | 🚧    | 🚧   | 🚧  |
-| 3.5            | Prefill-Decode Separation (requires two Macintosh devices)  | 🚧    | 🚧   | 🚧  |
-| 3.6            | Parallelism                                                 | 🚧    | 🚧   | 🚧  |
-| 3.7            | AI Agent     / Tool Calling                                 | 🚧    | 🚧   | 🚧  |
+| 3.5            | RAG Pipeline                                                | 🚧    | 🚧   | 🚧  |
+| 3.6            | AI Agent     / Tool Calling                                 | 🚧    | 🚧   | 🚧  |
+| 3.7            | Long Context                                                 | 🚧    | 🚧   | 🚧  |
 
 Other topics not covered: quantized/compressed kv cache, prefix/prompt cache; sampling, fine tuning; smaller kernels (softmax, silu, etc)
