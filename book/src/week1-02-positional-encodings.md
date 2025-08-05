@@ -79,7 +79,7 @@ frequencies to each half separately.
 
 **📚 Readings**
 
-- [vLLM implementation of RoPE](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/rotary_embedding.py)
+- [vLLM implementation of RoPE](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/rotary_embedding)
 
 
 You can test your implementation by running the following command:
