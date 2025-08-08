@@ -9,7 +9,7 @@ namespace tiny_llm_ext_ref {
 void load_library(mx::Device d, const char *path) {
 #ifdef _METAL_
     auto &md = mx::metal::device(d);
-    md.register_library("tiny_llm_ext_ref", path);
+    md.get_library("tiny_llm_ext_ref", path);
 #endif
 }
 

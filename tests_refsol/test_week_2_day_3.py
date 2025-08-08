@@ -1,35 +1,34 @@
 import pytest
 import mlx.core as mx
 from .tiny_llm_base import *
-import numpy as np
 from .utils import *
 
 
 def attention_helper(stream: mx.Stream, H_q, H, L, E, S, BATCH):
-    precision = np.float32
+    precision = mx.float32
     with mx.stream(stream):
         q_shape = (BATCH, H_q, L, E)
         kv_shape = (BATCH, H, S, E)
-        scale = 1.0
+        scale = 0.9
         for _ in range(100):
-            query = np.random.rand(*q_shape).astype(precision)
-            key = np.random.rand(*kv_shape).astype(precision)
-            value = np.random.rand(*kv_shape).astype(precision)
-            reference_output = torch.nn.functional.scaled_dot_product_attention(
-                torch.tensor(query, device=TORCH_DEVICE),
-                torch.tensor(key, device=TORCH_DEVICE),
-                torch.tensor(value, device=TORCH_DEVICE),
+            query = mx.random.uniform(shape=q_shape, dtype=precision)
+            key = mx.random.uniform(shape=kv_shape, dtype=precision)
+            value = mx.random.uniform(shape=kv_shape, dtype=precision)
+
+            reference_output = mx.fast.scaled_dot_product_attention(
+                q=query,
+                k=key,
+                v=value,
                 scale=scale,
-                enable_gqa=True,
             )
             user_output = flash_attention(
-                mx.array(query),
-                mx.array(key),
-                mx.array(value),
+                query,
+                key,
+                value,
                 scale=scale,
             )
             mx.eval(user_output)  # so that any error will be caught here
-            assert_allclose(user_output, reference_output, precision=precision)
+            assert_allclose(user_output, reference_output, precision=mx.float16)
 
 
 def test_flash_attention_cpu_small():

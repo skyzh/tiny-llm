@@ -1,12 +1,5 @@
 # Week 1 Day 3: Grouped Query Attention (GQA)
 
-<div class="warning">
-
-This book is not complete and this chapter is not finalized yet. We are still working on the reference solution, writing
-tests, and unify the math notations in the book.
-
-</div>
-
 In day 3, we will implement Grouped Query Attention (GQA). The Qwen2 models use GQA which is an optimization technique for multi-head attention that reduces the computational and memory costs associated with the Key (K) and Value (V) projections. Instead of each Query (Q) head having its own K and V heads (like in Multi-Head Attention, MHA), multiple Q heads share the same K and V heads. Multi-Query Attention (MQA) is a special case of GQA where all Q heads share a single K/V head pair.
 
 

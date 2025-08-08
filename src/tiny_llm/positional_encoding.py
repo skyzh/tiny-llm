@@ -11,5 +11,7 @@ class RoPE:
     ):
         pass
 
-    def __call__(self, x: mx.array, offset: slice | None = None) -> mx.array:
+    def __call__(
+        self, x: mx.array, offset: list[slice] | slice | None = None
+    ) -> mx.array:
         pass

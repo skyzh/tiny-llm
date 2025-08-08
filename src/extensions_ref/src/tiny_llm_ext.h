@@ -32,17 +32,18 @@ public:
         throw std::runtime_error("QuantizedMatmul has no vmap implementation.");
     }
 
-    void print(std::ostream &os) override { os << "QuantizedMatmul"; }
-
-    bool is_equivalent(const mx::Primitive &other) const override;
+    const char *name() const override { return "QuantizedMatmul"; }
 
 private:
     int group_size_;
     int bits_;
 };
 
-mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const float scale,
-                          const int num_kv_heads, const int num_heads, mx::StreamOrDevice s = {});
+mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
+                          const float scale, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s = {});
+
+mx::array flash_attention_no_mask(const mx::array &q, const mx::array &k, const mx::array &v,
+                                  const float scale, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s = {});
 
 class FlashAttention : public mx::Primitive {
 public:
@@ -57,12 +58,7 @@ public:
         throw std::runtime_error("FlashAttention has no vmap implementation.");
     }
 
-    void print(std::ostream &os) override { os << "FlashAttention"; }
-
-    bool is_equivalent(const mx::Primitive &other) const override {
-        const FlashAttention &r_other = static_cast<const FlashAttention &>(other);
-        return scale_ == r_other.scale_ && num_kv_heads_ == r_other.num_kv_heads_ && num_heads_ == r_other.num_heads_;
-    }
+    const char *name() const override { return "FlashAttention"; }
 
 private:
     float scale_;

@@ -1,12 +1,5 @@
 # Week 1 Day 1: Attention and Multi-Head Attention
 
-<div class="warning">
-
-This book is not complete and this chapter is not finalized yet. We are still working on the reference solution, writing
-tests, and unify the math notations in the book.
-
-</div>
-
 In day 1, we will implement the basic attention layer and the multi-head attention layer. Attention layers take a input
 sequence and focus on different parts of the sequence when generating the output. Attention layers are the key building
 blocks of the Transformer models.

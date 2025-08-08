@@ -1,6 +1,9 @@
 from mlx_lm import load
+import mlx_lm
 import mlx.core as mx
 import argparse
+
+import mlx_lm.sample_utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="Qwen/Qwen2-7B-Instruct-MLX")
@@ -12,6 +15,9 @@ parser.add_argument(
 parser.add_argument("--solution", type=str, default="tiny_llm")
 parser.add_argument("--loader", type=str, default="week1")
 parser.add_argument("--device", type=str, default="gpu")
+parser.add_argument("--sampler-temp", type=float, default=0)
+parser.add_argument("--sampler-top-p", type=float, default=None)
+parser.add_argument("--sampler-top-k", type=int, default=None)
 args = parser.parse_args()
 
 use_mlx = False
@@ -22,6 +28,7 @@ if args.solution == "tiny_llm":
         Qwen2ModelWeek2,
         simple_generate,
         simple_generate_with_kv_cache,
+        sampler,
     )
 
 elif args.solution == "tiny_llm_ref" or args.solution == "ref":
@@ -31,6 +38,7 @@ elif args.solution == "tiny_llm_ref" or args.solution == "ref":
         Qwen2ModelWeek2,
         simple_generate,
         simple_generate_with_kv_cache,
+        sampler,
     )
 
 elif args.solution == "mlx":
@@ -63,10 +71,16 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         messages, tokenize=False, add_generation_prompt=True
     )
     if not use_mlx:
+        sampler = sampler.make_sampler(
+            args.sampler_temp, top_p=args.sampler_top_p, top_k=args.sampler_top_k
+        )
         if args.loader == "week1":
-            simple_generate(tiny_llm_model, tokenizer, prompt)
+            simple_generate(tiny_llm_model, tokenizer, prompt, sampler=sampler)
         elif args.loader == "week2":
             simple_generate_with_kv_cache(tiny_llm_model, tokenizer, prompt)
     else:
-        for resp in stream_generate(tiny_llm_model, tokenizer, prompt):
+        sampler = mlx_lm.sample_utils.make_sampler(
+            args.sampler_temp, top_p=args.sampler_top_p, top_k=args.sampler_top_k
+        )
+        for resp in stream_generate(tiny_llm_model, tokenizer, prompt, sampler=sampler):
             print(resp.text, end="", flush=True)

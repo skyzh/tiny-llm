@@ -47,7 +47,7 @@ stands for and what dimension of the matrixes are passed into the function.
 
 This course is created by [Chi](https://github.com/skyzh) and [Connor](https://github.com/Connor1996).
 
-Chi is a systems software engineer at [Neon](https://neon.tech), acquired by Databricks, focusing on storage systems.
+Chi is a systems software engineer at [Neon](https://neon.tech) (now acquired by Databricks), focusing on storage systems.
 Fascinated by the vibe of large language models (LLMs), he created this course to explore how LLM inference works.
 
 Connor is a software engineer at [PingCAP](https://pingcap.com), developing the TiKV distributed key-value database.

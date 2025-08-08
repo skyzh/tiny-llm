@@ -1,14 +1,12 @@
 import pytest
 import mlx.core as mx
-import torch
 from .tiny_llm_base import *
-import numpy as np
 from .utils import *
 
 
 def grouped_attention_helper(
     stream: mx.Stream,
-    precision: np.dtype,
+    precision: mx.Dtype,
     batch_dimension: int,
     scale: float | None,
     is_causal_mask: bool,
@@ -34,30 +32,28 @@ def grouped_attention_helper(
             kv_shape = (BATCH_2, BATCH, H, S, D)
             mask_shape = (BATCH_2, BATCH, H_q, L, S)
         for _ in range(100):
-            query = np.random.rand(*q_shape).astype(precision)
-            key = np.random.rand(*kv_shape).astype(precision)
-            value = np.random.rand(*kv_shape).astype(precision)
-            mask = np.random.rand(*mask_shape).astype(precision)
-            reference_output = torch.nn.functional.scaled_dot_product_attention(
-                torch.tensor(query, device=TORCH_DEVICE),
-                torch.tensor(key, device=TORCH_DEVICE),
-                torch.tensor(value, device=TORCH_DEVICE),
-                scale=scale,
-                attn_mask=torch.tensor(mask, device=TORCH_DEVICE)
-                if not is_causal_mask
-                else torch.tensor(
-                    np.array(causal_mask(L, S, np_type_to_mx_type(precision))),
-                    device=TORCH_DEVICE,
-                ),
-                enable_gqa=True,
+            query = mx.random.uniform(shape=q_shape, dtype=precision)
+            key = mx.random.uniform(shape=kv_shape, dtype=precision)
+            value = mx.random.uniform(shape=kv_shape, dtype=precision)
+            mask = mx.random.uniform(shape=mask_shape, dtype=precision)
+
+            reference_output = mx.fast.scaled_dot_product_attention(
+                q=query.reshape(-1, H_q, L, D),
+                k=key.reshape(-1, H, S, D),
+                v=value.reshape(-1, H, S, D),
+                scale=scale if scale is not None else (1.0 / (D**0.5)),
+                mask=mask.reshape(-1, H_q, L, S) if not is_causal_mask else "causal",
             )
+            # Reshape reference output back to original shape
+            reference_output = reference_output.reshape(query.shape)
             user_output = scaled_dot_product_attention_grouped(
-                mx.array(query),
-                mx.array(key),
-                mx.array(value),
+                query,
+                key,
+                value,
                 scale=scale,
-                mask=mx.array(mask) if not is_causal_mask else "causal",
+                mask=mask if not is_causal_mask else "causal",
             )
+
             assert_allclose(user_output, reference_output, precision=precision)
 
 
@@ -68,7 +64,7 @@ def grouped_attention_helper(
 )
 @pytest.mark.parametrize("scale", [None, 0.8])
 def test_task_1_grouped_attention(
-    stream: mx.Stream, precision: np.dtype, batch_dimension: int, scale: float | None
+    stream: mx.Stream, precision: mx.Dtype, batch_dimension: int, scale: float | None
 ):
     grouped_attention_helper(stream, precision, batch_dimension, scale, False)
 
@@ -89,12 +85,12 @@ def test_task_2_mask_only_same_dim(
             user_output,
             mx.array(
                 [
-                    [0, -np.inf, -np.inf],
-                    [0, 0, -np.inf],
+                    [0, -mx.inf, -mx.inf],
+                    [0, 0, -mx.inf],
                     [0, 0, 0],
                 ]
             ),
-            precision=np.float32,
+            precision=mx.float32,
         )
 
 
@@ -114,12 +110,12 @@ def test_task_2_mask_only_different_dim(
             user_output,
             mx.array(
                 [
-                    [0, 0, 0, -np.inf, -np.inf],
-                    [0, 0, 0, 0, -np.inf],
+                    [0, 0, 0, -mx.inf, -mx.inf],
+                    [0, 0, 0, 0, -mx.inf],
                     [0, 0, 0, 0, 0],
                 ]
             ),
-            precision=np.float32,
+            precision=mx.float32,
         )
 
 
@@ -130,10 +126,71 @@ def test_task_2_mask_only_different_dim(
 )
 @pytest.mark.parametrize("scale", [None, 0.8])
 def test_task_2_grouped_attention_causal_mask(
-    stream: mx.Stream, precision: np.dtype, batch_dimension: int, scale: float | None
+    stream: mx.Stream, precision: mx.Dtype, batch_dimension: int, scale: float | None
 ):
     grouped_attention_helper(stream, precision, batch_dimension, scale, True)
 
 
-def test_task_3_qwen2_grouped_query_attention():
-    pass
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
+@pytest.mark.parametrize("mask", [None, "causal"], ids=["no_mask", "causal_mask"])
+def test_task_3_qwen2_grouped_query_attention(
+    stream: mx.Stream, precision: mx.Dtype, mask: str | None
+):
+    with mx.stream(stream):
+        batch_size = 1
+        seq_len = 4
+        hidden_size = 32
+        num_heads = 4
+        num_kv_heads = 2
+        max_seq_len = 64
+        theta = 10000
+
+        from mlx_lm.models import qwen2
+
+        args = qwen2.ModelArgs(
+            model_type="qwen2",
+            hidden_size=hidden_size,
+            num_hidden_layers=2,
+            intermediate_size=hidden_size * 4,
+            num_attention_heads=num_heads,
+            num_key_value_heads=num_kv_heads,
+            rms_norm_eps=1e-6,
+            vocab_size=1000,
+            rope_theta=theta,
+            rope_traditional=False,
+            max_position_embeddings=max_seq_len,
+        )
+
+        mlx_attention = qwen2.Attention(args)
+        wq = mlx_attention.q_proj.weight
+        wk = mlx_attention.k_proj.weight
+        wv = mlx_attention.v_proj.weight
+        wo = mlx_attention.o_proj.weight
+        bq = mlx_attention.q_proj.bias
+        bk = mlx_attention.k_proj.bias
+        bv = mlx_attention.v_proj.bias
+        mx.random.seed(42)
+        x = mx.random.uniform(
+            -1.0, 1.0, shape=(batch_size, seq_len, hidden_size), dtype=precision
+        )
+
+        user_attention = qwen2_week1.Qwen2MultiHeadAttention(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
+            wq=wq,
+            wk=wk,
+            wv=wv,
+            wo=wo,
+            bq=bq,
+            bk=bk,
+            bv=bv,
+            max_seq_len=max_seq_len,
+            theta=theta,
+        )
+
+        user_output = user_attention(x, offset=0, mask=mask)
+        mlx_output = mlx_attention(x, mask=mask, cache=None)
+
+        assert_allclose(user_output, mlx_output, precision=precision)

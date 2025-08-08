@@ -13,9 +13,9 @@
 #endif
 
 namespace tiny_llm_ext_ref {
-mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const float scale,
-                          const int num_kv_heads, const int num_heads, mx::StreamOrDevice s) {
-    if (q.dtype() != mx::float32 || k.dtype() != mx::float32 || v.dtype() != mx::float32) {
+mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
+                          const float scale, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s) {
+    if (q.dtype() != mx::float32 || k.dtype() != mx::float32 || v.dtype() != mx::float32 || mask.dtype() != mx::float32) {
         throw std::runtime_error("flash_attention: all input arrays must be float32");
     }
     if (q.shape().size() != 3 || k.shape().size() != 3 || v.shape().size() != 3) {
@@ -24,10 +24,15 @@ mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::arra
     if (num_heads % num_kv_heads != 0) {
         throw std::runtime_error("flash_attention: num_heads must be divisible by num_kv_heads");
     }
-    // Q: [N, S, E]
-    // K: [N_KV, L, E]
-    // V: [N_KV, L, E]
-    // O: [N, S, E]
+    if (mask.shape().size() != 3) {
+        throw std::runtime_error("flash_attention: mask must be 3D");
+    }
+
+    // Q: [N, L, E]
+    // K: [N_KV, S, E]
+    // V: [N_KV, S, E]
+    // O: [N, L, E]
+    // M: [N, L, S] (optional, needs broadcasting)
 
     if (q.shape()[0] % num_heads != 0) {
         throw std::runtime_error("flash_attention: q.shape[0] must be divisible by num_heads");
@@ -44,16 +49,24 @@ mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::arra
     if (k.shape()[1] != v.shape()[1]) {
         throw std::runtime_error("flash_attention: k.shape[1] must be equal to v.shape[1]");
     }
+    if (mask.shape()[0] != q.shape()[0] || mask.shape()[1] != q.shape()[1] || mask.shape()[2] != k.shape()[1]) {
+        throw std::runtime_error("flash_attention: mask must be broadcastable to q, k, v");
+    }
 
     return mx::array(q.shape(), mx::float32,
-                     std::make_shared<FlashAttention>(to_stream(s), scale, num_kv_heads, num_heads), {q, k, v});
+                     std::make_shared<FlashAttention>(to_stream(s), scale, num_kv_heads, num_heads), {q, k, v, mask});
 }
 
 void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
     auto &q = inputs[0];
     auto &k = inputs[1];
     auto &v = inputs[2];
+    auto &mask = inputs[3];
     auto &out = outputs[0];
+
+    if (out.dtype() != mx::float32) {
+        throw std::runtime_error("flash_attention: output dtype must be float32");
+    }
 
     out.set_data(mx::allocator::malloc(out.nbytes()));
 
@@ -61,6 +74,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
     encoder.set_input_array(q);
     encoder.set_input_array(k);
     encoder.set_input_array(v);
+    encoder.set_input_array(mask);
     encoder.set_output_array(out);
 
     if (!q.flags().row_contiguous) {
@@ -75,23 +89,25 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
 
     // Launch the CPU kernel
     encoder.dispatch([out_ptr = out.data<float>(), out_shape = out.shape(), q = mx::array::unsafe_weak_copy(q),
-                      k = mx::array::unsafe_weak_copy(k), v = mx::array::unsafe_weak_copy(v), num_heads = num_heads_,
-                      num_kv_heads = num_kv_heads_, scale = scale_]() {
+                      k = mx::array::unsafe_weak_copy(k), v = mx::array::unsafe_weak_copy(v),
+                      mask = mx::array::unsafe_weak_copy(mask), num_heads = num_heads_, num_kv_heads = num_kv_heads_,
+                      scale = scale_]() {
         const int64_t N = q.shape()[0];
-        const int64_t S = q.shape()[1];
-        const int64_t L = k.shape()[1];
+        const int64_t L = q.shape()[1];
+        const int64_t S = k.shape()[1];
         const int64_t E = q.shape()[2];
-        const int64_t N_Q_HEAD = S * E;
-        const int64_t N_K_HEAD = L * E;
+        const int64_t N_Q_HEAD = L * E;
+        const int64_t N_K_HEAD = S * E;
         const int64_t Br = 32;
         const int64_t Bc = 32;
-        const int64_t Tr = (S + Br - 1) / Br;
-        const int64_t Tc = (L + Bc - 1) / Bc;
+        const int64_t Tr = (L + Br - 1) / Br;
+        const int64_t Tc = (S + Bc - 1) / Bc;
 
         const int64_t q_kv_heads_ratio = num_heads / num_kv_heads;
         const float *q_ptr = q.data<float>();
         const float *k_ptr = k.data<float>();
         const float *v_ptr = v.data<float>();
+        const float *m_ptr = mask.data<float>();
 
         for (int64_t n = 0; n < N; n++) {
             const float *q_batch = q_ptr + n * N_Q_HEAD;
@@ -99,7 +115,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
             const float *v_batch = v_ptr + (n / q_kv_heads_ratio) * N_K_HEAD;
             for (int64_t i = 0; i < Tr; i++) {
                 std::vector<float> q_i(Br * E, 0.0);
-                int br_upper_bound = std::min(S - i * Br, Br);
+                int br_upper_bound = std::min(L - i * Br, Br);
                 // Load Qi
                 for (int64_t a = 0; a < br_upper_bound; a++) {
                     for (int64_t b = 0; b < E; b++) {
@@ -111,7 +127,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                 std::vector<float> l_i(Br, 0.0);
                 std::vector<float> m_i(Br, -std::numeric_limits<float>::infinity());
                 for (int64_t j = 0; j < Tc; j++) {
-                    int bc_upper_bound = std::min(L - j * Bc, Bc);
+                    int bc_upper_bound = std::min(S - j * Bc, Bc);
                     // Each kernel processes a block of Br x Bc
                     // Load Kj and Vj
                     std::vector<float> k_j(Bc * E, 0.0);
@@ -120,7 +136,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                         int64_t kv_idx_base = j * Bc + a;
                         for (int64_t b = 0; b < E; b++) {
                             int kv_idx = kv_idx_base * E + b;
-                            if (kv_idx_base < L) {
+                            if (kv_idx_base < S) {
                                 k_j[a * E + b] = k_batch[kv_idx];
                                 v_j[a * E + b] = v_batch[kv_idx];
                             }
@@ -134,6 +150,18 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                             for (int64_t c = 0; c < E; c++) {
                                 s_i[a * Bc + b] += q_i[a * E + c] * k_j[b * E + c];
                             }
+                        }
+                    }
+
+                    // Add mask and scale
+                    for (int64_t a = 0; a < br_upper_bound; a++) {
+                        for (int64_t b = 0; b < bc_upper_bound; b++) {
+                            int m_idx_1 = n;
+                            int m_idx_2 = i * Br + a;
+                            int m_idx_3 = j * Bc + b;
+                            int m_idx_converted = mx::elem_to_loc(m_idx_1 * L * S + m_idx_2 * S + m_idx_3, mask);
+                            s_i[a * Bc + b] *= scale;
+                            s_i[a * Bc + b] += m_ptr[m_idx_converted];
                         }
                     }
 
@@ -193,7 +221,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                 for (int64_t a = 0; a < br_upper_bound; a++) {
                     for (int64_t b = 0; b < E; b++) {
                         int out_idx = i * Br + a;
-                        if (out_idx < S) {
+                        if (out_idx < L) {
                             out_ptr[n * N_Q_HEAD + out_idx * E + b] = o_i[a * E + b];
                         }
                     }
@@ -208,30 +236,34 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     const auto &q = inputs[0];
     const auto &k = inputs[1];
     const auto &v = inputs[2];
+    const auto &mask = inputs[3];
     auto &out = outputs[0];
+
+    if (out.dtype() != mx::float32) {
+        throw std::runtime_error("flash_attention: output dtype must be float32");
+    }
+
+    out.set_data(mx::allocator::malloc(out.nbytes()));
 
     auto &s = stream();
     auto &d = mx::metal::device(s.device);
-    out.set_data(mx::allocator::malloc(out.nbytes()));
 
     // Make a kernel from this metal library
-    auto kernel = d.get_kernel("flash_attention_f32_e128", "tiny_llm_ext_ref");
+    auto library = d.get_library("tiny_llm_ext_ref");
+    auto kernel = d.get_kernel("flash_attention_f32_e128", library);
 
     // Prepare to encode kernel
     auto &compute_encoder = d.get_command_encoder(s.index);
     compute_encoder.set_compute_pipeline_state(kernel);
 
-    // Kernel parameters are registered with buffer indices corresponding to
-    // those in the kernel declaration at axpby.metal
-    int ndim = out.ndim();
-
     // Encode input arrays to kernel
     compute_encoder.set_input_array(q, 0);
     compute_encoder.set_input_array(k, 1);
     compute_encoder.set_input_array(v, 2);
-
-    // Encode output arrays to kernel
-    compute_encoder.set_output_array(out, 3);
+    compute_encoder.set_input_array(mask, 3);
+    compute_encoder.set_output_array(out, 4);    
+    compute_encoder.set_vector_bytes(mask.shape(), 5);
+    compute_encoder.set_vector_bytes(mask.strides(), 6);
 
     if (!q.flags().row_contiguous) {
         throw std::runtime_error("flash_attention: q must be contiguous");
@@ -242,26 +274,30 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     if (!v.flags().row_contiguous) {
         throw std::runtime_error("flash_attention: v must be contiguous");
     }
+    if (!out.flags().row_contiguous) {
+        throw std::runtime_error("flash_attention: out must be contiguous");
+    }
 
-    const int64_t N = q.shape()[0];
-    const int64_t S = q.shape()[1];
-    const int64_t L = k.shape()[1];
-    const int64_t E = q.shape()[2];
+    const int N = q.shape()[0];
+    const int L = q.shape()[1];
+    const int S = k.shape()[1];
+    const int E = q.shape()[2];
 
-    compute_encoder.set_bytes(N, 4);
-    compute_encoder.set_bytes(S, 5);
-    compute_encoder.set_bytes(L, 6);
-    compute_encoder.set_bytes(E, 7);
+    compute_encoder.set_bytes(N, 7);
+    compute_encoder.set_bytes(L, 8);
+    compute_encoder.set_bytes(S, 9);
+    compute_encoder.set_bytes(E, 10);
 
-    compute_encoder.set_bytes(num_kv_heads_, 8);
-    compute_encoder.set_bytes(num_heads_, 9);
-    compute_encoder.set_bytes(scale_, 10);
+    // Make sure the data type matches with the metal kernel: otherwise you'll get flaky issues and stuck :(
+    compute_encoder.set_bytes(num_kv_heads_, 11);
+    compute_encoder.set_bytes(num_heads_, 12);
+    compute_encoder.set_bytes(scale_, 13);
 
     size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
     size_t simd_width = kernel->threadExecutionWidth();
 
-    const int64_t Br = 32;
-    const int64_t Bc = 32;
+    const int Br = 32;
+    const int Bc = 32;
     if (simd_width * Br > tgp_size) {
         throw std::runtime_error("flash_attention: simd_width * Br must be equal to tgp_size");
     }
@@ -277,13 +313,17 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
         throw std::runtime_error("flash_attention: Br must be less than 32");
     }
 
-    const int64_t Tr = (S + Br - 1) / Br;
-    const int64_t Tc = (L + Bc - 1) / Bc;
+    if (Bc > 32) {
+        throw std::runtime_error("flash_attention: Bc must be less than 32");
+    }
 
-    compute_encoder.set_bytes(Br, 11);
-    compute_encoder.set_bytes(Bc, 12);
-    compute_encoder.set_bytes(Tr, 13);
-    compute_encoder.set_bytes(Tc, 14);
+    const int Tr = (L + Br - 1) / Br;
+    const int Tc = (S + Bc - 1) / Bc;
+
+    compute_encoder.set_bytes(Br, 14);
+    compute_encoder.set_bytes(Bc, 15);
+    compute_encoder.set_bytes(Tr, 16);
+    compute_encoder.set_bytes(Tc, 17);
 
     MTL::Size num_threadgroups = MTL::Size(N, Tr, 1);
     MTL::Size num_threads_per_group = MTL::Size(Br, simd_width, 1);

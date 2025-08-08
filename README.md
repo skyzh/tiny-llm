@@ -2,11 +2,13 @@
 
 [![CI (main)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml/badge.svg)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml)
 
-Still WIP and in very early stage. A tutorial on LLM serving using MLX for system engineers. The codebase
+A course on LLM serving using MLX for system engineers. The codebase
 is solely (almost!) based on MLX array/matrix APIs without any high-level neural network APIs, so that we
 can build the model serving infrastructure from scratch and dig into the optimizations.
 
-The goal is to learn the techniques behind efficiently serving a large language model (i.e., Qwen2 models).
+The goal is to learn the techniques behind efficiently serving a large language model (e.g., Qwen2 models).
+
+In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen2 model to generate responses (e.g., attention, RoPE, etc). In week 2, you will implement the inference system which is similar to but a much simpler version of vLLM (e.g., KV cache, continuous batching, flash attention, etc). In week 3, we will cover more advanced topics and how the model interacts with the outside world.
 
 Why MLX: nowadays it's easier to get a macOS-based local development environment than setting up an NVIDIA GPU.
 
@@ -24,91 +26,31 @@ You may join skyzh's Discord server and study with the tiny-llm community.
 
 ## Roadmap
 
+Week 1 is complete. Week 2 is in progress.
+
 | Week + Chapter | Topic                                                       | Code | Test | Doc |
 | -------------- | ----------------------------------------------------------- | ---- | ---- | --- |
+|                | Goal: wire up Qwen and make it generate text                |  | | |
 | 1.1            | Attention                                                   | ✅    | ✅   | ✅  |
 | 1.2            | RoPE                                                        | ✅    | ✅   | ✅  |
 | 1.3            | Grouped Query Attention                                     | ✅    | ✅   | ✅  |
 | 1.4            | RMSNorm and MLP                                             | ✅    | ✅   | ✅  |
-| 1.5            | Transformer Block                                           | ✅    | 🚧   | 🚧  |
-| 1.6            | Load the Model                                              | ✅    | 🚧   | 🚧  |
-| 1.7            | Generate Responses (aka Decoding)                           | ✅    | ✅   | 🚧  |
+| 1.5            | Load the Model                                              | ✅    | ✅   | ✅  |
+| 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
+| 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
 | 2.1            | Key-Value Cache                                             | ✅    | 🚧   | 🚧  |
-| 2.2            | Quantized Matmul and Linear - CPU                           | ✅    | 🚧   | 🚧  |
-| 2.3            | Quantized Matmul and Linear - GPU                           | ✅    | 🚧   | 🚧  |
-| 2.4            | Flash Attention 2 - CPU                                     | ✅    | 🚧   | 🚧  |
-| 2.5            | Flash Attention 2 - GPU                                     | ✅    | 🚧   | 🚧  |
+| 2.2            | Quantized Matmul and Linear - CPU                           | ✅    | ✅   | 🚧  |
+| 2.3            | Quantized Matmul and Linear - GPU                           | ✅    | ✅   | 🚧  |
+| 2.4            | Flash Attention 2 - CPU                                     | ✅    | ✅   | 🚧  |
+| 2.5            | Flash Attention 2 - GPU                                     | ✅    | ✅   | 🚧  |
 | 2.6            | Continuous Batching                                         | ✅    | 🚧   | 🚧  |
 | 2.7            | Chunked Prefill                                             | ✅    | 🚧   | 🚧  |
 | 3.1            | Paged Attention - Part 1                                    | 🚧    | 🚧   | 🚧  |
 | 3.2            | Paged Attention - Part 2                                    | 🚧    | 🚧   | 🚧  |
 | 3.3            | MoE (Mixture of Experts)                                    | 🚧    | 🚧   | 🚧  |
 | 3.4            | Speculative Decoding                                        | 🚧    | 🚧   | 🚧  |
-| 3.5            | Prefill-Decode Separation (requires two Macintosh devices)  | 🚧    | 🚧   | 🚧  |
-| 3.6            | Parallelism                                                 | 🚧    | 🚧   | 🚧  |
-| 3.7            | AI Agent     / Tool Calling                                 | 🚧    | 🚧   | 🚧  |
+| 3.5            | RAG Pipeline                                                | 🚧    | 🚧   | 🚧  |
+| 3.6            | AI Agent     / Tool Calling                                 | 🚧    | 🚧   | 🚧  |
+| 3.7            | Long Context                                                 | 🚧    | 🚧   | 🚧  |
 
 Other topics not covered: quantized/compressed kv cache, prefix/prompt cache; sampling, fine tuning; smaller kernels (softmax, silu, etc)
-
-<!--
-
-### Day 2: RoPE Embedding
-
-Note there are traditional and non-traditional ropes.
-
-**References**
-
-* https://pytorch.org/torchtune/stable/generated/torchtune.modules.RotaryPositionalEmbeddings.html
-* https://github.com/pytorch/torchtune/blob/main/torchtune/modules/position_embeddings.py
-* https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/rotary_embedding.py
-* https://ml-explore.github.io/mlx/build/html/python/nn/_autosummary/mlx.nn.RoPE.html
-* https://arxiv.org/abs/2104.09864
-
-### Day 3: Grouped Query Attention
-
-The Qwen2 models use Grouped Query Attention (GQA). GQA allows different dimensions for query and key/value.
-
-**References**
-
-* Qwen layers implementation in mlx-lm https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py
-* PyTorch API (the case where enable_gqa=True) https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
-* torchtune.modules.MultiHeadAttention https://pytorch.org/torchtune/0.3/generated/torchtune.modules.MultiHeadAttention.html
-* https://arxiv.org/abs/2305.13245v1
-
-### Day 4: RMSNorm and MLP
-
-RMSNorm needs to be accumulated over float32
-
-* Qwen layers implementation in mlx-lm https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py
-* SiLU https://pytorch.org/docs/stable/generated/torch.nn.SiLU.html
-* RMSNorm (note that it needs to accumulate at float32)
-
-### Day 5: Transformer Block
-
-* Qwen layers implementation in mlx-lm https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py
-
-### Day 6: Load the Model
-
-We will use mlx-lm's loader to load the model. We will _steal_ the loaded parameters from the mlx model and
-plug it into our own operators.
-
-### Day 7: Generate Responses
-
-* Qwen layers implementation in mlx-lm https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py
-
-Run `python main.py` and it should give you a reasonable response.
-
-On my M4 Pro Mac Mini, my implementation gives 17 tokens per sec on Metal, versus 50 tokens per sec from the mlx-lm
-Qwen2 implementation. Sadly, it also takes 4x memory than using the mlx-lm components as it does not support computation
-over quantized parameters.
-
-## Week 2
-
-Quantization, implement softmax/linear/silu kernels, implement attention kernels, key-value cache and compression, attention masks, prompt cache.
-
-## Week 3
-
-Continuous batching, OpenAPI HTTP endpoint, integrate with other services.
-
-
--->

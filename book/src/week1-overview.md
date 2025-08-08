@@ -1,11 +1,5 @@
 # Week 1: From Matmul to Text
 
-<div class="warning">
-
-This book is not complete and this chapter is not finalized yet. We might switch to Qwen3 in the final version of the course.
-
-</div>
-
 In this week, we will start from the basic matrix operations and see how those these matrix manipulations can turn the
 Qwen2 model parameters into a model that generates text. We will implement the neural network layers used in the Qwen2
 model using mlx's matrix APIs.

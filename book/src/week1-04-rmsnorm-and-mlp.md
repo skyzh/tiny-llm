@@ -1,12 +1,5 @@
 # Week 1 Day 4: RMSNorm and Multi Perceptron Layer
 
-<div class="warning">
-
-This book is not complete and this chapter is not finalized yet. We are still working on the reference solution, writing
-tests, and unify the math notations in the book.
-
-</div>
-
 In day 4, we will implement two crucial components of the Qwen2 Transformer architecture: RMSNorm and the MLP (Multi-Layer Perceptron) block, also known as the FeedForward Network. RMSNorm is a layer normalization technique that helps stabilize training with less computational overhead compared to traditional layer normalization. The MLP block is a feedforward network that processes the output of the attention layers, applying non-linear transformations to enhance the model's expressiveness.
 
 

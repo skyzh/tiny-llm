@@ -23,17 +23,27 @@ dependencies = [
 ]
 
 [tool.pdm.scripts]
+build-ext.cmd = "python build.py"
+build-ext.working_dir = "src/extensions"
+build-ext-test.cmd = "python test.py"
+build-ext-test.working_dir = "src/extensions"
 build-ext-ref.cmd = "python build.py"
 build-ext-ref.working_dir = "src/extensions_ref"
+clean-ext.cmd = "rm -rf build"
+clean-ext.working_dir = "src/extensions"
+clean-ext-ref.cmd = "rm -rf build"
+clean-ext-ref.working_dir = "src/extensions_ref"
 main.cmd = "python main.py"
 main-week1.cmd = "python main.py --loader week1"
 main-week2.cmd = "python main.py --loader week2"
 batch-main.cmd = "python batch-main.py"
 test.cmd = "python scripts/dev-tools.py test"
+check-installation.cmd = "python scripts/check-installation.py"
 test-refsol.cmd = "python scripts/dev-tools.py test-refsol"
 bench.cmd = "pytest benches"
 format = "ruff format"
-format-cpp.shell = "find src/extensions_ref -type file \\( -name '*.h' -or -name '*.cpp' \\) | xargs -n1 clang-format -i"
+format-cpp-ref.shell = "find src/extensions_ref -type file \\( -name '*.h' -or -name '*.cpp' \\) | xargs -n1 clang-format -i"
+format-cpp.shell = "find src/extensions -type file \\( -name '*.h' -or -name '*.cpp' \\) | xargs -n1 clang-format -i"
 copy-test.cmd = "python scripts/dev-tools.py copy-test"
 book.cmd = "mdbook serve book/"
 

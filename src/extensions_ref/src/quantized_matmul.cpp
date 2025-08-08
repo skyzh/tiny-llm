@@ -163,7 +163,8 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     out.set_data(mx::allocator::malloc(out.nbytes()));
 
     // Make a kernel from this metal library
-    auto kernel = d.get_kernel("quantized_matmul_w4a16_g64", "tiny_llm_ext_ref");
+    auto library = d.get_library("tiny_llm_ext_ref");
+    auto kernel = d.get_kernel("quantized_matmul_w4a16_g64", library);
 
     // Prepare to encode kernel
     auto &compute_encoder = d.get_command_encoder(s.index);
@@ -212,11 +213,6 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     // Launch the grid with the given number of threads divided among
     // the given threadgroups
     compute_encoder.dispatch_threadgroups(num_threadgroups, num_threads_per_group);
-}
-
-bool QuantizedMatmul::is_equivalent(const Primitive &other) const {
-    const QuantizedMatmul &r_other = static_cast<const QuantizedMatmul &>(other);
-    return group_size_ == r_other.group_size_ && bits_ == r_other.bits_;
 }
 
 }  // namespace tiny_llm_ext_ref

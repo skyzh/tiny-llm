@@ -27,3 +27,5 @@ https://huggingface.co/docs/transformers/pad_truncation
 
 https://siboehm.com/articles/22/CUDA-MMM
 https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-metal/ggml-metal.metal
+
+pdm run batch-main --solution ref --model Qwen/Qwen2-7B-Instruct-MLX --prefill-step 16

@@ -1,19 +1,18 @@
 import pytest
 import mlx.core as mx
 from .tiny_llm_base import *
-import numpy as np
 from .utils import *
 
 
 def quantized_matmul_helper(
-    stream: mx.Stream, identity_matrix: bool, precision: np.dtype
+    stream: mx.Stream, identity_matrix: bool, precision: mx.Dtype
 ):
     with mx.stream(stream):
         if identity_matrix:
-            input = mx.array(np.eye(64).astype(precision))
+            input = mx.eye(64, dtype=precision)
         else:
-            input = mx.array(np.random.randn(3, 64).astype(precision))
-        weight = mx.array(np.random.randn(5, 64).astype(precision))
+            input = mx.random.normal(shape=(3, 64), dtype=precision)
+        weight = mx.random.normal(shape=(5, 64), dtype=precision)
         w_q, scales, biases = mx.quantize(weight)
         user_out = quantized_matmul(
             scales=scales,
@@ -37,16 +36,16 @@ def quantized_matmul_helper(
 
 
 def test_task_1_quantized_matmul_simple_f16_cpu():
-    quantized_matmul_helper(mx.cpu, True, np.float16)
+    quantized_matmul_helper(mx.cpu, True, mx.float16)
 
 
 def test_task_1_quantized_matmul_complex_f16_cpu():
-    quantized_matmul_helper(mx.cpu, False, np.float16)
+    quantized_matmul_helper(mx.cpu, False, mx.float16)
 
 
 def test_task_2_quantized_matmul_simple_f16_gpu():
-    quantized_matmul_helper(mx.gpu, True, np.float16)
+    quantized_matmul_helper(mx.gpu, True, mx.float16)
 
 
 def test_task_2_quantized_matmul_complex_f16_gpu():
-    quantized_matmul_helper(mx.gpu, False, np.float16)
+    quantized_matmul_helper(mx.gpu, False, mx.float16)

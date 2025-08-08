@@ -34,7 +34,7 @@ pdm install -v # this will automatically create a virtual environment and instal
 ## Check the Installation
 
 ```bash
-pdm run python check.py
+pdm run check-installation
 # The reference solution should pass all the *week 1* tests
 pdm run test-refsol -- -- -k week_1
 ```

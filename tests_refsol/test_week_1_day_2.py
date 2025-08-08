@@ -1,16 +1,14 @@
 import pytest
 import mlx.core as mx
-import torch
 from .tiny_llm_base import *
 import numpy as np
 from .utils import *
-import torchtune
 
 
 def rope_helper(
     stream: mx.Stream,
     traditional: bool,
-    precision: np.dtype,
+    precision: mx.Dtype,
     with_offset: bool,
 ):
     BATCH_SIZE = 1
@@ -18,12 +16,12 @@ def rope_helper(
     HEAD_DIM = 4
     MAX_SEQ_LEN = 20
     SEQ_LEN = 10
-    BASE = 10000.0
+    BASE = 10000
     with mx.stream(stream):
         for _ in range(100):
             user_layer = RoPE(HEAD_DIM, MAX_SEQ_LEN, BASE, traditional=traditional)
-            x = np.random.rand(BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM).astype(
-                precision
+            x = mx.random.uniform(
+                shape=(BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM), dtype=precision
             )
 
             if with_offset:
@@ -36,19 +34,19 @@ def rope_helper(
                 input_pos_user = None
 
             reference_output = mx.fast.rope(
-                mx.array(x).transpose(0, 2, 1, 3),
+                x.transpose(0, 2, 1, 3),
                 dims=HEAD_DIM,
                 traditional=traditional,
                 base=BASE,
                 scale=1.0,
                 offset=input_pos_mx or 0,
             ).transpose(0, 2, 1, 3)
-            user_output = user_layer(mx.array(x), input_pos_user)
+            user_output = user_layer(x, input_pos_user)
             assert_allclose(
                 user_output,
                 reference_output,
                 precision,
-                atol=5e-6 if precision == np.float32 else 1e-3,
+                atol=5e-6 if precision == mx.float32 else 1e-3,
             )
 
 
@@ -58,7 +56,7 @@ def rope_helper(
 )
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 def test_task_1_rope_mlx_traditional(
-    stream: mx.Stream, with_offset: bool, precision: np.dtype
+    stream: mx.Stream, with_offset: bool, precision: mx.Dtype
 ):
     rope_helper(stream, True, precision, with_offset)
 
@@ -69,6 +67,6 @@ def test_task_1_rope_mlx_traditional(
 )
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 def test_task_2_rope_mlx_non_traditional(
-    stream: mx.Stream, with_offset: bool, precision: np.dtype
+    stream: mx.Stream, with_offset: bool, precision: mx.Dtype
 ):
     rope_helper(stream, False, precision, with_offset)

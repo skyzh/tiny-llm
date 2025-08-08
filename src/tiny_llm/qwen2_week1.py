@@ -30,6 +30,7 @@ class Qwen2MultiHeadAttention:
         self,
         x: mx.array,
         offset: int,
+        mask: mx.array | str | None = None,
     ) -> mx.array:
         pass
 
@@ -78,6 +79,7 @@ class Qwen2TransformerBlock:
         self,
         x: mx.array,
         offset: int,
+        mask: mx.array | str | None = None,
     ) -> mx.array:
         pass
 
