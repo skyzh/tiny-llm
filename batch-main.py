@@ -4,7 +4,7 @@ import argparse
 import random
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model", type=str, default="Qwen/Qwen2-0.5B-Instruct-MLX")
+parser.add_argument("--model", type=str, default="mlx-community/Qwen3-0.6B-4bit")
 
 shanghai_wikipedia = """
 Shanghai[a] is a direct-administered municipality and the most populous urban area in China. The city is located on the Chinese shoreline on the southern estuary of the Yangtze River, with the Huangpu River flowing through it. The population of the city proper is the second largest in the world after Chongqing, with around 24.87 million inhabitants in 2023, while the urban area is the most populous in China, with 29.87 million residents. As of 2022, the Greater Shanghai metropolitan area was estimated to produce a gross metropolitan product (nominal) of nearly 13 trillion RMB ($1.9 trillion).[13] Shanghai is one of the world's major centers for finance, business and economics, research, science and technology, manufacturing, transportation, tourism, and culture. The Port of Shanghai is the world's busiest container port.
@@ -42,11 +42,11 @@ args = parser.parse_args()
 
 if args.solution == "tiny_llm":
     print("Using your tiny_llm solution")
-    from tiny_llm import Qwen2ModelWeek2, batch_generate
+    from tiny_llm import Qwen3ModelWeek2, batch_generate
 
 elif args.solution == "tiny_llm_ref" or args.solution == "ref":
     print("Using tiny_llm_ref solution")
-    from tiny_llm_ref import Qwen2ModelWeek2, batch_generate
+    from tiny_llm_ref import Qwen3ModelWeek2, batch_generate
 
 else:
     raise ValueError(f"Solution {args.solution} not supported")
@@ -54,7 +54,7 @@ else:
 mlx_model, tokenizer = load(args.model)
 
 with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-    tiny_llm_model = Qwen2ModelWeek2(mlx_model)
+    tiny_llm_model = Qwen3ModelWeek2(mlx_model)
     encoded_prompts = []
     for idx, prompt in enumerate(prompts):
         print(f"Prompt {idx}: {prompt}")

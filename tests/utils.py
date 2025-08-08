@@ -1,6 +1,7 @@
 import numpy as np
 import mlx.core as mx
 import huggingface_hub
+import mlx.nn as nn
 
 AVAILABLE_STREAMS = [mx.cpu, mx.gpu]
 AVAILABLE_STREAMS_IDS = ["cpu", "gpu"]
@@ -51,34 +52,57 @@ def np_type_to_mx_type(np_type: np.dtype) -> mx.Dtype:
         raise ValueError(f"Unsupported numpy type: {np_type}")
 
 
-def qwen_2_05b_model_exists() -> bool:
+def qwen_3_06b_model_exists() -> bool:
     try:
         huggingface_hub.snapshot_download(
-            "Qwen/Qwen2-0.5B-Instruct-MLX", local_files_only=True
+            "mlx-community/Qwen3-0.6B-4bit", local_files_only=True
         )
         return True
     except Exception as e:
-        print(f"Cannot find the Qwen2-0.5B-Instruct-MLX model: {e}")
+        print(f"Cannot find the Qwen3-0.6B-4bit model: {e}")
         return False
 
 
-def qwen_2_15b_model_exists() -> bool:
+def qwen_3_17b_model_exists() -> bool:
     try:
         huggingface_hub.snapshot_download(
-            "Qwen/Qwen2-1.5B-Instruct-MLX", local_files_only=True
+            "mlx-community/Qwen3-1.7B-4bit", local_files_only=True
         )
         return True
     except Exception as e:
-        print(f"Cannot find the Qwen2-1.5B-Instruct-MLX model: {e}")
+        print(f"Cannot find the Qwen3-1.7B-4bit model: {e}")
         return False
 
 
-def qwen_2_7b_model_exists() -> bool:
+def qwen_3_8b_model_exists() -> bool:
     try:
         huggingface_hub.snapshot_download(
-            "Qwen/Qwen2-7B-Instruct-MLX", local_files_only=True
+            "mlx-community/Qwen3-8B-4bit", local_files_only=True
         )
         return True
     except Exception as e:
-        print(f"Cannot find the Qwen2-7B-Instruct-MLX model: {e}")
+        print(f"Cannot find the Qwen3-8B-4bit model: {e}")
         return False
+
+
+def force_convert_bf16_to(model, precision: mx.Dtype):
+    if isinstance(model, list):
+        for idx, item in enumerate(model):
+            res = force_convert_bf16_to(item, precision)
+            if res is not None:
+                model[idx] = res
+    elif isinstance(model, dict):
+        for key, value in model.items():
+            res = force_convert_bf16_to(value, precision)
+            if res is not None:
+                model[key] = res
+    elif isinstance(model, nn.Module):
+        for _, param in model.parameters().items():
+            force_convert_bf16_to(param, precision)
+    elif isinstance(model, mx.array):
+        if model.dtype == mx.bfloat16:
+            return model.astype(precision)
+        else:
+            return model
+    else:
+        raise ValueError(f"Unsupported model type: {type(model)}")
