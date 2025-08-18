@@ -88,7 +88,11 @@ class Qwen2TransformerBlock:
 
 
 class Qwen2ModelWeek2:
-    def __init__(self, mlx_model: Any):
+    def __init__(
+        self,
+        mlx_model: Any,
+        enable_flash_attn: bool = False,
+    ):
         pass
 
     def __call__(

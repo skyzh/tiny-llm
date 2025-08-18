@@ -65,5 +65,5 @@ def simple_generate_with_kv_cache(
         print(detokenizer.last_segment, end="", flush=True)
         if token.item() == tokenizer.eos_token_id:
             break
-        offset += tokens.size
+        offset += token.size
         tokens = token
