@@ -219,6 +219,7 @@ class Qwen2ModelWeek1:
     def __call__(
         self,
         inputs: mx.array,
+        offset: int,
     ) -> mx.array:
         h = self.embedding(inputs)
         for layer in range(self.num_hidden_layers):

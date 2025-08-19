@@ -29,7 +29,6 @@ class Qwen2MultiHeadAttention:
     def __call__(
         self,
         x: mx.array,
-        offset: int,
         mask: mx.array | str | None = None,
     ) -> mx.array:
         pass
@@ -78,7 +77,6 @@ class Qwen2TransformerBlock:
     def __call__(
         self,
         x: mx.array,
-        offset: int,
         mask: mx.array | str | None = None,
     ) -> mx.array:
         pass
@@ -91,6 +89,5 @@ class Qwen2ModelWeek1:
     def __call__(
         self,
         inputs: mx.array,
-        offset: int,
     ) -> mx.array:
         pass
