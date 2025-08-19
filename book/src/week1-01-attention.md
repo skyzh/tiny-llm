@@ -88,8 +88,8 @@ src/tiny_llm/attention.py
 **📚 Readings**
 
 * [Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
-* [PyTorch SimpleMultiHeadAttention API](https://pytorch.org/docs/stable/generated/torch.nn.SimpleMultiHeadAttention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
-* [MLX SimpleMultiHeadAttention API](https://ml-explore.github.io/mlx/build/html/python/nn/_autosummary/mlx.nn.SimpleMultiHeadAttention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
+* [PyTorch MultiHeadAttention API](https://docs.pytorch.org/docs/2.8/generated/torch.nn.MultiheadAttention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
+* [MLX MultiHeadAttention API](https://ml-explore.github.io/mlx/build/html/python/nn/_autosummary/mlx.nn.MultiHeadAttention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
 * [The Illustrated GPT-2 (Visualizing Transformer Language Models)](https://jalammar.github.io/illustrated-gpt2) helps you better understand what key, value, and query are.
 
 Implement `SimpleMultiHeadAttention`. The layer takes a batch of vectors, maps it through the K, V, Q weight matrixes, and use the attention function we implemented in task 1 to compute the result. The output needs to be mapped using the O
