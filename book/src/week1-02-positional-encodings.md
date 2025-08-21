@@ -33,7 +33,7 @@ x: (N, L, H, D)
 cos/sin_freqs: (MAX_SEQ_LEN, D // 2)
 ```
 
-In the traditional form of RoPE, each head on the dimension of `D` is viewed as consequtive complex pairs. That is to
+In the traditional form of RoPE, each head on the dimension of `D` is viewed as consecutive complex pairs. That is to
 say, if D = 8, then, x[0] and x[1] are a pair, x[2] and x[3] are another pair, and so on. A pair gets the same frequency
 from `cos/sin_freqs`.
 
