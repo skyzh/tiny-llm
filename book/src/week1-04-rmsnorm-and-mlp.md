@@ -66,7 +66,7 @@ Modern Transformer architectures, including Qwen2, often employ more advanced FF
 * [PyTorch SiLU documentation](https://pytorch.org/docs/stable/generated/torch.nn.SiLU.html)
 * [Qwen2 layers implementation in mlx-lm (includes MLP)](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py)
 
-Essientially, SwiGLU is a combination of GLU and the SiLU (Sigmoid Linear Unit) activation function:
+Essentially, SwiGLU is a combination of GLU and the SiLU (Sigmoid Linear Unit) activation function:
 -  GLU is a gating mechanism that allows the model to learn which parts of the input to focus on. It typically involves an element-wise product of two linear projections of the input, one of which might be passed through an activation function. Compared to ReLU used in the original FFN, GLU can help the model learn more complex relationships in the data, deciding which features to keep and which to discard.
 -  SiLU (Sigmoid Linear Unit) is a smooth, non-monotonic activation function that has been shown to perform well in various deep learning tasks. Compared to ReLU and sigmoid used in GLU, it is fully differentiable without the zero-gradient “dead zones”, retains non-zero output even for negative inputs.
 

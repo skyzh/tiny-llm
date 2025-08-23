@@ -62,7 +62,7 @@ src/tiny_llm/embedding.py
 
 - [LLM Embeddings Explained: A Visual and Intuitive Guide](https://huggingface.co/spaces/hesamation/primer-llm-embedding)
 
-The embedding layer maps one or more tokens (represented as an interger) to one or more vector of dimension `embedding_dim`.
+The embedding layer maps one or more tokens (represented as an integer) to one or more vector of dimension `embedding_dim`.
 In this task, you will implement the embedding layer.
 
 ```
@@ -148,7 +148,6 @@ in the next day.
 
 You should pass all tests for this task by running:
 
-
 ```bash
 # Download the models if you haven't done so
 huggingface-cli download Qwen/Qwen2-0.5B-Instruct-MLX
@@ -162,6 +161,5 @@ At the end of the day, you should be able to pass all tests of this day:
 ```bash
 pdm run test --week 1 --day 5
 ```
-
 
 {{#include copyright.md}}

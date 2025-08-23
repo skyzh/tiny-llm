@@ -20,7 +20,7 @@ resources are:
 
 ## Environment Setup
 
-This course uses [MLX](https://github.com/ml-explore/mlx), an array/machine learning library for Apple Silicon. Nowaways
+This course uses [MLX](https://github.com/ml-explore/mlx), an array/machine learning library for Apple Silicon. Nowadays
 it's much easier to get an Apple Silicon device than NVIDIA GPUs. In theory you can also do this course with PyTorch or
 numpy, but we just don't have the test infra to support them. We test your implementation against PyTorch's CPU implementation
 and MLX's implementation to ensure correctness.
