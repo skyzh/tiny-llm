@@ -8,7 +8,7 @@ def scaled_dot_product_attention_simple(
     scale: float | None = None,
     mask: mx.array | None = None,
 ) -> mx.array:
-    D, L = query.shape[-1], query.shape[-2]
+    L, D = query.shape[-2], query.shape[-1]
 
     score = mx.matmul(query, key.swapaxes(-2, -1))
     atten_score = score * (mx.rsqrt(D) if scale is None else scale)
@@ -53,9 +53,9 @@ class SimpleMultiHeadAttention:
         value = linear(value, self.wv).reshape(N, L, self.num_heads, self.head_hidden_size)
 
         # N x H x L x D
-        query = query.swapaxes(1, 2)
-        key = key.swapaxes(1, 2)
-        value = value.swapaxes(1, 2)
+        query = query.swapaxes(-1, -2)
+        key = key.swapaxes(-1, -2)
+        value = value.swapaxes(-1, -2)
         
         # N x H x L x D
         mh_attention = scaled_dot_product_attention_simple(
@@ -75,7 +75,8 @@ class SimpleMultiHeadAttention:
 
 
 def causal_mask(L: int, S: int, dtype: mx.Dtype) -> mx.array:
-    pass
+    mask = mx.triu(mx.ones((L, S)), k=1)
+
 
 
 def scaled_dot_product_attention_grouped(
@@ -85,7 +86,34 @@ def scaled_dot_product_attention_grouped(
     scale: float | None = None,
     mask: mx.array | str | None = None,
 ) -> mx.array:
-    pass
+    H_q, L, D = query.shape[-3], query.shape[-2], query.shape[-1]
+    H, S = key.shape[-3], key.shape[-2]
+
+    assert H_q % H == 0, "Query heads must be divisible by kv heads"
+
+    n_repeats = H_q // H
+    
+    q_shape = query.shape
+    query = query.reshape(-1, H, n_repeats, L, D)
+    key = key.reshape(-1, H, 1, S, D)
+    value = value.reshape(-1, H, 1, S, D)
+
+    print("query shape: ", query.shape)
+    print("key shape: ", key.shape)
+    print("value shape: ", value.shape) 
+
+    score = mx.matmul(query, key.swapaxes(-2, -1))
+    atten_score = score * (mx.rsqrt(D) if scale is None else scale)
+
+    if isinstance(mask, str) and mask == "causal":
+        mask = causal_mask(L, S, query.dtype)
+        
+        
+    elif isinstance(mask, mx.array):
+        atten_score += mask.reshape(atten_score.shape)
+    
+    return mx.matmul(softmax(atten_score, axis=-1), value).reshape(q_shape)
+    
 
 
 def flash_attention(
