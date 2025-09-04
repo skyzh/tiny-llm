@@ -20,9 +20,6 @@ class RoPE:
         self, x: mx.array, offset: list[slice] | slice | None = None
     ) -> mx.array:
         N, L, H, D = x.shape
-        print(N, L, H, D)
-        print(self.max_seq_len)
-        print(self.dims)
         assert D == self.dims
 
         costh, sinth = RoPE._cal_cos_sin_theta(offset, L, self.base, self.dims)
