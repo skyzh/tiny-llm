@@ -14,7 +14,7 @@ src/tiny_llm/layer_norm.py
 **📚 Readings**
 
 * [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)
-* [Qwen2 layers implementation in mlx-lm (includes RMSNorm)](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py) - See `Qwen2RMSNorm`.
+* [Qwen2 layers implementation in mlx-lm (includes RMSNorm)]([https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py](https://github.com/ml-explore/mlx-lm/blob/bcb96db87f218453774f8808159012f15fc0dc7b/mlx_lm/models/qwen2.py)) - See `RMSNorm`.
 
 
 RMSNorm is defined as:
