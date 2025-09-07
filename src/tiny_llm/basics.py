@@ -17,4 +17,6 @@ def linear(
         return mx.matmul(x, w.T) + bias
 
 def silu(x: mx.array) -> mx.array:
-    pass
+    def sigmoid(x: mx.array):
+        return 1.0 / (1.0 + mx.exp(-x))
+    return x * sigmoid(x)
