@@ -120,7 +120,7 @@ L is seq_len, in PyTorch API it's S (source len)
 
 w_q/w_k/w_v: (H x D) x E
 output/input: N x L x E
-w_o: E x (H  D)
+w_o: E x (H x D)
 ```
 
 At the end of the task, you should be able to pass the following tests:
