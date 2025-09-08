@@ -20,3 +20,8 @@ def silu(x: mx.array) -> mx.array:
     def sigmoid(x: mx.array):
         return 1.0 / (1.0 + mx.exp(-x))
     return x * sigmoid(x)
+
+def logsumexp_norm(x: mx.array):
+    c = x.max(axis=-1)
+    logsumexp = c + mx.log(mx.sum(mx.exp(x - c), axis=-1))
+    return mx.exp(x - logsumexp)

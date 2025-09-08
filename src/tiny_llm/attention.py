@@ -98,10 +98,6 @@ def scaled_dot_product_attention_grouped(
     key = key.reshape(-1, H, 1, S, D)
     value = value.reshape(-1, H, 1, S, D)
 
-    print("query shape: ", query.shape)
-    print("key shape: ", key.shape)
-    print("value shape: ", value.shape) 
-
     score = mx.matmul(query, key.swapaxes(-2, -1))
     atten_score = score * (mx.rsqrt(D) if scale is None else scale)
 
