@@ -158,7 +158,7 @@ def test_task_3_qwen2_grouped_query_attention(
             rms_norm_eps=1e-6,
             vocab_size=1000,
             rope_theta=theta,
-            rope_traditional=True,
+            rope_traditional=False,
             max_position_embeddings=max_seq_len,
         )
 
