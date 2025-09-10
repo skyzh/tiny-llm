@@ -108,6 +108,8 @@ x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L, H_q, D ;
 x = linear(x, wo) -> B, L, E
 ```
 
+Keep in mind that you should use non-traditional RoPE.
+
 You can test your implementation by running the following command:
 
 ```bash
