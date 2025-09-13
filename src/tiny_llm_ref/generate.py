@@ -56,14 +56,16 @@ def simple_generate_with_kv_cache(
     tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
     detokenizer = tokenizer.detokenizer
     detokenizer.reset()
-    offset = tokens.size
+    offset = 0
     # generate/decode
     while True:
         token, _ = _step(model, tokens, offset, kv_cache)
         mx.eval(token)
-        detokenizer.add_token(token.item())
-        print(detokenizer.last_segment, end="", flush=True)
         if token.item() == tokenizer.eos_token_id:
             break
-        offset += token.size
+        detokenizer.add_token(token.item())
+        print(detokenizer.last_segment, end="", flush=True)
+        # The first iteration of this loop is prefill. We want to add the offset to the prefilled token size.
+        # Otherwise, we add the decoded token size (which is always 1).
+        offset += tokens.size
         tokens = token

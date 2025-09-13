@@ -48,7 +48,7 @@ class Qwen2MultiHeadAttention:
         self.bq = bq
         self.bk = bk
         self.bv = bv
-        self.rope = RoPE(self.head_dim, max_seq_len, theta)
+        self.rope = RoPE(self.head_dim, max_seq_len, theta, traditional=False)
         self.use_flash_attention = use_flash_attention
 
     def __call__(
