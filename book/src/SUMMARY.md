@@ -17,8 +17,7 @@
     - [Key-Value Cache](./week2-01-kv-cache.md)
     - [Quantized Matmul (2 Days)]()
     - [Flash Attention (2 Days)]()
-    - [Chunked Prefill]()
-    - [Continuous Batching]()
+    - [Continuous Batching (2 Days)](./week2-06-prefill-and-batch.md)
 - [Week 3: Serving]()
 
 ---

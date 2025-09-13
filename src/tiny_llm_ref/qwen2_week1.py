@@ -59,7 +59,6 @@ class Qwen2MultiHeadAttention:
         projection_v = linear(x, self.wv, bias=self.bv).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        print(x.shape, self.wk.shape)
         projection_q = self.rope(projection_q, offset=slice(0, L))
         projection_k = self.rope(projection_k, offset=slice(0, L))
         projection_q = projection_q.transpose(0, 2, 1, 3)

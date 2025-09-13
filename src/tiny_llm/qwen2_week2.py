@@ -24,6 +24,7 @@ class Qwen2MultiHeadAttention:
         bv: mx.array,
         max_seq_len: int = 32768,
         theta: int = 1000000,
+        use_flash_attention: bool = False,
     ):
         pass
 
@@ -74,6 +75,7 @@ class Qwen2TransformerBlock:
         w_post_attention_layernorm: mx.array,
         max_seq_len: int = 32768,
         theta: int = 1000000,
+        use_flash_attention: bool = False,
     ):
         pass
 
@@ -93,6 +95,7 @@ class Qwen2ModelWeek2:
         mlx_model: Any,
         enable_flash_attn: bool = False,
     ):
+        self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
 
     def __call__(

@@ -138,6 +138,3 @@ class TinyKvFullCache(TinyKvCache):
             self.key_values = (new_keys, new_values)
             self.offset += S
             return new_keys, new_values, self.offset, mask
-
-    def get_offset(self):
-        return self.offset
