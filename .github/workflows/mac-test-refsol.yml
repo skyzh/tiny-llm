@@ -1,0 +1,24 @@
+# Build and test the reference solution automatically on M1 runners.
+# This helps prevent breakage of the dev setup.
+name: Test reference solution
+
+on: push
+
+jobs:
+  test-refsol:
+    runs-on: macos-15 # ARM64
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pdm-project/setup-pdm@v4
+
+      - run: pdm install
+
+      - run: pdm run check-installation
+
+      - run: pdm test-refsol
+
+      - name: Build and test extensions
+        run: |
+          pdm run build-ext
+          pdm run build-ext-test
