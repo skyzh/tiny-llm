@@ -2,7 +2,11 @@
 # This helps prevent breakage of the dev setup.
 name: macOS
 
-on: push
+on:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
   test-refsol:
