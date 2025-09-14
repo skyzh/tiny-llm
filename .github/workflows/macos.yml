@@ -20,7 +20,11 @@ jobs:
 
       - run: pdm run check-installation
 
-      - run: curl https://sshx.io/get | sh -s run
+      # Without this, future build steps fail in CMake.
+      - name: Add nanobind to CMake
+        run: |
+          nanobind_dir=$(pdm run python -c 'import nanobind, os; print(os.path.join(nanobind.__path__[0], "cmake"))')
+          echo "nanobind_DIR=${nanobind_dir}" >> $GITHUB_ENV
 
       - name: Try building extensions
         run: |
