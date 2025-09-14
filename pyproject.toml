@@ -8,18 +8,18 @@ version = "0.1.0"
 requires-python = ">=3.10, <3.13"
 readme = "README.md"
 dependencies = [
-    "mlx>=0.25.0",
+    "mlx>=0.27.0",
     "torch>=2.6.0",
     "torchtune>=0.6.1",
     "torchao>=0.10.0",
-    "mlx-lm>=0.23.0",
+    "mlx-lm>=0.26.0",
     "numpy>=2.2.4",
     "pytest>=8.3.5",
     "ruff>=0.11.6",
     # this should not usually appear in a project dependency list but we add it to simplify the setup process
     "setuptools>=62",
     "nanobind==2.4.0",
-    "pytest-benchmark>=5.1.0"
+    "pytest-benchmark>=5.1.0",
 ]
 
 [tool.pdm.scripts]
@@ -48,7 +48,5 @@ copy-test.cmd = "python scripts/dev-tools.py copy-test"
 book.cmd = "mdbook serve book/"
 
 [tool.pytest.ini_options]
-addopts = [
-    "--import-mode=importlib",
-]
+addopts = ["--import-mode=importlib"]
 pythonpath = "src"
