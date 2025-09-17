@@ -92,6 +92,12 @@ src/tiny_llm/qwen2_week2.py
 
 Ensure your model can handle multiple requests simultaneously. You should also use the masks returned by the batch KV cache.
 
+You should pass all of the tests by running:
+
+```bash
+pdm run test --week 2 --day 6 -- -k task_3
+```
+
 ## Task 4: Batch Generate
 
 ```

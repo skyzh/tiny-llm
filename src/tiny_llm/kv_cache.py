@@ -1,9 +1,11 @@
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import mlx.core as mx
 
 
-class TinyKvCache:
+class TinyKvCache(ABC):
+    @abstractmethod
     def update_and_fetch(
         self,
         key: mx.array,
@@ -26,7 +28,6 @@ class TinyKvCache:
             In week 2 day 6/7, we need to return the updated key-value cache, the updated value, the sequence length, and the mask.
             so that the batching kv cache can use this information to generate the mask.
         """
-        pass
 
 
 class BatchingKvCache(TinyKvCache):

@@ -1,6 +1,8 @@
 import mlx.core as mx
 import numpy as np
 import pytest
+from mlx_lm import load
+
 from .tiny_llm_base import *
 from .utils import *
 
@@ -174,3 +176,79 @@ def test_task_1_attention_with_mask_gpu():
 
 def test_task_1_attention_with_mask_gpu_large():
     attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, use_flash_attention=False)
+
+
+def helper_test_task_3(model_name: str, seq_len: int, iters: int = 1):
+    """Tests for continuous batching of decode requests."""
+    requests = 4
+    max_seq_len = seq_len
+
+    mlx_model, tokenizer = load(model_name)
+    model = Qwen2ModelWeek2(mlx_model)
+    for _ in range(iters):
+        cache = [
+            BatchingKvCache(requests, max_seq_len)
+            for _ in range(model.num_hidden_layers)
+        ]
+        # Start each request at a staggered token index.
+        staggered_start = [seq_len * i // requests for i in range(requests)]
+        inputs = mx.random.randint(0, tokenizer.vocab_size, (requests, seq_len))
+        ref_outputs = mlx_model(inputs)
+        for offset in range(seq_len + staggered_start[-1]):
+            seq_idx = [offset - start for start in staggered_start]
+
+            # Requests join at the staggered start, and leave when they reach seq_len.
+            for request_id, sidx in enumerate(seq_idx):
+                if sidx == 0:
+                    for c in cache:
+                        c.add_request(TinyKvFullCache(), request_id)
+                elif sidx == seq_len:
+                    for c in cache:
+                        c.remove_request(request_id)
+
+            next_tokens = []
+            next_offsets = []
+            for request_id, sidx in enumerate(seq_idx):
+                if 0 <= sidx < seq_len:
+                    next_tokens.append(inputs[request_id, sidx].item())
+                    next_offsets.append(sidx)
+                else:
+                    next_tokens.append(0)
+                    next_offsets.append(0)
+
+            user_out = model(
+                inputs=mx.array(next_tokens, dtype=mx.int32).reshape(-1, 1),
+                offset=mx.array(next_offsets, dtype=mx.int32),
+                cache=cache,
+            )
+
+            for request_id, sidx in enumerate(seq_idx):
+                if 0 <= sidx < seq_len:
+                    user_out_r = user_out[request_id, 0, :]
+                    ref_out_r = ref_outputs[request_id, sidx, :]
+                    user_out_r = user_out_r - mx.logsumexp(user_out_r, keepdims=True)
+                    ref_out_r = ref_out_r - mx.logsumexp(ref_out_r, keepdims=True)
+                    assert_allclose(
+                        user_out_r, ref_out_r, precision=mx.float16, rtol=1e-1
+                    )
+
+
+@pytest.mark.skipif(
+    not qwen_2_05b_model_exists(), reason="Qwen2-0.5B-Instruct-MLX model not found"
+)
+def test_task_3_qwen_2_05b():
+    helper_test_task_3("Qwen/Qwen2-0.5B-Instruct-MLX", seq_len=3)
+
+
+@pytest.mark.skipif(
+    not qwen_2_7b_model_exists(), reason="Qwen2-7B-Instruct-MLX model not found"
+)
+def test_task_3_qwen_2_7b():
+    helper_test_task_3("Qwen/Qwen2-7B-Instruct-MLX", seq_len=3)
+
+
+@pytest.mark.skipif(
+    not qwen_2_15b_model_exists(), reason="Qwen2-1.5B-Instruct-MLX model not found"
+)
+def test_task_3_qwen_2_15b():
+    helper_test_task_3("Qwen/Qwen2-1.5B-Instruct-MLX", seq_len=3)

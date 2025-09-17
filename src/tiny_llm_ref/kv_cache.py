@@ -1,10 +1,12 @@
+from abc import ABC, abstractmethod
 from typing import Optional
 
 from .attention import causal_mask
 import mlx.core as mx
 
 
-class TinyKvCache:
+class TinyKvCache(ABC):
+    @abstractmethod
     def update_and_fetch(
         self,
         key: mx.array,
@@ -24,7 +26,6 @@ class TinyKvCache:
         Returns:
             A tuple of the updated key-value cache, the updated value, the sequence length, and the mask.
         """
-        pass
 
 
 class BatchingKvCache(TinyKvCache):
@@ -44,7 +45,10 @@ class BatchingKvCache(TinyKvCache):
         B, H, S, D = keys.shape
         assert keys.shape == values.shape
         assert S <= self.max_seq_len
-        assert self.HD == (H, D), f"expect {self.HD} but got {H, D}"
+        if self.HD is None:
+            self.HD = (H, D)
+        else:
+            assert self.HD == (H, D), f"expect {self.HD} but got {H, D}"
         assert B == self.max_active_requests
         # Step 1: append the result to the cache
         data = []
@@ -88,19 +92,20 @@ class BatchingKvCache(TinyKvCache):
             elif isinstance(mask, mx.array):
                 masks[b, :, seq_len - S : seq_len] = mask
             else:
-                raise NotImplemented
+                raise NotImplementedError
         return keys, values, None, masks.reshape(B, 1, mask_length, seq_len)
 
     def add_request(self, prefilled: TinyKvCache, id: int):
         if id >= self.max_active_requests:
             raise ValueError(f"Request id {id} is out of range")
-        keys, _ = prefilled.key_values
-        B, H, _, D = keys.shape
-        assert B == 1
-        if self.HD is None:
-            self.HD = (H, D)
-        else:
-            assert self.HD == (H, D)
+        if getattr(prefilled, "key_values", None) is not None:
+            keys, _ = prefilled.key_values
+            B, H, _, D = keys.shape
+            assert B == 1
+            if self.HD is None:
+                self.HD = (H, D)
+            else:
+                assert self.HD == (H, D)
         self.kv_caches[id] = prefilled
 
     def remove_request(self, id: int):
@@ -126,7 +131,7 @@ class TinyKvFullCache(TinyKvCache):
             self.key_values = (key, value)
             B, H, S, D = key.shape
             self.offset = S
-            return key, value, 0, mask
+            return key, value, self.offset, mask
         else:
             B, H, S, D = key.shape
             assert key.shape == value.shape
