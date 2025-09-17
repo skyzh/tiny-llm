@@ -60,6 +60,7 @@ them with:
 
 ```bash
 huggingface-cli login
+huggingface-cli download Qwen/Qwen2-0.5B-Instruct-MLX
 huggingface-cli download Qwen/Qwen2-7B-Instruct-MLX
 ```
 
