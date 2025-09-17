@@ -1,7 +1,52 @@
-import pytest
 import mlx.core as mx
+import numpy as np
+import pytest
 from .tiny_llm_base import *
 from .utils import *
+
+
+def rope_helper(stream: mx.Stream, traditional: bool, precision: mx.Dtype):
+    BATCH_SIZE = 16
+    NUM_HEADS = 8
+    HEAD_DIM = 4
+    MAX_SEQ_LEN = 14
+    SEQ_LEN = 9
+    BASE = 10000
+    with mx.stream(stream):
+        for _ in range(100):
+            user_layer = RoPE(HEAD_DIM, MAX_SEQ_LEN, BASE, traditional=traditional)
+            x = mx.random.uniform(
+                shape=(BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM), dtype=precision
+            )
+
+            input_pos = np.random.randint(0, MAX_SEQ_LEN - SEQ_LEN, size=BATCH_SIZE)
+            input_pos_mx = mx.array(input_pos, dtype=mx.int32)
+            input_pos_user = [slice(i, i + SEQ_LEN) for i in input_pos]
+
+            reference_output = mx.fast.rope(
+                x.transpose(0, 2, 1, 3),
+                dims=HEAD_DIM,
+                traditional=traditional,
+                base=BASE,
+                scale=1.0,
+                offset=input_pos_mx,
+            ).transpose(0, 2, 1, 3)
+            user_output = user_layer(x, input_pos_user)
+            assert_allclose(
+                user_output,
+                reference_output,
+                precision,
+                atol=5e-6 if precision == mx.float32 else 1e-3,
+            )
+
+
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize("traditional", [False, True], ids=["default", "traditional"])
+@pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
+def test_task_1_rope_multiple_offsets(
+    stream: mx.Stream, traditional: bool, precision: mx.Dtype
+):
+    rope_helper(stream, traditional, precision)
 
 
 def attention_helper(
@@ -75,57 +120,57 @@ def attention_helper(
             )
 
 
-def test_flash_attention_with_mask_cpu_small():
+def test_task_1_flash_attention_with_mask_cpu_small():
     attention_helper(mx.cpu, 6, 3, 2, 5, 3, 1, use_flash_attention=True)
 
 
-def test_flash_attention_with_mask_cpu():
+def test_task_1_flash_attention_with_mask_cpu():
     attention_helper(mx.cpu, 18, 6, 7, 5, 3, 10, use_flash_attention=True)
 
 
-def test_flash_attention_with_mask_cpu_large():
+def test_task_1_flash_attention_with_mask_cpu_large():
     attention_helper(mx.cpu, 28, 4, 16, 128, 16, 3, use_flash_attention=True)
 
 
-def test_flash_attention_with_mask_gpu_extra_small():
+def test_task_1_flash_attention_with_mask_gpu_extra_small():
     attention_helper(mx.gpu, 1, 1, 5, 7, 4, 1, use_flash_attention=True)
 
 
-def test_flash_attention_with_mask_gpu_small():
+def test_task_1_flash_attention_with_mask_gpu_small():
     attention_helper(mx.gpu, 6, 3, 2, 5, 3, 1, use_flash_attention=True)
 
 
-def test_flash_attention_with_mask_gpu():
+def test_task_1_flash_attention_with_mask_gpu():
     attention_helper(mx.gpu, 18, 6, 7, 5, 3, 10, use_flash_attention=True)
 
 
-def test_flash_attention_with_mask_gpu_large():
+def test_task_1_flash_attention_with_mask_gpu_large():
     attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, use_flash_attention=True)
 
 
-def test_attention_with_mask_cpu_small():
+def test_task_1_attention_with_mask_cpu_small():
     attention_helper(mx.cpu, 6, 3, 2, 5, 3, 1, use_flash_attention=False)
 
 
-def test_attention_with_mask_cpu():
+def test_task_1_attention_with_mask_cpu():
     attention_helper(mx.cpu, 18, 6, 7, 5, 3, 10, use_flash_attention=False)
 
 
-def test_attention_with_mask_cpu_large():
+def test_task_1_attention_with_mask_cpu_large():
     attention_helper(mx.cpu, 28, 4, 16, 128, 16, 3, use_flash_attention=False)
 
 
-def test_attention_with_mask_gpu_extra_small():
+def test_task_1_attention_with_mask_gpu_extra_small():
     attention_helper(mx.gpu, 1, 1, 5, 7, 4, 1, use_flash_attention=False)
 
 
-def test_attention_with_mask_gpu_small():
+def test_task_1_attention_with_mask_gpu_small():
     attention_helper(mx.gpu, 6, 3, 2, 5, 3, 1, use_flash_attention=False)
 
 
-def test_attention_with_mask_gpu():
+def test_task_1_attention_with_mask_gpu():
     attention_helper(mx.gpu, 18, 6, 7, 5, 3, 10, use_flash_attention=False)
 
 
-def test_attention_with_mask_gpu_large():
+def test_task_1_attention_with_mask_gpu_large():
     attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, use_flash_attention=False)

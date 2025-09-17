@@ -5,7 +5,7 @@
 groups = ["default"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:57bf554af33b4cc63ec547d0b25307f18a1642bec8ff0c628d71866a926180cd"
+content_hash = "sha256:1c01c53bb8f2b7383a86ffdc398d66ebc30dce2d762a5e39761f35d152c78222"
 
 [[metadata.targets]]
 requires_python = ">=3.10,<3.13"
@@ -783,58 +783,58 @@ files = [
 
 [[package]]
 name = "mlx"
-version = "0.27.1"
+version = "0.29.1"
 requires_python = ">=3.9"
 summary = "A framework for machine learning on Apple silicon."
 groups = ["default"]
 dependencies = [
-    "mlx-metal==0.27.1; platform_system == \"Darwin\"",
+    "mlx-metal==0.29.1; platform_system == \"Darwin\"",
 ]
 files = [
-    {file = "mlx-0.27.1-cp310-cp310-macosx_13_0_arm64.whl", hash = "sha256:a033b65fe46425ad5032867d5a71a556a5168108d89aa7092b457556c70d84fc"},
-    {file = "mlx-0.27.1-cp310-cp310-macosx_14_0_arm64.whl", hash = "sha256:2836c6fd9803dc0c6cd06f204e31b3e0191e6c5b6bc8570b28661d926908cba3"},
-    {file = "mlx-0.27.1-cp310-cp310-macosx_15_0_arm64.whl", hash = "sha256:8b0566054c46d84c470cc99cda2afc3914ad6c7808fbb724dc1ec235e5b2a98c"},
-    {file = "mlx-0.27.1-cp310-cp310-manylinux_2_35_x86_64.whl", hash = "sha256:91ef93ce09900c9a8ca662cf34e3c39ab5af2762822ecd6b12fecae518be167f"},
-    {file = "mlx-0.27.1-cp311-cp311-macosx_13_0_arm64.whl", hash = "sha256:d2e5dedbfbcbe558e51a5c476ca6a18e307676f9e49854eb27e53778bc474699"},
-    {file = "mlx-0.27.1-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:9f04b9778897a879c9ca22e5413dfa1efc192d86d7211b184e079efec49dfb8b"},
-    {file = "mlx-0.27.1-cp311-cp311-macosx_15_0_arm64.whl", hash = "sha256:01d794f9e390438ab4f942a18d9a8ca65bef10c2c2007ef38ca988d039d6d9d3"},
-    {file = "mlx-0.27.1-cp311-cp311-manylinux_2_35_x86_64.whl", hash = "sha256:fae11432d0639789f1e172b19b35ac8987c8ab9716e55a23fc7a170d6545fc33"},
-    {file = "mlx-0.27.1-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:0c570c9afb57c697bd864504115be8a7c4de97f0b80557a597d496ee426a6812"},
-    {file = "mlx-0.27.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:ccff7bbbd9df302b26e79013ef6d0c3531c9ba5963ead521e2d85856811b86a0"},
-    {file = "mlx-0.27.1-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:9ccadaed449c07dfeae484620992b904c17dfea7564f8df63095c60eed3af02b"},
-    {file = "mlx-0.27.1-cp312-cp312-manylinux_2_35_x86_64.whl", hash = "sha256:742c413e75605b71db69379a176da63e32ba19b9e9ad03b8763adbd1fcfcd394"},
+    {file = "mlx-0.29.1-cp310-cp310-macosx_13_0_arm64.whl", hash = "sha256:6a10d589a439346be1b7d8d0bbfe6cba45f1ef592f406b247b2da7131a9242c2"},
+    {file = "mlx-0.29.1-cp310-cp310-macosx_14_0_arm64.whl", hash = "sha256:673505b631f05041d7634366c8f52bf38d80439af44592f6e4291e59bb17a243"},
+    {file = "mlx-0.29.1-cp310-cp310-macosx_15_0_arm64.whl", hash = "sha256:4fd9e75f778cbd4a1f0060d090824863da8935a0e071f4747a4bc8f4b8d83838"},
+    {file = "mlx-0.29.1-cp310-cp310-manylinux_2_35_x86_64.whl", hash = "sha256:b68563e760e70355507f789f62a515a5809f71813540896282a7ce0958b2862a"},
+    {file = "mlx-0.29.1-cp311-cp311-macosx_13_0_arm64.whl", hash = "sha256:4da94700d8d19966f56962d16fe12510e41c3a85d3c90c6fb532016a8ab3c6d5"},
+    {file = "mlx-0.29.1-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:0edf6c2c34bdd073741f583ea72ad538bbec26ebf66dc907478bbd68f942b5b8"},
+    {file = "mlx-0.29.1-cp311-cp311-macosx_15_0_arm64.whl", hash = "sha256:03dd298a3818ef32a764edbf602b2233739ab8eb3fd095b8a2ff4c994d373cdf"},
+    {file = "mlx-0.29.1-cp311-cp311-manylinux_2_35_x86_64.whl", hash = "sha256:380f005a5c6889496999358ee7c5e8144a3b5c7c1f54efe1f74cfb073b37f1be"},
+    {file = "mlx-0.29.1-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:1c437c32931ab69e514dfec25d13e319cbe43b2bd524047cbbe103e8be32d903"},
+    {file = "mlx-0.29.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:e0a7b9ac66a8000eef75ec2cb4394a2133a2b7b2290606ade47d7c1a1d05d16e"},
+    {file = "mlx-0.29.1-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:6b5795655fe1a313bbfa52f16a4b23226bef32e47bfc81d3885e9487ca34e7f7"},
+    {file = "mlx-0.29.1-cp312-cp312-manylinux_2_35_x86_64.whl", hash = "sha256:7d7e15086bf71be3d7c6480816d7988ad91e4c8c3989a251fd12154f2f17f6c4"},
 ]
 
 [[package]]
 name = "mlx-lm"
-version = "0.26.2"
+version = "0.27.1"
 requires_python = ">=3.8"
 summary = "LLMs with MLX and the Hugging Face Hub"
 groups = ["default"]
 dependencies = [
     "jinja2",
-    "mlx>=0.26.0",
+    "mlx>=0.29.0",
     "numpy",
     "protobuf",
     "pyyaml",
     "transformers>=4.39.3",
 ]
 files = [
-    {file = "mlx_lm-0.26.2-py3-none-any.whl", hash = "sha256:632624c4753a290dfe68f368d21f24883105cd8bba4c6ba5cf0905fecd626c1e"},
-    {file = "mlx_lm-0.26.2.tar.gz", hash = "sha256:77e6f875bdea90a71174357363622b90a071d9c279bc958021e17e38d69fbc2a"},
+    {file = "mlx_lm-0.27.1-py3-none-any.whl", hash = "sha256:300da6f63d8d392483b62b2abda794730fa04343dcb28a1f6a712f4c3ab60f3c"},
+    {file = "mlx_lm-0.27.1.tar.gz", hash = "sha256:36640fb64c909cfd9baddf37b16e7d3b94a1a141033e6b7ea7a0ef5a965fb4ae"},
 ]
 
 [[package]]
 name = "mlx-metal"
-version = "0.27.1"
+version = "0.29.1"
 requires_python = ">=3.9"
 summary = "A framework for machine learning on Apple silicon."
 groups = ["default"]
 marker = "platform_system == \"Darwin\""
 files = [
-    {file = "mlx_metal-0.27.1-py3-none-macosx_13_0_arm64.whl", hash = "sha256:c66d9b1adb3c0ea19492fba6493f672bc7542e65dd65f7e2995918815fbeb907"},
-    {file = "mlx_metal-0.27.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:fe4415ddd242974d91c7ca0699cd01507d17da8a5ba304122ef137cdb5e7fff4"},
-    {file = "mlx_metal-0.27.1-py3-none-macosx_15_0_arm64.whl", hash = "sha256:d025dea30bda8baa32c928cfa333eac64a5adc8d07656f8fc55072d99403ebc9"},
+    {file = "mlx_metal-0.29.1-py3-none-macosx_13_0_arm64.whl", hash = "sha256:b9dadd432948eab196ed110db0dc745795fd516b7124c0d3c4d176fee678a07a"},
+    {file = "mlx_metal-0.29.1-py3-none-macosx_14_0_arm64.whl", hash = "sha256:824b939b721a964a455aeea4d0e956e4cc945f3333522c1e72a077ae774bca49"},
+    {file = "mlx_metal-0.29.1-py3-none-macosx_15_0_arm64.whl", hash = "sha256:ebd9ba8e83213f929663b92b8065b451a4276c7002ed83eae0fc8dde721c50c5"},
 ]
 
 [[package]]

@@ -8,11 +8,11 @@ version = "0.1.0"
 requires-python = ">=3.10, <3.13"
 readme = "README.md"
 dependencies = [
-    "mlx>=0.27.0",
+    "mlx>=0.29.1",
     "torch>=2.6.0",
     "torchtune>=0.6.1",
     "torchao>=0.10.0",
-    "mlx-lm>=0.26.0",
+    "mlx-lm>=0.27.1",
     "numpy>=2.2.4",
     "pytest>=8.3.5",
     "ruff>=0.11.6",
