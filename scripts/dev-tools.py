@@ -68,7 +68,7 @@ def main():
     test_refsol_parser.set_defaults(test_refsol_parser=True)
     args = parser.parse_args()
     if hasattr(args, "copy_test_parser"):
-        copy_test(args, args.force)
+        copy_test(args, force=args.force)
     if hasattr(args, "test_parser"):
         test(args)
     if hasattr(args, "test_refsol_parser"):
