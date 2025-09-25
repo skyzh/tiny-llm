@@ -4,7 +4,11 @@ import math
 
 def softmax(x: mx.array, axis: int) -> mx.array:
     # TODO: manual implementation
-    return mx.softmax(x, axis=axis)
+    # softmax(x_i) = exp(x_i) / sum_j exp(x_j)
+    x_max = mx.max(x, axis=axis, keepdims=True)
+    x_exp = mx.exp(x - x_max)
+    x_exp_sum = mx.sum(x_exp, axis=axis, keepdims=True)
+    return x_exp / x_exp_sum
 
 
 def linear(
