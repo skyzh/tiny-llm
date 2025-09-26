@@ -7,6 +7,7 @@ import mlx_lm.sample_utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="qwen2-7b")
+parser.add_argument("--draft-model", type=str, default=None)
 parser.add_argument(
     "--prompt",
     type=str,
@@ -39,6 +40,7 @@ elif args.solution == "tiny_llm_ref" or args.solution == "ref":
         models,
         simple_generate,
         simple_generate_with_kv_cache,
+        speculative_generate,
         sampler,
     )
 
@@ -52,6 +54,15 @@ else:
 
 args.model = models.shortcut_name_to_full_name(args.model)
 mlx_model, tokenizer = load(args.model)
+
+if args.draft_model:
+    args.draft_model = models.shortcut_name_to_full_name(args.draft_model)
+    draft_mlx_model, draft_tokenizer = load(args.draft_model)
+    if args.loader == "week1":
+        raise ValueError("Draft model not supported for week1")
+else:
+    draft_mlx_model = None
+    draft_tokenizer = None
 
 with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
     if use_mlx:
@@ -67,6 +78,13 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
             tiny_llm_model = models.dispatch_model(
                 args.model, mlx_model, week=2, enable_flash_attn=args.enable_flash_attn
             )
+            if draft_mlx_model is not None:
+                print(f"Using draft model {args.draft_model}")
+                draft_tiny_llm_model = models.dispatch_model(
+                    args.draft_model, draft_mlx_model, week=2, enable_flash_attn=args.enable_flash_attn
+                )
+            else:
+                draft_tiny_llm_model = None
         else:
             raise ValueError(f"Loader {args.loader} not supported")
     messages = [
@@ -86,7 +104,10 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         if args.loader == "week1":
             simple_generate(tiny_llm_model, tokenizer, prompt, sampler=sampler)
         elif args.loader == "week2":
-            simple_generate_with_kv_cache(tiny_llm_model, tokenizer, prompt)
+            if draft_tiny_llm_model is not None:
+                speculative_generate(draft_tiny_llm_model, tiny_llm_model, draft_tokenizer, tokenizer, prompt)
+            else:
+                simple_generate_with_kv_cache(tiny_llm_model, tokenizer, prompt)
     else:
         sampler = mlx_lm.sample_utils.make_sampler(
             args.sampler_temp, top_p=args.sampler_top_p, top_k=args.sampler_top_k
