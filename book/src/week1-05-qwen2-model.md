@@ -129,7 +129,7 @@ Embedding::as_linear  OR  Linear (lm_head)
 output
 ```
 
-You can access the number of layers, hidden size, and other model parameters from `mlx_model.args`. Note that different
+You can access the number of layers, hidden size, and other model parameters from `mlx_model.args` which is defined in [ModelArgs](https://github.com/ml-explore/mlx-lm/blob/f318741784496dc2025dd7a4dea1ae698d21c610/mlx_lm/models/qwen2.py#L14). Note that different
 size of the Qwen2 models use different strategies to map the embeddings back to the token space. For the 0.5b model, it
 directly uses the `Embedding::as_linear` layer. For the 7b model, it has a separate `lm_head` linear layer. You can
 decide which strategy to use based on the `mlx_model.args.tie_word_embeddings` argument. If it is true, then you should
