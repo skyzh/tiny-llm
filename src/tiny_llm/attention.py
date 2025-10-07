@@ -92,20 +92,20 @@ def scaled_dot_product_attention_grouped(
     n_requests = h_q // h_k
 
     N = query.shape[:-3]
-    query.reshape(*N, -1, n_requests, h_k, L, d_k)
-    key.reshape(*N, -1, 1, h_k, S, d_k)
-    value.reshape(*N, -1, 1, h_k, S, d_k)
+    query = query.reshape(*N, -1, h_k, n_requests, L, d_k)
+    key = key.reshape(*N, -1, h_k, 1, S, d_k)
+    value = value.reshape(*N, -1, h_k, 1, S, d_k)
 
     scale_factor = scale if scale is not None else 1.0 / mx.sqrt(d_k)   # scale = 1 / sqrt(d_k)
-    scores = mx.matmul(query, key.swapaxes(-2, -1)) * scale_factor # scores : (*N, 1, n_requests, h_k, L, S)
+    scores = mx.matmul(query, key.swapaxes(-2, -1)) * scale_factor # scores : (*N, 1, h_k, n_requests, L, S)
     if mask is not None:
         if mask == "causal":
             mask = causal_mask(L, S, query.dtype)   # mask : (L, S)
         else:
             mask = mx.broadcast_to(mask, (*N, h_q, L, S))  # mask : (*N, h_q, L, S)
-            mask = mask.reshape(*N, 1, h_k, n_requests, L, S)  # mask : (*N, 1, n_requests, h_k, L, S)
+            mask = mask.reshape(*N, 1, h_k, n_requests, L, S)   # mask : (*N, 1, h_k, n_requests, L, S)
         scores = scores + mask
-    scores = mx.matmul(softmax(scores, axis=-1), value)   # scores : (*N, 1, n_requests, h_k, L, d_k)
+    scores = mx.matmul(softmax(scores, axis=-1), value)   # scores : (*N, 1, h_k, n_requests, L, d_k)
     return scores.reshape(original_shape)   # scores : (*N, h_q, L, d_k)
 
 
