@@ -24,14 +24,57 @@ class Qwen2MultiHeadAttention:
         max_seq_len: int = 32768,
         theta: int = 1000000,
     ):
-        pass
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.d_k = hidden_size // num_heads
+        self.rope = RoPE(self.d_k, max_seq_len, theta, False)   # use untroditional RoPE
+        self.wq = wq
+        self.wk = wk
+        self.wv = wv
+        self.wo = wo
+        self.bq = bq
+        self.bk = bk
+        self.bv = bv
 
     def __call__(
         self,
         x: mx.array,
         mask: mx.array | str | None = None,
     ) -> mx.array:
-        pass
+        # 1. liear
+        N, L, _ = x.shape   # x: (N, L, d_model)
+        query = (
+            linear(x, self.wq, self.bq)  # query: (N, L, d_model)
+            .reshape(N, L, self.num_heads, self.d_k)    # query: (N, L, h, d_k)
+            # .transpose(0, 2, 1, 3)  # query: (N, h, L, d_k)
+        )
+        key = (
+            linear(x, self.wk, self.bk)
+            .reshape(N, L, self.num_kv_heads, self.d_k)
+        )
+        value = (
+            linear(x, self.wv, self.bv)
+            .reshape(N, L, self.num_kv_heads, self.d_k)
+        )
+
+        # 2. RoPE
+        query = self.rope(query, offset=slice(0, L))
+        key = self.rope(key, offset=slice(0, L))
+        query = query.transpose(0, 2, 1, 3)  # query: (N, h, L, d_k)
+        key = key.transpose(0, 2, 1, 3)
+        value = value.transpose(0, 2, 1, 3)
+
+        # 2-3. scaled dot-product attention & concat
+        scale = 1.0 / mx.sqrt(self.d_k)   # scale = 1 / sqrt(d_k)
+        scores = (
+            scaled_dot_product_attention_grouped(query, key, value, scale, mask=mask)  # scores: (N, h, L, d_k)
+            .transpose(0, 2, 1, 3)  # scores: (N, L, h, d_k)
+            .reshape(N, L, self.hidden_size)  # scores: (N, L, d_model)
+        )
+
+        # 4. linear
+        return linear(scores, self.wo)  # output: (N, L, d_model)
 
 
 class Qwen2MLP:
