@@ -155,10 +155,79 @@ class Qwen2TransformerBlock:
 
 class Qwen2ModelWeek1:
     def __init__(self, mlx_model: Any):
-        pass
+        precision = mx.float16
+        self.hidden_size = mlx_model.args.hidden_size
+
+        # 1. embedding
+        self.embeddings = Embedding(
+            vocab_size=mlx_model.args.vocab_size,
+            embedding_dim=self.hidden_size,
+            weight=dequantize_linear(mlx_model.model.embed_tokens).astype(precision),
+        )
+
+        # 2. transformer blocks
+        self.layers_inner = []
+        for i in range(mlx_model.args.num_hidden_layers):
+            wq = dequantize_linear(mlx_model.model.layers[i].self_attn.q_proj).astype(precision)
+            wk = dequantize_linear(mlx_model.model.layers[i].self_attn.k_proj).astype(precision)
+            wv = dequantize_linear(mlx_model.model.layers[i].self_attn.v_proj).astype(precision)
+            wo = dequantize_linear(mlx_model.model.layers[i].self_attn.o_proj).astype(precision)
+            w_gate = dequantize_linear(mlx_model.model.layers[i].mlp.gate_proj).astype(precision)
+            w_up = dequantize_linear(mlx_model.model.layers[i].mlp.up_proj).astype(precision)
+            w_down = dequantize_linear(mlx_model.model.layers[i].mlp.down_proj).astype(precision)
+            
+            layer = Qwen2TransformerBlock(
+                num_attention_heads=mlx_model.args.num_attention_heads,
+                num_kv_heads=mlx_model.args.num_key_value_heads,
+                hidden_size=self.hidden_size,
+                intermediate_size=mlx_model.args.intermediate_size,
+                rms_norm_eps=mlx_model.args.rms_norm_eps,
+                wq=wq,
+                wk=wk,
+                wv=wv,
+                wo=wo,
+                bq=mlx_model.model.layers[i].self_attn.q_proj.bias.astype(precision),
+                bk=mlx_model.model.layers[i].self_attn.k_proj.bias.astype(precision),
+                bv=mlx_model.model.layers[i].self_attn.v_proj.bias.astype(precision),
+                w_gate=w_gate,
+                w_up=w_up,
+                w_down=w_down,
+                w_input_layernorm=mlx_model.model.layers[i].input_layernorm.weight.astype(precision),
+                w_post_attention_layernorm=mlx_model.model.layers[i].post_attention_layernorm.weight.astype(precision),
+                max_seq_len=mlx_model.args.max_position_embeddings,
+                theta=mlx_model.args.rope_theta,
+            )
+            self.layers_inner.append(layer)
+        
+        # 3. RMSNorm final
+        self.norm = RMSNorm(
+            self.hidden_size,
+            weight=mlx_model.model.norm.weight.astype(precision),
+            eps=mlx_model.args.rms_norm_eps,
+        )
+
+        # 4. Embedding::as_linear OR Linear (lm_head)
+        if not mlx_model.args.tie_word_embeddings:
+            self.lm_head = dequantize_linear(mlx_model.lm_head).astype(precision)
+        else:
+            self.lm_head = None
 
     def __call__(
         self,
         inputs: mx.array,
     ) -> mx.array:
-        pass
+        # 1. embedding
+        x = self.embeddings(inputs)  # (N, L, d_model)
+
+        # 2. transformer blocks
+        for layer in self.layers_inner:
+            x = layer(x, mask="causal")  # (N, L, d_model)
+        
+        # 3. RMSNorm final
+        x = self.norm(x)  # (N, L, d_model)
+
+        # 4. Embedding::as_linear OR Linear (lm_head)
+        if self.lm_head is not None:
+            return linear(x, self.lm_head)  # untied weights
+        else:
+            return self.embeddings.as_linear(x) # tied weights
