@@ -103,7 +103,6 @@ src/tiny_llm/qwen2_week1.py
 
 **📚 Readings**
 
-- [Qwen2.5-7B-Instruct model parameters](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct?show_file_info=model.safetensors.index.json)
 
 In this course, you will not implement the process of loading the model parameters from the tensor files. Instead, we
 will load the model using the `mlx-lm` library, and then we will place the loaded parameters into our model. Therefore,
@@ -129,7 +128,9 @@ Embedding::as_linear  OR  Linear (lm_head)
 output
 ```
 
-You can access the number of layers, hidden size, and other model parameters from `mlx_model.args`. Note that different
+You can access the number of layers, hidden size, and other model parameters from `mlx_model.args` which is defined in [ModelArgs](https://github.com/ml-explore/mlx-lm/blob/f318741784496dc2025dd7a4dea1ae698d21c610/mlx_lm/models/qwen2.py#L14). You can reach the loaded weights from `mlx_model.model` which is defined in [Qwen2Model](https://github.com/ml-explore/mlx-lm/blob/f318741784496dc2025dd7a4dea1ae698d21c610/mlx_lm/models/qwen2.py#L125-L133), the layers structure can be found in [Qwen2.5-7B-Instruct model structure](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct?show_file_info=model.safetensors.index.json) and [Qwen2-0.5B-Instruct model structure](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct?show_file_info=model.safetensors).
+
+Note that different
 size of the Qwen2 models use different strategies to map the embeddings back to the token space. For the 0.5b model, it
 directly uses the `Embedding::as_linear` layer. For the 7b model, it has a separate `lm_head` linear layer. You can
 decide which strategy to use based on the `mlx_model.args.tie_word_embeddings` argument. If it is true, then you should
