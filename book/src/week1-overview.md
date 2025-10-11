@@ -47,7 +47,7 @@ utilize these resources to better understand the internals of the model and what
 
 **📚 Readings**
 
-- [Qwen2.5: A Party of Foundation Models!](https://qwenlm.github.io/blog/qwen2.5/)
+- [Qwen2.5: A Party of Foundation Models!](https://qwen.ai/blog?id=6da44b4d3b48c53f5719bab9cc18b732a7065647&from=research.research-list)
 - [Key Concepts of the Qwen2 Model](https://qwen.readthedocs.io/en/latest/getting_started/concepts.html)
 - [Huggingface Transformers - Qwen2](https://github.com/huggingface/transformers/tree/main/src/transformers/models/qwen2)
 - [vLLM Qwen2](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/models/qwen2.py)
