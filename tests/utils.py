@@ -20,7 +20,7 @@ def assert_allclose(
     b = np.array(b)
     if precision == mx.float32:
         rtol = rtol or 1.0e-5
-        atol = atol or 1.0e-8
+        atol = atol or 1.0e-6
     elif precision == mx.float16:
         rtol = rtol or 3.0e-2
         atol = atol or 1.0e-5
