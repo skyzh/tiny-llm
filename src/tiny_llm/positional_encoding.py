@@ -32,8 +32,17 @@ class RoPE:
         # x is shape (N, L, H, D).
         nlh_dims = x.shape[:-1]
         seq_len = min(nlh_dims[1], self.seq_len)
-        # (N, L, H, D) -> (N, L, H, D//2, 2)
-        x = x.reshape(*nlh_dims, self.dims // 2, 2)
+        if self.traditional:
+            # (N, L, H, D) -> (N, L, H, D//2, 2)
+            x_split = x.reshape(*nlh_dims, self.dims // 2, 2)
+            # each of x_left/right shape is (N, L, H, D//2)
+            x_left, x_right = x_split[..., 0], x_split[..., 1]
+        else:
+            # each of x_left/right shape is (N, L, H, D//2)
+            x_left, x_right = (
+                x[..., : self.dims // 2],
+                x[..., (self.dims // 2) :],
+            )
 
         if offset:
             cos_freqs = self.cos_freqs[offset, :]
@@ -42,14 +51,17 @@ class RoPE:
             cos_freqs = self.cos_freqs[:seq_len, :]
             sin_freqs = self.sin_freqs[:seq_len, :]
 
-        x_left, x_right = x[..., 0], x[..., 1]
         # shape: (N, L, H, D//2)
         out_left = mx.multiply(x_left, cos_freqs) - mx.multiply(x_right, sin_freqs)
         # shape: (N, L, H, D//2)
         out_right = mx.multiply(x_left, sin_freqs) + mx.multiply(x_right, cos_freqs)
-        # shape: (N, L, H, D//2, 2)
-        out = mx.stack([out_left, out_right], axis=-1)
-        # shape: (N, L, H, D)
-        out = out.reshape(*nlh_dims, -1)
+        if self.traditional:
+            # shape: (N, L, H, D//2, 2)
+            out = mx.stack([out_left, out_right], axis=-1)
+            # shape: (N, L, H, D)
+            out = out.reshape(*nlh_dims, -1)
+        else:
+            # shape: (N, L, H, D)
+            out = mx.concatenate([out_left, out_right], axis=-1)
 
         return out
