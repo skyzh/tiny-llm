@@ -69,7 +69,14 @@ class SimpleMultiHeadAttention:
 
 
 def causal_mask(L: int, S: int, dtype: mx.Dtype) -> mx.array:
-    pass
+    causal_mask = mx.zeros(shape=(L, S), dtype=dtype)
+    i = mx.arange(L)[:, None]
+    j = mx.arange(S)
+    # we want -inf for the upper right triangle. this is when i + (S-L) < j
+    # mx.where keeps original values when index mask is true
+    # so we set indexing mask to i + (S-L) ≥ j
+    indexing_mask = i + S - L >= j
+    return mx.where(indexing_mask, causal_mask, float("-inf"))
 
 
 def scaled_dot_product_attention_grouped(
@@ -102,6 +109,8 @@ def scaled_dot_product_attention_grouped(
     if isinstance(mask, mx.array):
         # mask (N.., H_q, L, S) -> (N.., H, n_repeat, L, S)
         qk_t += mask.reshape(*batch_dims, h, n_repeat, l, s)
+    elif mask == "causal":
+        qk_t += causal_mask(l, s, qk_t.dtype)
 
     # shape: (N.., H, n_repeat, L, S)
     p_attn = softmax(qk_t, axis=-1)
