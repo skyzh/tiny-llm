@@ -79,7 +79,34 @@ def scaled_dot_product_attention_grouped(
     scale: float | None = None,
     mask: mx.array | str | None = None,
 ) -> mx.array:
-    pass
+    *batch_dims, h_q, l, d = query.shape
+    *ignore, h, s, _ = key.shape
+    assert not h_q % h, f"h should divide h_q but h={h} and h_q={h_q}"
+    assert l <= s, "l should be no greater than s but l={l} and s={s}"
+    n_repeat = h_q//h
+
+    # truncate key and value to actual seq length of query
+    # and add a dummy dimension for easy broadcasting later
+    # (N.., H, S, D) -> (N.., H, L, D) -> (N.., H, 1, L, D)
+    key_reshaped = key[..., :l, :].reshape(*batch_dims, h, 1, l, d)
+    value_reshaped = value[..., :l, :].reshape(*batch_dims, h, 1, l, d)
+
+    # reshape query tensor
+    # (N.., H_q, L, D) -> (N.., H, n_repeat, L, D)
+    query_reshaped = query.reshape(*batch_dims, h, n_repeat, l, d)
+
+    if not scale:
+        scale = mx.rsqrt(d)
+    # qk_t shape: (N.., H, n_repeat, L, L)
+    qk_t = mx.matmul(query_reshaped, key_reshaped.swapaxes(-2, -1)) * scale
+    if isinstance(mask, mx.array):
+        # mask (N.., H_q, L, S) -> (N.., H_q, L, L) -> (N.., H, n_repeat, L, L)
+        qk_t += mask[..., :l].reshape(*batch_dims, h, n_repeat, l, l)
+
+    # shape: (N.., H, n_repeat, L, L)
+    p_attn = softmax(qk_t, axis=-1)
+    # shape: (N.., H, n_repeats, L, D) -> (N.., H_q, L, D)
+    return mx.matmul(p_attn, value_reshaped).reshape(*batch_dims, h_q, l, d)
 
 
 def flash_attention(
@@ -89,6 +116,4 @@ def flash_attention(
     scale: float | None = None,
     mask: mx.array | None = None,
 ) -> mx.array:
-    pass
-    pass
     pass
