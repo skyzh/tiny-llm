@@ -87,9 +87,9 @@ def scaled_dot_product_attention_grouped(
 
     # truncate key and value to actual seq length of query
     # and add a dummy dimension for easy broadcasting later
-    # (N.., H, S, D) -> (N.., H, L, D) -> (N.., H, 1, L, D)
-    key_reshaped = key[..., :l, :].reshape(*batch_dims, h, 1, l, d)
-    value_reshaped = value[..., :l, :].reshape(*batch_dims, h, 1, l, d)
+    # (N.., H, S, D) -> (N.., H, 1, S, D)
+    key_reshaped = key.reshape(*batch_dims, h, 1, s, d)
+    value_reshaped = value.reshape(*batch_dims, h, 1, s, d)
 
     # reshape query tensor
     # (N.., H_q, L, D) -> (N.., H, n_repeat, L, D)
@@ -97,15 +97,15 @@ def scaled_dot_product_attention_grouped(
 
     if not scale:
         scale = mx.rsqrt(d)
-    # qk_t shape: (N.., H, n_repeat, L, L)
+    # qk_t shape: (N.., H, n_repeat, L, D) * (N.., H, 1, D, S) -> (N.., H, n_repeat, L, S)
     qk_t = mx.matmul(query_reshaped, key_reshaped.swapaxes(-2, -1)) * scale
     if isinstance(mask, mx.array):
-        # mask (N.., H_q, L, S) -> (N.., H_q, L, L) -> (N.., H, n_repeat, L, L)
-        qk_t += mask[..., :l].reshape(*batch_dims, h, n_repeat, l, l)
+        # mask (N.., H_q, L, S) -> (N.., H, n_repeat, L, S)
+        qk_t += mask.reshape(*batch_dims, h, n_repeat, l, s)
 
-    # shape: (N.., H, n_repeat, L, L)
+    # shape: (N.., H, n_repeat, L, S)
     p_attn = softmax(qk_t, axis=-1)
-    # shape: (N.., H, n_repeats, L, D) -> (N.., H_q, L, D)
+    # shape: (N.., H, n_repeat, L, S) * (N.., H, 1, S, D) -> (N.., H, n_repeats, L, D) -> (N.., H_q, L, D)
     return mx.matmul(p_attn, value_reshaped).reshape(*batch_dims, h_q, l, d)
 
 
