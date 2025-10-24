@@ -89,7 +89,7 @@ def scaled_dot_product_attention_grouped(
     *batch_dims, h_q, l, d = query.shape
     *ignore, h, s, _ = key.shape
     assert not h_q % h, f"h should divide h_q but h={h} and h_q={h_q}"
-    assert l <= s, "l should be no greater than s but l={l} and s={s}"
+    assert l <= s, f"l should be no greater than s but l={l} and s={s}"
     n_repeat = h_q//h
 
     # truncate key and value to actual seq length of query
