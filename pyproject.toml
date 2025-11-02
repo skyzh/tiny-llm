@@ -23,6 +23,7 @@ dependencies = [
 ]
 
 [tool.pdm.scripts]
+pre_run = { shell = "pdm sync --no-self > /dev/null" }
 build-ext.cmd = "python build.py"
 build-ext.working_dir = "src/extensions"
 build-ext-test.cmd = "python test.py"
