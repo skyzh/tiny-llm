@@ -131,7 +131,8 @@ def speculative_generate(
             layer.rewind(revert_len)
 
     def _print_text(text, progress):
-        print(f"+{progress} {text.replace('\n', ' ')[-80:]}")
+        newline = '\n'
+        print(f"+{progress} {text.replace(newline, ' ')[-80:]}")
 
     # speculative decode
     while True:
