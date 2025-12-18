@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mlx/ops.h"
+#include "mlx/utils.h"
 #include "mlx/primitives.h"
 
 namespace mx = mlx::core;
