@@ -1,7 +1,6 @@
 [book]
 authors = ["Alex Chi", "Connor Zhang"]
 language = "en"
-multilingual = false
 src = "src"
 title = "Tiny LLM - LLM Serving in a Week"
 
