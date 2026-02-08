@@ -16,7 +16,8 @@ jobs:
       - name: setup rust toolchain
         run: rustup update && rustup toolchain install
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install mdbook-katex
+      - run: cargo install mdbook-toc
+      - run: cargo install mdbook-katex --version 0.10.0-alpha
       - uses: taiki-e/install-action@mdbook
       - name: patch for gh-pages build
         run: mv book/theme/head.hbs._ book/theme/head.hbs
