@@ -15,7 +15,7 @@
     - [Sampling and Preparing for Week 2](./week1-07-sampling-prepare.md)
 - [Week 2: Tiny vLLM](./week2-overview.md)
     - [Key-Value Cache](./week2-01-kv-cache.md)
-    - [Quantized Matmul (2 Days)]()
+    - [Quantized Matmul (2 Days)](./week2-02-quantized-matmul.md)
     - [Flash Attention (2 Days)]()
     - [Continuous Batching (2 Days)](./week2-06-prefill-and-batch.md)
 - [Week 3: Serving]()
