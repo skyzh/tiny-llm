@@ -35,6 +35,7 @@ pick the token with the highest probability.
 
 - 📚 [The Log-Sum-Exp Trick](https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/)
 - 📚 [Decoding Strategies in Large Language Models](https://mlabonne.github.io/blog/posts/2023-06-07-Decoding_strategies.html)
+- 📚 [Tokenizer definition](https://huggingface.co/docs/transformers/main/en/main_classes/tokenizer)
 
 With the `_step` function implemented, you can now implement the full `simple_generate` function. The function will
 first prefill the model with the prompt. As the prompt is a string, you need to first convert it to a list of tokens
