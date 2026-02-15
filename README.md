@@ -38,7 +38,7 @@ Week 1 is complete. Week 2 is in progress.
 | 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
 | 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
 | 2.1            | Key-Value Cache                                             | ✅    | ✅   | ✅  |
-| 2.2            | Quantized Matmul and Linear - CPU                           | ✅    | ✅   | 🚧  |
+| 2.2            | Quantized Matmul and Linear - CPU                           | ✅    | ✅   | ✅  |
 | 2.3            | Quantized Matmul and Linear - GPU                           | ✅    | ✅   | 🚧  |
 | 2.4            | Flash Attention 2 - CPU                                     | ✅    | ✅   | 🚧  |
 | 2.5            | Flash Attention 2 - GPU                                     | ✅    | ✅   | 🚧  |
