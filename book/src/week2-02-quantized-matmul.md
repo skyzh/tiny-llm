@@ -287,7 +287,7 @@ Complete the `eval_gpu` method in `quantized_matmul.cpp` to dispatch your Metal 
 1. Get the Metal device and command encoder from the stream.
 2. Select the correct kernel name based on the activation dtype (`float16` → `half`, `bfloat16` → `bfloat16_t`).
 3. Set input/output buffers and dimension constants (`M`, `N`, `K`) on the encoder — make sure the buffer order matches your kernel signature.
-4. Calculate a 2D threadgroup configuration: use `kernel->maxTotalThreadsPerThreadgroup()` to determine the total threads, then split between the M and K dimensions (e.g., 32 threads for M, the rest for K).
+4. Calculate a 2D thread group configuration: use `kernel->maxTotalThreadsPerThreadgroup()` to determine the total threads, then split between the M and K dimensions (e.g., 32 threads for M, the rest for K).
 5. Dispatch with `dispatchThreadgroups`.
 
 You can test your implementation by running:
