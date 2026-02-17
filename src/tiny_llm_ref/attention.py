@@ -121,10 +121,10 @@ class SimpleMultiHeadAttention:
         assert hidden_size % num_heads == 0
         self.head_dim = hidden_size // num_heads
         self.scale = mx.rsqrt(self.head_dim)
-        assert wq.shape == (hidden_size, num_heads * self.head_dim)
-        assert wk.shape == (hidden_size, num_heads * self.head_dim)
-        assert wv.shape == (hidden_size, num_heads * self.head_dim)
-        assert wo.shape == (num_heads * self.head_dim, hidden_size)
+        assert wq.shape == (num_heads * self.head_dim, hidden_size)
+        assert wk.shape == (num_heads * self.head_dim, hidden_size)
+        assert wv.shape == (num_heads * self.head_dim, hidden_size)
+        assert wo.shape == (hidden_size, num_heads * self.head_dim)
         self.wq = wq
         self.wk = wk
         self.wv = wv
