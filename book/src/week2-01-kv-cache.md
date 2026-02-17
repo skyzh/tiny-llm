@@ -192,4 +192,11 @@ pdm run main --solution tiny_llm --loader week2 --model qwen2-0.5b
 pdm run main --solution tiny_llm --loader week2 --model qwen2-7b
 ```
 
+You can also benchmark throughput and compare your implementation with the reference solution:
+
+```bash
+pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b
+pdm bench --solution tiny_llm_ref --loader week2 --model qwen2-0.5b
+```
+
 {{#include copyright.md}}
