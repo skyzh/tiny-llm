@@ -52,16 +52,16 @@ pdm run test
 We will use the Qwen2-7B-Instruct model for this course. It takes ~20GB of memory in week 1 to load the model parameters.
 If you do not have enough memory, you can consider using the smaller 0.5B model.
 
-Follow the guide of [this page](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli) to install the huggingface
-cli.
+Follow the guide of [this page](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli) to install the Hugging Face
+CLI (`hf`).
 
 The model parameters are hosted on Hugging Face. Once you authenticated your cli with the credentials, you can download
 them with:
 
 ```bash
-huggingface-cli login
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-7B-Instruct-MLX
+hf login
+hf download Qwen/Qwen2-0.5B-Instruct-MLX
+hf download Qwen/Qwen2-7B-Instruct-MLX
 ```
 
 Then, you can run:
