@@ -5,9 +5,9 @@ In day 5, we will implement the Qwen2 model.
 Before we start, please make sure you have downloaded the models:
 
 ```bash
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-7B-Instruct-MLX
+hf download Qwen/Qwen2-0.5B-Instruct-MLX
+hf download Qwen/Qwen2-1.5B-Instruct-MLX
+hf download Qwen/Qwen2-7B-Instruct-MLX
 ```
 
 Otherwise, some of the tests will be skipped.
@@ -47,9 +47,9 @@ You should pass all tests for this task by running:
 
 ```bash
 # Download the models if you haven't done so
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-7B-Instruct-MLX
+hf download Qwen/Qwen2-0.5B-Instruct-MLX
+hf download Qwen/Qwen2-1.5B-Instruct-MLX
+hf download Qwen/Qwen2-7B-Instruct-MLX
 # Run the tests
 pdm run test --week 1 --day 5 -- -k task_1
 ```
@@ -89,9 +89,9 @@ You should pass all tests for this task by running:
 
 ```bash
 # Download the models if you haven't done so; we need to tokenizers
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-7B-Instruct-MLX
+hf download Qwen/Qwen2-0.5B-Instruct-MLX
+hf download Qwen/Qwen2-1.5B-Instruct-MLX
+hf download Qwen/Qwen2-7B-Instruct-MLX
 # Run the tests
 pdm run test --week 1 --day 5 -- -k task_2
 ```
@@ -154,9 +154,9 @@ You should pass all tests for this task by running:
 
 ```bash
 # Download the models if you haven't done so
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct-MLX
-huggingface-cli download Qwen/Qwen2-7B-Instruct-MLX
+hf download Qwen/Qwen2-0.5B-Instruct-MLX
+hf download Qwen/Qwen2-1.5B-Instruct-MLX
+hf download Qwen/Qwen2-7B-Instruct-MLX
 # Run the tests
 pdm run test --week 1 --day 5 -- -k task_3
 ```
