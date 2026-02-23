@@ -14,5 +14,6 @@
 - [Qwen2 Transformer Block](./week1-05-qwen2-model.md)
 - [Week 1 Qwen2 Model](./week1-05-qwen2-model.md)
 - [dequantize_linear](./week1-05-qwen2-model.md)
+- [Flash Attention 2](./week2-04-flash-attention.md)
 
 {{#include copyright.md}}
