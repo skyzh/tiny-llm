@@ -96,7 +96,6 @@ def _print_progress(
     else:
         print(f"  Prefill: idle, {queue_size} requests in queue", flush=True)
 
-
 def batch_generate(
     model: any,
     tokenizer: TokenizerWrapper,

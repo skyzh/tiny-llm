@@ -37,6 +37,8 @@ target_sources(
   PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}/src/axpby.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.cpp
 )
 
 # Add include headers
@@ -58,6 +60,8 @@ if(MLX_BUILD_METAL)
     tiny_llm_ext
     SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/axpby.metal
+    ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.metal
+    ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.metal
     INCLUDE_DIRS
     ${PROJECT_SOURCE_DIR}
     ${MLX_INCLUDE_DIRS}

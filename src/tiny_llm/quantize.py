@@ -1,6 +1,8 @@
 import mlx.core as mx
 from typing import Any
 
+from extensions import tiny_llm_ext
+
 
 def dequantize_linear(mx_layer: Any) -> mx.array:
     w = mx.dequantize(
@@ -48,7 +50,19 @@ def quantized_matmul(
     b: mx.array,
     transpose_b: bool = False,
 ) -> mx.array:
-    pass
+    *N, D = a.shape
+    a = a.reshape(-1, D)
+    a = mx.contiguous(a)
+    b = mx.contiguous(b)
+    return tiny_llm_ext.quantized_matmul(
+        scales,
+        biases,
+        group_size,
+        bits,
+        a,
+        b,
+        transpose_b,
+    ).reshape(*N, -1)
 
 
 def quantized_linear(
@@ -56,4 +70,11 @@ def quantized_linear(
     w: QuantizedWeights,
     bias: mx.array | None = None,
 ) -> mx.array:
-    pass
+    v = quantized_matmul(
+        w.scales, w.biases, w.group_size, w.bits, x, w.weight, transpose_b=True
+    )
+
+    if bias is not None:
+        return v + bias
+    else:
+        return v
