@@ -11,17 +11,18 @@ using namespace metal;
     device float* out [[buffer(4)]],
     constant const int* mask_shape [[buffer(5)]],
     constant const int64_t* mask_strides [[buffer(6)]],
-    device const int &N [[buffer(7)]],
-    device const int &L [[buffer(8)]],
-    device const int &S [[buffer(9)]],
-    device const int &E [[buffer(10)]],
-    device const int &num_kv_heads [[buffer(11)]],
-    device const int &num_heads [[buffer(12)]],
-    device const float &scale [[buffer(13)]],
-    device const int &Br [[buffer(14)]],
-    device const int &Bc [[buffer(15)]],
-    [[maybe_unused]] device const int &Tr [[buffer(16)]],
-    device const int &Tc [[buffer(17)]],
+    device const int &is_causal [[buffer(7)]],
+    device const int &N [[buffer(8)]],
+    device const int &L [[buffer(9)]],
+    device const int &S [[buffer(10)]],
+    device const int &E [[buffer(11)]],
+    device const int &num_kv_heads [[buffer(12)]],
+    device const int &num_heads [[buffer(13)]],
+    device const float &scale [[buffer(14)]],
+    device const int &Br [[buffer(15)]],
+    device const int &Bc [[buffer(16)]],
+    [[maybe_unused]] device const int &Tr [[buffer(17)]],
+    device const int &Tc [[buffer(18)]],
     uint2 group_id [[threadgroup_position_in_grid]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
@@ -70,6 +71,13 @@ using namespace metal;
     }
 
     for (int j = 0; j < Tc; j++) {
+        int row_max = min((i + 1) * Br - 1, L - 1);
+        int col_min = j * Bc;
+        // Causal masking: if the entire block of K is masked out by causal mask, we can skip the computation for this block.
+        if (is_causal && col_min > row_max + (S - L)) {
+            continue;
+        }
+       
         bool is_j_in_range = j * Bc + b < S && b < Bc;
 
         device const float *k_ptr = k_ptr_base + j * Bc * E;
@@ -84,11 +92,16 @@ using namespace metal;
         }
         s_a_b *= scale;
         if (is_i_in_range && is_j_in_range) {
-            int64_t m_idx_1 = n;
-            int64_t m_idx_2 = i * Br + a;
-            int64_t m_idx_3 = j * Bc + b;
-            int64_t m_idx_converted = elem_to_loc(m_idx_1 * L * S + m_idx_2 * S + m_idx_3, mask_shape, mask_strides, 3);
-            s_a_b += mask[m_idx_converted];
+            int row_min = i * Br;
+            int col_max = min((j + 1) * Bc - 1, S - 1);
+            bool block_all_valid = is_causal && (col_max <= row_min + (S - L));
+            if (!block_all_valid) {
+                int64_t m_idx_1 = n;
+                int64_t m_idx_2 = i * Br + a;
+                int64_t m_idx_3 = j * Bc + b;
+                int64_t m_idx_converted = elem_to_loc(m_idx_1 * L * S + m_idx_2 * S + m_idx_3, mask_shape, mask_strides, 3);
+                s_a_b += mask[m_idx_converted];
+            }
         } else {
             s_a_b = -1e9;
         }

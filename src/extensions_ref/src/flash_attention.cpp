@@ -14,7 +14,8 @@
 
 namespace tiny_llm_ext_ref {
 mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
-                          const float scale, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s) {
+                          const float scale, const bool is_causal, const int num_kv_heads, const int num_heads,
+                          mx::StreamOrDevice s) {
     if (q.dtype() != mx::float32 || k.dtype() != mx::float32 || v.dtype() != mx::float32 || mask.dtype() != mx::float32) {
         throw std::runtime_error("flash_attention: all input arrays must be float32");
     }
@@ -54,7 +55,8 @@ mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::arra
     }
 
     return mx::array(q.shape(), mx::float32,
-                     std::make_shared<FlashAttention>(to_stream(s), scale, num_kv_heads, num_heads), {q, k, v, mask});
+                     std::make_shared<FlashAttention>(to_stream(s), scale, is_causal, num_kv_heads, num_heads),
+                     {q, k, v, mask});
 }
 
 void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -91,7 +93,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
     encoder.dispatch([out_ptr = out.data<float>(), out_shape = out.shape(), q = mx::array::unsafe_weak_copy(q),
                       k = mx::array::unsafe_weak_copy(k), v = mx::array::unsafe_weak_copy(v),
                       mask = mx::array::unsafe_weak_copy(mask), num_heads = num_heads_, num_kv_heads = num_kv_heads_,
-                      scale = scale_]() {
+                      scale = scale_, is_causal = is_causal_]() {
         const int64_t N = q.shape()[0];
         const int64_t L = q.shape()[1];
         const int64_t S = k.shape()[1];
@@ -126,7 +128,14 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                 std::vector<float> o_i(Br * E, 0.0);
                 std::vector<float> l_i(Br, 0.0);
                 std::vector<float> m_i(Br, -std::numeric_limits<float>::infinity());
+                const int64_t causal_offset = S - L;
                 for (int64_t j = 0; j < Tc; j++) {
+                    int64_t row_max = i * Br + br_upper_bound - 1;
+                    int64_t col_min = j * Bc;
+                    // Causal masking: if the entire block of K is masked out by causal mask, we can skip the computation for this block.
+                    if (is_causal && col_min > row_max + causal_offset) {
+                        continue;
+                    }
                     int bc_upper_bound = std::min(S - j * Bc, Bc);
                     // Each kernel processes a block of Br x Bc
                     // Load Kj and Vj
@@ -154,14 +163,20 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                     }
 
                     // Add mask and scale
+                    int64_t row_min = i * Br;
+                    int64_t col_max = j * Bc + bc_upper_bound - 1;
+                    bool block_all_valid = is_causal && (col_max <= row_min + causal_offset);
                     for (int64_t a = 0; a < br_upper_bound; a++) {
                         for (int64_t b = 0; b < bc_upper_bound; b++) {
-                            int m_idx_1 = n;
-                            int m_idx_2 = i * Br + a;
-                            int m_idx_3 = j * Bc + b;
-                            int m_idx_converted = mx::elem_to_loc(m_idx_1 * L * S + m_idx_2 * S + m_idx_3, mask);
                             s_i[a * Bc + b] *= scale;
-                            s_i[a * Bc + b] += m_ptr[m_idx_converted];
+                            // If the block is all valid, we don't need to add mask because it's all zeros. Otherwise we need to add mask for each element.
+                            if (!block_all_valid) {
+                                int m_idx_1 = n;
+                                int m_idx_2 = i * Br + a;
+                                int m_idx_3 = j * Bc + b;
+                                int m_idx_converted = mx::elem_to_loc(m_idx_1 * L * S + m_idx_2 * S + m_idx_3, mask);
+                                s_i[a * Bc + b] += m_ptr[m_idx_converted];
+                            }
                         }
                     }
 
@@ -283,15 +298,16 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     const int S = k.shape()[1];
     const int E = q.shape()[2];
 
-    compute_encoder.set_bytes(N, 7);
-    compute_encoder.set_bytes(L, 8);
-    compute_encoder.set_bytes(S, 9);
-    compute_encoder.set_bytes(E, 10);
+    compute_encoder.set_bytes(static_cast<int>(is_causal_), 7);
+    compute_encoder.set_bytes(N, 8);
+    compute_encoder.set_bytes(L, 9);
+    compute_encoder.set_bytes(S, 10);
+    compute_encoder.set_bytes(E, 11);
 
     // Make sure the data type matches with the metal kernel: otherwise you'll get flaky issues and stuck :(
-    compute_encoder.set_bytes(num_kv_heads_, 11);
-    compute_encoder.set_bytes(num_heads_, 12);
-    compute_encoder.set_bytes(scale_, 13);
+    compute_encoder.set_bytes(num_kv_heads_, 12);
+    compute_encoder.set_bytes(num_heads_, 13);
+    compute_encoder.set_bytes(scale_, 14);
 
     size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
     size_t simd_width = kernel->threadExecutionWidth();
@@ -320,10 +336,10 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     const int Tr = (L + Br - 1) / Br;
     const int Tc = (S + Bc - 1) / Bc;
 
-    compute_encoder.set_bytes(Br, 14);
-    compute_encoder.set_bytes(Bc, 15);
-    compute_encoder.set_bytes(Tr, 16);
-    compute_encoder.set_bytes(Tc, 17);
+    compute_encoder.set_bytes(Br, 15);
+    compute_encoder.set_bytes(Bc, 16);
+    compute_encoder.set_bytes(Tr, 17);
+    compute_encoder.set_bytes(Tc, 18);
 
     MTL::Size num_threadgroups = MTL::Size(N, Tr, 1);
     MTL::Size num_threads_per_group = MTL::Size(Br, simd_width, 1);
