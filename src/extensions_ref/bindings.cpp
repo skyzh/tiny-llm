@@ -32,7 +32,7 @@ NB_MODULE(_ext, m) {
       )");
 
     m.def("flash_attention", &tiny_llm_ext_ref::flash_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a = 1.0,
-          "num_kv_heads"_a, "num_heads"_a, "stream"_a = nb::none(), R"(
+          "is_causal"_a = false, "num_kv_heads"_a, "num_heads"_a, "stream"_a = nb::none(), R"(
         Flash attention layer
 
         Args:
@@ -41,6 +41,7 @@ NB_MODULE(_ext, m) {
             value (array): Value array.
             mask (array): Mask array.
             scale (float): Scaling factor.
+            is_causal (bool): Enable causal-mask fast path.
 
         Returns:
             array: ``softmax(query @ key.T * scale) @ value``

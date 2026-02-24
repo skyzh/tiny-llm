@@ -3,7 +3,6 @@ from .basics import silu
 from .attention import (
     scaled_dot_product_attention_grouped,
     flash_attention,
-    causal_mask,
 )
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
@@ -85,9 +84,6 @@ class Qwen3MultiHeadAttention:
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        S = projection_k.shape[-2]
-        if mask == "causal":
-            mask = causal_mask(L, S, mx.float32)
         if self.use_flash_attention:
             x = flash_attention(
                 projection_q.astype(mx.float32),
