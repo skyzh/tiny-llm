@@ -4,6 +4,7 @@ In this chapter, we will implement Flash Attention 2 for the Week 2 Qwen2 servin
 
 **📚 Readings**
 
+- [From Online Softmax to FlashAttention](https://courses.cs.washington.edu/courses/cse599m/23sp/notes/flashattn.pdf)
 - [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135)
 - [FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning](https://arxiv.org/abs/2307.08691)
 - [MLX Extension Development Guide](https://ml-explore.github.io/mlx/build/html/dev/extensions.html)
