@@ -61,14 +61,6 @@ using namespace metal;
         }
     }
 
-    if (simd_lid == 0) {
-        for (int c = 0; c < E; c++) {
-            if (is_i_in_range && n < N) {
-                out[n * L * E + (i * Br + a) * E + c] = -233.0;
-            }
-        }
-    }
-
     for (int j = 0; j < Tc; j++) {
         bool is_j_in_range = j * Bc + b < S && b < Bc;
 
