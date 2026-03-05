@@ -309,7 +309,7 @@ K and V blocks are streamed from global memory in the inner loop over Tc. The Q 
 
 In `flash_attention.metal`, write `flash_attention_f32_e128` with one threadgroup per `(n, i)` tile, where `n` is the flattened head batch and `i` is the query tile index. Use threadgroup memory for local Q and partial O, and use SIMD reductions (`simd_max`, `simd_sum`) for row-wise max/sum updates.
 
-In `eval_gpu(...)`, load the kernel from the extension metallib, bind inputs/outputs and scalar constants (`N`, `L`, `S`, `E`, head counts, `scale`, tile sizes), and dispatch over `(N, Tr, 1)`. Keep the same contiguous checks as CPU path. Also remember to add `src/flash_attention.metal` into `mlx_build_metallib(...)` in `CMakeLists.txt`.
+In `eval_gpu(...)`, load the kernel from the extension, bind inputs/outputs and scalar constants (`N`, `L`, `S`, `E`, head counts, `scale`, tile sizes), and dispatch over `(N, Tr, 1)`. Keep the same contiguous checks as CPU path. Also remember to add `src/flash_attention.metal` into `mlx_build_metallib(...)` in `CMakeLists.txt`.
 
 You can test your implementation by running:
 

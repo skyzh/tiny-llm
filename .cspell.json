@@ -31,6 +31,7 @@
         "dequantizes",
         "dtype",
         "threadgroups",
+        "threadgroup",
     ],
     "ignoreRegExpList": [
         "`[^`]*`",
