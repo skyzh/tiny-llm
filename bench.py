@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default="qwen2-0.5b")
     parser.add_argument("--solution", type=str, default="tiny_llm")
     parser.add_argument("--loader", type=str, default="week2", choices=["week1", "week2"])
+    parser.add_argument("--enable-flash-attn", action="store_true")
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)
     parser.add_argument("--min-input-len", type=int, default=64)
@@ -175,7 +176,7 @@ def main() -> None:
     model_name = models.shortcut_name_to_full_name(args.model)
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
-        f"Model={model_name}"
+        f"Model={model_name} FlashAttn={args.enable_flash_attn}"
     )
     mlx_model, tokenizer = load(model_name)
 
@@ -193,6 +194,7 @@ def main() -> None:
                 model_name,
                 mlx_model,
                 week=2,
+                enable_flash_attn=args.enable_flash_attn,
             )
 
             def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
