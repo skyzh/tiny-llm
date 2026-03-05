@@ -61,13 +61,15 @@ using namespace metal;
             q_local[a][c] = q_ptr[a * E + c];
         }
     }
-
+    
     for (int j = 0; j < Tc; j++) {
-        int row_max = min((i + 1) * Br - 1, L - 1);
-        int col_min = j * Bc;
         // Causal masking: if the entire block of K is masked out by causal mask, we can skip the computation for this block.
-        if (is_causal && col_min > row_max + (S - L)) {
-            continue;
+        if (is_causal) {
+            int row_max = min((i + 1) * Br - 1, L - 1);
+            int col_min = j * Bc;
+            if (col_min > row_max + (S - L)) {
+                continue;
+            }
         }
        
         bool is_j_in_range = j * Bc + b < S && b < Bc;
