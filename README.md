@@ -53,3 +53,7 @@ Week 1 and 2 is complete. Week 3 is in progress.
 | 3.7            | Long Context                                                | 🚧    | 🚧   | 🚧  |
 
 Other topics not covered: quantized/compressed kv cache, prefix/prompt cache; sampling, fine tuning; smaller kernels (softmax, silu, etc)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=skyzh/tiny-llm&type=Date)](https://www.star-history.com/#skyzh/tiny-llm&Date)
