@@ -84,11 +84,11 @@ batched_values[i, :, (S-S_i):S, :] = values[i, :, :, :]
 mask[i, :, 0:L, (S-S_i):S] = causal_mask(L, S_i)
 ```
 
-You can verfiy your implementation by running:
+You can verify your implementation by running:
 
 ```bash
 pdm run test --week 2 --day 6 -- -k task_2
-``
+```
 
 ## Task 3: Handle Batches in the Model
 
