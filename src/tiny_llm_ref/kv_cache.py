@@ -78,9 +78,6 @@ class BatchingKvCache(TinyKvCache):
         )
         for b in range(B):
             if data[b] is None:
-                # for some reasons we need to do this, otherwise it will cause wrong output?
-                # maybe precision issues?
-                masks[b, :, :] = causal_mask(mask_length, seq_len, dtype=key.dtype)
                 continue
             key, value, S, mask = data[b]
             keys[b, :, seq_len - S : seq_len, :] = key

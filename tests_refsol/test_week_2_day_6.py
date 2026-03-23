@@ -236,7 +236,7 @@ def test_task_2_batching_kv_cache():
     expected_mask = mx.array(
         [
             [[[-mx.inf, 0.0, 0.0, -mx.inf], [-mx.inf, 0.0, 0.0, 0.0]]],
-            [[[0.0, 0.0, 0.0, -mx.inf], [0.0, 0.0, 0.0, 0.0]]],
+            [[[-mx.inf, -mx.inf, -mx.inf, -mx.inf], [-mx.inf, -mx.inf, -mx.inf, -mx.inf]]],
             [[[0.0, 0.0, 0.0, -mx.inf], [0.0, 0.0, 0.0, 0.0]]],
         ],
         dtype=mx.float32,
