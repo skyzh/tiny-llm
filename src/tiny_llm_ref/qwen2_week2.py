@@ -53,7 +53,7 @@ class Qwen2MultiHeadAttention:
     def __call__(
         self,
         x: mx.array,
-        offsets: list[int],
+        offsets: int | list[int] | mx.array,
         cache: TinyKvCache,
         mask: mx.array | str | None = None,
     ) -> mx.array:
@@ -172,7 +172,7 @@ class Qwen2TransformerBlock:
     def __call__(
         self,
         x: mx.array,
-        offset: int,
+        offset: int | list[int] | mx.array,
         cache: TinyKvCache,
         mask: mx.array | str | None = None,
     ) -> mx.array:
@@ -266,7 +266,7 @@ class Qwen2ModelWeek2:
     def __call__(
         self,
         inputs: mx.array,
-        offset: int,
+        offset: int | list[int] | mx.array,
         cache: list[TinyKvCache],
     ) -> mx.array:
         h = self.embedding(inputs)
