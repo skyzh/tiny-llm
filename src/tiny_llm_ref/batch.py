@@ -55,6 +55,8 @@ class Request:
             self.kv_cache,
         )
         self.offset += tokens_to_prefill
+
+        # Materialize KV cache after each chunk so the lazy graph does not keep growing.
         for i in self.kv_cache:
             mx.eval(i.key_values[0])
             mx.eval(i.key_values[1])

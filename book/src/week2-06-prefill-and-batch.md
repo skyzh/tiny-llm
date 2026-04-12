@@ -120,6 +120,8 @@ src/tiny_llm/batch.py
 
 Modify `try_prefill` so that it performs prefilling in chunks, rather than all at once.
 
+> **Tip:** Call `mx.eval` on the KV cache after each prefill chunk. Otherwise, MLX keeps extending a lazy expression across chunks, and memory usage keeps growing.
+
 You can test your implementation by running:
 
 ```bash
