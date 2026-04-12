@@ -9,7 +9,7 @@ from datetime import datetime
 def _step(model, y, offsets, kv_cache):
     logits = model(y, offsets, kv_cache)
     logits = logits[:, -1, :]
-    logprobs = logits - mx.logsumexp(logits, keepdims=True)
+    logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
     sampler = lambda x: mx.argmax(x, axis=-1)
     y = sampler(logprobs)
     return y
@@ -194,6 +194,7 @@ def batch_generate(
             for i in range(batch_size):
                 req = decode_requests[i]
                 if req is not None:
+                    req.decode_done(next_tokens[i].item())
                     remove_reason = None
                     if req.is_done:
                         remove_reason = "EOS"
@@ -203,11 +204,10 @@ def batch_generate(
                         print(
                             f"Removing request {i} due to {remove_reason}", flush=True
                         )
-                        batch_cache.remove_request(i)
+                        for layer_cache in kv_cache:
+                            layer_cache.remove_request(i)
                         result.append((req.prompt_idx, req.text()))
                         decode_requests[i] = None
-                        continue
-                    req.decode_done(next_tokens[i].item())
             _print_progress(
                 decode_requests,
                 pending_prefill_request,
