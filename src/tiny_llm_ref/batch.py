@@ -80,7 +80,6 @@ class Request:
 
 def _print_progress(
     requests: list[Request | None],
-    is_idle: list[bool],
     pending_prefill_request: Request | None,
     queue_size: int,
     progress_cnt: int,
@@ -89,13 +88,13 @@ def _print_progress(
     print(f"  --- {datetime.now() - start_time}")
     animation_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     animation_frame = animation_frames[progress_cnt % len(animation_frames)]
-    for i in range(len(requests)):
-        if is_idle[i]:
+    for i, request in enumerate(requests):
+        if request is None:
             print(f"  Decode #{i}: idle", flush=True)
         else:
-            text_preview = requests[i].text()[-80:].replace("\n", " ")
+            text_preview = request.text()[-80:].replace("\n", " ")
             print(
-                f"{animation_frame} Decode [req {requests[i].prompt_idx}, {requests[i].offset}]: {text_preview}",
+                f"{animation_frame} Decode [req {request.prompt_idx}, {request.offset}]: {text_preview}",
                 flush=True,
             )
     if pending_prefill_request is not None:
@@ -124,8 +123,7 @@ def batch_generate(
     batch_size=5,
     prefill_step=128,
 ):
-    decode_requests: list[Request] = [None] * batch_size
-    is_idle = [True] * batch_size
+    decode_requests: list[Request | None] = [None] * batch_size
     kv_cache = [
         BatchingKvCache(max_active_requests=batch_size, max_seq_len=max_seq_len)
         for _ in range(model.num_hidden_layers)
@@ -137,7 +135,7 @@ def batch_generate(
     start_time = datetime.now()
 
     while True:
-        if len(prompts) == 0 and all(is_idle):
+        if len(prompts) == 0 and all(req is None for req in decode_requests):
             break
         # prefill until no idle slots
         if len(prompts) > 0 and pending_prefill_request is None:
@@ -157,9 +155,8 @@ def batch_generate(
                 prefill_kv_cache = pending_prefill_request.kv_cache
                 found_slot = False
                 for i in range(batch_size):
-                    if is_idle[i]:
+                    if decode_requests[i] is None:
                         # Add this request to the decode requests
-                        is_idle[i] = False
                         for prefill_cache, batch_cache in zip(
                             prefill_kv_cache, kv_cache
                         ):
@@ -173,7 +170,6 @@ def batch_generate(
             if made_progress:
                 _print_progress(
                     decode_requests,
-                    is_idle,
                     pending_prefill_request,
                     len(prompts),
                     progress_cnt,
@@ -182,7 +178,7 @@ def batch_generate(
                 progress_cnt += 1
 
         # After the prefill request moves forward one step, we do the decode
-        if not all(is_idle):
+        if any(req is not None for req in decode_requests):
             next_tokens = []
             offsets = []
             for req in decode_requests:
@@ -196,8 +192,8 @@ def batch_generate(
             # decode
             next_tokens = _step(model, next_tokens.reshape(-1, 1), offsets, kv_cache)
             for i in range(batch_size):
-                if not is_idle[i]:
-                    req = decode_requests[i]
+                req = decode_requests[i]
+                if req is not None:
                     remove_reason = None
                     if req.is_done:
                         remove_reason = "EOS"
@@ -208,14 +204,12 @@ def batch_generate(
                             f"Removing request {i} due to {remove_reason}", flush=True
                         )
                         batch_cache.remove_request(i)
-                        is_idle[i] = True
                         result.append((req.prompt_idx, req.text()))
                         decode_requests[i] = None
                         continue
                     req.decode_done(next_tokens[i].item())
             _print_progress(
                 decode_requests,
-                is_idle,
                 pending_prefill_request,
                 len(prompts),
                 progress_cnt,
