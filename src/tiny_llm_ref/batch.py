@@ -55,6 +55,9 @@ class Request:
             self.kv_cache,
         )
         self.offset += tokens_to_prefill
+
+        # Materialize KV cache after each prefill chunk to truncate the lazy
+        # computation graph and prevent memory from growing unboundedly.
         for i in self.kv_cache:
             mx.eval(i.key_values[0])
             mx.eval(i.key_values[1])
@@ -201,9 +204,7 @@ def batch_generate(
                     elif req.offset >= max_seq_len:
                         remove_reason = "max seq len"
                     if remove_reason is not None:
-                        print(
-                            f"Removing request {i} due to {remove_reason}", flush=True
-                        )
+                        print(f"Removing request {i} due to {remove_reason}", flush=True)
                         for layer_cache in kv_cache:
                             layer_cache.remove_request(i)
                         result.append((req.prompt_idx, req.text()))

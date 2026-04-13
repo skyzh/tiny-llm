@@ -120,6 +120,8 @@ src/tiny_llm/batch.py
 
 Modify `try_prefill` so that it performs prefilling in chunks, rather than all at once.
 
+Note that you should materialize KV cache between chunks. Because MLX uses lazy evaluation, and chunked prefill keeps extending the KV cache across multiple model calls. If you never call `mx.eval`, the cache becomes a longer and longer lazy expression, so memory usage keeps growing. Calling `mx.eval` on the key and value tensors after each chunk materializes the current KV cache and truncates the graph.
+
 You can test your implementation by running:
 
 ```bash
