@@ -1,5 +1,6 @@
 from .qwen2_week1 import Qwen2ModelWeek1
 from .qwen2_week2 import Qwen2ModelWeek2
+from .qwen2_week3 import Qwen2ModelWeek3
 from .qwen3 import Qwen3Model
 
 
@@ -29,6 +30,8 @@ def dispatch_model(model_name: str, mlx_model, week: int, **kwargs):
         return Qwen2ModelWeek1(mlx_model, **kwargs)
     elif week == 2 and model_name.startswith("Qwen/Qwen2"):
         return Qwen2ModelWeek2(mlx_model, **kwargs)
+    elif week == 3 and model_name.startswith("Qwen/Qwen2"):
+        return Qwen2ModelWeek3(mlx_model, **kwargs)
     elif week == 2 and model_name.startswith("mlx-community/Qwen3"):
         return Qwen3Model(mlx_model, **kwargs)
     else:

@@ -25,7 +25,7 @@ class Request:
         prompt_idx: int = 0,
     ):
         self.prompt = prompt
-        self.kv_cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
+        self.kv_cache = model.create_kv_cache()
         self.model = model
         self.detokenizer = tokenizer.detokenizer.__class__(tokenizer._tokenizer)
         self.prefill_tokens = mx.array(
