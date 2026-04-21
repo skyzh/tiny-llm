@@ -44,8 +44,8 @@ Week 1 and 2 is complete. Week 3 is in progress.
 | 2.5            | Flash Attention 2 - GPU                                     | ✅    | ✅   | ✅  |
 | 2.6            | Continuous Batching                                         | ✅    | ✅   | ✅  |
 | 2.7            | Chunked Prefill                                             | ✅    | ✅   | ✅  |
-| 3.1            | Paged Attention - Part 1                                    | 🚧    | 🚧   | ✅  |
-| 3.2            | Paged Attention - Part 2                                    | 🚧    | 🚧   | ✅  |
+| 3.1            | Paged Attention - Part 1                                    | ✅    | ✅   | 🚧  |
+| 3.2            | Paged Attention - Part 2                                    | 🚧    | 🚧   | 🚧  |
 | 3.3            | MoE (Mixture of Experts)                                    | 🚧    | 🚧   | 🚧  |
 | 3.4            | Speculative Decoding                                        | 🚧    | ✅   | 🚧  |
 | 3.5            | RAG Pipeline                                                | 🚧    | 🚧   | 🚧  |
