@@ -6,6 +6,11 @@ from .qwen2_week2 import Qwen2ModelWeek2
 from typing import Callable
 
 
+def _release_kv_cache(kv_cache):
+    for layer in kv_cache:
+        layer.release()
+
+
 def simple_generate(
     model: Qwen2ModelWeek1,
     tokenizer: TokenizerWrapper,
@@ -42,7 +47,7 @@ def simple_generate(
 def simple_generate_with_kv_cache(
     model: Qwen2ModelWeek2, tokenizer: TokenizerWrapper, prompt: str
 ) -> str:
-    kv_cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
+    kv_cache = model.create_kv_cache()
 
     def _step(model, y, offset, kv_cache):
         logits = model(y[None], offset, kv_cache)
@@ -52,23 +57,26 @@ def simple_generate_with_kv_cache(
         y = sampler(logprobs)
         return y, logprobs.squeeze(0)
 
-    # prefill with the prompt
-    tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
-    detokenizer = tokenizer.detokenizer
-    detokenizer.reset()
-    offset = 0
-    # generate/decode
-    while True:
-        token, _ = _step(model, tokens, offset, kv_cache)
-        mx.eval(token)
-        if token.item() == tokenizer.eos_token_id:
-            break
-        detokenizer.add_token(token.item())
-        print(detokenizer.last_segment, end="", flush=True)
-        # The first iteration of this loop is prefill. We want to add the offset to the prefilled token size.
-        # Otherwise, we add the decoded token size (which is always 1).
-        offset += tokens.size
-        tokens = token
+    try:
+        # prefill with the prompt
+        tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
+        detokenizer = tokenizer.detokenizer
+        detokenizer.reset()
+        offset = 0
+        # generate/decode
+        while True:
+            token, _ = _step(model, tokens, offset, kv_cache)
+            mx.eval(token)
+            if token.item() == tokenizer.eos_token_id:
+                break
+            detokenizer.add_token(token.item())
+            print(detokenizer.last_segment, end="", flush=True)
+            # The first iteration of this loop is prefill. We want to add the offset to the prefilled token size.
+            # Otherwise, we add the decoded token size (which is always 1).
+            offset += tokens.size
+            tokens = token
+    finally:
+        _release_kv_cache(kv_cache)
 
 
 def speculative_generate(
@@ -78,8 +86,8 @@ def speculative_generate(
     tokenizer: TokenizerWrapper,
     prompt: str,
 ) -> str:
-    draft_kv_cache = [TinyKvFullCache() for _ in range(draft_model.num_hidden_layers)]
-    kv_cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
+    draft_kv_cache = draft_model.create_kv_cache()
+    kv_cache = model.create_kv_cache()
 
     def _step(model, y, offset, kv_cache, n_tokens=1):
         logits = model(y[None], offset, kv_cache)
@@ -103,81 +111,85 @@ def speculative_generate(
         offset = prefill_tokens.size
         return token, offset
 
-    draft_token, draft_offset = _prefill(
-        draft_model, draft_tokenizer, prompt, draft_kv_cache
-    )
-    token, offset = _prefill(model, tokenizer, prompt, kv_cache)
-
-    def _decode_one(token, tokenizer):
-        if token.item() == tokenizer.eos_token_id:
-            return False
-        detokenizer = tokenizer.detokenizer
-        detokenizer.add_token(token.item())
-        return True
-
-    def draft_generate(model, last_token, offset, kv_cache, num_drafts):
-        tokens = []
-        current_offset = offset
-        for _ in range(num_drafts):
-            token, _ = _step(model, last_token, current_offset, kv_cache)
-            mx.eval(token)
-            tokens.append(token.item())
-            last_token = token
-            current_offset += 1
-        return tokens
-
-    num_drafts = 4
-
-    def _rewind_cache(kv_cache, revert_len):
-        for layer in kv_cache:
-            layer.rewind(revert_len)
-
-    def _print_text(text, progress):
-        newline = '\n'
-        print(f"+{progress} {text.replace(newline, ' ')[-80:]}")
-
-    # speculative decode
-    while True:
-        draft_tokens = draft_generate(
-            draft_model, token, draft_offset, draft_kv_cache, num_drafts
+    try:
+        draft_token, draft_offset = _prefill(
+            draft_model, draft_tokenizer, prompt, draft_kv_cache
         )
-        draft_offset += num_drafts
-        # assume both models use the same tokenizer
-        draft_tokens = mx.concat([token, mx.array(draft_tokens)])
-        new_tokens, _ = _step(model, draft_tokens, offset, kv_cache, num_drafts + 1)
-        new_tokens = new_tokens.tolist()[0]
-        offset += num_drafts + 1
-        last_new_token = new_tokens[-1]
-        new_tokens = mx.array([token.item()] + new_tokens[:-1])
-        assert len(new_tokens) == len(draft_tokens)
-        accept_all = True
-        for i in range(len(new_tokens)):
-            if new_tokens[i] != draft_tokens[i]:
-                # revert the full draft generation; re-generate next time
-                # or we matched full, then no rewind and use the last token
-                assert i >= 1  # first token is always the same
-                revert_len = len(draft_tokens) - i
-                _rewind_cache(draft_kv_cache, revert_len - 1)
-                draft_offset -= revert_len - 1
-                _rewind_cache(kv_cache, revert_len)
-                token = mx.array([new_tokens[i]])
-                offset -= revert_len
-                assert offset == draft_offset
-                assert offset == kv_cache[0].offset
-                _print_text(tokenizer._detokenizer.text, i)
-                accept_all = False
-                break
-            if not _decode_one(new_tokens[i], tokenizer):
-                print(tokenizer._detokenizer.text)
-                return tokenizer._detokenizer.text
-        if accept_all:
-            _print_text(tokenizer._detokenizer.text, len(new_tokens))
-            draft_generate(
-                draft_model,
-                mx.array(draft_tokens[-1:]),
-                draft_offset,
-                draft_kv_cache,
-                1,
+        token, offset = _prefill(model, tokenizer, prompt, kv_cache)
+
+        def _decode_one(token, tokenizer):
+            if token.item() == tokenizer.eos_token_id:
+                return False
+            detokenizer = tokenizer.detokenizer
+            detokenizer.add_token(token.item())
+            return True
+
+        def draft_generate(model, last_token, offset, kv_cache, num_drafts):
+            tokens = []
+            current_offset = offset
+            for _ in range(num_drafts):
+                token, _ = _step(model, last_token, current_offset, kv_cache)
+                mx.eval(token)
+                tokens.append(token.item())
+                last_token = token
+                current_offset += 1
+            return tokens
+
+        num_drafts = 4
+
+        def _rewind_cache(kv_cache, revert_len):
+            for layer in kv_cache:
+                layer.rewind(revert_len)
+
+        def _print_text(text, progress):
+            newline = '\n'
+            print(f"+{progress} {text.replace(newline, ' ')[-80:]}")
+
+        # speculative decode
+        while True:
+            draft_tokens = draft_generate(
+                draft_model, token, draft_offset, draft_kv_cache, num_drafts
             )
-            token = mx.array([last_new_token])
-            draft_offset += 1
+            draft_offset += num_drafts
+            # assume both models use the same tokenizer
+            draft_tokens = mx.concat([token, mx.array(draft_tokens)])
+            new_tokens, _ = _step(model, draft_tokens, offset, kv_cache, num_drafts + 1)
+            new_tokens = new_tokens.tolist()[0]
+            offset += num_drafts + 1
+            last_new_token = new_tokens[-1]
+            new_tokens = mx.array([token.item()] + new_tokens[:-1])
+            assert len(new_tokens) == len(draft_tokens)
+            accept_all = True
+            for i in range(len(new_tokens)):
+                if new_tokens[i] != draft_tokens[i]:
+                    # revert the full draft generation; re-generate next time
+                    # or we matched full, then no rewind and use the last token
+                    assert i >= 1  # first token is always the same
+                    revert_len = len(draft_tokens) - i
+                    _rewind_cache(draft_kv_cache, revert_len - 1)
+                    draft_offset -= revert_len - 1
+                    _rewind_cache(kv_cache, revert_len)
+                    token = mx.array([new_tokens[i]])
+                    offset -= revert_len
+                    assert offset == draft_offset
+                    assert offset == kv_cache[0].offset
+                    _print_text(tokenizer._detokenizer.text, i)
+                    accept_all = False
+                    break
+                if not _decode_one(new_tokens[i], tokenizer):
+                    print(tokenizer._detokenizer.text)
+                    return tokenizer._detokenizer.text
+            if accept_all:
+                _print_text(tokenizer._detokenizer.text, len(new_tokens))
+                draft_generate(
+                    draft_model,
+                    mx.array(draft_tokens[-1:]),
+                    draft_offset,
+                    draft_kv_cache,
+                    1,
+                )
+                token = mx.array([last_new_token])
+                draft_offset += 1
+    finally:
+        _release_kv_cache(draft_kv_cache)
+        _release_kv_cache(kv_cache)

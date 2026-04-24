@@ -27,6 +27,253 @@ class TinyKvCache(ABC):
             A tuple of the updated key-value cache, the updated value, the sequence length, and the mask.
         """
 
+    def release(self):
+        """
+        Release all resources owned by this cache.
+
+        Request-scoped caches use this when generation finishes or a batch slot
+        is removed. Dense caches do not own shared resources, while paged caches
+        return their physical pages to a shared pool.
+        """
+        return None
+
+    def rewind(self, n: int):
+        """
+        Remove the newest n logical tokens from this cache.
+
+        This is needed by speculative decoding when some draft tokens are
+        rejected after their K/V has already been written. Implementations may
+        drop dense suffixes or return whole pages to a page pool.
+        """
+        raise NotImplementedError("This KV cache does not support rewind")
+
+
+class TinyKvPagedPool:
+    """Model-local physical storage for paged KV.
+
+    The model owns one pool and passes it to every layer cache. The pool gives
+    out physical page ids from one free list. Because every live page id is
+    unique, the page id alone is enough to find the physical K/V page.
+    """
+
+    def __init__(self, page_size: int = 128):
+        assert page_size > 0
+        self.page_size = page_size
+        self.key_pages: list[mx.array | None] = []
+        self.value_pages: list[mx.array | None] = []
+        self.free_page_ids: list[int] = []
+        self.used_page_ids: set[int] = set()
+
+    @property
+    def num_pages(self) -> int:
+        return len(self.key_pages)
+
+    @property
+    def num_free_pages(self) -> int:
+        return len(self.free_page_ids)
+
+    def _check_page_chunk(self, x: mx.array) -> None:
+        B, H, S, D = x.shape
+        assert 0 < S <= self.page_size
+
+    def allocate_page(self) -> int:
+        # The page id is allocated from a model-wide free list. In this teaching
+        # version, a layer cache owns the page until release/rewind returns it.
+        if self.free_page_ids:
+            page_id = self.free_page_ids.pop()
+        else:
+            page_id = self.num_pages
+            self.key_pages.append(None)
+            self.value_pages.append(None)
+        self.used_page_ids.add(page_id)
+        return page_id
+
+    def read_page(self, page_id: int) -> tuple[mx.array, mx.array]:
+        key = self.key_pages[page_id]
+        value = self.value_pages[page_id]
+        if key is None or value is None:
+            raise ValueError(f"Page {page_id} has no storage")
+        return key, value
+
+    def _ensure_page_storage(
+        self,
+        page_id: int,
+        key: mx.array,
+        value: mx.array,
+    ) -> tuple[mx.array, mx.array]:
+        key_page = self.key_pages[page_id]
+        value_page = self.value_pages[page_id]
+        if key_page is not None and value_page is not None:
+            return key_page, value_page
+
+        B, H, _, D = key.shape
+        key_page = mx.zeros((B, H, self.page_size, D), dtype=key.dtype)
+        value_page = mx.zeros((B, H, self.page_size, D), dtype=value.dtype)
+        self.key_pages[page_id] = key_page
+        self.value_pages[page_id] = value_page
+        return key_page, value_page
+
+    def write_page_slice(
+        self,
+        page_id: int,
+        start: int,
+        key: mx.array,
+        value: mx.array,
+    ) -> None:
+        assert key.shape == value.shape
+        self._check_page_chunk(key)
+        if page_id not in self.used_page_ids:
+            raise ValueError(f"Page {page_id} is free")
+        key_page, value_page = self._ensure_page_storage(page_id, key, value)
+        B, H, capacity, D = key_page.shape
+        assert value_page.shape == (B, H, capacity, D)
+        assert capacity == self.page_size
+        assert key.shape[:2] == (B, H)
+        assert key.shape[3] == D
+        end = start + key.shape[2]
+        assert 0 <= start <= capacity
+        assert end <= self.page_size
+
+        key_page[:, :, start:end, :] = key
+        value_page[:, :, start:end, :] = value
+        self.key_pages[page_id] = key_page
+        self.value_pages[page_id] = value_page
+
+    def free_page(self, page_id: int) -> None:
+        if page_id not in self.used_page_ids:
+            raise ValueError(f"Page {page_id} is already free")
+        # Keep the page id stable, but drop its old K/V tensors so the id can be
+        # handed to a future cache.
+        self.used_page_ids.remove(page_id)
+        self.key_pages[page_id] = None
+        self.value_pages[page_id] = None
+        self.free_page_ids.append(page_id)
+
+
+class TinyKvPagedCache(TinyKvCache):
+    """Layer-local K/V cache backed by a model-owned page pool.
+
+    Each transformer layer gets its own TinyKvPagedCache and therefore its own
+    `page_ids`, `page_lens`, and `offset`. The shared part is only the pool,
+    which lets pages be recycled across requests and layers.
+    """
+
+    def __init__(self, pool: TinyKvPagedPool):
+        self.pool = pool
+        self.page_size = self.pool.page_size
+        self.page_ids: list[int] = []
+        self.page_lens: list[int] = []
+        self.offset = 0
+
+    @property
+    def num_pages(self) -> int:
+        return len(self.page_ids)
+
+    @property
+    def key_values(self) -> tuple[mx.array, mx.array] | None:
+        if self.offset == 0:
+            return None
+        return self.gather_dense()
+
+    def _append_chunk(self, key: mx.array, value: mx.array) -> None:
+        assert key.shape == value.shape
+        B, H, S, D = key.shape
+        assert B == 1, "Paged request cache only supports one request at a time"
+        start = 0
+
+        # First fill the existing tail page if it has free slots.
+        if self.page_ids and self.page_lens[-1] < self.page_size:
+            page_id = self.page_ids[-1]
+            page_start = self.page_lens[-1]
+            take = min(self.page_size - page_start, S)
+            self.pool.write_page_slice(
+                page_id,
+                page_start,
+                key[:, :, :take, :],
+                value[:, :, :take, :],
+            )
+            self.page_lens[-1] += take
+            start += take
+
+        # Then allocate fresh pages for the remaining chunk. We only write the
+        # valid prefix; unused tail slots are ignored by page_lens.
+        while start < S:
+            end = min(start + self.page_size, S)
+            page_id = self.pool.allocate_page()
+            self.pool.write_page_slice(
+                page_id,
+                0,
+                key[:, :, start:end, :],
+                value[:, :, start:end, :],
+            )
+            self.page_ids.append(page_id)
+            self.page_lens.append(end - start)
+            start = end
+
+        self.offset += S
+
+    def gather_dense(self) -> tuple[mx.array, mx.array]:
+        assert self.offset > 0
+        # Stage A compatibility path: attention still expects dense K/V, so we
+        # trim each fixed-capacity page to its valid prefix and concatenate
+        # request pages in logical order.
+        key_chunks = []
+        value_chunks = []
+        for page_id, page_len in zip(self.page_ids, self.page_lens):
+            key_page, value_page = self.pool.read_page(page_id)
+            assert key_page.shape[2] == self.page_size
+            assert value_page.shape[2] == self.page_size
+            key_chunks.append(key_page[:, :, :page_len, :])
+            value_chunks.append(value_page[:, :, :page_len, :])
+        if len(key_chunks) == 1:
+            return key_chunks[0], value_chunks[0]
+        return mx.concat(key_chunks, axis=2), mx.concat(value_chunks, axis=2)
+
+    def update_and_fetch(
+        self,
+        key: mx.array,
+        value: mx.array,
+        mask_length: int | None = None,
+        mask: mx.array | str | None = None,
+    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        assert key.shape == value.shape
+        self._append_chunk(key, value)
+        # Day 1 keeps the old attention interface. Day 2 can replace this dense
+        # gather with block_table/context_lens metadata.
+        dense_key, dense_value = self.gather_dense()
+        return dense_key, dense_value, self.offset, mask
+
+    def rewind(self, n: int):
+        assert 0 <= n <= self.offset
+        new_offset = self.offset - n
+        if new_offset == self.offset:
+            return
+        if new_offset == 0:
+            self.release()
+            return
+
+        target_num_pages = (new_offset + self.page_size - 1) // self.page_size
+        while len(self.page_ids) > target_num_pages:
+            # Whole pages beyond the new logical length return to the shared
+            # allocator. Stale suffix slots in the final page are ignored because
+            # page_lens defines the valid prefix and future writes overwrite them.
+            page_id = self.page_ids.pop()
+            self.page_lens.pop()
+            self.pool.free_page(page_id)
+
+        last_page_len = new_offset - self.page_size * (target_num_pages - 1)
+        self.page_lens[-1] = last_page_len
+        self.offset = new_offset
+
+    def release(self):
+        # Request completion returns every page owned by this layer cache to the
+        # model-level allocator. Other layer caches release their own pages.
+        for page_id in self.page_ids:
+            self.pool.free_page(page_id)
+        self.page_ids.clear()
+        self.page_lens.clear()
+        self.offset = 0
+
 
 class BatchingKvCache(TinyKvCache):
     def __init__(self, max_active_requests: int, max_seq_len: int):
@@ -50,7 +297,9 @@ class BatchingKvCache(TinyKvCache):
         else:
             assert self.HD == (H, D), f"expect {self.HD} but got {H, D}"
         assert B == self.max_active_requests
-        # Step 1: append the result to the cache
+        # Step 1: append each active row into its request cache. For paged
+        # caches, this writes into the request's page table and then gathers a
+        # dense view for the current Week 3 Day 1 attention path.
         data = []
         for b in range(B):
             if self.kv_caches[b] is None:
@@ -70,7 +319,8 @@ class BatchingKvCache(TinyKvCache):
             return seq_len
 
         seq_len = max(map(get_seq_len, data))
-        # Step 3: generate masks and a single array of keys and values
+        # Step 3: rebuild one dense batch tensor. True paged attention will
+        # replace this with block_table/context_lens metadata.
         keys = mx.zeros((self.max_active_requests, H, seq_len, D), dtype=key.dtype)
         values = mx.zeros((self.max_active_requests, H, seq_len, D), dtype=value.dtype)
         masks = mx.full(
@@ -106,8 +356,9 @@ class BatchingKvCache(TinyKvCache):
         self.kv_caches[id] = prefilled
 
     def remove_request(self, id: int):
-        if self.kv_caches is None:
+        if self.kv_caches[id] is None:
             raise ValueError(f"Request id {id} is not in the cache")
+        self.kv_caches[id].release()
         self.kv_caches[id] = None
 
 

@@ -1,4 +1,5 @@
 import mlx.core as mx
+
 from .basics import silu
 from .attention import (
     scaled_dot_product_attention_grouped,
@@ -9,7 +10,7 @@ from .positional_encoding import RoPE
 from typing import Any
 from .embedding import Embedding
 from .quantize import dequantize_linear, QuantizedWeights, quantized_linear
-from .kv_cache import TinyKvCache
+from .kv_cache import TinyKvCache, TinyKvPagedCache, TinyKvPagedPool
 
 
 class Qwen2MultiHeadAttention:
@@ -67,7 +68,6 @@ class Qwen2MultiHeadAttention:
         projection_v = quantized_linear(x, self.wv, bias=self.bv).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        # todo: move offsets to kv cache
         if isinstance(offsets, int):
             offset_slice = [slice(int(offsets), int(offsets + L))]
         else:
@@ -183,15 +183,20 @@ class Qwen2TransformerBlock:
         return out
 
 
-class Qwen2ModelWeek2:
+class Qwen2ModelWeek3:
     def __init__(
         self,
         mlx_model: Any,
         enable_flash_attn: bool = False,
+        page_size: int = 128,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size
+        self.page_size = page_size
+        # One model-level pool is shared by all layer caches. Each layer cache
+        # still owns its own page table and allocates its own physical pages.
+        self.page_pool = TinyKvPagedPool(page_size=self.page_size)
         precision = mx.float16
         self.precision = precision
 
@@ -264,9 +269,12 @@ class Qwen2ModelWeek2:
         self.mlx_model = mlx_model
 
     def create_kv_cache(self) -> list[TinyKvCache]:
-        from .kv_cache import TinyKvFullCache
-
-        return [TinyKvFullCache() for _ in range(self.num_hidden_layers)]
+        # One request gets one cache handle per layer. The handles share the
+        # model-level pool, but their page_ids/page_lens/offset are independent.
+        return [
+            TinyKvPagedCache(pool=self.page_pool)
+            for _ in range(self.num_hidden_layers)
+        ]
 
     def __call__(
         self,

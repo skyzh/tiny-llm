@@ -19,6 +19,8 @@
     - [Flash Attention (2 Days)](./week2-04-flash-attention.md)
     - [Continuous Batching (2 Days)](./week2-06-prefill-and-batch.md)
 - [Week 3: Serving]()
+    - [Paged Attention, Part 1]()
+    - [Paged Attention, Part 2]()
 
 ---
 
