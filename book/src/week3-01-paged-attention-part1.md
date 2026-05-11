@@ -196,14 +196,15 @@ This is not the final paged attention runtime yet, but it is a very useful inter
 
 ## How This Maps to `tiny-llm`
 
-## `src/tiny_llm/kv_cache.py`
+## `src/tiny_llm/paged_kv_cache.py`
 
 Add:
 
-- `PagePool`
-- `PagedRequestCache`
+- `TinyKvPagedPool`
+- `TinyKvPagedCache`
 
-Keep `TinyKvFullCache` around as a baseline and test oracle.
+Keep `TinyKvFullCache` in `src/tiny_llm/kv_cache.py` as a baseline and test
+oracle.
 
 The key Day 1 behavior is:
 
@@ -240,7 +241,7 @@ Before implementing, make sure the following are clear:
 ## Task 1: Design `PagePool`
 
 ```
-src/tiny_llm/kv_cache.py
+src/tiny_llm/paged_kv_cache.py
 ```
 
 Design a model-owned page pool that:
@@ -254,7 +255,7 @@ Design a model-owned page pool that:
 ## Task 2: Design `PagedRequestCache`
 
 ```
-src/tiny_llm/kv_cache.py
+src/tiny_llm/paged_kv_cache.py
 ```
 
 Replace the "one layer cache = one dense KV tensor" model with:
@@ -268,7 +269,7 @@ Replace the "one layer cache = one dense KV tensor" model with:
 ## Task 3: Add a Dense-Gather Compatibility Path
 
 ```
-src/tiny_llm/kv_cache.py
+src/tiny_llm/paged_kv_cache.py
 src/tiny_llm/qwen2_week3.py
 ```
 

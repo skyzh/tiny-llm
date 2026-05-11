@@ -91,18 +91,15 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
                 draft_tiny_llm_model = None
         elif args.loader == "week3":
             print(
-                f"Using week3 loader with flash_attn={args.enable_flash_attn} thinking={args.enable_thinking} for {args.model}"
+                f"Using week3 loader with thinking={args.enable_thinking} for {args.model}"
             )
-            tiny_llm_model = models.dispatch_model(
-                args.model, mlx_model, week=3, enable_flash_attn=args.enable_flash_attn
-            )
+            tiny_llm_model = models.dispatch_model(args.model, mlx_model, week=3)
             if draft_mlx_model is not None:
                 print(f"Using draft model {args.draft_model}")
                 draft_tiny_llm_model = models.dispatch_model(
                     args.draft_model,
                     draft_mlx_model,
                     week=3,
-                    enable_flash_attn=args.enable_flash_attn,
                 )
             else:
                 draft_tiny_llm_model = None

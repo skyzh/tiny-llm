@@ -46,4 +46,22 @@ NB_MODULE(_ext, m) {
         Returns:
             array: ``softmax(query @ key.T * scale) @ value``
       )");
+
+    m.def("paged_attention", &tiny_llm_ext_ref::paged_attention, "query"_a, "key_pages"_a, "value_pages"_a,
+          "block_table"_a, "context_lens"_a, "scale"_a = 1.0, "is_causal"_a = false, "num_kv_heads"_a, "num_heads"_a,
+          "stream"_a = nb::none(), R"(
+        Paged attention layer
+
+        Args:
+            query (array): Query array with shape [B * H_q, L, D].
+            key_pages (array): Key page storage with shape [P, H_kv, page_size, D].
+            value_pages (array): Value page storage with shape [P, H_kv, page_size, D].
+            block_table (array): Physical page ids with shape [B, max_pages].
+            context_lens (array): Valid context length for each request.
+            scale (float): Scaling factor.
+            is_causal (bool): Enable causal masking.
+
+        Returns:
+            array: ``softmax(query @ paged_key.T * scale) @ paged_value``
+      )");
 }
