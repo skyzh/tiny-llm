@@ -22,16 +22,18 @@ Once KV is paged, dense `B x H x S x D` tensors are no longer the natural runtim
 ```plain
 block_table:  [B, max_pages_per_request]
 context_lens: [B]
-slot_mapping: [B] or [num_new_tokens]
 ```
 
 For the current layer being executed:
 
 - `block_table[b, i]` gives the page id for request `b`'s current-layer logical page `i`
 - `context_lens[b]` gives the valid token count for request `b`
-- `slot_mapping` tells us where newly generated K/V should be written
 
 This is the bridge between the scheduler and the attention kernel.
+
+A production runtime often also carries write-side metadata such as `slot_mapping`.
+For this chapter, we keep the write side inside the cache and focus on the read-side
+metadata needed by attention.
 
 ## Why `block_table` Matters
 
@@ -70,6 +72,7 @@ paged_attention(
     value_pages,
     block_table,
     context_lens,
+    page_size,
     scale=None,
     mask="causal",
 )
@@ -78,14 +81,19 @@ paged_attention(
 With shapes like:
 
 ```plain
-query:        B, H_q, L, D
-key_pages:    P, H_kv, page_size, D
-value_pages:  P, H_kv, page_size, D
-block_table:  B, max_pages
-context_lens: B
+query:          B, H_q, L, D
+key_pages[i]:   1, H_kv, page_size, D
+value_pages[i]: 1, H_kv, page_size, D
+block_table:    B, max_pages
+context_lens:   B
 ```
 
 Compared with the Week 2 dense path, the important difference is that the source length is no longer represented as one contiguous tensor dimension. It is reconstructed logically from the page table.
+
+In this chapter, `paged_attention` should read pages directly from a GPU
+kernel. The runtime contract is now: model code and batching code pass pages
+plus metadata, and the attention kernel walks that metadata without first
+rebuilding dense K/V.
 
 ## Prefill Metadata
 
@@ -96,7 +104,8 @@ During prefill, a chunk may span multiple pages. The runtime needs to know:
 - how many valid tokens are in the tail page,
 - how to map incoming K/V rows into page storage.
 
-This is why a paged design usually carries a write-side structure such as `slot_mapping`.
+In this teaching implementation, the cache still owns the write-side bookkeeping.
+The attention path only needs the block table after the write is done.
 
 ## Decode Metadata
 
@@ -104,8 +113,8 @@ During decode, each active request typically writes one token.
 
 The runtime should be able to:
 
-1. compute the destination slot for that token,
-2. write K/V into the correct page slot,
+1. append the token's K/V to the current tail page,
+2. allocate a new page only if the tail page is full,
 3. update the current layer cache's `context_len`,
 4. run attention over the full logical context using `block_table`
 
@@ -113,7 +122,7 @@ This is the point where decode stops paying the repeated dense-repack cost from 
 
 ## How This Maps to `tiny-llm`
 
-## `src/tiny_llm/attention.py`
+### `src/tiny_llm/attention.py`
 
 Add a new function:
 
@@ -122,34 +131,55 @@ def paged_attention(...):
     ...
 ```
 
-The easiest rollout is:
+For this course implementation, make it a FlashAttention-style page-walking
+Metal kernel:
 
-1. first implement it as a gather-then-call wrapper around existing attention,
-2. later replace that wrapper with a real paged kernel or paged FlashAttention path.
+1. use `block_table[b]` to find the physical pages for request `b`,
+2. use `context_lens[b]` to ignore unused tail capacity,
+3. visit K/V in small tiles instead of materializing dense K/V,
+4. merge each tile into the output with online softmax.
 
-That preserves correctness while the runtime contracts stabilize.
+The important change from Week 2 is the K/V address calculation. Week 2 can
+advance through dense K/V by pointer arithmetic. Week 3 must translate each
+logical key position through `block_table` first:
 
-## `src/tiny_llm/qwen2_week3.py`
-
-The attention module should be able to branch on cache capability:
-
-```python
-if cache.supports_paged_attention:
-    x = paged_attention(...)
-else:
-    x = scaled_dot_product_attention_grouped(...)
+```plain
+logical key position -> logical page -> physical page id -> slot in page
 ```
 
-This keeps the model code readable while letting the cache and kernel evolve independently.
+After that lookup, the online-softmax update is the same idea as Week 2
+FlashAttention. We still avoid a dense K/V gather before attention.
 
-## `src/tiny_llm/batch.py`
+The page pool should therefore expose contiguous physical storage:
+
+```plain
+key_pages:   P, H_kv, page_size, D
+value_pages: P, H_kv, page_size, D
+```
+
+A Python list of page tensors is convenient for teaching the allocator, but a
+GPU kernel needs a single buffer so `page_id` can be turned into an address.
+
+### `src/tiny_llm/qwen2_week3.py`
+
+The attention module should call the paged runtime directly:
+
+```python
+metadata = cache.update_and_fetch_paged(...)
+x = paged_attention(...)
+```
+
+Week 3 cache handles are expected to provide paged metadata. If a dense cache is
+passed to the Week 3 model, that is a programming error rather than a signal to
+silently fall back to Week 2 attention.
+
+### `src/tiny_llm/batch.py`
 
 The scheduler now needs to prepare runtime metadata instead of only dense K/V:
 
 - per-layer page tables for each active request
 - padded batch `block_table`
 - `context_lens`
-- write positions for prefill and decode
 
 This is where continuous batching and paged attention finally connect. In Week 2, batching worked by repacking tensors. In Week 3, batching should work by reusing page tables and updating only the new slots.
 
@@ -158,9 +188,9 @@ This is where continuous batching and paged attention finally connect. In Week 2
 The safest implementation order is:
 
 1. paged storage
-2. dense gather compatibility path
-3. `block_table` / `context_lens` plumbing
-4. real paged attention dispatch
+2. `block_table` / `context_lens` plumbing
+3. FlashAttention-style page-walking GPU attention
+4. model and batch dispatch
 
 This order matters because it gives us a clean correctness baseline at each step.
 
@@ -177,6 +207,7 @@ These are the invariants worth checking in tests:
 ## Task 1: Add Batch Metadata
 
 ```
+src/tiny_llm/paged_kv_cache.py
 src/tiny_llm/kv_cache.py
 src/tiny_llm/batch.py
 ```
@@ -185,7 +216,6 @@ Extend the batch cache and scheduler so they can prepare:
 
 - `block_table`
 - `context_lens`
-- write-slot metadata
 
 for all active requests.
 
@@ -193,9 +223,24 @@ for all active requests.
 
 ```
 src/tiny_llm/attention.py
+src/extensions/src/paged_attention.cpp
+src/extensions/src/paged_attention.metal
 ```
 
 Add a paged attention interface whose inputs come from the paged runtime rather than a dense reconstructed `S` dimension.
+
+The reference solution walks every request's block table and keeps online
+softmax state:
+
+```python
+running_max = max(previous_max, page_max)
+running_sum = previous_sum * exp(previous_max - running_max) + page_sum
+output = previous_output * exp(previous_max - running_max) + page_output
+```
+
+After all visible pages are consumed, divide `output` by `running_sum`.
+This is the key idea that lets the kernel avoid materializing dense K/V while
+still producing the same result as dense attention.
 
 ## Task 3: Dispatch from the Model
 

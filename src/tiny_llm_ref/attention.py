@@ -66,6 +66,53 @@ def scaled_dot_product_attention_grouped(
     return result.reshape(expected_shape)
 
 
+def paged_attention(
+    query: mx.array,
+    key_pages: mx.array,
+    value_pages: mx.array,
+    block_table: mx.array,
+    context_lens: mx.array,
+    page_size: int,
+    scale: float | None = None,
+    mask: mx.array | str | None = None,
+) -> mx.array:
+    """
+    Paged attention backed by the C++/Metal extension.
+
+    The Python wrapper keeps the model-facing shape as [B, H_q, L, D], while
+    the extension sees flattened query heads and contiguous page storage.
+    """
+    if isinstance(mask, mx.array):
+        raise NotImplementedError("Paged attention only supports mask=None or causal")
+    if mask is not None and mask != "causal":
+        raise NotImplementedError
+
+    factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
+    B, H_q, L, D = query.shape
+    _, H, _, _ = key_pages.shape
+    assert H_q % H == 0
+
+    query = mx.contiguous(query.astype(mx.float32).reshape(B * H_q, L, D))
+    key_pages = mx.contiguous(key_pages.astype(mx.float32))
+    value_pages = mx.contiguous(value_pages.astype(mx.float32))
+    block_table = mx.contiguous(block_table.astype(mx.int32))
+    context_lens = mx.contiguous(context_lens.astype(mx.int32))
+    is_causal = mask == "causal"
+
+    result = tiny_llm_ext_ref.paged_attention(
+        query,
+        key_pages,
+        value_pages,
+        block_table,
+        context_lens,
+        float(factor),
+        is_causal=is_causal,
+        num_kv_heads=H,
+        num_heads=H_q,
+    )
+    return mx.contiguous(result.reshape(B, H_q, L, D))
+
+
 def flash_attention(
     query: mx.array,
     key: mx.array,

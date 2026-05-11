@@ -37,6 +37,7 @@ target_sources(
   PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/paged_attention.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp
 )
 
@@ -60,6 +61,7 @@ if(MLX_BUILD_METAL)
     SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.metal
     ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.metal
+    ${CMAKE_CURRENT_LIST_DIR}/src/paged_attention.metal
     INCLUDE_DIRS
     ${PROJECT_SOURCE_DIR}
     ${MLX_INCLUDE_DIRS}

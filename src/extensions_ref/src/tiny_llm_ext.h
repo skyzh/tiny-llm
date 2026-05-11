@@ -69,4 +69,31 @@ private:
     int num_heads_;
 };
 
+mx::array paged_attention(const mx::array &q, const mx::array &key_pages, const mx::array &value_pages,
+                          const mx::array &block_table, const mx::array &context_lens, const float scale,
+                          const bool is_causal, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s = {});
+
+class PagedAttention : public mx::Primitive {
+public:
+    explicit PagedAttention(mx::Stream stream, const float scale, const bool is_causal, const int num_kv_heads,
+                            const int num_heads)
+        : mx::Primitive(stream), scale_(scale), is_causal_(is_causal), num_kv_heads_(num_kv_heads), num_heads_(num_heads) {};
+
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &inputs,
+                                                             const std::vector<int> &axes) override {
+        throw std::runtime_error("PagedAttention has no vmap implementation.");
+    }
+
+    const char *name() const override { return "PagedAttention"; }
+
+private:
+    float scale_;
+    bool is_causal_;
+    int num_kv_heads_;
+    int num_heads_;
+};
+
 }  // namespace tiny_llm_ext_ref
