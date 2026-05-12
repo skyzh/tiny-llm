@@ -11,7 +11,7 @@ In this chapter, we will implement the quantized matrix multiplication. Quantiza
 
 ## Why Quantization?
 
-As we learned in the KV Cache chapter, the decode phase of LLM inference is **memory-bandwidth bound**. Let's revisit the arithmetic intensity calculation for the Qwen2-0.5B model:
+As we learned in the KV Cache chapter, the decode phase of LLM inference is **memory-bandwidth bound**. Let's revisit the arithmetic intensity calculation for the Qwen3-0.6B model:
 
 ```plain
 Per-token computation in decode phase:
@@ -300,10 +300,10 @@ pdm run test --week 2 --day 2 -- -k task_3
 ## Task 4: Model Integration
 
 ```
-src/tiny_llm/qwen2_week2.py
+src/tiny_llm/qwen3_week2.py
 ```
 
-Integrate your quantized matmul into the Week 2 Qwen2 model so that inference runs on quantized weights end-to-end.
+Integrate your quantized matmul into the Week 2 Qwen3 model so that inference runs on quantized weights end-to-end.
 
 Change the weight type from `mx.array` to `QuantizedWeights` for all linear layers in attention (`wq/wk/wv/wo`) and MLP (`w_gate/w_up/w_down`). Replace every `linear(x, w)` call with `quantized_linear(x, w)`. In the model loading code, use `QuantizedWeights.from_mlx_layer(...)` to extract quantized weight information from each MLX linear layer, instead of calling `mx.dequantize` to get a full float16 matrix. Make sure the Week 1 loader still dequantizes (since Week 1 layers expect plain `mx.array`), while the Week 2 loader does **not** dequantize.
 
@@ -312,14 +312,14 @@ Note that MLX loads quantized models with `scales` and `biases` stored in **bflo
 You can test your implementation by running:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen2-0.5b
+pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
 ```
 
 You can also benchmark throughput and compare your implementation with the reference solution:
 
 ```bash
-pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b
-pdm bench --solution tiny_llm_ref --loader week2 --model qwen2-0.5b
+pdm bench --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 ```
 
 {{#include copyright.md}}

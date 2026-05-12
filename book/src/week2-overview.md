@@ -1,6 +1,6 @@
 # Week 2: Tiny vLLM
 
-In Week 2 of the course, we will focus on building serving infrastructure for the Qwen2 model. Essentially, this means creating a minimal version of the vLLM project from scratch. By the end of the week, you’ll be able to serve the Qwen2 model efficiently on your Apple Silicon device using the infrastructure we’ve built together.
+In Week 2 of the course, we will focus on building serving infrastructure for the Qwen3 model. Essentially, this means creating a minimal version of the vLLM project from scratch. By the end of the week, you’ll be able to serve the Qwen3 model efficiently on your Apple Silicon device using the infrastructure we’ve built together.
 
 ## What We’ll Cover
 
@@ -48,5 +48,5 @@ https://huggingface.co/docs/transformers/pad_truncation
 https://siboehm.com/articles/22/CUDA-MMM
 https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-metal/ggml-metal.metal
 
-pdm run batch-main --solution ref --model qwen2-7b --prefill-step 16
+pdm run batch-main --solution ref --model qwen3-4b --prefill-step 16
 -->

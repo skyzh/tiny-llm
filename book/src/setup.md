@@ -49,8 +49,7 @@ pdm run test
 
 ## Download the Model Parameters
 
-We will use the Qwen2-7B-Instruct model for this course. It takes ~20GB of memory in week 1 to load the model parameters.
-If you do not have enough memory, you can consider using the smaller 0.5B model.
+We will use the official Qwen3 MLX 4-bit checkpoints for this course. The default model is `Qwen/Qwen3-0.6B-MLX-4bit`, which is small enough for the Week 1 dequantized Python implementation. If you have more memory, you can also try the larger Qwen3 MLX checkpoints.
 
 Follow the guide of [this page](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli) to install the Hugging Face
 CLI (`hf`).
@@ -60,8 +59,9 @@ them with:
 
 ```bash
 hf login
-hf download Qwen/Qwen2-0.5B-Instruct-MLX
-hf download Qwen/Qwen2-7B-Instruct-MLX
+hf download Qwen/Qwen3-0.6B-MLX-4bit
+hf download Qwen/Qwen3-1.7B-MLX-4bit
+hf download Qwen/Qwen3-4B-MLX-4bit
 ```
 
 Then, you can run:

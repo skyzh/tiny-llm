@@ -1,12 +1,12 @@
 # Week 1 Day 3: Grouped Query Attention (GQA)
 
-In day 3, we will implement Grouped Query Attention (GQA). The Qwen2 models use GQA which is an optimization technique for multi-head attention that reduces the computational and memory costs associated with the Key (K) and Value (V) projections. Instead of each Query (Q) head having its own K and V heads (like in Multi-Head Attention, MHA), multiple Q heads share the same K and V heads. Multi-Query Attention (MQA) is a special case of GQA where all Q heads share a single K/V head pair.
+In day 3, we will implement Grouped Query Attention (GQA). The Qwen3 models use GQA which is an optimization technique for multi-head attention that reduces the computational and memory costs associated with the Key (K) and Value (V) projections. Instead of each Query (Q) head having its own K and V heads (like in Multi-Head Attention, MHA), multiple Q heads share the same K and V heads. Multi-Query Attention (MQA) is a special case of GQA where all Q heads share a single K/V head pair.
 
 
 **Readings**
 
 *   [GQA Paper (Training Generalized Multi-Query Transformer Models from Pre-Trained Checkpoints)](https://arxiv.org/abs/2305.13245)
-*   [Qwen layers implementation in mlx-lm](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py)
+*   [Qwen layers implementation in mlx-lm](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py)
 *   [PyTorch API (the case where enable_gqa=True)](https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
 *   [torchtune.modules.MultiHeadAttention](https://pytorch.org/torchtune/0.3/generated/torchtune.modules.MultiHeadAttention.html)
 
@@ -85,21 +85,23 @@ You can test your implementation by running the following command:
 pdm run test --week 1 --day 3 -- -k task_2
 ```
 
-## Task 3: Qwen2 Grouped Query Attention
+## Task 3: Qwen3 Grouped Query Attention
 
-In this task, we will implement the Qwen2 Grouped Query Attention. You will need to modify the following file:
+In this task, we will implement the Qwen3 Grouped Query Attention. You will need to modify the following file:
 
 ```
-src/tiny_llm/qwen2_week1.py
+src/tiny_llm/qwen3_week1.py
 ```
 
-`Qwen2MultiHeadAttention` implements the multi-head attention for Qwen2. You will need to implement the following pseudo code:
+`Qwen3MultiHeadAttention` implements the multi-head attention for Qwen3. You will need to implement the following pseudo code:
 
 ```
 x: B, L, E
-q = linear(x, wq, bq) -> B, L, H_q, D
-k = linear(x, wk, bk) -> B, L, H, D
-v = linear(x, wv, bv) -> B, L, H, D
+q = linear(x, wq) -> B, L, H_q, D
+k = linear(x, wk) -> B, L, H, D
+v = linear(x, wv) -> B, L, H, D
+q = q_norm(q)
+k = k_norm(k)
 q = rope(q, offset=slice(0, L))
 k = rope(k, offset=slice(0, L))
 (transpose as needed)
@@ -108,7 +110,7 @@ x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L, H_q, D ;
 x = linear(x, wo) -> B, L, E
 ```
 
-Keep in mind that you should use non-traditional RoPE.
+Qwen3 attention has no Q/K/V projection bias, and it applies RMSNorm to each Q/K head before RoPE. Keep in mind that you should use non-traditional RoPE.
 
 You can test your implementation by running the following command:
 

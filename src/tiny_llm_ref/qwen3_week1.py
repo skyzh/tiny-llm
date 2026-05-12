@@ -8,41 +8,45 @@ from .embedding import Embedding
 from .quantize import dequantize_linear
 
 
-class Qwen2MultiHeadAttention:
+def assert_dtype(weights: mx.array, dtype: mx.Dtype):
+    if weights.dtype != dtype:
+        raise ValueError(f"{weights.dtype} != {dtype}")
+    else:
+        return weights
+
+
+class Qwen3MultiHeadAttention:
     def __init__(
         self,
         hidden_size: int,
         num_heads: int,
         num_kv_heads: int,
+        head_dim: int,
         wq: mx.array,
         wk: mx.array,
         wv: mx.array,
         wo: mx.array,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
+        q_norm: mx.array,
+        k_norm: mx.array,
         max_seq_len: int = 32768,
         theta: int = 1000000,
+        rms_norm_eps: float = 1e-5,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
-        assert hidden_size % num_heads == 0, (
-            f"hidden_size {hidden_size} must be divisible by num_heads {num_heads}"
-        )
         assert num_heads % num_kv_heads == 0, (
             f"num_heads {num_heads} must be divisible by num_kv_heads {num_kv_heads}"
         )
-        self.head_dim = hidden_size // num_heads
+        self.head_dim = head_dim
         self.scale = mx.rsqrt(self.head_dim)
         self.wq = wq
         self.wk = wk
         self.wv = wv
         self.wo = wo
-        self.bq = bq
-        self.bk = bk
-        self.bv = bv
         self.rope = RoPE(self.head_dim, max_seq_len, theta)
+        self.q_norm = RMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
+        self.k_norm = RMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
 
     def __call__(
         self,
@@ -50,13 +54,13 @@ class Qwen2MultiHeadAttention:
         mask: mx.array | str | None = None,
     ) -> mx.array:
         B, L, _ = x.shape
-        projection_q = linear(x, self.wq, bias=self.bq).reshape(
-            B, L, self.num_heads, self.head_dim
-        )
-        projection_k = linear(x, self.wk, bias=self.bk).reshape(
+        projection_q = linear(x, self.wq).reshape(B, L, self.num_heads, self.head_dim)
+        projection_k = linear(x, self.wk).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        projection_v = linear(x, self.wv, bias=self.bv).reshape(
+        projection_q = self.q_norm(projection_q)
+        projection_k = self.k_norm(projection_k)
+        projection_v = linear(x, self.wv).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
         projection_q = self.rope(projection_q, offset=slice(0, L))
@@ -71,11 +75,11 @@ class Qwen2MultiHeadAttention:
             scale=self.scale,
             mask=mask,
         ).astype(x.dtype)
-        x = x.transpose(0, 2, 1, 3).reshape(B, L, self.hidden_size)
+        x = x.transpose(0, 2, 1, 3).reshape(B, L, self.num_heads * self.head_dim)
         return linear(x, self.wo)
 
 
-class Qwen2MLP:
+class Qwen3MLP:
     def __init__(
         self,
         dim: int,
@@ -94,21 +98,21 @@ class Qwen2MLP:
         return linear(silu(linear(x, self.w_gate)) * linear(x, self.w_up), self.w_down)
 
 
-class Qwen2TransformerBlock:
+class Qwen3TransformerBlock:
     def __init__(
         self,
         num_attention_heads: int,
         num_kv_heads: int,
         hidden_size: int,
+        head_dim: int,
         intermediate_size: int,
         rms_norm_eps: float,
         wq: mx.array,
         wk: mx.array,
         wv: mx.array,
         wo: mx.array,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
+        q_norm: mx.array,
+        k_norm: mx.array,
         w_gate: mx.array,
         w_up: mx.array,
         w_down: mx.array,
@@ -119,24 +123,25 @@ class Qwen2TransformerBlock:
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
-        self.mlp = Qwen2MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
+        self.mlp = Qwen3MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
         self.input_layernorm = RMSNorm(hidden_size, w_input_layernorm, eps=rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(
             hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
         )
-        self.self_attn = Qwen2MultiHeadAttention(
+        self.self_attn = Qwen3MultiHeadAttention(
             num_heads=num_attention_heads,
             hidden_size=hidden_size,
             num_kv_heads=num_kv_heads,
+            head_dim=head_dim,
             wq=wq,
             wk=wk,
             wv=wv,
             wo=wo,
-            bq=bq,
-            bk=bk,
-            bv=bv,
+            q_norm=q_norm,
+            k_norm=k_norm,
             max_seq_len=max_seq_len,
             theta=theta,
+            rms_norm_eps=rms_norm_eps,
         )
 
     def __call__(
@@ -151,7 +156,7 @@ class Qwen2TransformerBlock:
         return out
 
 
-class Qwen2ModelWeek1:
+class Qwen3ModelWeek1:
     def __init__(
         self,
         mlx_model: Any,
@@ -159,58 +164,80 @@ class Qwen2ModelWeek1:
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size
-        precision = mx.float16
+        precision = mx.bfloat16
         self.precision = precision
 
         self.embedding = Embedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
-            weight=dequantize_linear(mlx_model.model.embed_tokens).astype(precision),
+            weight=assert_dtype(
+                dequantize_linear(mlx_model.model.embed_tokens), dtype=precision
+            ),
         )
         self.layers_inner = []
 
         for i in range(mlx_model.args.num_hidden_layers):
-            wq = dequantize_linear(mlx_model.model.layers[i].self_attn.q_proj)
-            wk = dequantize_linear(mlx_model.model.layers[i].self_attn.k_proj)
-            wv = dequantize_linear(mlx_model.model.layers[i].self_attn.v_proj)
-            wo = dequantize_linear(mlx_model.model.layers[i].self_attn.o_proj)
-            w_gate = dequantize_linear(mlx_model.model.layers[i].mlp.gate_proj)
-            w_up = dequantize_linear(mlx_model.model.layers[i].mlp.up_proj)
-            w_down = dequantize_linear(mlx_model.model.layers[i].mlp.down_proj)
-
-            layer = Qwen2TransformerBlock(
+            layer = Qwen3TransformerBlock(
                 num_attention_heads=mlx_model.args.num_attention_heads,
                 num_kv_heads=mlx_model.args.num_key_value_heads,
                 hidden_size=mlx_model.args.hidden_size,
+                head_dim=mlx_model.args.head_dim,
                 intermediate_size=mlx_model.args.intermediate_size,
                 rms_norm_eps=mlx_model.args.rms_norm_eps,
-                wq=wq.astype(precision),
-                wk=wk.astype(precision),
-                wv=wv.astype(precision),
-                wo=wo.astype(precision),
-                bq=mlx_model.model.layers[i].self_attn.q_proj.bias.astype(precision),
-                bk=mlx_model.model.layers[i].self_attn.k_proj.bias.astype(precision),
-                bv=mlx_model.model.layers[i].self_attn.v_proj.bias.astype(precision),
-                w_gate=w_gate.astype(precision),
-                w_up=w_up.astype(precision),
-                w_down=w_down.astype(precision),
-                w_input_layernorm=mlx_model.model.layers[
-                    i
-                ].input_layernorm.weight.astype(precision),
-                w_post_attention_layernorm=mlx_model.model.layers[
-                    i
-                ].post_attention_layernorm.weight.astype(precision),
+                wq=assert_dtype(
+                    dequantize_linear(mlx_model.model.layers[i].self_attn.q_proj),
+                    dtype=precision,
+                ),
+                wk=assert_dtype(
+                    dequantize_linear(mlx_model.model.layers[i].self_attn.k_proj),
+                    dtype=precision,
+                ),
+                wv=assert_dtype(
+                    dequantize_linear(mlx_model.model.layers[i].self_attn.v_proj),
+                    dtype=precision,
+                ),
+                wo=assert_dtype(
+                    dequantize_linear(mlx_model.model.layers[i].self_attn.o_proj),
+                    dtype=precision,
+                ),
+                q_norm=assert_dtype(
+                    mlx_model.model.layers[i].self_attn.q_norm.weight, dtype=precision
+                ),
+                k_norm=assert_dtype(
+                    mlx_model.model.layers[i].self_attn.k_norm.weight, dtype=precision
+                ),
+                w_gate=assert_dtype(
+                    dequantize_linear(mlx_model.model.layers[i].mlp.gate_proj),
+                    dtype=precision,
+                ),
+                w_up=assert_dtype(
+                    dequantize_linear(mlx_model.model.layers[i].mlp.up_proj),
+                    dtype=precision,
+                ),
+                w_down=assert_dtype(
+                    dequantize_linear(mlx_model.model.layers[i].mlp.down_proj),
+                    dtype=precision,
+                ),
+                w_input_layernorm=assert_dtype(
+                    mlx_model.model.layers[i].input_layernorm.weight, dtype=precision
+                ),
+                w_post_attention_layernorm=assert_dtype(
+                    mlx_model.model.layers[i].post_attention_layernorm.weight,
+                    dtype=precision,
+                ),
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
             )
             self.layers_inner.append(layer)
         self.norm = RMSNorm(
             mlx_model.args.hidden_size,
-            weight=mlx_model.model.norm.weight.astype(precision),
+            weight=assert_dtype(mlx_model.model.norm.weight, dtype=precision),
             eps=mlx_model.args.rms_norm_eps,
         )
         if not mlx_model.args.tie_word_embeddings:
-            self.w_lm_head = dequantize_linear(mlx_model.lm_head)
+            self.w_lm_head = assert_dtype(
+                dequantize_linear(mlx_model.lm_head), precision
+            )
         else:
             self.w_lm_head = None
         self.mlx_model = mlx_model

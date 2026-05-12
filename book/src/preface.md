@@ -27,9 +27,9 @@ and MLX's implementation to ensure correctness.
 
 ## Course Structure
 
-This course is divided into 3 weeks. We will serve the Qwen2-7B-Instruct model and optimize it throughout the course.
+This course is divided into 3 weeks. We will serve Qwen3 MLX models and optimize the serving path throughout the course.
 
-- Week 1: serve Qwen2 with purely matrix manipulation APIs. Just Python.
+- Week 1: serve Qwen3 with purely matrix manipulation APIs. Just Python.
 - Week 2: optimizations, implement C++/Metal custom kernels to make the model run faster.
 - Week 3: more optimizations, batch the requests to serve the model with high throughput.
 

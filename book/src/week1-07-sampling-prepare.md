@@ -24,7 +24,7 @@ To implement temperature sampling, simply divide the logprobs by the temperature
 randomly select the next token.
 
 ```bash
-pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b --sampler-temp 0.5
+pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b --sampler-temp 0.5
 ```
 
 **Top-k Sampling**
@@ -36,7 +36,7 @@ You can use `mx.argpartition` to partition the output so that you can know the i
 mask those logprobs outside the top-k with `-mx.inf`. After that, do temperature sampling.
 
 ```bash
-pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b --sampler-temp 0.5 --sampler-top-k 10
+pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b --sampler-temp 0.5 --sampler-top-k 10
 ```
 
 **Top-p (Nucleus) Sampling**
@@ -49,12 +49,12 @@ probability to lowest), and then, do a `cumsum` over the sorted logprobs to get 
 those logprobs outside the top-p with `-mx.inf`. After that, do temperature sampling.
 
 ```bash
-pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b --sampler-temp 0.5 --sampler-top-p 0.9
+pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b --sampler-temp 0.5 --sampler-top-p 0.9
 ```
 
 ## Task 2: Prepare for Week 2
 
-In week 2, we will optimize the serving infrastructure of the Qwen2 model. We will write some C++ code and Metal kernel
+In week 2, we will optimize the serving infrastructure of the Qwen3 model. We will write some C++ code and Metal kernel
 to make some operations run faster. You will need Xcode and its command-line tools, which include the Metal compiler,
 to compile the C++ code and Metal kernels.
 
@@ -99,7 +99,7 @@ If you are not familiar with C++ or Metal programming, we also suggest doing som
 them. You can implement some element-wise operations like `exp`, `sin`, `cos` and replace the MLX ones in your model
 implementation.
 
-That's all for week 1! We have implemented all the components to serve the Qwen2 model. Now we are ready to start week 2,
+That's all for week 1! We have implemented all the components to serve the Qwen3 model. Now we are ready to start week 2,
 where we will optimize the serving infrastructure and make it run blazing fast on your Apple Silicon device.
 
 {{#include copyright.md}}
