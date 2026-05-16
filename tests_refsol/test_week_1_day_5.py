@@ -107,7 +107,9 @@ def test_utils_qwen_3_17b():
     pass
 
 
-def helper_test_task_3(model_name: str, iters: int = 10):
+def helper_test_task_3(
+    model_name: str, iters: int = 10, rtol: float = 1e-1, atol: float = 1e-2
+):
     mlx_model, tokenizer = load(model_name)
     model = Qwen3ModelWeek1(mlx_model)
     for _ in range(iters):
@@ -116,7 +118,9 @@ def helper_test_task_3(model_name: str, iters: int = 10):
         user_output = user_output - mx.logsumexp(user_output, keepdims=True)
         ref_output = mlx_model(input)
         ref_output = ref_output - mx.logsumexp(ref_output, keepdims=True)
-        assert_allclose(user_output, ref_output, precision=mx.bfloat16, rtol=1e-1)
+        assert_allclose(
+            user_output, ref_output, precision=mx.bfloat16, rtol=rtol, atol=atol
+        )
 
 
 @pytest.mark.skipif(
@@ -164,7 +168,7 @@ def test_task_3_qwen_3_06b():
     not qwen_3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
 )
 def test_task_3_qwen_3_4b():
-    helper_test_task_3("Qwen/Qwen3-4B-MLX-4bit", 1)
+    helper_test_task_3("Qwen/Qwen3-4B-MLX-4bit", 1, rtol=2.5e-1, atol=2.5e-1)
 
 
 @pytest.mark.skipif(

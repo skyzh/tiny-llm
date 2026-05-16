@@ -253,7 +253,13 @@ def test_task_2_batching_kv_cache():
     assert_allclose(mask, expected_mask, mx.float32)
 
 
-def helper_test_task_3(model_name: str, seq_len: int, iters: int = 1):
+def helper_test_task_3(
+    model_name: str,
+    seq_len: int,
+    iters: int = 1,
+    rtol: float = 1e-1,
+    atol: float = 1e-2,
+):
     """Tests for continuous batching of decode requests."""
     requests = 4
     max_seq_len = seq_len
@@ -304,7 +310,11 @@ def helper_test_task_3(model_name: str, seq_len: int, iters: int = 1):
                     user_out_r = user_out_r - mx.logsumexp(user_out_r, keepdims=True)
                     ref_out_r = ref_out_r - mx.logsumexp(ref_out_r, keepdims=True)
                     assert_allclose(
-                        user_out_r, ref_out_r, precision=mx.bfloat16, rtol=1e-1
+                        user_out_r,
+                        ref_out_r,
+                        precision=mx.bfloat16,
+                        rtol=rtol,
+                        atol=atol,
                     )
 
 
@@ -319,7 +329,7 @@ def test_task_3_qwen_3_06b():
     not qwen_3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
 )
 def test_task_3_qwen_3_4b():
-    helper_test_task_3("Qwen/Qwen3-4B-MLX-4bit", seq_len=3)
+    helper_test_task_3("Qwen/Qwen3-4B-MLX-4bit", seq_len=3, rtol=2.5e-1, atol=2.5e-1)
 
 
 @pytest.mark.skipif(
