@@ -18,8 +18,5 @@
 - [Quantized Matmul](./week2-02-quantized-matmul.md)
 - [Flash Attention](./week2-04-flash-attention.md)
 - [Paged Attention](./week3-02-paged-attention-part2.md)
-- [Mixture of Experts](./week3-03-moe.md)
-- [Router](./week3-03-moe.md)
-- [Expert](./week3-03-moe.md)
 
 {{#include copyright.md}}
