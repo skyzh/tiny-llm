@@ -8,10 +8,6 @@ from .embedding import Embedding
 from .quantize import dequantize_linear
 
 
-def qwen3_head_rms_norm(x: mx.array, weight: mx.array, eps: float = 1e-5) -> mx.array:
-    return mx.fast.rms_norm(x, weight, eps=eps)
-
-
 def assert_dtype(weights: mx.array, dtype: mx.Dtype):
     if weights.dtype != dtype:
         raise ValueError(f"{weights.dtype} != {dtype}")
@@ -63,10 +59,10 @@ class Qwen3MultiHeadAttention:
         projection_k = linear(x, self.wk).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        projection_q = qwen3_head_rms_norm(
+        projection_q = mx.fast.rms_norm(
             projection_q, self.q_norm, eps=self.rms_norm_eps
         )
-        projection_k = qwen3_head_rms_norm(
+        projection_k = mx.fast.rms_norm(
             projection_k, self.k_norm, eps=self.rms_norm_eps
         )
         projection_v = linear(x, self.wv).reshape(

@@ -12,7 +12,7 @@ In this course, a checkpoint means the saved model package we download from Hugg
 
 * Attention, Multi-Head Attention, and Grouped/Multi Query Attention
 * Positional Embeddings and RoPE
-* Use Qwen3's per-head Q/K normalization in attention, then implement RMSNorm ourselves
+* Use `mx.fast.rms_norm` for Qwen3's per-head Q/K normalization in attention, then implement RMSNorm ourselves
 * Implement the MLP layer, put the attention layers together, and implement the whole Transformer model
 * Load the Qwen3 model parameters and generate text
 

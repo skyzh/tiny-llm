@@ -100,8 +100,8 @@ x: B, L, E
 q = linear(x, wq) -> B, L, H_q, D
 k = linear(x, wk) -> B, L, H, D
 v = linear(x, wv) -> B, L, H, D
-q = qwen3_head_rms_norm(q, q_norm, eps=rms_norm_eps)
-k = qwen3_head_rms_norm(k, k_norm, eps=rms_norm_eps)
+q = mx.fast.rms_norm(q, q_norm, eps=rms_norm_eps)
+k = mx.fast.rms_norm(k, k_norm, eps=rms_norm_eps)
 q = rope(q, offset=slice(0, L))
 k = rope(k, offset=slice(0, L))
 (transpose as needed)
@@ -110,7 +110,7 @@ x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L, H_q, D ;
 x = linear(x, wo) -> B, L, E
 ```
 
-Qwen3 attention has no Q/K/V projection bias, and it applies RMSNorm to each Q/K head before RoPE. We will implement the general `RMSNorm` layer on day 4, so for today use the provided `qwen3_head_rms_norm` helper in `qwen3_week1.py` and treat it as part of the Qwen3 attention primitive. Keep in mind that you should use non-traditional RoPE.
+Qwen3 attention has no Q/K/V projection bias, and it applies RMSNorm to each Q/K head before RoPE. We will implement the general `RMSNorm` layer on day 4, so for today call `mx.fast.rms_norm` directly for `q_norm` and `k_norm`. Keep in mind that you should use non-traditional RoPE.
 
 You can test your implementation by running the following command:
 

@@ -8,10 +8,6 @@ from .embedding import Embedding
 from .quantize import dequantize_linear
 
 
-def qwen3_head_rms_norm(x: mx.array, weight: mx.array, eps: float = 1e-5) -> mx.array:
-    return mx.fast.rms_norm(x, weight, eps=eps)
-
-
 class Qwen3MultiHeadAttention:
     def __init__(
         self,
