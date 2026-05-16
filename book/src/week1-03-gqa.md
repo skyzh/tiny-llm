@@ -100,8 +100,8 @@ x: B, L, E
 q = linear(x, wq) -> B, L, H_q, D
 k = linear(x, wk) -> B, L, H, D
 v = linear(x, wv) -> B, L, H, D
-q = mx.fast.rms_norm(q, q_norm, eps=rms_norm_eps)
-k = mx.fast.rms_norm(k, k_norm, eps=rms_norm_eps)
+q = q_norm(q)
+k = k_norm(k)
 q = rope(q, offset=slice(0, L))
 k = rope(k, offset=slice(0, L))
 (transpose as needed)
