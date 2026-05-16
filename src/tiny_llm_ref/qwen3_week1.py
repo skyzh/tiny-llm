@@ -8,6 +8,10 @@ from .embedding import Embedding
 from .quantize import dequantize_linear
 
 
+def qwen3_head_rms_norm(x: mx.array, weight: mx.array, eps: float = 1e-5) -> mx.array:
+    return mx.fast.rms_norm(x, weight, eps=eps)
+
+
 def assert_dtype(weights: mx.array, dtype: mx.Dtype):
     if weights.dtype != dtype:
         raise ValueError(f"{weights.dtype} != {dtype}")
@@ -45,8 +49,9 @@ class Qwen3MultiHeadAttention:
         self.wv = wv
         self.wo = wo
         self.rope = RoPE(self.head_dim, max_seq_len, theta)
-        self.q_norm = RMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
-        self.k_norm = RMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
+        self.q_norm = q_norm
+        self.k_norm = k_norm
+        self.rms_norm_eps = rms_norm_eps
 
     def __call__(
         self,
@@ -58,8 +63,12 @@ class Qwen3MultiHeadAttention:
         projection_k = linear(x, self.wk).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        projection_q = self.q_norm(projection_q)
-        projection_k = self.k_norm(projection_k)
+        projection_q = qwen3_head_rms_norm(
+            projection_q, self.q_norm, eps=self.rms_norm_eps
+        )
+        projection_k = qwen3_head_rms_norm(
+            projection_k, self.k_norm, eps=self.rms_norm_eps
+        )
         projection_v = linear(x, self.wv).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )

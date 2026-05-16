@@ -133,6 +133,8 @@ output
 
 You can access the number of layers, hidden size, head dimension, and other model parameters from `mlx_model.args` which is defined in [ModelArgs](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py). You can reach the loaded weights from `mlx_model.model`; the layer names are easiest to inspect from the Qwen3 MLX checkpoint metadata on Hugging Face.
 
+By this point, you have implemented `RMSNorm` yourself. If your day 3 attention path still uses the provided `qwen3_head_rms_norm` helper for `q_norm` and `k_norm`, you can now replace those calls with `RMSNorm(head_dim, q_norm, eps=...)` and `RMSNorm(head_dim, k_norm, eps=...)`. They implement the same formula; the helper existed only to avoid teaching RMSNorm before the GQA chapter.
+
 Note that different
 size of the Qwen3 models use different strategies to map the embeddings back to the token space. Some checkpoints
 directly use the `Embedding::as_linear` layer, while others have a separate `lm_head` linear layer. You can

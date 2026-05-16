@@ -11,6 +11,8 @@ In this task, we will implement the `RMSNorm` layer.
 src/tiny_llm/layer_norm.py
 ```
 
+Day 3 used the provided `qwen3_head_rms_norm` helper so that the GQA chapter could stay focused on attention. This task implements the same normalization rule as a reusable layer. After this point, the transformer block, final model norm, and any Q/K normalization path can use your own `RMSNorm` implementation instead of treating normalization as a built-in helper.
+
 **📚 Readings**
 
 * [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)

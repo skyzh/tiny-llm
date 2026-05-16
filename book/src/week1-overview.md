@@ -6,14 +6,14 @@ model using mlx's matrix APIs.
 
 We will use `Qwen/Qwen3-0.6B-MLX-4bit` for this week. Week 1 dequantizes model parameters into bfloat16, so start with the 0.6B checkpoint before trying larger Qwen3 models.
 
-The MLX checkpoint we downloaded in the setup is an int4 quantized version of the original bfloat16 model.
+In this course, a checkpoint means the saved model package we download from Hugging Face: config, tokenizer files, quantized weights, and the metadata needed by `mlx_lm.load(...)` to rebuild the model. The MLX checkpoint we downloaded in the setup is an int4 quantized version of the original bfloat16 model.
 
 ## What We will Cover
 
 * Attention, Multi-Head Attention, and Grouped/Multi Query Attention
 * Positional Embeddings and RoPE
-* Put the attention layers together and implement the whole Transformer block
-* Implement the MLP layer and the whole Transformer model
+* Use Qwen3's per-head Q/K normalization in attention, then implement RMSNorm ourselves
+* Implement the MLP layer, put the attention layers together, and implement the whole Transformer model
 * Load the Qwen3 model parameters and generate text
 
 ## What We will Not Cover
