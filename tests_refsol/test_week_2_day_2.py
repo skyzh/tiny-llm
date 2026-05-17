@@ -25,14 +25,15 @@ def quantized_matmul_outputs(
             b=w_q,
             transpose_b=True,
         )
-        dequantized_weight = mx.dequantize(
+        ref_out = mx.quantized_matmul(
+            input.astype(mx.float32),
             w_q,
-            scales,
-            biases,
+            scales.astype(mx.float32),
+            biases.astype(mx.float32),
             group_size=group_size,
             bits=4,
+            transpose=True,
         )
-        ref_out = input @ dequantized_weight.T
         return user_out, ref_out
 
 
