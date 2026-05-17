@@ -15,6 +15,7 @@ def assert_allclose(
     rtol: float | None = None,
     atol: float | None = None,
     message: str | None = None,
+    max_allowed_mismatches: int = 0,
 ):
     if a.dtype == mx.bfloat16:
         a = a.astype(mx.float32)
@@ -36,7 +37,10 @@ def assert_allclose(
     assert a.shape == b.shape, f"shape mismatch: {a.shape} vs {b.shape}"
     if not np.allclose(a, b, rtol=rtol, atol=atol):
         diff = np.invert(np.isclose(a, b, rtol=rtol, atol=atol))
-        if diff.size > 10000 and np.sum(diff) <= 32:
+        if max_allowed_mismatches > 0 and diff.size > 10000:
+            if np.sum(diff) <= max_allowed_mismatches:
+                return
+        if diff.size > 10000 and np.sum(diff) <= 3:
             # if only a small number of elements are different in a large array, probably fine
             return
         with np.printoptions(precision=3, suppress=True):

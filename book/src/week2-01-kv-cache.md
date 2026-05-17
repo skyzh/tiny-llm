@@ -21,8 +21,8 @@ x: B, L, E
 q = linear(x, wq) -> B, L, H_q, D
 k = linear(x, wk) -> B, L, H, D
 v = linear(x, wv) -> B, L, H, D
-q = q_norm(q)
-k = k_norm(k)
+q = rms_norm(q, q_norm)
+k = rms_norm(k, k_norm)
 q = rope(q, offset=slice(offset, offset + L))
 k = rope(k, offset=slice(offset, offset + L))
 (transpose as needed)
@@ -137,8 +137,8 @@ x: B, L', E
 q = linear(x, wq) -> B, L', H_q, D
 k = linear(x, wk) -> B, L', H, D
 v = linear(x, wv) -> B, L', H, D
-q = q_norm(q)
-k = k_norm(k)
+q = rms_norm(q, q_norm)
+k = rms_norm(k, k_norm)
 q = rope(q, offset=slice(offset, offset + L'))
 k = rope(k, offset=slice(offset, offset + L'))
 (transpose as needed)
