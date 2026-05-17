@@ -13,7 +13,7 @@ In Week 2 of the course, we will focus on building serving infrastructure for th
     * Implementing chunked prefill
     * Implementing continuous batching
 
-Additionally, the repo includes skeleton code for the Qwen3 model. If your device supports the bfloat16 data type (note: M1 chips do not), you’re encouraged to try implementing it and experiment with the Qwen3-series models as well.
+This week continues with Qwen3 as the main model. The serving code uses the official Qwen3 MLX 4-bit checkpoints, preserves their bfloat16 tensors, and builds the KV cache, custom kernels, and batching path around that model family.
 
 {{#include copyright.md}}
 

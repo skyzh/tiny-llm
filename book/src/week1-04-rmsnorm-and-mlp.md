@@ -16,7 +16,7 @@ Day 3 used `mx.fast.rms_norm` directly so that the GQA chapter could stay focuse
 **📚 Readings**
 
 * [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)
-* [Qwen3 layers implementation in mlx-lm (includes RMSNorm)]([https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py](https://github.com/ml-explore/mlx-lm/blob/bcb96db87f218453774f8808159012f15fc0dc7b/mlx_lm/models/qwen3.py)) - See `RMSNorm`.
+* [Qwen3 layers implementation in mlx-lm (includes RMSNorm)](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py) - See `RMSNorm`.
 
 
 RMSNorm is defined as:
