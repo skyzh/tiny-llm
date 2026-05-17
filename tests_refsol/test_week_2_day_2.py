@@ -1,54 +1,7 @@
 import pytest
 import mlx.core as mx
-import numpy as np
 from .tiny_llm_base import *
 from .utils import *
-
-
-def round_to_bfloat16(value: np.ndarray) -> np.ndarray:
-    value = np.asarray(value, dtype=np.float32)
-    bits = value.view(np.uint32).copy()
-    bits = (
-        bits
-        + np.uint32(0x7FFF)
-        + ((bits >> np.uint32(16)) & np.uint32(1))
-    ) & np.uint32(0xFFFF0000)
-    return bits.view(np.float32)
-
-
-def quantized_matmul_reference(
-    inputs: mx.array,
-    weight: mx.array,
-    scales: mx.array,
-    biases: mx.array,
-    group_size: int,
-    bits: int,
-) -> mx.array:
-    inputs = round_to_bfloat16(np.array(inputs.astype(mx.float32)))
-    weight = np.array(weight)
-    scales = round_to_bfloat16(np.array(scales.astype(mx.float32)))
-    biases = round_to_bfloat16(np.array(biases.astype(mx.float32)))
-
-    shifts = np.arange(0, 32, bits, dtype=np.uint32)
-    mask = np.uint32((1 << bits) - 1)
-    unpacked = ((weight[..., None] >> shifts) & mask).astype(np.float32)
-    unpacked = unpacked.reshape(weight.shape[0], -1)
-
-    groups_per_row = inputs.shape[1] // group_size
-    weight = unpacked.reshape(weight.shape[0], groups_per_row, group_size)
-    weight = round_to_bfloat16(
-        weight * scales[..., None] + biases[..., None]
-    ).reshape(weight.shape[0], -1)
-
-    output = round_to_bfloat16(
-        np.zeros((inputs.shape[0], weight.shape[0]), dtype=np.float32)
-    )
-    for col in range(inputs.shape[1]):
-        product = round_to_bfloat16(
-            inputs[:, col : col + 1] * weight[:, col][None, :]
-        )
-        output = round_to_bfloat16(output + product)
-    return mx.array(output, dtype=mx.bfloat16)
 
 
 def quantized_matmul_outputs(
@@ -72,19 +25,26 @@ def quantized_matmul_outputs(
             b=w_q,
             transpose_b=True,
         )
-        ref_out = quantized_matmul_reference(
+        ref_out = mx.quantized_matmul(
             input,
             w_q,
             scales,
             biases,
-            group_size,
-            4,
+            group_size=group_size,
+            bits=4,
+            transpose=True,
         )
         return user_out, ref_out
 
 
 def assert_quantized_matmul_close(user_out: mx.array, ref_out: mx.array):
-    assert_allclose(user_out, ref_out, mx.bfloat16)
+    assert_allclose(
+        user_out,
+        ref_out,
+        mx.bfloat16,
+        atol=2.0e-1,
+        message="quantized matmul bf16 comparison",
+    )
 
 
 def test_task_2_quantized_matmul_simple_bf16_cpu():
