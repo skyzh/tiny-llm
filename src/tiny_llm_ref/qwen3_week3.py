@@ -9,7 +9,6 @@ from .embedding import Embedding
 from .quantize import dequantize_linear, QuantizedWeights, quantized_linear
 from .kv_cache import TinyKvCache
 from .paged_kv_cache import TinyKvPagedCache, TinyKvPagedPool
-from .qwen3_week2 import Qwen3MLP
 
 
 class Qwen3PagedMultiHeadAttention:
@@ -92,6 +91,28 @@ class Qwen3PagedMultiHeadAttention:
         ).astype(x.dtype)
         x = x.transpose(0, 2, 1, 3).reshape(B, L, self.num_heads * self.head_dim)
         return quantized_linear(x, self.wo)
+
+
+class Qwen3MLP:
+    def __init__(
+        self,
+        dim: int,
+        hidden_dim: int,
+        w_gate: QuantizedWeights,
+        w_up: QuantizedWeights,
+        w_down: QuantizedWeights,
+    ):
+        self.dim = dim
+        self.hidden_dim = hidden_dim
+        self.w_gate = w_gate
+        self.w_up = w_up
+        self.w_down = w_down
+
+    def __call__(self, x: mx.array) -> mx.array:
+        return quantized_linear(
+            silu(quantized_linear(x, self.w_gate)) * quantized_linear(x, self.w_up),
+            self.w_down,
+        )
 
 
 class Qwen3TransformerBlock:
