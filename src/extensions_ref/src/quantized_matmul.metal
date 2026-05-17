@@ -11,12 +11,12 @@ template <typename T>
     device const int &M [[buffer(5)]],
     device const int &N [[buffer(6)]],
     device const int &K [[buffer(7)]],
-    device const int &group_size [[buffer(8)]],
     uint3 group_id [[threadgroup_position_in_grid]],
     uint3 thread_id [[thread_position_in_threadgroup]],
     uint3 threads_per_threadgroup [[threads_per_threadgroup]],
     [[maybe_unused]] threadgroup char * shmem [[threadgroup(0)]]) {
     const int bits = 4;
+    const int group_size = 128;
     const int packs_per_item = 32 / bits;
     const int groups_per_row = N / group_size;
     // Each thread processes an element in the output matrix

@@ -14,6 +14,11 @@
 
 namespace tiny_llm_ext_ref {
 
+namespace {
+constexpr int kGroupSize = 128;
+constexpr int kBits = 4;
+}  // namespace
+
 mx::array quantized_matmul(const mx::array &scales,         // Input array scales
                            const mx::array &biases,         // Input array biases
                            const int group_size,            // Group size
@@ -41,11 +46,11 @@ mx::array quantized_matmul(const mx::array &scales,         // Input array scale
     if (b.shape().size() != 2) {
         throw std::runtime_error("quantized_matmul: b must be a 2D array");
     }
-    if (bits != 4) {
+    if (bits != kBits) {
         throw std::runtime_error("quantized_matmul: bits must be 4");
     }
     const int packs_per_item = 32 / bits;
-    if (group_size != 128) {
+    if (group_size != kGroupSize) {
         throw std::runtime_error("quantized_matmul: group_size must be 128");
     }
     auto out_shape = a.shape();
@@ -77,14 +82,14 @@ mx::array quantized_matmul(const mx::array &scales,         // Input array scale
         /* const mx::Shape& shape = */ out_shape,
         /* mx::Dtype dtype = */ a.dtype(),
         /* std::shared_ptr<mx::Primitive> primitive = */
-        std::make_shared<QuantizedMatmul>(to_stream(s), group_size, bits),
+        std::make_shared<QuantizedMatmul>(to_stream(s), bits),
         /* const std::vector<mx::array>& inputs = */ {scales, biases, a, b});
 }
 
 void quantized_matmul_impl(
     const mx::array &scales, const mx::array &biases,
     const mx::array &a, const mx::array &b,
-    mx::array &out, int group_size, int bits, mx::Stream stream) {
+    mx::array &out, int bits, mx::Stream stream) {
 
     out.set_data(mx::allocator::malloc(out.nbytes()));
     auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -95,19 +100,19 @@ void quantized_matmul_impl(
     encoder.set_output_array(out);
 
     encoder.dispatch([out_ptr = out.data<mx::bfloat16_t>(), out_shape = out.shape(), out_strides = out.strides(),
-        group_size = group_size, bits = bits,
+        bits = bits,
         a = mx::array::unsafe_weak_copy(a), b = mx::array::unsafe_weak_copy(b),
         scales = mx::array::unsafe_weak_copy(scales), biases = mx::array::unsafe_weak_copy(biases)]() {
 
-        // each `group_size` continuous weighted elements are packed into a group and each weight is quantized into `bits` bits
-        // thus each `group_size` continuous weighted elements takes `group_size * bits / 32` uint32_t elements in b
-        // when decoding the group of weights, the scales and biases are repeated for `group_size` times (shared by all elements in the group)
+        // each `kGroupSize` continuous weighted elements are packed into a group and each weight is quantized into `bits` bits
+        // thus each `kGroupSize` continuous weighted elements takes `kGroupSize * bits / 32` uint32_t elements in b
+        // when decoding the group of weights, the scales and biases are repeated for `kGroupSize` times (shared by all elements in the group)
         int m = a.shape()[0], n = a.shape()[1], k = b.shape()[0];
         
         // row => group => item => pack
-        const int group_per_row = n / group_size;   // b[k, :] = [ group_0, group_1, ..., group_(group_per_row-1) ]
+        const int group_per_row = n / kGroupSize;   // b[k, :] = [ group_0, group_1, ..., group_(group_per_row-1) ]
         const int packs_per_item = 32 / bits;   // each uint32_t element can store `packs_per_item` packed elements
-        const int items_per_group = group_size / packs_per_item;   // each group contains `items_per_group` uint32_t elements
+        const int items_per_group = kGroupSize / packs_per_item;   // each group contains `items_per_group` uint32_t elements
 
         const mx::bfloat16_t *a_ptr = a.data<mx::bfloat16_t>(),
                 *scales_ptr = scales.data<mx::bfloat16_t>(), *biases_ptr = biases.data<mx::bfloat16_t>();
@@ -124,8 +129,8 @@ void quantized_matmul_impl(
                     float scale = static_cast<float>(scales_ptr[scales_idx]);
                     float bias = static_cast<float>(biases_ptr[biases_idx]);
 
-                    int64_t a_idx = mx::elem_to_loc(i * n + group_idx * group_size, a.shape(), a.strides());
-                    int64_t b_idx = mx::elem_to_loc((j * n + group_idx * group_size) / packs_per_item, b.shape(), b.strides());
+                    int64_t a_idx = mx::elem_to_loc(i * n + group_idx * kGroupSize, a.shape(), a.strides());
+                    int64_t b_idx = mx::elem_to_loc((j * n + group_idx * kGroupSize) / packs_per_item, b.shape(), b.strides());
 
                     for (int item_idx = 0; item_idx < items_per_group; item_idx++) {
                         uint32_t b_val = b_ptr[b_idx];   // fetch one uint32_t element in current group (item), so we use type uint32_t to store it
@@ -159,7 +164,7 @@ void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector
     auto &b = inputs[3];
     auto &out = outputs[0];
 
-    quantized_matmul_impl(scales, biases, a, b, out, group_size_, bits_, stream());
+    quantized_matmul_impl(scales, biases, a, b, out, bits_, stream());
 }
 
 void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -201,7 +206,7 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     int N = a.shape()[1];
     int K = b.shape()[0];
 
-    if (N % group_size_ != 0) {
+    if (N % kGroupSize != 0) {
         throw std::runtime_error("quantized_matmul: N must be divisible by group_size");
     }
 
@@ -209,7 +214,6 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     compute_encoder.set_bytes(M, 5);
     compute_encoder.set_bytes(N, 6);
     compute_encoder.set_bytes(K, 7);
-    compute_encoder.set_bytes(group_size_, 8);
 
     size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
     const int x_size = 32;

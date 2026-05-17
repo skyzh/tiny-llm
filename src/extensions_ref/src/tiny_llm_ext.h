@@ -21,8 +21,8 @@ mx::array quantized_matmul(const mx::array &scales,   // Input array scales
 
 class QuantizedMatmul : public mx::Primitive {
 public:
-    explicit QuantizedMatmul(mx::Stream stream, const int group_size, const int bits)
-        : mx::Primitive(stream), group_size_(group_size), bits_(bits) {};
+    explicit QuantizedMatmul(mx::Stream stream, const int bits)
+        : mx::Primitive(stream), bits_(bits) {};
 
     void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
     void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
@@ -35,7 +35,6 @@ public:
     const char *name() const override { return "QuantizedMatmul"; }
 
 private:
-    int group_size_;
     int bits_;
 };
 
