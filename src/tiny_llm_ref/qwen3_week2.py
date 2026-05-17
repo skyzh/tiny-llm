@@ -188,22 +188,6 @@ class Qwen3TransformerBlock:
         return out
 
 
-def assert_dtype(weights: mx.array, dtype: mx.Dtype):
-    if weights.dtype != dtype:
-        raise ValueError(f"{weights.dtype} != {dtype}")
-    else:
-        return weights
-
-
-def assert_quantized_weights_dtype(weights: QuantizedWeights, dtype: mx.Dtype):
-    if weights.scales.dtype != dtype:
-        raise ValueError(f"{weights.scales.dtype} != {dtype}")
-    if weights.biases.dtype != dtype:
-        raise ValueError(f"{weights.biases.dtype} != {dtype}")
-    else:
-        return weights
-
-
 class Qwen3ModelWeek2:
     def __init__(
         self,
@@ -219,52 +203,31 @@ class Qwen3ModelWeek2:
         self.embedding = Embedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
-            weight=assert_dtype(
-                dequantize_linear(mlx_model.model.embed_tokens), dtype=precision
-            ),
+            weight=dequantize_linear(mlx_model.model.embed_tokens),
         )
         self.layers_inner = []
 
         for i in range(mlx_model.args.num_hidden_layers):
-            wq = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].self_attn.q_proj
-                ),
-                dtype=precision,
+            wq = QuantizedWeights.from_mlx_layer(
+                mlx_model.model.layers[i].self_attn.q_proj
             )
-            wk = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].self_attn.k_proj
-                ),
-                dtype=precision,
+            wk = QuantizedWeights.from_mlx_layer(
+                mlx_model.model.layers[i].self_attn.k_proj
             )
-            wv = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].self_attn.v_proj
-                ),
-                dtype=precision,
+            wv = QuantizedWeights.from_mlx_layer(
+                mlx_model.model.layers[i].self_attn.v_proj
             )
-            wo = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].self_attn.o_proj
-                ),
-                dtype=precision,
+            wo = QuantizedWeights.from_mlx_layer(
+                mlx_model.model.layers[i].self_attn.o_proj
             )
-            w_gate = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.gate_proj
-                ),
-                dtype=precision,
+            w_gate = QuantizedWeights.from_mlx_layer(
+                mlx_model.model.layers[i].mlp.gate_proj
             )
-            w_up = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(mlx_model.model.layers[i].mlp.up_proj),
-                dtype=precision,
+            w_up = QuantizedWeights.from_mlx_layer(
+                mlx_model.model.layers[i].mlp.up_proj
             )
-            w_down = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.down_proj
-                ),
-                dtype=precision,
+            w_down = QuantizedWeights.from_mlx_layer(
+                mlx_model.model.layers[i].mlp.down_proj
             )
 
             layer = Qwen3TransformerBlock(
@@ -278,22 +241,15 @@ class Qwen3ModelWeek2:
                 wk=wk,
                 wv=wv,
                 wo=wo,
-                q_norm=assert_dtype(
-                    mlx_model.model.layers[i].self_attn.q_norm.weight, dtype=precision
-                ),
-                k_norm=assert_dtype(
-                    mlx_model.model.layers[i].self_attn.k_norm.weight, dtype=precision
-                ),
+                q_norm=mlx_model.model.layers[i].self_attn.q_norm.weight,
+                k_norm=mlx_model.model.layers[i].self_attn.k_norm.weight,
                 w_gate=w_gate,
                 w_up=w_up,
                 w_down=w_down,
-                w_input_layernorm=assert_dtype(
-                    mlx_model.model.layers[i].input_layernorm.weight, dtype=precision
-                ),
-                w_post_attention_layernorm=assert_dtype(
-                    mlx_model.model.layers[i].post_attention_layernorm.weight,
-                    dtype=precision,
-                ),
+                w_input_layernorm=mlx_model.model.layers[i].input_layernorm.weight,
+                w_post_attention_layernorm=mlx_model.model.layers[
+                    i
+                ].post_attention_layernorm.weight,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
                 use_flash_attention=enable_flash_attn,
@@ -301,13 +257,11 @@ class Qwen3ModelWeek2:
             self.layers_inner.append(layer)
         self.norm = RMSNorm(
             mlx_model.args.hidden_size,
-            weight=assert_dtype(mlx_model.model.norm.weight, dtype=precision),
+            weight=mlx_model.model.norm.weight,
             eps=mlx_model.args.rms_norm_eps,
         )
         if not mlx_model.args.tie_word_embeddings:
-            self.w_lm_head = assert_quantized_weights_dtype(
-                QuantizedWeights.from_mlx_layer(mlx_model.lm_head), dtype=precision
-            )
+            self.w_lm_head = QuantizedWeights.from_mlx_layer(mlx_model.lm_head)
         else:
             self.w_lm_head = None
         self.mlx_model = mlx_model

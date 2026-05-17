@@ -8,13 +8,6 @@ from .embedding import Embedding
 from .quantize import dequantize_linear
 
 
-def assert_dtype(weights: mx.array, dtype: mx.Dtype):
-    if weights.dtype != dtype:
-        raise ValueError(f"{weights.dtype} != {dtype}")
-    else:
-        return weights
-
-
 class Qwen3MultiHeadAttention:
     def __init__(
         self,
@@ -175,9 +168,7 @@ class Qwen3ModelWeek1:
         self.embedding = Embedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
-            weight=assert_dtype(
-                dequantize_linear(mlx_model.model.embed_tokens), dtype=precision
-            ),
+            weight=dequantize_linear(mlx_model.model.embed_tokens),
         )
         self.layers_inner = []
 
@@ -189,60 +180,30 @@ class Qwen3ModelWeek1:
                 head_dim=mlx_model.args.head_dim,
                 intermediate_size=mlx_model.args.intermediate_size,
                 rms_norm_eps=mlx_model.args.rms_norm_eps,
-                wq=assert_dtype(
-                    dequantize_linear(mlx_model.model.layers[i].self_attn.q_proj),
-                    dtype=precision,
-                ),
-                wk=assert_dtype(
-                    dequantize_linear(mlx_model.model.layers[i].self_attn.k_proj),
-                    dtype=precision,
-                ),
-                wv=assert_dtype(
-                    dequantize_linear(mlx_model.model.layers[i].self_attn.v_proj),
-                    dtype=precision,
-                ),
-                wo=assert_dtype(
-                    dequantize_linear(mlx_model.model.layers[i].self_attn.o_proj),
-                    dtype=precision,
-                ),
-                q_norm=assert_dtype(
-                    mlx_model.model.layers[i].self_attn.q_norm.weight, dtype=precision
-                ),
-                k_norm=assert_dtype(
-                    mlx_model.model.layers[i].self_attn.k_norm.weight, dtype=precision
-                ),
-                w_gate=assert_dtype(
-                    dequantize_linear(mlx_model.model.layers[i].mlp.gate_proj),
-                    dtype=precision,
-                ),
-                w_up=assert_dtype(
-                    dequantize_linear(mlx_model.model.layers[i].mlp.up_proj),
-                    dtype=precision,
-                ),
-                w_down=assert_dtype(
-                    dequantize_linear(mlx_model.model.layers[i].mlp.down_proj),
-                    dtype=precision,
-                ),
-                w_input_layernorm=assert_dtype(
-                    mlx_model.model.layers[i].input_layernorm.weight, dtype=precision
-                ),
-                w_post_attention_layernorm=assert_dtype(
-                    mlx_model.model.layers[i].post_attention_layernorm.weight,
-                    dtype=precision,
-                ),
+                wq=dequantize_linear(mlx_model.model.layers[i].self_attn.q_proj),
+                wk=dequantize_linear(mlx_model.model.layers[i].self_attn.k_proj),
+                wv=dequantize_linear(mlx_model.model.layers[i].self_attn.v_proj),
+                wo=dequantize_linear(mlx_model.model.layers[i].self_attn.o_proj),
+                q_norm=mlx_model.model.layers[i].self_attn.q_norm.weight,
+                k_norm=mlx_model.model.layers[i].self_attn.k_norm.weight,
+                w_gate=dequantize_linear(mlx_model.model.layers[i].mlp.gate_proj),
+                w_up=dequantize_linear(mlx_model.model.layers[i].mlp.up_proj),
+                w_down=dequantize_linear(mlx_model.model.layers[i].mlp.down_proj),
+                w_input_layernorm=mlx_model.model.layers[i].input_layernorm.weight,
+                w_post_attention_layernorm=mlx_model.model.layers[
+                    i
+                ].post_attention_layernorm.weight,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
             )
             self.layers_inner.append(layer)
         self.norm = RMSNorm(
             mlx_model.args.hidden_size,
-            weight=assert_dtype(mlx_model.model.norm.weight, dtype=precision),
+            weight=mlx_model.model.norm.weight,
             eps=mlx_model.args.rms_norm_eps,
         )
         if not mlx_model.args.tie_word_embeddings:
-            self.w_lm_head = assert_dtype(
-                dequantize_linear(mlx_model.lm_head), precision
-            )
+            self.w_lm_head = dequantize_linear(mlx_model.lm_head)
         else:
             self.w_lm_head = None
         self.mlx_model = mlx_model
