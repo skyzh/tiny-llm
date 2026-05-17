@@ -94,7 +94,7 @@ class Qwen3PagedMultiHeadAttention:
         return quantized_linear(x, self.wo)
 
 
-class Qwen3TransformerBlockWeek3:
+class Qwen3TransformerBlock:
     def __init__(
         self,
         num_attention_heads: int,
@@ -198,7 +198,7 @@ class Qwen3ModelWeek3:
                 mlx_model.model.layers[i].mlp.down_proj
             )
 
-            layer = Qwen3TransformerBlockWeek3(
+            layer = Qwen3TransformerBlock(
                 num_attention_heads=mlx_model.args.num_attention_heads,
                 num_kv_heads=mlx_model.args.num_key_value_heads,
                 hidden_size=mlx_model.args.hidden_size,
