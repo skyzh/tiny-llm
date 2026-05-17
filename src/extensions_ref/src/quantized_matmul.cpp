@@ -118,11 +118,12 @@ void quantized_matmul_impl_typed(
 
         for (int i = 0; i < m; i++) {
             for (int j = 0; j < k; j++) {
-                T sum = 0;
+                float sum = 0;
                 for (int group_idx = 0; group_idx < group_per_row; group_idx++) {
                     int64_t scales_idx = mx::elem_to_loc(j * group_per_row + group_idx, scales.shape(), scales.strides());
                     int64_t biases_idx = mx::elem_to_loc(j * group_per_row + group_idx, biases.shape(), biases.strides());
-                    T scale = scales_ptr[scales_idx], bias = biases_ptr[biases_idx];
+                    float scale = static_cast<float>(scales_ptr[scales_idx]);
+                    float bias = static_cast<float>(biases_ptr[biases_idx]);
 
                     int64_t a_idx = mx::elem_to_loc(i * n + group_idx * group_size, a.shape(), a.strides());
                     int64_t b_idx = mx::elem_to_loc((j * n + group_idx * group_size) / packs_per_item, b.shape(), b.strides());
@@ -137,8 +138,8 @@ void quantized_matmul_impl_typed(
                             // when pack_idx is even, extract the low 4 bits, otherwise extract the high 4 bits
                             // (pack_7, pack_6, pack_5, pack_4, pack_3, pack_2, pack_1, pack_0) => (b_bytes[3], b_bytes[2], b_bytes[1], b_bytes[0])
                             uint8_t item_val = (b_bytes[pack_idx / 2] >> ((pack_idx % 2) * bits)) & pack_mask;
-                            T a_val = a_ptr[a_idx];
-                            T b_val_real = static_cast<T>(item_val) * scale + bias;
+                            float a_val = static_cast<float>(a_ptr[a_idx]);
+                            float b_val_real = static_cast<float>(item_val) * scale + bias;
                             sum += a_val * b_val_real;
                             a_idx += 1;
                         }
@@ -146,7 +147,7 @@ void quantized_matmul_impl_typed(
                     }
                 }
                 int64_t out_idx = mx::elem_to_loc(i * k + j, out_shape, out_strides);
-                out_ptr[out_idx] = sum;
+                out_ptr[out_idx] = static_cast<T>(sum);
             }
         }
     });

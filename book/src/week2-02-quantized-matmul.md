@@ -195,7 +195,7 @@ Output:
   C: M × K (bfloat16)
 
 For each output element C[i, k]:
-  sum = 0
+  sum = 0  # float accumulator
   for each group g in 0..(N/G - 1):
     scale = scales[k, g]
     bias = biases[k, g]
@@ -251,7 +251,7 @@ You need to touch three files, all within the `tiny_llm_ext` namespace:
 - **`bindings.cpp`** — Add an `m.def(...)` call to expose the function to Python.
 - **`quantized_matmul.cpp`** — Implement the `quantized_matmul(...)` function (validate inputs, compute output shape, return a lazy `mx::array`) and the `eval_cpu` method (allocate output, register arrays with the CPU encoder, dispatch the compute kernel).
 
-The `eval_cpu` implementation follows the same CPU encoder pattern as `axpby`: allocate output memory with `out.set_data(mx::allocator::malloc(out.nbytes()))`, register input/output arrays with the encoder, then dispatch a lambda that performs the actual computation. Inside the lambda, implement the nested loop from the Computation Flow section above — iterate over each output element `(i, k)`, dequantize each packed value, accumulate the products, and write the `bfloat16` result to the output.
+The `eval_cpu` implementation follows the same CPU encoder pattern as `axpby`: allocate output memory with `out.set_data(mx::allocator::malloc(out.nbytes()))`, register input/output arrays with the encoder, then dispatch a lambda that performs the actual computation. Inside the lambda, implement the nested loop from the Computation Flow section above — iterate over each output element `(i, k)`, dequantize each packed value, accumulate the products in `float`, and write the `bfloat16` result to the output.
 
 Don't forget to add `src/quantized_matmul.cpp` to `target_sources` in `CMakeLists.txt`.
 
@@ -281,7 +281,7 @@ You need to implement one kernel entry in `quantized_matmul.metal`:
   - Iterate over groups using the runtime `group_size` argument
   - Unpack int4 values from packed `uint32`
   - Dequantize with `q * scale + bias`
-  - Accumulate the products and cast the final output back to `bfloat16_t`
+  - Accumulate the products in `float` and cast the final output back to `bfloat16_t`
 - Add boundary checks (`i < M`, `k < K`) before writing output.
 
 The custom kernel only needs to handle `bits = 4`, but `group_size` must come from the quantized layer metadata. Use it to compute `groups_per_row` and the packed weight offsets so both the isolated `group_size = 64` tests and Qwen3 `group_size = 128` tests work through the same kernel.
