@@ -49,7 +49,7 @@ pdm run test
 
 ## Download the Model Parameters
 
-We will use the official Qwen3 MLX 4-bit checkpoints for this course. The default model is `Qwen/Qwen3-0.6B-MLX-4bit`, which is small enough for the Week 1 dequantized Python implementation. If you have more memory, you can also try the larger Qwen3 MLX checkpoints.
+We will use the official Qwen3 MLX 4-bit model files for this course. The default model is `Qwen/Qwen3-0.6B-MLX-4bit`, which is small enough for the Week 1 dequantized Python implementation. If you have more memory, you can also try the larger Qwen3 MLX models.
 
 Follow the guide of [this page](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli) to install the Hugging Face
 CLI (`hf`).

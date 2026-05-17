@@ -69,7 +69,7 @@ For each group of G consecutive values in a row:
   3. Quantize each value using: quantized = round((value - bias) / scale)
 ```
 
-The first tests use `group_size = 64`, which keeps the exercise small and easy to test in isolation. The official Qwen3 MLX checkpoints we load later use their own checkpoint metadata (for example, the 0.6B checkpoint uses `group_size = 128`), so the kernel and model integration must read and respect the actual `group_size` and `bits` fields instead of hard-coding them.
+The first tests use `group_size = 64`, which keeps the exercise small and easy to test in isolation. Later Qwen3 model tests also cover `group_size = 128`, so the kernel and model integration must read and respect the actual `group_size` and `bits` fields instead of hard-coding them.
 
 ### Affine Quantization
 
@@ -284,7 +284,7 @@ You need to implement one kernel entry in `quantized_matmul.metal`:
   - Accumulate in `float` and cast to the output dtype at the end
 - Add boundary checks (`i < M`, `k < K`) before writing output.
 
-The custom kernel only needs to handle `bits = 4`, but `group_size` must come from the quantized layer metadata. Use it to compute `groups_per_row` and the packed weight offsets so both the isolated `group_size = 64` tests and Qwen3 checkpoint layouts such as `group_size = 128` work through the same kernel.
+The custom kernel only needs to handle `bits = 4`, but `group_size` must come from the quantized layer metadata. Use it to compute `groups_per_row` and the packed weight offsets so both the isolated `group_size = 64` tests and Qwen3 `group_size = 128` tests work through the same kernel.
 
 ### GPU Dispatch
 
@@ -313,9 +313,9 @@ Integrate your quantized matmul into the Week 2 Qwen3 model so that inference ru
 
 Change the weight type from `mx.array` to `QuantizedWeights` for all linear layers in attention (`wq/wk/wv/wo`) and MLP (`w_gate/w_up/w_down`). Replace every `linear(x, w)` call with `quantized_linear(x, w)`. In the model loading code, use `QuantizedWeights.from_mlx_layer(...)` to extract quantized weight information from each MLX linear layer, instead of calling `mx.dequantize` to get a full float16 matrix. Make sure the Week 1 loader still dequantizes (since Week 1 layers expect plain `mx.array`), while the Week 2 loader does **not** dequantize.
 
-Note that Qwen3 MLX checkpoints commonly use **bfloat16** for the tensors involved in dequantization. Your kernel dispatch should support both `float16` and `bfloat16`, and `scales`, `biases`, and activations must stay in the same dtype when calling the kernel. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
+Note that Qwen3 MLX quantized layers commonly use **bfloat16** for the tensors involved in dequantization. Your kernel dispatch should support both `float16` and `bfloat16`, and `scales`, `biases`, and activations must stay in the same dtype when calling the kernel. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
 
-Also keep the checkpoint's actual quantization parameters. The official Qwen3 MLX checkpoints may use a group size such as 128, so `quantized_matmul` should pass `group_size` and `bits` into your custom extension and let the CPU/GPU kernels use those values directly. The model code should pass through `w.group_size` and `w.bits`; it should not rewrite them.
+Also keep the quantized layer's parameters. `quantized_matmul` should pass `group_size` and `bits` into your custom extension and let the CPU/GPU kernels use those values directly. The model code should pass through `w.group_size` and `w.bits`; it should not rewrite them.
 
 You can test your implementation by running:
 

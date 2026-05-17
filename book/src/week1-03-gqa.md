@@ -5,7 +5,7 @@ In day 3, we will implement Grouped Query Attention (GQA). The Qwen3 models use 
 
 **Readings**
 
-*   [GQA Paper (Training Generalized Multi-Query Transformer Models from Pre-Trained Checkpoints)](https://arxiv.org/abs/2305.13245)
+*   [GQA Paper](https://arxiv.org/abs/2305.13245)
 *   [Qwen layers implementation in mlx-lm](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py)
 *   [PyTorch API (the case where enable_gqa=True)](https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
 *   [torchtune.modules.MultiHeadAttention](https://pytorch.org/torchtune/0.3/generated/torchtune.modules.MultiHeadAttention.html)

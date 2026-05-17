@@ -13,6 +13,7 @@ def quantized_matmul_helper(
     atol: float | None = None,
 ):
     with mx.stream(stream):
+        mx.random.seed(0)
         input_size = group_size * 4
         if identity_matrix:
             input = mx.eye(input_size, dtype=precision)
@@ -66,12 +67,12 @@ def test_task_3_quantized_matmul_complex_f16_gpu():
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
-def test_task_4_quantized_matmul_qwen3_checkpoint_group_size_f16(stream):
+def test_task_4_quantized_matmul_qwen3_group_size_128_f16(stream):
     quantized_matmul_helper(stream, False, mx.float16, group_size=128, atol=5e-2)
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
-def test_task_4_quantized_matmul_qwen3_checkpoint_group_size_bf16(stream):
+def test_task_4_quantized_matmul_qwen3_group_size_128_bf16(stream):
     quantized_matmul_helper(
         stream, False, mx.bfloat16, group_size=128, rtol=1e-1, atol=5e-1
     )

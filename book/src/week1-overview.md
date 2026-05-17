@@ -4,7 +4,7 @@ In this week, we will start from the basic matrix operations and see how those t
 Qwen3 model parameters into a model that generates text. We will implement the neural network layers used in the Qwen3
 model using mlx's matrix APIs.
 
-We will use `Qwen/Qwen3-0.6B-MLX-4bit` for this week. Week 1 dequantizes model parameters into bfloat16, so start with the 0.6B checkpoint before trying larger Qwen3 models.
+We will use `Qwen/Qwen3-0.6B-MLX-4bit` for this week. Week 1 dequantizes model parameters into bfloat16, so start with the 0.6B model before trying larger Qwen3 models.
 
 ## What We will Cover
 

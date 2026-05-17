@@ -12,7 +12,7 @@ In week 1, you will implement the necessary components in Python (only Python!) 
 
 Why MLX: nowadays it's easier to get a macOS-based local development environment than setting up an NVIDIA GPU.
 
-Why Qwen3: it keeps the dense decoder architecture small enough for a local MLX course while adding modern details such as QK norm and bfloat16 weights. The official MLX 4-bit checkpoints also make the setup predictable on Apple Silicon.
+Why Qwen3: it keeps the dense decoder architecture small enough for a local MLX course while adding modern details such as QK norm and bfloat16 weights. The official MLX 4-bit model files also make the setup predictable on Apple Silicon.
 
 ## Book
 
