@@ -54,7 +54,7 @@ def test_task_2_quantized_matmul_simple_f32_cpu():
 
 
 def test_task_2_quantized_matmul_complex_f32_cpu():
-    quantized_matmul_helper(mx.cpu, False, mx.float32)
+    quantized_matmul_helper(mx.cpu, False, mx.float32, atol=1e-5)
 
 
 def test_task_3_quantized_matmul_simple_f16_gpu():

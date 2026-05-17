@@ -152,6 +152,23 @@ void quantized_matmul_impl_typed(
     });
 }
 
+void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, const mx::array &a, const mx::array &b,
+                           mx::array &out, int group_size, int bits, mx::Stream stream) {
+    switch (a.dtype()) {
+        case mx::float16:
+            quantized_matmul_impl_typed<float16_t>(scales, biases, a, b, out, group_size, bits, stream);
+            break;
+        case mx::float32:
+            quantized_matmul_impl_typed<float>(scales, biases, a, b, out, group_size, bits, stream);
+            break;
+        case mx::bfloat16:
+            quantized_matmul_impl_typed<mx::bfloat16_t>(scales, biases, a, b, out, group_size, bits, stream);
+            break;
+        default:
+            throw std::runtime_error("Unsupported dtype for quantized_matmul");
+    }
+}
+
 void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
     auto &scales = inputs[0];
     auto &biases = inputs[1];
@@ -159,19 +176,7 @@ void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector
     auto &b = inputs[3];
     auto &out = outputs[0];
 
-    switch (a.dtype()) {
-        case mx::float16:
-            quantized_matmul_impl_typed<float16_t>(scales, biases, a, b, out, group_size_, bits_, stream());
-            break;
-        case mx::float32:
-            quantized_matmul_impl_typed<float>(scales, biases, a, b, out, group_size_, bits_, stream());
-            break;
-        case mx::bfloat16:
-            quantized_matmul_impl_typed<mx::bfloat16_t>(scales, biases, a, b, out, group_size_, bits_, stream());
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for quantized_matmul");
-    }
+    quantized_matmul_impl(scales, biases, a, b, out, group_size_, bits_, stream());
 }
 
 void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
