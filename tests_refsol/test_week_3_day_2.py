@@ -24,7 +24,7 @@ def _random_chunk(
 
 
 def _quantized_layer(
-    out_dim: int, in_dim: int, group_size: int = 64
+    out_dim: int, in_dim: int, group_size: int = 128
 ) -> SimpleNamespace:
     weight = mx.random.normal(shape=(out_dim, in_dim), dtype=mx.bfloat16)
     quantized_weight, scales, biases = mx.quantize(
@@ -43,12 +43,12 @@ def _fake_qwen3_mlx_model() -> SimpleNamespace:
     mx.random.seed(0)
     args = SimpleNamespace(
         num_hidden_layers=2,
-        hidden_size=64,
+        hidden_size=128,
         vocab_size=128,
         num_attention_heads=4,
         num_key_value_heads=2,
-        head_dim=16,
-        intermediate_size=128,
+        head_dim=32,
+        intermediate_size=256,
         rms_norm_eps=1e-5,
         max_position_embeddings=128,
         rope_theta=10000,

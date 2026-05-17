@@ -1,11 +1,10 @@
-import pytest
 import mlx.core as mx
 from .tiny_llm_base import *
 from .utils import *
 
 
 def quantized_matmul_outputs(
-    stream: mx.Stream, identity_matrix: bool, group_size: int = 64
+    stream: mx.Stream, identity_matrix: bool, group_size: int = 128
 ):
     with mx.stream(stream):
         mx.random.seed(0)
@@ -64,12 +63,4 @@ def test_task_3_quantized_matmul_simple_bf16_gpu():
 
 def test_task_3_quantized_matmul_complex_bf16_gpu():
     user_out, ref_out = quantized_matmul_outputs(mx.gpu, False)
-    assert_quantized_matmul_close(user_out, ref_out)
-
-
-@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
-def test_task_4_quantized_matmul_qwen3_group_size_128_bf16(stream):
-    user_out, ref_out = quantized_matmul_outputs(
-        stream, False, group_size=128
-    )
     assert_quantized_matmul_close(user_out, ref_out)

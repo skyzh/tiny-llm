@@ -55,12 +55,12 @@ The tradeoff is minimal accuracy loss with proper quantization techniques.
 
 Instead of quantizing all weights uniformly, we divide them into **groups** and quantize each group independently. This preserves more information about the weight distribution.
 
-For a weight matrix $W$ of shape $(K, N)$, we divide each row into groups of size $G$ (typically 64 or 128):
+For a weight matrix $W$ of shape $(K, N)$, we divide each row into groups of size $G$. In this course we use Qwen3 MLX 4-bit weights, whose group size is fixed at 128:
 
 ```plain
 Original weight matrix W: K × N (bfloat16)
 
-Group size: G
+Group size: G = 128
 Number of groups per row = N / G
 
 For each group of G consecutive values in a row:
@@ -69,7 +69,7 @@ For each group of G consecutive values in a row:
   3. Quantize each value using: quantized = round((value - bias) / scale)
 ```
 
-The first tests use `group_size = 64`, which keeps the exercise small and easy to test in isolation. Later Qwen3 model tests also cover `group_size = 128`, so the kernel and model integration must read and respect the actual `group_size` and `bits` fields instead of hard-coding them.
+All quantized matmul tests use `group_size = 128`, matching the Qwen3 MLX 4-bit weights used by the rest of the course.
 
 ### Affine Quantization
 
@@ -227,7 +227,7 @@ First, familiarize yourself with the `QuantizedWeights` class, which stores quan
 | `weight` | $(K, N/8)$ uint32 | Packed quantized weights. Each uint32 stores 8 consecutive 4-bit values. The original weight matrix has shape $(K, N)$, and after packing, it becomes $(K, N/8)$. |
 | `scales` | $(K, N/G)$ bfloat16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
 | `biases` | $(K, N/G)$ bfloat16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
-| `group_size` | int | Number of consecutive values that share the same scale/bias (typically 64) |
+| `group_size` | int | Number of consecutive values that share the same scale/bias. For the Qwen3 MLX 4-bit weights used here, this is `128`. |
 | `bits` | int | Quantization bit width (typically 4, meaning values are in range $[0, 15]$) |
 
 The `from_mlx_layer` static method extracts these fields from MLX's quantized linear layers when loading the model.
@@ -278,13 +278,13 @@ You need to implement one kernel entry in `quantized_matmul.metal`:
 - Use a **one-thread-per-output-element** mapping: each thread computes `out[i, k]`.
 - The kernel should use `bfloat16_t` inputs and outputs.
 - Apply the same group-wise dequantization loop as the CPU version:
-  - Iterate over groups using the runtime `group_size` argument
+  - Iterate over groups of 128 values
   - Unpack int4 values from packed `uint32`
   - Dequantize with `q * scale + bias`
   - Accumulate the products in `float` and cast the final output back to `bfloat16_t`
 - Add boundary checks (`i < M`, `k < K`) before writing output.
 
-The custom kernel only needs to handle `bits = 4`, but `group_size` must come from the quantized layer metadata. Use it to compute `groups_per_row` and the packed weight offsets so both the isolated `group_size = 64` tests and Qwen3 `group_size = 128` tests work through the same kernel.
+The custom kernel only needs to handle `bits = 4` and `group_size = 128`. Use that group size to compute `groups_per_row` and the packed weight offsets.
 
 ### GPU Dispatch
 
@@ -315,7 +315,7 @@ Change the weight type from `mx.array` to `QuantizedWeights` for all linear laye
 
 Qwen3 MLX quantized layers use **bfloat16** for the tensors involved in dequantization. Your kernel should take `scales`, `biases`, and activations as bfloat16. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
 
-Also keep the quantized layer's parameters. `quantized_matmul` should pass `group_size` and `bits` into your custom extension and let the CPU/GPU kernels use those values directly. The model code should pass through `w.group_size` and `w.bits`; it should not rewrite them.
+Also keep the quantized layer's parameters. The model code should pass through `w.group_size` and `w.bits`; the extension should validate that they match the Qwen3 course assumptions: `group_size = 128` and `bits = 4`.
 
 You can test your implementation by running:
 

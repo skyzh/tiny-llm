@@ -45,8 +45,8 @@ mx::array quantized_matmul(const mx::array &scales,         // Input array scale
         throw std::runtime_error("quantized_matmul: bits must be 4");
     }
     const int packs_per_item = 32 / bits;
-    if (group_size <= 0 || group_size % packs_per_item != 0) {
-        throw std::runtime_error("quantized_matmul: group_size must be a positive multiple of values per uint32 pack");
+    if (group_size != 128) {
+        throw std::runtime_error("quantized_matmul: group_size must be 128");
     }
     auto out_shape = a.shape();
     if (out_shape.size() != 2) {
