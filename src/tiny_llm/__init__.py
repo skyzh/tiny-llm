@@ -10,7 +10,6 @@ from .paged_kv_cache import *
 from .qwen3_week1 import Qwen3ModelWeek1
 from .qwen3_week2 import Qwen3ModelWeek2
 from .qwen3_week3 import Qwen3ModelWeek3
-from .qwen3 import Qwen3Model
 from .sampler import *
 from .kv_cache import *
 from .paged_kv_cache import *
