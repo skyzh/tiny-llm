@@ -7,7 +7,7 @@ import numpy as np
 
 def get_test_matmul_data():
     # Representative large-model matrix size
-    init = nn.init.he_uniform(mx.float16)
+    init = nn.init.he_uniform(mx.bfloat16)
     w = init(mx.zeros((512, 3584)))
     x = init(mx.zeros((300, 3584)))
     w_q, scales, biases = mx.quantize(w)
@@ -21,7 +21,7 @@ def test_mlx_quantized_matmul(benchmark):
         result = benchmark(
             lambda: mx.quantized_matmul(x, w_q, scales=scales, biases=biases)
         )
-        assert_allclose(result, res, precision=mx.float16, rtol=1e-2)
+        assert_allclose(result, res, precision=mx.bfloat16, rtol=1e-2)
 
 
 def test_refsol_quantized_matmul(benchmark):
@@ -32,4 +32,4 @@ def test_refsol_quantized_matmul(benchmark):
                 scales, biases, 64, 4, x, w_q, transpose_b=True
             )
         )
-        assert_allclose(result, res, precision=mx.float16, rtol=1e-2)
+        assert_allclose(result, res, precision=mx.bfloat16, rtol=1e-2)

@@ -51,5 +51,4 @@ template <typename T>
     }
 }
 
-instantiate_kernel("quantized_matmul_w4a16_f16", quantized_matmul_w4a16, float16_t);
 instantiate_kernel("quantized_matmul_w4a16_bf16", quantized_matmul_w4a16, bfloat16_t);

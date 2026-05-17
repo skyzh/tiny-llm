@@ -23,8 +23,8 @@ mx::array quantized_matmul(const mx::array &scales,         // Input array scale
                            const bool transpose_b,          // Whether to transpose b
                            mx::StreamOrDevice s /* = {} */  // Stream on which to schedule the operation
 ) {
-    if (scales.dtype() != mx::float16 && scales.dtype() != mx::bfloat16 && scales.dtype() != mx::float32) {
-        throw std::runtime_error("quantized_matmul: scales must be float16 or bfloat16 or float32");
+    if (scales.dtype() != mx::bfloat16) {
+        throw std::runtime_error("quantized_matmul: scales must be bfloat16");
     }
     if (scales.dtype() != biases.dtype()) {
         throw std::runtime_error("quantized_matmul: scales and biases must be the same dtype");
@@ -154,19 +154,7 @@ void quantized_matmul_impl_typed(
 
 void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, const mx::array &a, const mx::array &b,
                            mx::array &out, int group_size, int bits, mx::Stream stream) {
-    switch (a.dtype()) {
-        case mx::float16:
-            quantized_matmul_impl_typed<float16_t>(scales, biases, a, b, out, group_size, bits, stream);
-            break;
-        case mx::float32:
-            quantized_matmul_impl_typed<float>(scales, biases, a, b, out, group_size, bits, stream);
-            break;
-        case mx::bfloat16:
-            quantized_matmul_impl_typed<mx::bfloat16_t>(scales, biases, a, b, out, group_size, bits, stream);
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for quantized_matmul");
-    }
+    quantized_matmul_impl_typed<mx::bfloat16_t>(scales, biases, a, b, out, group_size, bits, stream);
 }
 
 void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -192,14 +180,7 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
 
     // Make a kernel from this metal library
     auto library = d.get_library("tiny_llm_ext_ref");
-    const char* kernel_name;
-    if (a.dtype() == mx::float16) {
-        kernel_name = "quantized_matmul_w4a16_f16";
-    } else if (a.dtype() == mx::bfloat16) {
-        kernel_name = "quantized_matmul_w4a16_bf16";
-    } else {
-        throw std::runtime_error("quantized_matmul: a must be float16 or bfloat16");
-    }
+    const char* kernel_name = "quantized_matmul_w4a16_bf16";
     auto kernel = d.get_kernel(kernel_name, library);
 
     // Prepare to encode kernel

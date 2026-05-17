@@ -7,7 +7,6 @@ from .utils import *
 def quantized_matmul_helper(
     stream: mx.Stream,
     identity_matrix: bool,
-    precision: mx.Dtype,
     group_size: int = 64,
     rtol: float | None = None,
     atol: float | None = None,
@@ -16,10 +15,10 @@ def quantized_matmul_helper(
         mx.random.seed(0)
         input_size = group_size * 4
         if identity_matrix:
-            input = mx.eye(input_size, dtype=precision)
+            input = mx.eye(input_size, dtype=mx.bfloat16)
         else:
-            input = mx.random.normal(shape=(3, input_size), dtype=precision)
-        weight = mx.random.normal(shape=(8, input_size), dtype=precision)
+            input = mx.random.normal(shape=(3, input_size), dtype=mx.bfloat16)
+        weight = mx.random.normal(shape=(8, input_size), dtype=mx.bfloat16)
         w_q, scales, biases = mx.quantize(weight, group_size=group_size, bits=4)
         user_out = quantized_matmul(
             scales=scales,
@@ -39,40 +38,27 @@ def quantized_matmul_helper(
             bits=4,
             transpose=True,
         )
-        assert_allclose(user_out, ref_out, precision, rtol=rtol, atol=atol)
+        assert_allclose(user_out, ref_out, mx.bfloat16, rtol=rtol, atol=atol)
 
 
-def test_task_2_quantized_matmul_simple_f16_cpu():
-    quantized_matmul_helper(mx.cpu, True, mx.float16)
+def test_task_2_quantized_matmul_simple_bf16_cpu():
+    quantized_matmul_helper(mx.cpu, True)
 
 
-def test_task_2_quantized_matmul_complex_f16_cpu():
-    quantized_matmul_helper(mx.cpu, False, mx.float16)
+def test_task_2_quantized_matmul_complex_bf16_cpu():
+    quantized_matmul_helper(mx.cpu, False, rtol=1e-1, atol=5e-1)
 
 
-def test_task_2_quantized_matmul_simple_f32_cpu():
-    quantized_matmul_helper(mx.cpu, True, mx.float32)
+def test_task_3_quantized_matmul_simple_bf16_gpu():
+    quantized_matmul_helper(mx.gpu, True)
 
 
-def test_task_2_quantized_matmul_complex_f32_cpu():
-    quantized_matmul_helper(mx.cpu, False, mx.float32, atol=1e-5)
-
-
-def test_task_3_quantized_matmul_simple_f16_gpu():
-    quantized_matmul_helper(mx.gpu, True, mx.float16)
-
-
-def test_task_3_quantized_matmul_complex_f16_gpu():
-    quantized_matmul_helper(mx.gpu, False, mx.float16, atol=5e-2)
-
-
-@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
-def test_task_4_quantized_matmul_qwen3_group_size_128_f16(stream):
-    quantized_matmul_helper(stream, False, mx.float16, group_size=128, atol=5e-2)
+def test_task_3_quantized_matmul_complex_bf16_gpu():
+    quantized_matmul_helper(mx.gpu, False, rtol=1e-1, atol=5e-1)
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 def test_task_4_quantized_matmul_qwen3_group_size_128_bf16(stream):
     quantized_matmul_helper(
-        stream, False, mx.bfloat16, group_size=128, rtol=1e-1, atol=5e-1
+        stream, False, group_size=128, rtol=1e-1, atol=5e-1
     )

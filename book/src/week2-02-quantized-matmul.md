@@ -43,7 +43,7 @@ We're using only ~4% of available compute!
 
 ### The Solution: Quantization
 
-By compressing weights from 16 bits (float16/bfloat16) to 4 bits (int4), we:
+By compressing weights from 16 bits (bfloat16) to 4 bits (int4), we:
 
 - **Reduce memory bandwidth by 4×**: 880 MB → ~220 MB per token
 - **Improve arithmetic intensity by 4×**: 1.0 → ~4.0 FLOPs/Byte
@@ -58,7 +58,7 @@ Instead of quantizing all weights uniformly, we divide them into **groups** and 
 For a weight matrix $W$ of shape $(K, N)$, we divide each row into groups of size $G$ (typically 64 or 128):
 
 ```plain
-Original weight matrix W: K × N (float16/bfloat16)
+Original weight matrix W: K × N (bfloat16)
 
 Group size: G
 Number of groups per row = N / G
@@ -119,15 +119,15 @@ Quantized: [0, 2, 7, 10, 15] (4 bits each)
 For efficient storage and computation, quantized weights are packed:
 
 ```plain
-Original: K × N float16/bfloat16 (2 bytes each) = 2KN bytes
+Original: K × N bfloat16 (2 bytes each) = 2KN bytes
 Quantized: K × N int4 (0.5 bytes each) = 0.5KN bytes
 
 Packing: 8 × 4-bit values fit in one uint32 (32 bits)
 
 Weight matrix shape: K × N
 Quantized storage shape: K × (N / 8) uint32
-Scales shape: K × (N / G) float16/bfloat16
-Biases shape: K × (N / G) float16/bfloat16
+Scales shape: K × (N / G) bfloat16
+Biases shape: K × (N / G) bfloat16
 ```
 
 Example packing for 8 consecutive 4-bit values `[a, b, c, d, e, f, g, h]`:
@@ -150,9 +150,9 @@ Unpacking:
 
 For standard matrix multiplication $C = AB^T$ where:
 
-- $A$: shape $(M, N)$, float16/bfloat16 (activations)
+- $A$: shape $(M, N)$, bfloat16 (activations)
 - $B$: shape $(K, N)$, **quantized** to int4 (weights)
-- $C$: shape $(M, K)$, float16/bfloat16 (output)
+- $C$: shape $(M, K)$, bfloat16 (output)
 
 Each element $C[i, k]$ is computed as:
 
@@ -186,13 +186,13 @@ This shows we can factor out the scale and bias per group, reducing the number o
 
 ```plain
 Input:
-  A: M × N (float16/bfloat16, activations)
+  A: M × N (bfloat16, activations)
   B_quantized: K × (N/8) (uint32, packed weights)
-  scales: K × (N/G) (float16/bfloat16)
-  biases: K × (N/G) (float16/bfloat16)
+  scales: K × (N/G) (bfloat16)
+  biases: K × (N/G) (bfloat16)
 
 Output:
-  C: M × K (float16/bfloat16)
+  C: M × K (bfloat16)
 
 For each output element C[i, k]:
   sum = 0
@@ -225,8 +225,8 @@ First, familiarize yourself with the `QuantizedWeights` class, which stores quan
 | Field | Shape | Description |
 |-------|-------|-------------|
 | `weight` | $(K, N/8)$ uint32 | Packed quantized weights. Each uint32 stores 8 consecutive 4-bit values. The original weight matrix has shape $(K, N)$, and after packing, it becomes $(K, N/8)$. |
-| `scales` | $(K, N/G)$ float16/bfloat16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
-| `biases` | $(K, N/G)$ float16/bfloat16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
+| `scales` | $(K, N/G)$ bfloat16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
+| `biases` | $(K, N/G)$ bfloat16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
 | `group_size` | int | Number of consecutive values that share the same scale/bias (typically 64) |
 | `bits` | int | Quantization bit width (typically 4, meaning values are in range $[0, 15]$) |
 
@@ -276,7 +276,7 @@ In this task, you will write the Metal kernel for quantized matmul **and** wire 
 You need to implement one kernel entry in `quantized_matmul.metal`:
 
 - Use a **one-thread-per-output-element** mapping: each thread computes `out[i, k]`.
-- The kernel should be templated on the data type (to support both `half` and `bfloat16_t`).
+- The kernel should use `bfloat16_t` inputs and outputs.
 - Apply the same group-wise dequantization loop as the CPU version:
   - Iterate over groups using the runtime `group_size` argument
   - Unpack int4 values from packed `uint32`
@@ -291,7 +291,7 @@ The custom kernel only needs to handle `bits = 4`, but `group_size` must come fr
 Complete the `eval_gpu` method in `quantized_matmul.cpp` to dispatch your Metal kernel. Follow the same pattern as `axpby`'s GPU dispatch:
 
 1. Get the Metal device and command encoder from the stream.
-2. Select the correct kernel name based on the activation dtype (`float16` → `half`, `bfloat16` → `bfloat16_t`).
+2. Load the bfloat16 quantized matmul kernel from the Metal library.
 3. Set input/output buffers and dimension constants (`M`, `N`, `K`) on the encoder — make sure the buffer order matches your kernel signature.
 4. Calculate a 2D thread group configuration: use `kernel->maxTotalThreadsPerThreadgroup()` to determine the total threads, then split between the M and K dimensions (e.g., 32 threads for M, the rest for K).
 5. Dispatch with `dispatchThreadgroups`.
@@ -311,9 +311,9 @@ src/tiny_llm/qwen3_week2.py
 
 Integrate your quantized matmul into the Week 2 Qwen3 model so that inference runs on quantized weights end-to-end.
 
-Change the weight type from `mx.array` to `QuantizedWeights` for all linear layers in attention (`wq/wk/wv/wo`) and MLP (`w_gate/w_up/w_down`). Replace every `linear(x, w)` call with `quantized_linear(x, w)`. In the model loading code, use `QuantizedWeights.from_mlx_layer(...)` to extract quantized weight information from each MLX linear layer, instead of calling `mx.dequantize` to get a full float16 matrix. Make sure the Week 1 loader still dequantizes (since Week 1 layers expect plain `mx.array`), while the Week 2 loader does **not** dequantize.
+Change the weight type from `mx.array` to `QuantizedWeights` for all linear layers in attention (`wq/wk/wv/wo`) and MLP (`w_gate/w_up/w_down`). Replace every `linear(x, w)` call with `quantized_linear(x, w)`. In the model loading code, use `QuantizedWeights.from_mlx_layer(...)` to extract quantized weight information from each MLX linear layer, instead of calling `mx.dequantize` to get a full bfloat16 matrix. Make sure the Week 1 loader still dequantizes (since Week 1 layers expect plain `mx.array`), while the Week 2 loader does **not** dequantize.
 
-Note that Qwen3 MLX quantized layers commonly use **bfloat16** for the tensors involved in dequantization. Your kernel dispatch should support both `float16` and `bfloat16`, and `scales`, `biases`, and activations must stay in the same dtype when calling the kernel. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
+Qwen3 MLX quantized layers use **bfloat16** for the tensors involved in dequantization. Your kernel should take `scales`, `biases`, and activations as bfloat16. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
 
 Also keep the quantized layer's parameters. `quantized_matmul` should pass `group_size` and `bits` into your custom extension and let the CPU/GPU kernels use those values directly. The model code should pass through `w.group_size` and `w.bits`; it should not rewrite them.
 
