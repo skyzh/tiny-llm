@@ -1,6 +1,20 @@
 #include <metal_stdlib>
 #include "mlx/backend/metal/kernels/utils.h"
 
+METAL_FUNC float round_to_bfloat16(float value) {
+    uint bits = as_type<uint>(value);
+    uint rounding_bias = 0x7fffu + ((bits >> 16) & 1u);
+    bits = (bits + rounding_bias) & 0xffff0000u;
+    return as_type<float>(bits);
+}
+
+METAL_FUNC float accumulate_quantized_product(
+    float sum, uint32_t quantized, float scale, float bias, float a_value) {
+    float b_value = round_to_bfloat16(static_cast<float>(quantized) * scale + bias);
+    float product = round_to_bfloat16(a_value * b_value);
+    return round_to_bfloat16(sum + product);
+}
+
 template <typename T>
 [[kernel]] void quantized_matmul_w4a16(
     device const T* scales [[buffer(0)]],
@@ -34,14 +48,14 @@ template <typename T>
             const float bias = biases[scales_biases_loc];
             for (int item_idx = 0; item_idx < group_size; item_idx += packs_per_item) {
                 uint32_t b_val_packed = b[b_loc];
-                sum += (static_cast<float>((b_val_packed >> 0) & mask) * scale + bias) * static_cast<float>(a[a_loc]);
-                sum += (static_cast<float>((b_val_packed >> 4) & mask) * scale + bias) * static_cast<float>(a[a_loc + 1]);
-                sum += (static_cast<float>((b_val_packed >> 8) & mask) * scale + bias) * static_cast<float>(a[a_loc + 2]);
-                sum += (static_cast<float>((b_val_packed >> 12) & mask) * scale + bias) * static_cast<float>(a[a_loc + 3]);
-                sum += (static_cast<float>((b_val_packed >> 16) & mask) * scale + bias) * static_cast<float>(a[a_loc + 4]);
-                sum += (static_cast<float>((b_val_packed >> 20) & mask) * scale + bias) * static_cast<float>(a[a_loc + 5]);
-                sum += (static_cast<float>((b_val_packed >> 24) & mask) * scale + bias) * static_cast<float>(a[a_loc + 6]);
-                sum += (static_cast<float>((b_val_packed >> 28) & mask) * scale + bias) * static_cast<float>(a[a_loc + 7]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 0) & mask, scale, bias, a[a_loc]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 4) & mask, scale, bias, a[a_loc + 1]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 8) & mask, scale, bias, a[a_loc + 2]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 12) & mask, scale, bias, a[a_loc + 3]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 16) & mask, scale, bias, a[a_loc + 4]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 20) & mask, scale, bias, a[a_loc + 5]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 24) & mask, scale, bias, a[a_loc + 6]);
+                sum = accumulate_quantized_product(sum, (b_val_packed >> 28) & mask, scale, bias, a[a_loc + 7]);
                 a_loc += packs_per_item;
                 b_loc += 1;
             }

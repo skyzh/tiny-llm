@@ -195,7 +195,7 @@ Output:
   C: M × K (bfloat16)
 
 For each output element C[i, k]:
-  sum = 0
+  sum = bfloat16(0)
   for each group g in 0..(N/G - 1):
     scale = scales[k, g]
     bias = biases[k, g]
@@ -207,9 +207,10 @@ For each output element C[i, k]:
       # Unpack 8 × 4-bit values
       for bit_offset in [0, 4, 8, 12, 16, 20, 24, 28]:
         quantized = (packed_value >> bit_offset) & 0xF
-        b_value = quantized * scale + bias
+        b_value = bfloat16(quantized * scale + bias)
         a_value = A[i, g*G + p*8 + bit_offset/4]
-        sum += a_value * b_value
+        product = bfloat16(a_value * b_value)
+        sum = bfloat16(sum + product)
   
   C[i, k] = sum
 ```
@@ -251,7 +252,7 @@ You need to touch three files, all within the `tiny_llm_ext` namespace:
 - **`bindings.cpp`** — Add an `m.def(...)` call to expose the function to Python.
 - **`quantized_matmul.cpp`** — Implement the `quantized_matmul(...)` function (validate inputs, compute output shape, return a lazy `mx::array`) and the `eval_cpu` method (allocate output, register arrays with the CPU encoder, dispatch the compute kernel).
 
-The `eval_cpu` implementation follows the same CPU encoder pattern as `axpby`: allocate output memory with `out.set_data(mx::allocator::malloc(out.nbytes()))`, register input/output arrays with the encoder, then dispatch a lambda that performs the actual computation. Inside the lambda, implement the nested loop from the Computation Flow section above — iterate over each output element `(i, k)`, accumulate in `float` (fp32) to avoid precision loss, and cast the result back to the output dtype when writing to the output.
+The `eval_cpu` implementation follows the same CPU encoder pattern as `axpby`: allocate output memory with `out.set_data(mx::allocator::malloc(out.nbytes()))`, register input/output arrays with the encoder, then dispatch a lambda that performs the actual computation. Inside the lambda, implement the nested loop from the Computation Flow section above — iterate over each output element `(i, k)`, round the dequantized value, product, and running sum to `bfloat16`, and write the `bfloat16` result to the output.
 
 Don't forget to add `src/quantized_matmul.cpp` to `target_sources` in `CMakeLists.txt`.
 
@@ -281,7 +282,7 @@ You need to implement one kernel entry in `quantized_matmul.metal`:
   - Iterate over groups using the runtime `group_size` argument
   - Unpack int4 values from packed `uint32`
   - Dequantize with `q * scale + bias`
-  - Accumulate in `float` and cast to the output dtype at the end
+  - Round the dequantized value, product, and running sum to `bfloat16`, matching the input/output dtype
 - Add boundary checks (`i < M`, `k < K`) before writing output.
 
 The custom kernel only needs to handle `bits = 4`, but `group_size` must come from the quantized layer metadata. Use it to compute `groups_per_row` and the packed weight offsets so both the isolated `group_size = 64` tests and Qwen3 `group_size = 128` tests work through the same kernel.

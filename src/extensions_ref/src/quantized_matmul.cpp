@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstring>
 
 #include "mlx/array.h"
 #include "mlx/device.h"
@@ -13,6 +14,14 @@
 #endif
 
 namespace tiny_llm_ext_ref {
+
+float round_to_bfloat16(float value) {
+    uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    bits = (bits + 0x7fff + ((bits >> 16) & 1)) & 0xffff0000;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
 
 mx::array quantized_matmul(const mx::array &scales,         // Input array scales
                            const mx::array &biases,         // Input array biases
@@ -122,7 +131,8 @@ void quantized_matmul_impl_typed(
                 for (int group_idx = 0; group_idx < group_per_row; group_idx++) {
                     int64_t scales_idx = mx::elem_to_loc(j * group_per_row + group_idx, scales.shape(), scales.strides());
                     int64_t biases_idx = mx::elem_to_loc(j * group_per_row + group_idx, biases.shape(), biases.strides());
-                    T scale = scales_ptr[scales_idx], bias = biases_ptr[biases_idx];
+                    float scale = static_cast<float>(scales_ptr[scales_idx]);
+                    float bias = static_cast<float>(biases_ptr[biases_idx]);
 
                     int64_t a_idx = mx::elem_to_loc(i * n + group_idx * group_size, a.shape(), a.strides());
                     int64_t b_idx = mx::elem_to_loc((j * n + group_idx * group_size) / packs_per_item, b.shape(), b.strides());
@@ -138,8 +148,9 @@ void quantized_matmul_impl_typed(
                             // (pack_7, pack_6, pack_5, pack_4, pack_3, pack_2, pack_1, pack_0) => (b_bytes[3], b_bytes[2], b_bytes[1], b_bytes[0])
                             uint8_t item_val = (b_bytes[pack_idx / 2] >> ((pack_idx % 2) * bits)) & pack_mask;
                             float a_val = static_cast<float>(a_ptr[a_idx]);
-                            float b_val_real = static_cast<float>(item_val) * static_cast<float>(scale) + static_cast<float>(bias);
-                            sum += a_val * b_val_real;
+                            float b_val_real = round_to_bfloat16(static_cast<float>(item_val) * scale + bias);
+                            float product = round_to_bfloat16(a_val * b_val_real);
+                            sum = round_to_bfloat16(sum + product);
                             a_idx += 1;
                         }
                         b_idx += 1;
