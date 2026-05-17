@@ -81,8 +81,7 @@ mx::array quantized_matmul(const mx::array &scales,         // Input array scale
         /* const std::vector<mx::array>& inputs = */ {scales, biases, a, b});
 }
 
-template<typename T>
-void quantized_matmul_impl_typed(
+void quantized_matmul_impl(
     const mx::array &scales, const mx::array &biases,
     const mx::array &a, const mx::array &b,
     mx::array &out, int group_size, int bits, mx::Stream stream) {
@@ -95,7 +94,7 @@ void quantized_matmul_impl_typed(
     encoder.set_input_array(b);
     encoder.set_output_array(out);
 
-    encoder.dispatch([out_ptr = out.data<T>(), out_shape = out.shape(), out_strides = out.strides(),
+    encoder.dispatch([out_ptr = out.data<mx::bfloat16_t>(), out_shape = out.shape(), out_strides = out.strides(),
         group_size = group_size, bits = bits,
         a = mx::array::unsafe_weak_copy(a), b = mx::array::unsafe_weak_copy(b),
         scales = mx::array::unsafe_weak_copy(scales), biases = mx::array::unsafe_weak_copy(biases)]() {
@@ -110,8 +109,8 @@ void quantized_matmul_impl_typed(
         const int packs_per_item = 32 / bits;   // each uint32_t element can store `packs_per_item` packed elements
         const int items_per_group = group_size / packs_per_item;   // each group contains `items_per_group` uint32_t elements
 
-        const T *a_ptr = a.data<T>(),
-                *scales_ptr = scales.data<T>(), *biases_ptr = biases.data<T>();
+        const mx::bfloat16_t *a_ptr = a.data<mx::bfloat16_t>(),
+                *scales_ptr = scales.data<mx::bfloat16_t>(), *biases_ptr = biases.data<mx::bfloat16_t>();
         const uint32_t *b_ptr = b.data<uint32_t>();
 
         uint32_t pack_mask = (1 << bits) - 1;
@@ -147,15 +146,10 @@ void quantized_matmul_impl_typed(
                     }
                 }
                 int64_t out_idx = mx::elem_to_loc(i * k + j, out_shape, out_strides);
-                out_ptr[out_idx] = static_cast<T>(sum);
+                out_ptr[out_idx] = static_cast<mx::bfloat16_t>(sum);
             }
         }
     });
-}
-
-void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, const mx::array &a, const mx::array &b,
-                           mx::array &out, int group_size, int bits, mx::Stream stream) {
-    quantized_matmul_impl_typed<mx::bfloat16_t>(scales, biases, a, b, out, group_size, bits, stream);
 }
 
 void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
