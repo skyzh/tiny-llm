@@ -164,6 +164,8 @@ class Qwen3ModelWeek3:
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size
         self.page_size = page_size
+        # One model-level pool is shared by all layer caches. Each layer cache
+        # still owns its own page table and allocates its own physical pages.
         self.page_pool = TinyKvPagedPool(page_size=self.page_size)
         precision = mx.bfloat16
         self.precision = precision
@@ -234,6 +236,8 @@ class Qwen3ModelWeek3:
         self.mlx_model = mlx_model
 
     def create_kv_cache(self) -> list[TinyKvCache]:
+        # One request gets one cache handle per layer. The handles share the
+        # model-level pool, but their page_ids/page_lens/offset are independent.
         return [
             TinyKvPagedCache(pool=self.page_pool) for _ in range(self.num_hidden_layers)
         ]
