@@ -2,7 +2,7 @@
 #include "mlx/backend/metal/kernels/utils.h"
 
 template <typename T>
-[[kernel]] void quantized_matmul_w4a16(
+[[kernel]] void quantized_matmul_w4a16_g128(
     device const T* scales [[buffer(0)]],
     device const T* biases [[buffer(1)]],
     device const T* a [[buffer(2)]],
@@ -51,4 +51,4 @@ template <typename T>
     }
 }
 
-instantiate_kernel("quantized_matmul_w4a16_bf16", quantized_matmul_w4a16, bfloat16_t);
+instantiate_kernel("quantized_matmul_w4a16_g128_bf16", quantized_matmul_w4a16_g128, bfloat16_t);
