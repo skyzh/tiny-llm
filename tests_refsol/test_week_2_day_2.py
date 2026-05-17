@@ -4,12 +4,8 @@ from .tiny_llm_base import *
 from .utils import *
 
 
-def quantized_matmul_helper(
-    stream: mx.Stream,
-    identity_matrix: bool,
-    group_size: int = 64,
-    rtol: float | None = None,
-    atol: float | None = None,
+def quantized_matmul_outputs(
+    stream: mx.Stream, identity_matrix: bool, group_size: int = 64
 ):
     with mx.stream(stream):
         mx.random.seed(0)
@@ -38,27 +34,36 @@ def quantized_matmul_helper(
             bits=4,
             transpose=True,
         )
-        assert_allclose(user_out, ref_out, mx.bfloat16, rtol=rtol, atol=atol)
+        return user_out, ref_out
+
+
+def assert_quantized_matmul_close(user_out: mx.array, ref_out: mx.array):
+    assert_allclose(user_out, ref_out, mx.bfloat16, rtol=1e-1, atol=5e-1)
 
 
 def test_task_2_quantized_matmul_simple_bf16_cpu():
-    quantized_matmul_helper(mx.cpu, True)
+    user_out, ref_out = quantized_matmul_outputs(mx.cpu, True)
+    assert_allclose(user_out, ref_out, mx.bfloat16)
 
 
 def test_task_2_quantized_matmul_complex_bf16_cpu():
-    quantized_matmul_helper(mx.cpu, False, rtol=1e-1, atol=5e-1)
+    user_out, ref_out = quantized_matmul_outputs(mx.cpu, False)
+    assert_quantized_matmul_close(user_out, ref_out)
 
 
 def test_task_3_quantized_matmul_simple_bf16_gpu():
-    quantized_matmul_helper(mx.gpu, True)
+    user_out, ref_out = quantized_matmul_outputs(mx.gpu, True)
+    assert_allclose(user_out, ref_out, mx.bfloat16)
 
 
 def test_task_3_quantized_matmul_complex_bf16_gpu():
-    quantized_matmul_helper(mx.gpu, False, rtol=1e-1, atol=5e-1)
+    user_out, ref_out = quantized_matmul_outputs(mx.gpu, False)
+    assert_quantized_matmul_close(user_out, ref_out)
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 def test_task_4_quantized_matmul_qwen3_group_size_128_bf16(stream):
-    quantized_matmul_helper(
-        stream, False, group_size=128, rtol=1e-1, atol=5e-1
+    user_out, ref_out = quantized_matmul_outputs(
+        stream, False, group_size=128
     )
+    assert_quantized_matmul_close(user_out, ref_out)
