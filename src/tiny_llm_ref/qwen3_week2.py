@@ -285,6 +285,3 @@ class Qwen3ModelWeek2:
             return quantized_linear(h, self.w_lm_head)
         else:
             return self.embedding.as_linear(h)
-
-
-Qwen3Model = Qwen3ModelWeek2
