@@ -58,6 +58,26 @@ The original Transformer model utilized a simple Feed-Forward Network (FFN) with
 
 Modern Transformer architectures, including Qwen2, often employ more advanced FFN variants for improved performance. Qwen2 uses a specific type of Gated Linear Unit (GLU) called SwiGLU.
 
+A plain FFN can be abstracted as:
+
+```plain
+h = activation(W_up(x))
+out = W_down(h)
+```
+
+GLU keeps the same expand-then-project-back shape, but adds another projection
+that gates the intermediate features before `W_down`. This gives the MLP a
+learned, input-dependent way to control which intermediate channels matter,
+instead of only applying an activation to the same features produced by `W_up`.
+
+SwiGLU is the GLU variant used by Qwen2:
+
+```plain
+u = W_up(x)
+g = SiLU(W_gate(x))
+out = W_down(g * u)
+```
+
 **📚 Readings**
 * [Attention is All You Need (Transformer Paper, Section 3.3 "Position-wise Feed-Forward Networks")](https://arxiv.org/abs/1706.03762)
 * [GLU Paper(Language Modeling with Gated Convolutional Networks)](https://arxiv.org/pdf/1612.08083)
@@ -75,7 +95,6 @@ The `silu` function is defined as:
 $$
 \text{SiLU}(x) = x * \text{sigmoid}(x) = \frac{x}{1 + e^{-x}}
 $$
-
 
 Then implement `Qwen2MLP`. The structure for Qwen2's MLP block is:
 *  A gate linear projection ($W_{gate}$).
