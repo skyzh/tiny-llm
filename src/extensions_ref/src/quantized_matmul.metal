@@ -2,7 +2,7 @@
 #include "mlx/backend/metal/kernels/utils.h"
 
 template <typename T>
-[[kernel]] void quantized_matmul_w4a16_g64(
+[[kernel]] void quantized_matmul_w4a16(
     device const T* scales [[buffer(0)]],
     device const T* biases [[buffer(1)]],
     device const T* a [[buffer(2)]],
@@ -11,11 +11,11 @@ template <typename T>
     device const int &M [[buffer(5)]],
     device const int &N [[buffer(6)]],
     device const int &K [[buffer(7)]],
+    device const int &group_size [[buffer(8)]],
     uint3 group_id [[threadgroup_position_in_grid]],
     uint3 thread_id [[thread_position_in_threadgroup]],
     uint3 threads_per_threadgroup [[threads_per_threadgroup]],
     [[maybe_unused]] threadgroup char * shmem [[threadgroup(0)]]) {
-    const int group_size = 64;
     const int bits = 4;
     const int packs_per_item = 32 / bits;
     const int groups_per_row = N / group_size;
@@ -51,5 +51,5 @@ template <typename T>
     }
 }
 
-instantiate_kernel("quantized_matmul_w4a16_g64_f16", quantized_matmul_w4a16_g64, float16_t);
-instantiate_kernel("quantized_matmul_w4a16_g64_bf16", quantized_matmul_w4a16_g64, bfloat16_t);
+instantiate_kernel("quantized_matmul_w4a16_f16", quantized_matmul_w4a16, float16_t);
+instantiate_kernel("quantized_matmul_w4a16_bf16", quantized_matmul_w4a16, bfloat16_t);

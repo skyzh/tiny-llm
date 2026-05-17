@@ -69,7 +69,7 @@ For each group of G consecutive values in a row:
   3. Quantize each value using: quantized = round((value - bias) / scale)
 ```
 
-The custom kernel in this chapter starts with `group_size = 64`, which keeps the exercise small and easy to test in isolation. The official Qwen3 MLX checkpoints we load later use their own checkpoint metadata (for example, the 0.6B checkpoint uses `group_size = 128`), so the model integration must read and respect the actual `group_size` and `bits` fields instead of hard-coding them.
+The first tests use `group_size = 64`, which keeps the exercise small and easy to test in isolation. The official Qwen3 MLX checkpoints we load later use their own checkpoint metadata (for example, the 0.6B checkpoint uses `group_size = 128`), so the kernel and model integration must read and respect the actual `group_size` and `bits` fields instead of hard-coding them.
 
 ### Affine Quantization
 
@@ -278,13 +278,13 @@ You need to implement one kernel entry in `quantized_matmul.metal`:
 - Use a **one-thread-per-output-element** mapping: each thread computes `out[i, k]`.
 - The kernel should be templated on the data type (to support both `half` and `bfloat16_t`).
 - Apply the same group-wise dequantization loop as the CPU version:
-  - Iterate over groups (`group_size = 64` for this custom kernel path)
+  - Iterate over groups using the runtime `group_size` argument
   - Unpack int4 values from packed `uint32`
   - Dequantize with `q * scale + bias`
   - Accumulate in `float` and cast to the output dtype at the end
 - Add boundary checks (`i < M`, `k < K`) before writing output.
 
-The first custom kernel path only needs to handle `bits = 4` and `group_size = 64`. Keep this limitation explicit in your Python wrapper so unsupported checkpoint layouts can take a fallback path instead of silently using the wrong shape math.
+The custom kernel only needs to handle `bits = 4`, but `group_size` must come from the quantized layer metadata. Use it to compute `groups_per_row` and the packed weight offsets so both the isolated `group_size = 64` tests and Qwen3 checkpoint layouts such as `group_size = 128` work through the same kernel.
 
 ### GPU Dispatch
 
@@ -315,7 +315,7 @@ Change the weight type from `mx.array` to `QuantizedWeights` for all linear laye
 
 Note that Qwen3 MLX checkpoints commonly use **bfloat16** for the tensors involved in dequantization. Your kernel dispatch should support both `float16` and `bfloat16`, and `scales`, `biases`, and activations must stay in the same dtype when calling the kernel. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
 
-Also keep the checkpoint's actual quantization parameters. The custom kernel in this chapter handles the `bits = 4`, `group_size = 64` path used by the kernel-focused tests, while the official Qwen3 MLX checkpoints may use another group size such as 128. In `quantized_matmul`, dispatch to your custom extension for the supported path and call MLX's built-in `mx.quantized_matmul(...)` as a fallback for other `group_size` values. The model code should pass through `w.group_size` and `w.bits`; it should not rewrite them.
+Also keep the checkpoint's actual quantization parameters. The official Qwen3 MLX checkpoints may use a group size such as 128, so `quantized_matmul` should pass `group_size` and `bits` into your custom extension and let the CPU/GPU kernels use those values directly. The model code should pass through `w.group_size` and `w.bits`; it should not rewrite them.
 
 You can test your implementation by running:
 
