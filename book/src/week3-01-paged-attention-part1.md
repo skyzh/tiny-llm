@@ -270,7 +270,7 @@ Replace the "one layer cache = one dense KV tensor" model with:
 
 ```
 src/tiny_llm/paged_kv_cache.py
-src/tiny_llm/qwen2_week3.py
+src/tiny_llm/qwen3_week3.py
 ```
 
 Build a compatibility path that reconstructs dense K/V from pages and compares it against `TinyKvFullCache`.

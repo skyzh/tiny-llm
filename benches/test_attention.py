@@ -6,7 +6,7 @@ import pytest
 
 
 def get_test_attention_data():
-    # Qwen2 7B matrix size
+    # Representative large-model attention size
     init = nn.init.he_uniform(mx.float32)
     q = init(mx.zeros((10, 28, 1024, 128)))
     k = init(mx.zeros((10, 4, 1024, 128)))

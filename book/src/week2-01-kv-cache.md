@@ -1,6 +1,6 @@
 # Week 2 Day 1: Key-Value Cache
 
-In this chapter, we will implement the **key-value cache** for the Qwen2 model. The key-value cache is an essential component of the attention mechanism, as it allows the model to reuse previously computed results instead of recomputing them for every new token.
+In this chapter, we will implement the **key-value cache** for the Qwen3 model. The key-value cache is an essential component of the attention mechanism, as it allows the model to reuse previously computed results instead of recomputing them for every new token.
 
 **📚 Readings**
 
@@ -18,9 +18,11 @@ decode:  _step(model, [1, 2, 3, 4, 5, 6, 7, 8]) # returns 9
 
 ```plain
 x: B, L, E
-q = linear(x, wq, bq) -> B, L, H_q, D
-k = linear(x, wk, bk) -> B, L, H, D
-v = linear(x, wv, bv) -> B, L, H, D
+q = linear(x, wq) -> B, L, H_q, D
+k = linear(x, wk) -> B, L, H, D
+v = linear(x, wv) -> B, L, H, D
+q = rms_norm(q, q_norm)
+k = rms_norm(k, k_norm)
 q = rope(q, offset=slice(offset, offset + L))
 k = rope(k, offset=slice(offset, offset + L))
 (transpose as needed)
@@ -118,10 +120,10 @@ return self.key, self.value
 ## Task 2: Use the Key-Value Cache
 
 ```
-src/tiny_llm/qwen2_week2.py
+src/tiny_llm/qwen3_week2.py
 ```
 
-With the cache in place, update your week 1 Qwen2 implementation to support it. Implement the `Qwen2MultiHeadAttention` class in `qwen2_week2.py`.
+With the cache in place, update your week 1 Qwen3 implementation to support it. Implement the `Qwen3MultiHeadAttention` class in `qwen3_week2.py`.
 
 * Each layer should use its own cache.
 * The model must now accept an `offset` argument, which represents the position of the last token processed.
@@ -132,9 +134,11 @@ Example computation flow:
 
 ```plain
 x: B, L', E
-q = linear(x, wq, bq) -> B, L', H_q, D
-k = linear(x, wk, bk) -> B, L', H, D
-v = linear(x, wv, bv) -> B, L', H, D
+q = linear(x, wq) -> B, L', H_q, D
+k = linear(x, wk) -> B, L', H, D
+v = linear(x, wv) -> B, L', H, D
+q = rms_norm(q, q_norm)
+k = rms_norm(k, k_norm)
 q = rope(q, offset=slice(offset, offset + L'))
 k = rope(k, offset=slice(offset, offset + L'))
 (transpose as needed)
@@ -146,7 +150,7 @@ x = linear(x, wo) -> B, L', E
 
 We use two different variables for the `L'` because they have different meanings in the context of this chapter
 and the context of week 1 day 3: in the GQA implementation, k/v's sequence length is `S` (source length), while
-q's sequence length is `L`. In the Qwen2 multihead attention implementation, `L'` is the "new token" and `L` is
+q's sequence length is `L`. In the Qwen3 multihead attention implementation, `L'` is the "new token" and `L` is
 the total sequence length, which corresponds to `L` and `S` in week 1 respectively.
 
 Note that another refactor of this week's code is that all modules now take `QuantizedWeights` instead of `mx.array`
@@ -156,7 +160,7 @@ will replace it with our own quantized matmul implementation for the rest of the
 ## Task 3: Implement the Model
 
 ```
-src/tiny_llm/qwen2_week2.py
+src/tiny_llm/qwen3_week2.py
 ```
 
 Complete the rest of the model using your week 1 implementation as a base, but modify all relevant components to use the key-value cache.
@@ -173,7 +177,7 @@ pdm run test --week 2 --day 1
 src/tiny_llm/generate.py
 ```
 
-Next, implement the decoding logic in `generate.py` by completing the `simple_generate_with_kv_cache` function. This function should call your Week 2 Qwen2 model with both the `offset` and the newly decoded token.
+Next, implement the decoding logic in `generate.py` by completing the `simple_generate_with_kv_cache` function. This function should call your Week 2 Qwen3 model with both the `offset` and the newly decoded token.
 
 For example:
 
@@ -188,15 +192,15 @@ decode:  _step(model, [8], 8)  # returns 9
 You can test your implementation with:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen2-0.5b
-pdm run main --solution tiny_llm --loader week2 --model qwen2-7b
+pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm run main --solution tiny_llm --loader week2 --model qwen3-4b
 ```
 
 You can also benchmark throughput and compare your implementation with the reference solution:
 
 ```bash
-pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b
-pdm bench --solution tiny_llm_ref --loader week2 --model qwen2-0.5b
+pdm bench --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 ```
 
 {{#include copyright.md}}

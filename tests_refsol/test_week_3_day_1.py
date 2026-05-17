@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import mlx.core as mx
 
 from .tiny_llm_base import (
-    Qwen2ModelWeek2,
-    Qwen2ModelWeek3,
+    Qwen3ModelWeek2,
+    Qwen3ModelWeek3,
     TinyKvFullCache,
     TinyKvPagedCache,
     TinyKvPagedPool,
@@ -12,30 +12,31 @@ from .tiny_llm_base import (
 from .utils import assert_allclose
 
 
-def _random_chunk(length: int, num_heads: int = 2, head_dim: int = 4) -> tuple[mx.array, mx.array]:
+def _random_chunk(
+    length: int, num_heads: int = 2, head_dim: int = 4
+) -> tuple[mx.array, mx.array]:
     key = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
     value = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
     return key, value
 
 
 def _quantized_layer(
-    out_dim: int, in_dim: int, *, bias: bool = False, group_size: int = 64
+    out_dim: int, in_dim: int, group_size: int = 64
 ) -> SimpleNamespace:
-    weight = mx.random.normal(shape=(out_dim, in_dim), dtype=mx.float16)
-    quantized_weight, scales, biases = mx.quantize(weight, group_size=group_size, bits=4)
-    layer = SimpleNamespace(
+    weight = mx.random.normal(shape=(out_dim, in_dim), dtype=mx.bfloat16)
+    quantized_weight, scales, biases = mx.quantize(
+        weight, group_size=group_size, bits=4
+    )
+    return SimpleNamespace(
         weight=quantized_weight,
         scales=scales,
         biases=biases,
         group_size=group_size,
         bits=4,
     )
-    if bias:
-        layer.bias = mx.random.normal(shape=(out_dim,), dtype=mx.float16)
-    return layer
 
 
-def _fake_qwen2_mlx_model() -> SimpleNamespace:
+def _fake_qwen3_mlx_model() -> SimpleNamespace:
     mx.random.seed(0)
     args = SimpleNamespace(
         num_hidden_layers=2,
@@ -43,6 +44,7 @@ def _fake_qwen2_mlx_model() -> SimpleNamespace:
         vocab_size=128,
         num_attention_heads=4,
         num_key_value_heads=2,
+        head_dim=16,
         intermediate_size=128,
         rms_norm_eps=1e-5,
         max_position_embeddings=128,
@@ -50,27 +52,38 @@ def _fake_qwen2_mlx_model() -> SimpleNamespace:
         tie_word_embeddings=True,
     )
     embed_tokens = _quantized_layer(args.vocab_size, args.hidden_size)
-    kv_hidden_size = args.hidden_size // args.num_attention_heads * args.num_key_value_heads
+    kv_hidden_size = args.num_key_value_heads * args.head_dim
+    attn_hidden_size = args.num_attention_heads * args.head_dim
     layers = []
     for _ in range(args.num_hidden_layers):
         layers.append(
             SimpleNamespace(
                 self_attn=SimpleNamespace(
-                    q_proj=_quantized_layer(args.hidden_size, args.hidden_size, bias=True),
-                    k_proj=_quantized_layer(kv_hidden_size, args.hidden_size, bias=True),
-                    v_proj=_quantized_layer(kv_hidden_size, args.hidden_size, bias=True),
-                    o_proj=_quantized_layer(args.hidden_size, args.hidden_size),
+                    q_proj=_quantized_layer(attn_hidden_size, args.hidden_size),
+                    k_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
+                    v_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
+                    o_proj=_quantized_layer(args.hidden_size, attn_hidden_size),
+                    q_norm=SimpleNamespace(
+                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
+                    ),
+                    k_norm=SimpleNamespace(
+                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
+                    ),
                 ),
                 mlp=SimpleNamespace(
-                    gate_proj=_quantized_layer(args.intermediate_size, args.hidden_size),
+                    gate_proj=_quantized_layer(
+                        args.intermediate_size, args.hidden_size
+                    ),
                     up_proj=_quantized_layer(args.intermediate_size, args.hidden_size),
-                    down_proj=_quantized_layer(args.hidden_size, args.intermediate_size),
+                    down_proj=_quantized_layer(
+                        args.hidden_size, args.intermediate_size
+                    ),
                 ),
                 input_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.float16)
+                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
                 ),
                 post_attention_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.float16)
+                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
                 ),
             )
         )
@@ -79,7 +92,9 @@ def _fake_qwen2_mlx_model() -> SimpleNamespace:
         model=SimpleNamespace(
             embed_tokens=embed_tokens,
             layers=layers,
-            norm=SimpleNamespace(weight=mx.ones((args.hidden_size,), dtype=mx.float16)),
+            norm=SimpleNamespace(
+                weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
+            ),
         ),
     )
 
@@ -124,7 +139,9 @@ def test_task_1_paged_pool_reuses_freed_pages():
     assert pool.num_free_pages == 2
 
     second_key, second_value = _random_chunk(5)
-    gathered_key, gathered_value, seq_len, _ = second.update_and_fetch(second_key, second_value)
+    gathered_key, gathered_value, seq_len, _ = second.update_and_fetch(
+        second_key, second_value
+    )
     assert seq_len == 5
     assert pool.num_pages == 2
     assert pool.num_free_pages == 0
@@ -164,8 +181,8 @@ def test_task_1_paged_cache_rewind():
 
 
 def test_task_1_model_kv_caches_share_layer_pools():
-    mlx_model = _fake_qwen2_mlx_model()
-    week3_model = Qwen2ModelWeek3(mlx_model, page_size=4)
+    mlx_model = _fake_qwen3_mlx_model()
+    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
     first_request_cache = week3_model.create_kv_cache()
     second_request_cache = week3_model.create_kv_cache()
 
@@ -180,8 +197,8 @@ def test_task_1_model_kv_caches_share_layer_pools():
 
 
 def test_task_1_model_layer_caches_keep_independent_page_metadata():
-    mlx_model = _fake_qwen2_mlx_model()
-    week3_model = Qwen2ModelWeek3(mlx_model, page_size=4)
+    mlx_model = _fake_qwen3_mlx_model()
+    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
     cache = week3_model.create_kv_cache()
     inputs = mx.array([[1, 5, 7, 3, 9]], dtype=mx.int32)
 
@@ -201,9 +218,9 @@ def test_task_1_model_layer_caches_keep_independent_page_metadata():
 
 
 def test_task_3_incremental_decode_matches_week2():
-    mlx_model = _fake_qwen2_mlx_model()
-    week2_model = Qwen2ModelWeek2(mlx_model)
-    week3_model = Qwen2ModelWeek3(mlx_model, page_size=4)
+    mlx_model = _fake_qwen3_mlx_model()
+    week2_model = Qwen3ModelWeek2(mlx_model)
+    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
     inputs = mx.array([[1, 5, 7, 3, 9, 11]], dtype=mx.int32)
     week2_cache = week2_model.create_kv_cache()
     week3_cache = week3_model.create_kv_cache()
@@ -214,4 +231,6 @@ def test_task_3_incremental_decode_matches_week2():
         week3_out = week3_model(token, offset, week3_cache)
         week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
         week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
-        assert_allclose(week3_out, week2_out, precision=mx.float16, rtol=1e-3, atol=1e-3)
+        assert_allclose(
+            week3_out, week2_out, precision=mx.bfloat16, rtol=1e-3, atol=1e-3
+        )

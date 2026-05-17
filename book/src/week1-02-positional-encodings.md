@@ -1,7 +1,7 @@
 # Week 1 Day 2: Positional Encodings and RoPE
 
-In day 2, we will implement the positional embedding used in the Qwen2 model: Rotary Positional Encoding. In a transformer
-model, we need a way to embed the information of the position of a token into the input of the attention layers. In Qwen2,
+In day 2, we will implement the positional embedding used in the Qwen3 model: Rotary Positional Encoding. In a transformer
+model, we need a way to embed the information of the position of a token into the input of the attention layers. In Qwen3,
 positional embedding is applied within the multi head attention layer on the query and key vectors.
 
 **📚 Readings**
@@ -63,7 +63,7 @@ pdm run test --week 1 --day 2 -- -k task_1
 
 ## Task 2: Implement `RoPE` in the non-traditional form
 
-The Qwen2 model uses a non-traditional form of RoPE. In this form, the head embedding dimension is split into two halves,
+The Qwen3 model uses a non-traditional form of RoPE. In this form, the head embedding dimension is split into two halves,
 and the two halves are applied with different frequencies. Let's say `x1 = x[.., :HALF_DIM]` and `x2 = x[.., HALF_DIM:]`.
 
 ```

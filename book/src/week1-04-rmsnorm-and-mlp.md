@@ -1,6 +1,6 @@
 # Week 1 Day 4: RMSNorm and Multi Perceptron Layer
 
-In day 4, we will implement two crucial components of the Qwen2 Transformer architecture: RMSNorm and the MLP (Multi-Layer Perceptron) block, also known as the FeedForward Network. RMSNorm is a layer normalization technique that helps stabilize training with less computational overhead compared to traditional layer normalization. The MLP block is a feedforward network that processes the output of the attention layers, applying non-linear transformations to enhance the model's expressiveness.
+In day 4, we will implement two crucial components of the Qwen3 Transformer architecture: RMSNorm and the MLP (Multi-Layer Perceptron) block, also known as the FeedForward Network. RMSNorm is a layer normalization technique that helps stabilize training with less computational overhead compared to traditional layer normalization. The MLP block is a feedforward network that processes the output of the attention layers, applying non-linear transformations to enhance the model's expressiveness.
 
 
 ## Task 1: Implement `RMSNorm`
@@ -11,10 +11,12 @@ In this task, we will implement the `RMSNorm` layer.
 src/tiny_llm/layer_norm.py
 ```
 
+Day 3 used `mx.fast.rms_norm` directly so that the GQA chapter could stay focused on attention. This task implements the same normalization rule as a reusable layer. After this point, the transformer block, final model norm, and any Q/K normalization path can use your own `RMSNorm` implementation instead of treating normalization as a built-in API.
+
 **📚 Readings**
 
 * [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)
-* [Qwen2 layers implementation in mlx-lm (includes RMSNorm)]([https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py](https://github.com/ml-explore/mlx-lm/blob/bcb96db87f218453774f8808159012f15fc0dc7b/mlx_lm/models/qwen2.py)) - See `RMSNorm`.
+* [Qwen3 layers implementation in mlx-lm (includes RMSNorm)](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py) - See `RMSNorm`.
 
 
 RMSNorm is defined as:
@@ -48,15 +50,15 @@ pdm run test --week 1 --day 4 -- -k task_1
 
 ## Task 2: Implement the MLP Block
 
-In this task, we will implement the MLP block named `Qwen2MLP`.
+In this task, we will implement the MLP block named `Qwen3MLP`.
 
 ```
-src/tiny_llm/qwen2_week1.py
+src/tiny_llm/qwen3_week1.py
 ```
 
 The original Transformer model utilized a simple Feed-Forward Network (FFN) within each block. This FFN typically consisted of two linear transformations with a ReLU activation in between, applied position-wise.
 
-Modern Transformer architectures, including Qwen2, often employ more advanced FFN variants for improved performance. Qwen2 uses a specific type of Gated Linear Unit (GLU) called SwiGLU.
+Modern Transformer architectures, including Qwen3, often employ more advanced FFN variants for improved performance. Qwen3 uses a specific type of Gated Linear Unit (GLU) called SwiGLU.
 
 A plain FFN can be abstracted as:
 
@@ -70,7 +72,7 @@ that gates the intermediate features before `W_down`. This gives the MLP a
 learned, input-dependent way to control which intermediate channels matter,
 instead of only applying an activation to the same features produced by `W_up`.
 
-SwiGLU is the GLU variant used by Qwen2:
+SwiGLU is the GLU variant used by Qwen3:
 
 ```plain
 u = W_up(x)
@@ -84,7 +86,7 @@ out = W_down(g * u)
 * [SilU(Swish) activation function](https://arxiv.org/pdf/1710.05941)
 * [SwiGLU Paper(GLU Variants Improve Transformer)](https://arxiv.org/abs/2002.05202v1)
 * [PyTorch SiLU documentation](https://pytorch.org/docs/stable/generated/torch.nn.SiLU.html)
-* [Qwen2 layers implementation in mlx-lm (includes MLP)](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py)
+* [Qwen3 layers implementation in mlx-lm (includes MLP)](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py)
 
 Essentially, SwiGLU is a combination of GLU and the SiLU (Sigmoid Linear Unit) activation function:
 -  GLU is a gating mechanism that allows the model to learn which parts of the input to focus on. It typically involves an element-wise product of two linear projections of the input, one of which might be passed through an activation function. Compared to ReLU used in the original FFN, GLU can help the model learn more complex relationships in the data, deciding which features to keep and which to discard.
@@ -96,7 +98,7 @@ $$
 \text{SiLU}(x) = x * \text{sigmoid}(x) = \frac{x}{1 + e^{-x}}
 $$
 
-Then implement `Qwen2MLP`. The structure for Qwen2's MLP block is:
+Then implement `Qwen3MLP`. The structure for Qwen3's MLP block is:
 *  A gate linear projection ($W_{gate}$).
 *  An up linear projection ($W_{up}$).
 *  A SiLU activation function applied to the output of $W_{gate}$.
@@ -107,7 +109,7 @@ This can be expressed as:
 $$
 \text{MLP}(x) = (\text{SiLU}(W_{gate}(x)) \odot W_{up}(x))W_{down}
 $$
-Where $\odot$ denotes element-wise multiplication. All linear projections in Qwen2's MLP are typically implemented without bias.
+Where $\odot$ denotes element-wise multiplication. All linear projections in Qwen3's MLP are typically implemented without bias.
 
 ```
 N.. is zero or more dimensions for batches

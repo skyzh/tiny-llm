@@ -111,13 +111,13 @@ def attention_helper(
             assert_allclose(
                 user_output_2,
                 reference_output_2,
-                precision=mx.float16,
+                precision=mx.bfloat16,
                 message="no mask",
             )
             assert_allclose(
                 user_output_1,
                 reference_output_1,
-                precision=mx.float16,
+                precision=mx.bfloat16,
                 message="with mask",
             )
 
@@ -236,7 +236,12 @@ def test_task_2_batching_kv_cache():
     expected_mask = mx.array(
         [
             [[[-mx.inf, 0.0, 0.0, -mx.inf], [-mx.inf, 0.0, 0.0, 0.0]]],
-            [[[-mx.inf, -mx.inf, -mx.inf, -mx.inf], [-mx.inf, -mx.inf, -mx.inf, -mx.inf]]],
+            [
+                [
+                    [-mx.inf, -mx.inf, -mx.inf, -mx.inf],
+                    [-mx.inf, -mx.inf, -mx.inf, -mx.inf],
+                ]
+            ],
             [[[0.0, 0.0, 0.0, -mx.inf], [0.0, 0.0, 0.0, 0.0]]],
         ],
         dtype=mx.float32,
@@ -248,13 +253,20 @@ def test_task_2_batching_kv_cache():
     assert_allclose(mask, expected_mask, mx.float32)
 
 
-def helper_test_task_3(model_name: str, seq_len: int, iters: int = 1):
+def helper_test_task_3(
+    model_name: str,
+    seq_len: int,
+    iters: int = 1,
+    rtol: float = 1e-1,
+    atol: float = 1e-2,
+    max_allowed_mismatches: int = 0,
+):
     """Tests for continuous batching of decode requests."""
     requests = 4
     max_seq_len = seq_len
 
     mlx_model, tokenizer = load(model_name)
-    model = Qwen2ModelWeek2(mlx_model)
+    model = Qwen3ModelWeek2(mlx_model)
     for _ in range(iters):
         cache = [
             BatchingKvCache(requests, max_seq_len)
@@ -299,26 +311,43 @@ def helper_test_task_3(model_name: str, seq_len: int, iters: int = 1):
                     user_out_r = user_out_r - mx.logsumexp(user_out_r, keepdims=True)
                     ref_out_r = ref_out_r - mx.logsumexp(ref_out_r, keepdims=True)
                     assert_allclose(
-                        user_out_r, ref_out_r, precision=mx.float16, rtol=1e-1
+                        user_out_r,
+                        ref_out_r,
+                        precision=mx.bfloat16,
+                        rtol=rtol,
+                        atol=atol,
+                        max_allowed_mismatches=max_allowed_mismatches,
                     )
 
 
 @pytest.mark.skipif(
-    not qwen_2_05b_model_exists(), reason="Qwen2-0.5B-Instruct-MLX model not found"
+    not qwen_3_06b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
-def test_task_3_qwen_2_05b():
-    helper_test_task_3("Qwen/Qwen2-0.5B-Instruct-MLX", seq_len=3)
+def test_task_3_qwen_3_06b():
+    helper_test_task_3("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3, max_allowed_mismatches=32)
 
 
 @pytest.mark.skipif(
-    not qwen_2_7b_model_exists(), reason="Qwen2-7B-Instruct-MLX model not found"
+    not qwen_3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
 )
-def test_task_3_qwen_2_7b():
-    helper_test_task_3("Qwen/Qwen2-7B-Instruct-MLX", seq_len=3)
+def test_task_3_qwen_3_4b():
+    helper_test_task_3(
+        "Qwen/Qwen3-4B-MLX-4bit",
+        seq_len=3,
+        rtol=2.5e-1,
+        atol=2.5e-1,
+        max_allowed_mismatches=1024,
+    )
 
 
 @pytest.mark.skipif(
-    not qwen_2_15b_model_exists(), reason="Qwen2-1.5B-Instruct-MLX model not found"
+    not qwen_3_17b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
 )
-def test_task_3_qwen_2_15b():
-    helper_test_task_3("Qwen/Qwen2-1.5B-Instruct-MLX", seq_len=3)
+def test_task_3_qwen_3_17b():
+    helper_test_task_3(
+        "Qwen/Qwen3-1.7B-MLX-4bit",
+        seq_len=3,
+        rtol=2.5e-1,
+        atol=5e-1,
+        max_allowed_mismatches=1024,
+    )

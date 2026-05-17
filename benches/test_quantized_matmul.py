@@ -6,7 +6,7 @@ import numpy as np
 
 
 def get_test_matmul_data():
-    # Qwen2 7B matrix size
+    # Representative large-model matrix size
     init = nn.init.he_uniform(mx.float16)
     w = init(mx.zeros((512, 3584)))
     x = init(mx.zeros((300, 3584)))
