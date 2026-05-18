@@ -11,7 +11,7 @@ from .kv_cache import TinyKvCache
 from .paged_kv_cache import TinyKvPagedCache, TinyKvPagedPool
 
 
-class Qwen3PagedMultiHeadAttention:
+class Qwen3MultiHeadAttention:
     def __init__(
         self,
         hidden_size: int,
@@ -145,7 +145,7 @@ class Qwen3TransformerBlock:
         self.post_attention_layernorm = RMSNorm(
             hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
         )
-        self.self_attn = Qwen3PagedMultiHeadAttention(
+        self.self_attn = Qwen3MultiHeadAttention(
             num_heads=num_attention_heads,
             hidden_size=hidden_size,
             num_kv_heads=num_kv_heads,
