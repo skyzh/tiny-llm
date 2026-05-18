@@ -97,6 +97,9 @@ The `silu` function is defined as:
 $$
 \text{SiLU}(x) = x * \text{sigmoid}(x) = \frac{x}{1 + e^{-x}}
 $$
+In code, prefer `x * mx.sigmoid(x)`. It is algebraically equivalent to the
+division form, but it follows MLX's `nn.silu` path more closely for low-precision
+model activations.
 
 Then implement `Qwen3MLP`. The structure for Qwen3's MLP block is:
 *  A gate linear projection ($W_{gate}$).

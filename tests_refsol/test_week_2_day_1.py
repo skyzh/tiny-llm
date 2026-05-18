@@ -41,7 +41,7 @@ def helper_test_task_3(model_name: str, iters: int = 10):
         user_output = user_output - mx.logsumexp(user_output, keepdims=True)
         ref_output = ref_output - mx.logsumexp(ref_output, keepdims=True)
         assert_allclose(
-            user_output, ref_output, precision=mx.bfloat16, rtol=0.1, atol=5.0
+            user_output, ref_output, precision=mx.bfloat16, rtol=0.1, atol=1.0
         )
 
 
@@ -87,7 +87,7 @@ def helper_test_task_4(
             user_out = user_out - mx.logsumexp(user_out, keepdims=True)
             ref_out = ref_out - mx.logsumexp(ref_out, keepdims=True)
             assert_allclose(
-                user_out, ref_out, precision=mx.bfloat16, rtol=0.1, atol=5.0
+                user_out, ref_out, precision=mx.bfloat16, rtol=0.1, atol=1.0
             )
 
 

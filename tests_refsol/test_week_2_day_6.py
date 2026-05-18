@@ -314,7 +314,7 @@ def helper_test_task_3(
                         ref_out_r,
                         precision=mx.bfloat16,
                         rtol=0.1,
-                        atol=5.0,
+                        atol=1.0,
                     )
 
 
