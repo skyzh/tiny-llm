@@ -93,7 +93,7 @@ pdm run test --week 2 --day 6 -- -k task_2
 ## Task 3: Handle Batches in the Model
 
 ```
-src/tiny_llm/qwen2_week2.py
+src/tiny_llm/qwen3_week2.py
 ```
 
 Ensure your model can handle multiple requests simultaneously. You should also use the masks returned by the batch KV cache.
@@ -128,6 +128,6 @@ You can test your implementation by running:
 pdm run batch-main
 ```
 
-This will use the `qwen2-0.5b` model with a batch size of 5 to process a fixed set of prompts.
+This will use the `qwen3-0.6b` model with a batch size of 5 to process a fixed set of prompts.
 
 {{#include copyright.md}}

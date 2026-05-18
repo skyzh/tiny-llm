@@ -11,23 +11,25 @@ In this chapter, we will implement the quantized matrix multiplication. Quantiza
 
 ## Why Quantization?
 
-As we learned in the KV Cache chapter, the decode phase of LLM inference is **memory-bandwidth bound**. Let's revisit the arithmetic intensity calculation for the Qwen2-0.5B model:
+As we learned in the KV Cache chapter, the decode phase of LLM inference is **memory-bandwidth bound**. Let's revisit the arithmetic intensity calculation for the Qwen3-0.6B model:
 
 ```plain
-Per-token computation in decode phase:
-- Input: 1 token × 896 dimensions = 896 float16 values = 1.792 KB
-- MLP weights: 896 × 4864 × 3 matrices × 2 bytes = ~25 MB per layer
-- Attention weights: 896 × 896 × 4 matrices × 2 bytes = ~6 MB per layer
+Per-token linear layers in decode phase:
+- Input: 1 token × 1024 dimensions = 1024 bfloat16 values = 2 KB
+- MLP weights: 1024 × 3072 × 3 matrices × 2 bytes = ~19 MB per layer
+- Attention weights:
+  - q_proj / o_proj: 1024 × 2048 × 2 matrices × 2 bytes = ~8 MB per layer
+  - k_proj / v_proj: 1024 × 1024 × 2 matrices × 2 bytes = ~4 MB per layer
 - Total weights per layer: ~31 MB
-- Total for 24 layers: ~750 MB
+- Total for 28 layers: ~880 MB
 
 FLOPs (2 per multiply-accumulate):
-- MLP per layer: 2 × 3 × 896 × 4864 ≈ 26M
-- Attention per layer: 2 × 4 × 896 × 896 ≈ 6.4M
-- 24 layers: ~780 million per token
+- MLP per layer: 2 × 3 × 1024 × 3072 ≈ 19M
+- Attention projections per layer: 2 × (1024 × 2048 × 2 + 1024 × 1024 × 2) ≈ 13M
+- 28 layers: ~880 million per token
 
-Memory access: ~750 MB
-Arithmetic intensity: 780M FLOPs / 750 MB ≈ 1.0 FLOPs/Byte
+Memory access: ~880 MB
+Arithmetic intensity: 880M FLOPs / 880 MB ≈ 1.0 FLOPs/Byte
 ```
 
 With M3 Max's 400 GB/s memory bandwidth and ~10 TFLOPS compute:
@@ -41,9 +43,9 @@ We're using only ~4% of available compute!
 
 ### The Solution: Quantization
 
-By compressing weights from 16 bits (float16/bfloat16) to 4 bits (int4), we:
+By compressing weights from 16 bits (bfloat16) to 4 bits (int4), we:
 
-- **Reduce memory bandwidth by 4×**: 750 MB → ~190 MB per token
+- **Reduce memory bandwidth by 4×**: 880 MB → ~220 MB per token
 - **Improve arithmetic intensity by 4×**: 1.0 → ~4.0 FLOPs/Byte
 - **Increase throughput by ~4×**: 400 GFLOPS → ~1.6 TFLOPS
 
@@ -53,19 +55,21 @@ The tradeoff is minimal accuracy loss with proper quantization techniques.
 
 Instead of quantizing all weights uniformly, we divide them into **groups** and quantize each group independently. This preserves more information about the weight distribution.
 
-For a weight matrix $W$ of shape $(K, N)$, we divide each row into groups of size $G$ (typically 64 or 128):
+For a weight matrix $W$ of shape $(K, N)$, we divide each row into groups of size $G$. In this course we use Qwen3 MLX 4-bit weights, whose group size is fixed at 128:
 
 ```plain
-Original weight matrix W: K × N (float16/bfloat16)
+Original weight matrix W: K × N (bfloat16)
 
-Group size G = 64
+Group size: G = 128
 Number of groups per row = N / G
 
-For each group of 64 consecutive values in a row:
+For each group of G consecutive values in a row:
   1. Find min and max values
   2. Compute scale and bias to map [min, max] → [0, 15] (4-bit range)
   3. Quantize each value using: quantized = round((value - bias) / scale)
 ```
+
+All quantized matmul tests use `group_size = 128`, matching the Qwen3 MLX 4-bit weights used by the rest of the course.
 
 ### Affine Quantization
 
@@ -115,15 +119,15 @@ Quantized: [0, 2, 7, 10, 15] (4 bits each)
 For efficient storage and computation, quantized weights are packed:
 
 ```plain
-Original: K × N float16 (2 bytes each) = 2KN bytes
+Original: K × N bfloat16 (2 bytes each) = 2KN bytes
 Quantized: K × N int4 (0.5 bytes each) = 0.5KN bytes
 
 Packing: 8 × 4-bit values fit in one uint32 (32 bits)
 
 Weight matrix shape: K × N
 Quantized storage shape: K × (N / 8) uint32
-Scales shape: K × (N / 64) float16
-Biases shape: K × (N / 64) float16
+Scales shape: K × (N / G) bfloat16
+Biases shape: K × (N / G) bfloat16
 ```
 
 Example packing for 8 consecutive 4-bit values `[a, b, c, d, e, f, g, h]`:
@@ -146,9 +150,9 @@ Unpacking:
 
 For standard matrix multiplication $C = AB^T$ where:
 
-- $A$: shape $(M, N)$, float16/bfloat16 (activations)
+- $A$: shape $(M, N)$, bfloat16 (activations)
 - $B$: shape $(K, N)$, **quantized** to int4 (weights)
-- $C$: shape $(M, K)$, float16/bfloat16 (output)
+- $C$: shape $(M, K)$, bfloat16 (output)
 
 Each element $C[i, k]$ is computed as:
 
@@ -182,32 +186,32 @@ This shows we can factor out the scale and bias per group, reducing the number o
 
 ```plain
 Input:
-  A: M × N (float16, activations)
+  A: M × N (bfloat16, activations)
   B_quantized: K × (N/8) (uint32, packed weights)
-  scales: K × (N/64) (float16)
-  biases: K × (N/64) (float16)
+  scales: K × (N/G) (bfloat16)
+  biases: K × (N/G) (bfloat16)
 
 Output:
-  C: M × K (float16)
+  C: M × K (bfloat16)
 
 For each output element C[i, k]:
-  sum = 0
-  for each group g in 0..(N/64 - 1):
+  sum = 0  # float accumulator
+  for each group g in 0..(N/G - 1):
     scale = scales[k, g]
     bias = biases[k, g]
     
-    # Process 64 values in the group (8 uint32 packs)
-    for each pack p in 0..7:
-      packed_value = B_quantized[k, g*8 + p]
+    # Process G values in the group (G/8 uint32 packs)
+    for each pack p in 0..(G/8 - 1):
+      packed_value = B_quantized[k, g*(G/8) + p]
       
       # Unpack 8 × 4-bit values
       for bit_offset in [0, 4, 8, 12, 16, 20, 24, 28]:
         quantized = (packed_value >> bit_offset) & 0xF
         b_value = quantized * scale + bias
-        a_value = A[i, g*64 + p*8 + bit_offset/4]
-        sum += a_value * b_value
+        a_value = A[i, g*G + p*8 + bit_offset/4]
+        sum = sum + a_value * b_value
   
-  C[i, k] = sum
+  C[i, k] = bfloat16(sum)
 ```
 
 ## Task 1: Implement QuantizedWeights
@@ -221,9 +225,9 @@ First, familiarize yourself with the `QuantizedWeights` class, which stores quan
 | Field | Shape | Description |
 |-------|-------|-------------|
 | `weight` | $(K, N/8)$ uint32 | Packed quantized weights. Each uint32 stores 8 consecutive 4-bit values. The original weight matrix has shape $(K, N)$, and after packing, it becomes $(K, N/8)$. |
-| `scales` | $(K, N/G)$ float16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
-| `biases` | $(K, N/G)$ float16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
-| `group_size` | int | Number of consecutive values that share the same scale/bias (typically 64) |
+| `scales` | $(K, N/G)$ bfloat16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
+| `biases` | $(K, N/G)$ bfloat16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
+| `group_size` | int | Number of consecutive values that share the same scale/bias. For the Qwen3 MLX 4-bit weights used here, this is `128`. |
 | `bits` | int | Quantization bit width (typically 4, meaning values are in range $[0, 15]$) |
 
 The `from_mlx_layer` static method extracts these fields from MLX's quantized linear layers when loading the model.
@@ -247,7 +251,7 @@ You need to touch three files, all within the `tiny_llm_ext` namespace:
 - **`bindings.cpp`** — Add an `m.def(...)` call to expose the function to Python.
 - **`quantized_matmul.cpp`** — Implement the `quantized_matmul(...)` function (validate inputs, compute output shape, return a lazy `mx::array`) and the `eval_cpu` method (allocate output, register arrays with the CPU encoder, dispatch the compute kernel).
 
-The `eval_cpu` implementation follows the same CPU encoder pattern as `axpby`: allocate output memory with `out.set_data(mx::allocator::malloc(out.nbytes()))`, register input/output arrays with the encoder, then dispatch a lambda that performs the actual computation. Inside the lambda, implement the nested loop from the Computation Flow section above — iterate over each output element `(i, k)`, accumulate in `float` (fp32) to avoid precision loss, and cast the result back to `float16` when writing to the output.
+The `eval_cpu` implementation follows the same CPU encoder pattern as `axpby`: allocate output memory with `out.set_data(mx::allocator::malloc(out.nbytes()))`, register input/output arrays with the encoder, then dispatch a lambda that performs the actual computation. Inside the lambda, implement the nested loop from the Computation Flow section above — iterate over each output element `(i, k)`, dequantize each packed value, accumulate the products in `float`, and write the `bfloat16` result to the output.
 
 Don't forget to add `src/quantized_matmul.cpp` to `target_sources` in `CMakeLists.txt`.
 
@@ -272,20 +276,22 @@ In this task, you will write the Metal kernel for quantized matmul **and** wire 
 You need to implement one kernel entry in `quantized_matmul.metal`:
 
 - Use a **one-thread-per-output-element** mapping: each thread computes `out[i, k]`.
-- The kernel should be templated on the data type (to support both `half` and `bfloat16_t`).
+- The kernel should use `bfloat16_t` inputs and outputs.
 - Apply the same group-wise dequantization loop as the CPU version:
-  - Iterate over groups (`group_size = 64`)
+  - Iterate over groups of 128 values
   - Unpack int4 values from packed `uint32`
   - Dequantize with `q * scale + bias`
-  - Accumulate in `float` and cast to the output dtype at the end
+  - Accumulate the products in `float` and cast the final output back to `bfloat16_t`
 - Add boundary checks (`i < M`, `k < K`) before writing output.
+
+The custom kernel only needs to handle `bits = 4` and `group_size = 128`. Use that group size to compute `groups_per_row` and the packed weight offsets.
 
 ### GPU Dispatch
 
 Complete the `eval_gpu` method in `quantized_matmul.cpp` to dispatch your Metal kernel. Follow the same pattern as `axpby`'s GPU dispatch:
 
 1. Get the Metal device and command encoder from the stream.
-2. Select the correct kernel name based on the activation dtype (`float16` → `half`, `bfloat16` → `bfloat16_t`).
+2. Load the bfloat16 quantized matmul kernel from the Metal library.
 3. Set input/output buffers and dimension constants (`M`, `N`, `K`) on the encoder — make sure the buffer order matches your kernel signature.
 4. Calculate a 2D thread group configuration: use `kernel->maxTotalThreadsPerThreadgroup()` to determine the total threads, then split between the M and K dimensions (e.g., 32 threads for M, the rest for K).
 5. Dispatch with `dispatchThreadgroups`.
@@ -300,26 +306,28 @@ pdm run test --week 2 --day 2 -- -k task_3
 ## Task 4: Model Integration
 
 ```
-src/tiny_llm/qwen2_week2.py
+src/tiny_llm/qwen3_week2.py
 ```
 
-Integrate your quantized matmul into the Week 2 Qwen2 model so that inference runs on quantized weights end-to-end.
+Integrate your quantized matmul into the Week 2 Qwen3 model so that inference runs on quantized weights end-to-end.
 
-Change the weight type from `mx.array` to `QuantizedWeights` for all linear layers in attention (`wq/wk/wv/wo`) and MLP (`w_gate/w_up/w_down`). Replace every `linear(x, w)` call with `quantized_linear(x, w)`. In the model loading code, use `QuantizedWeights.from_mlx_layer(...)` to extract quantized weight information from each MLX linear layer, instead of calling `mx.dequantize` to get a full float16 matrix. Make sure the Week 1 loader still dequantizes (since Week 1 layers expect plain `mx.array`), while the Week 2 loader does **not** dequantize.
+Change the weight type from `mx.array` to `QuantizedWeights` for all linear layers in attention (`wq/wk/wv/wo`) and MLP (`w_gate/w_up/w_down`). Replace every `linear(x, w)` call with `quantized_linear(x, w)`. In the model loading code, use `QuantizedWeights.from_mlx_layer(...)` to extract quantized weight information from each MLX linear layer, instead of calling `mx.dequantize` to get a full bfloat16 matrix. Make sure the Week 1 loader still dequantizes (since Week 1 layers expect plain `mx.array`), while the Week 2 loader does **not** dequantize.
 
-Note that MLX loads quantized models with `scales` and `biases` stored in **bfloat16** by default, while the activation tensors are typically **float16**. Since we have not implemented bfloat16 support in our kernel, you will need to convert the scales and biases to float16 with `mx.astype` before calling the kernel. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
+Qwen3 MLX quantized layers use **bfloat16** for the tensors involved in dequantization. Your kernel should take `scales`, `biases`, and activations as bfloat16. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
+
+Also keep the quantized layer's parameters. The model code should pass through `w.group_size` and `w.bits`; the extension should validate that they match the Qwen3 course assumptions: `group_size = 128` and `bits = 4`.
 
 You can test your implementation by running:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen2-0.5b
+pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
 ```
 
 You can also benchmark throughput and compare your implementation with the reference solution:
 
 ```bash
-pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b
-pdm bench --solution tiny_llm_ref --loader week2 --model qwen2-0.5b
+pdm bench --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 ```
 
 {{#include copyright.md}}

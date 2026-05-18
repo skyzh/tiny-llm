@@ -18,7 +18,7 @@ jobs:
       - name: Install HuggingFace weights
         run: |
           brew install huggingface-cli
-          hf download Qwen/Qwen2-0.5B-Instruct-MLX
+          hf download Qwen/Qwen3-0.6B-MLX-4bit
 
       - uses: pdm-project/setup-pdm@v4
         with:

@@ -270,12 +270,12 @@ Replace the "one layer cache = one dense KV tensor" model with:
 
 ```
 src/tiny_llm/paged_kv_cache.py
-src/tiny_llm/qwen2_week3.py
+src/tiny_llm/qwen3_week3.py
 ```
 
 Build a compatibility path that reconstructs dense K/V from pages and compares it against `TinyKvFullCache`.
 
-This gives us a correctness checkpoint before we change the attention path itself.
+This gives us a correctness check before we change the attention path itself.
 
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
 

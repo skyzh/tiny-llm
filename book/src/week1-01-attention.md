@@ -6,7 +6,7 @@ blocks of the Transformer models.
 
 [📚 Reading: Transformer Architecture](https://huggingface.co/learn/llm-course/chapter1/6)
 
-We use the Qwen2 model for text generation. The model is a decoder-only model. The input of the model is a sequence of
+We use the Qwen3 model for text generation. The model is a decoder-only model. The input of the model is a sequence of
 token embeddings. The output of the model is the most likely next token ID.
 
 [📚 Reading: LLM Inference, the Decode Phase](https://huggingface.co/learn/llm-course/chapter1/8)

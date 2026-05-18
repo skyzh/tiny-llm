@@ -18,9 +18,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Benchmark tiny-llm token throughput with synthetic token IDs."
     )
-    parser.add_argument("--model", type=str, default="qwen2-0.5b")
+    parser.add_argument("--model", type=str, default="qwen3-0.6b")
     parser.add_argument("--solution", type=str, default="tiny_llm")
-    parser.add_argument("--loader", type=str, default="week2", choices=["week1", "week2"])
+    parser.add_argument(
+        "--loader", type=str, default="week2", choices=["week1", "week2"]
+    )
     parser.add_argument("--enable-flash-attn", action="store_true")
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)

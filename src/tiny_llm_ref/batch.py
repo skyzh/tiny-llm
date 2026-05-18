@@ -1,7 +1,7 @@
 import mlx.core as mx
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 from .kv_cache import *
-from .qwen2_week2 import Qwen2ModelWeek2
+from .qwen3_week2 import Qwen3ModelWeek2
 from typing import Callable
 from datetime import datetime
 
@@ -204,7 +204,9 @@ def batch_generate(
                     elif req.offset >= max_seq_len:
                         remove_reason = "max seq len"
                     if remove_reason is not None:
-                        print(f"Removing request {i} due to {remove_reason}", flush=True)
+                        print(
+                            f"Removing request {i} due to {remove_reason}", flush=True
+                        )
                         for layer_cache in kv_cache:
                             layer_cache.remove_request(i)
                         result.append((req.prompt_idx, req.text()))

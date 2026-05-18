@@ -60,15 +60,15 @@ You can test your implementation by running the following command:
 
 ```bash
 # Download the models if you haven't done so
-hf download Qwen/Qwen2-0.5B-Instruct-MLX
-hf download Qwen/Qwen2-1.5B-Instruct-MLX
-hf download Qwen/Qwen2-7B-Instruct-MLX
+hf download Qwen/Qwen3-0.6B-MLX-4bit
+hf download Qwen/Qwen3-1.7B-MLX-4bit
+hf download Qwen/Qwen3-4B-MLX-4bit
 # Run the tests
-pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b \
+pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b \
   --prompt "Give me a short introduction to large language model"
-pdm run main --solution tiny_llm --loader week1 --model qwen2-1.5b \
+pdm run main --solution tiny_llm --loader week1 --model qwen3-1.7b \
   --prompt "Give me a short introduction to large language model"
-pdm run main --solution tiny_llm --loader week1 --model qwen2-7b \
+pdm run main --solution tiny_llm --loader week1 --model qwen3-4b \
   --prompt "Give me a short introduction to large language model"
 ```
 

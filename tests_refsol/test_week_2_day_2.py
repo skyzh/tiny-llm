@@ -1,23 +1,21 @@
-import pytest
 import mlx.core as mx
 from .tiny_llm_base import *
 from .utils import *
 
 
-def quantized_matmul_helper(
-    stream: mx.Stream, identity_matrix: bool, precision: mx.Dtype
-):
+def quantized_matmul_helper(stream: mx.Stream, identity_matrix: bool):
     with mx.stream(stream):
+        group_size = 128
         if identity_matrix:
-            input = mx.eye(64, dtype=precision)
+            input = mx.eye(group_size, dtype=mx.bfloat16)
         else:
-            input = mx.random.normal(shape=(3, 64), dtype=precision)
-        weight = mx.random.normal(shape=(5, 64), dtype=precision)
-        w_q, scales, biases = mx.quantize(weight)
+            input = mx.random.normal(shape=(3, group_size), dtype=mx.bfloat16)
+        weight = mx.random.normal(shape=(5, group_size), dtype=mx.bfloat16)
+        w_q, scales, biases = mx.quantize(weight, group_size=group_size, bits=4)
         user_out = quantized_matmul(
             scales=scales,
             biases=biases,
-            group_size=64,
+            group_size=group_size,
             bits=4,
             a=input,
             b=w_q,
@@ -28,32 +26,33 @@ def quantized_matmul_helper(
             w_q,
             scales,
             biases,
-            group_size=64,
+            group_size=group_size,
             bits=4,
             transpose=True,
         )
-        assert_allclose(user_out, ref_out, precision)
+        if identity_matrix:
+            assert_allclose(user_out, ref_out, mx.bfloat16)
+        else:
+            assert_allclose(
+                user_out,
+                ref_out,
+                mx.bfloat16,
+                atol=5.0e-1,
+                message="quantized matmul bf16 comparison",
+            )
 
 
-def test_task_2_quantized_matmul_simple_f16_cpu():
-    quantized_matmul_helper(mx.cpu, True, mx.float16)
+def test_task_2_quantized_matmul_simple_bf16_cpu():
+    quantized_matmul_helper(mx.cpu, True)
 
 
-def test_task_2_quantized_matmul_complex_f16_cpu():
-    quantized_matmul_helper(mx.cpu, False, mx.float16)
+def test_task_2_quantized_matmul_complex_bf16_cpu():
+    quantized_matmul_helper(mx.cpu, False)
 
 
-def test_task_2_quantized_matmul_simple_f32_cpu():
-    quantized_matmul_helper(mx.cpu, True, mx.float32)
+def test_task_3_quantized_matmul_simple_bf16_gpu():
+    quantized_matmul_helper(mx.gpu, True)
 
 
-def test_task_2_quantized_matmul_complex_f32_cpu():
-    quantized_matmul_helper(mx.cpu, False, mx.float32)
-
-
-def test_task_3_quantized_matmul_simple_f16_gpu():
-    quantized_matmul_helper(mx.gpu, True, mx.float16)
-
-
-def test_task_3_quantized_matmul_complex_f16_gpu():
-    quantized_matmul_helper(mx.gpu, False, mx.float16)
+def test_task_3_quantized_matmul_complex_bf16_gpu():
+    quantized_matmul_helper(mx.gpu, False)

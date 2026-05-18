@@ -3,7 +3,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from .tiny_llm_base import *
 from .utils import *
-from mlx_lm.models import qwen2
+from mlx_lm.models import qwen3
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
@@ -89,12 +89,12 @@ def test_task_2_qwen_mlp(stream: mx.Stream, precision: mx.Dtype, dims: dict):
         w_up = mx.random.uniform(shape=(HIDDEN_DIM, DIM), dtype=precision)
         w_down = mx.random.uniform(shape=(DIM, HIDDEN_DIM), dtype=precision)
 
-        user_mlp = qwen2_week1.Qwen2MLP(
+        user_mlp = qwen3_week1.Qwen3MLP(
             dim=DIM, hidden_dim=HIDDEN_DIM, w_gate=w_gate, w_up=w_up, w_down=w_down
         )
         user_output = user_mlp(x)
 
-        reference_mlp = qwen2.MLP(dim=DIM, hidden_dim=HIDDEN_DIM)
+        reference_mlp = qwen3.MLP(dim=DIM, hidden_dim=HIDDEN_DIM)
         reference_mlp.gate_proj.weight = w_gate
         reference_mlp.up_proj.weight = w_up
         reference_mlp.down_proj.weight = w_down

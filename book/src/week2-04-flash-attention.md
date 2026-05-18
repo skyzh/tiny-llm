@@ -1,6 +1,6 @@
 # Week 2 Day 4-5: Flash Attention 2
 
-In this chapter, we will implement Flash Attention 2 for the Week 2 Qwen2 serving pipeline. The goal is to replace the regular attention path with a tiled implementation to reduce memory bandwidth and increase throughput, especially for long contexts. 
+In this chapter, we will implement Flash Attention 2 for the Week 2 Qwen3 serving pipeline. The goal is to replace the regular attention path with a tiled implementation to reduce memory bandwidth and increase throughput, especially for long contexts.
 
 **📚 Readings**
 
@@ -321,22 +321,22 @@ pdm run test --week 2 --day 4 -- -k task_3
 ## Task 4: Model Integration
 
 ```
-src/tiny_llm/qwen2_week2.py
+src/tiny_llm/qwen3_week2.py
 ```
 
-Finally, wire the kernel into model execution. Keep the existing grouped attention path as fallback, add the `use_flash_attention` switch in `Qwen2MultiHeadAttention`, and propagate `enable_flash_attn` from model initialization into each block. After KV cache update, build the correct causal mask for `L x S`, run attention in float32, and cast back to activation dtype.
+Finally, wire the kernel into model execution. Keep the existing grouped attention path as fallback, add the `use_flash_attention` switch in `Qwen3MultiHeadAttention`, and propagate `enable_flash_attn` from model initialization into each block. After KV cache update, build the correct causal mask for `L x S`, run attention in float32, and cast back to activation dtype.
 
 You can run generation with Flash Attention enabled:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen2-0.5b --enable-flash-attn
+pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b --enable-flash-attn
 ```
 
 You can also benchmark throughput with and without Flash Attention:
 
 ```bash
-pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b
-pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b --enable-flash-attn
+pdm bench --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm bench --solution tiny_llm --loader week2 --model qwen3-0.6b --enable-flash-attn
 ```
 
 {{#include copyright.md}}

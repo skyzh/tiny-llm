@@ -1,8 +1,8 @@
 import mlx.core as mx
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 from .kv_cache import *
-from .qwen2_week1 import Qwen2ModelWeek1
-from .qwen2_week2 import Qwen2ModelWeek2
+from .qwen3_week1 import Qwen3ModelWeek1
+from .qwen3_week2 import Qwen3ModelWeek2
 from typing import Callable
 
 
@@ -12,7 +12,7 @@ def _release_kv_cache(kv_cache):
 
 
 def simple_generate(
-    model: Qwen2ModelWeek1,
+    model: Qwen3ModelWeek1,
     tokenizer: TokenizerWrapper,
     prompt: str,
     sampler: Callable[[mx.array], mx.array] | None,
@@ -45,7 +45,7 @@ def simple_generate(
 
 
 def simple_generate_with_kv_cache(
-    model: Qwen2ModelWeek2, tokenizer: TokenizerWrapper, prompt: str
+    model: Qwen3ModelWeek2, tokenizer: TokenizerWrapper, prompt: str
 ) -> str:
     kv_cache = model.create_kv_cache()
 
@@ -80,8 +80,8 @@ def simple_generate_with_kv_cache(
 
 
 def speculative_generate(
-    draft_model: Qwen2ModelWeek2,
-    model: Qwen2ModelWeek2,
+    draft_model: Qwen3ModelWeek2,
+    model: Qwen3ModelWeek2,
     draft_tokenizer: TokenizerWrapper,
     tokenizer: TokenizerWrapper,
     prompt: str,
@@ -142,7 +142,7 @@ def speculative_generate(
                 layer.rewind(revert_len)
 
         def _print_text(text, progress):
-            newline = '\n'
+            newline = "\n"
             print(f"+{progress} {text.replace(newline, ' ')[-80:]}")
 
         # speculative decode

@@ -1,14 +1,14 @@
 import mlx.core as mx
 from .kv_cache import TinyKvCache
-from .qwen2_week2 import (
-    Qwen2MLP,
-    Qwen2MultiHeadAttention,
-    Qwen2TransformerBlock,
+from .qwen3_week2 import (
+    Qwen3MLP,
+    Qwen3MultiHeadAttention,
+    Qwen3TransformerBlock,
 )
 from typing import Any
 
 
-class Qwen2ModelWeek3:
+class Qwen3ModelWeek3:
     def __init__(
         self,
         mlx_model: Any,

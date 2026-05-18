@@ -134,7 +134,7 @@ def test_task_2_grouped_attention_causal_mask(
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 @pytest.mark.parametrize("mask", [None, "causal"], ids=["no_mask", "causal_mask"])
-def test_task_3_qwen2_grouped_query_attention(
+def test_task_3_qwen3_grouped_query_attention(
     stream: mx.Stream, precision: mx.Dtype, mask: str | None
 ):
     with mx.stream(stream):
@@ -146,48 +146,49 @@ def test_task_3_qwen2_grouped_query_attention(
         max_seq_len = 64
         theta = 10000
 
-        from mlx_lm.models import qwen2
+        from mlx_lm.models import qwen3
 
-        args = qwen2.ModelArgs(
-            model_type="qwen2",
+        args = qwen3.ModelArgs(
+            model_type="qwen3",
             hidden_size=hidden_size,
             num_hidden_layers=2,
             intermediate_size=hidden_size * 4,
             num_attention_heads=num_heads,
             num_key_value_heads=num_kv_heads,
+            head_dim=hidden_size // num_heads,
             rms_norm_eps=1e-6,
             vocab_size=1000,
             rope_theta=theta,
-            rope_traditional=False,
             max_position_embeddings=max_seq_len,
+            tie_word_embeddings=True,
         )
 
-        mlx_attention = qwen2.Attention(args)
+        mlx_attention = qwen3.Attention(args)
         wq = mlx_attention.q_proj.weight
         wk = mlx_attention.k_proj.weight
         wv = mlx_attention.v_proj.weight
         wo = mlx_attention.o_proj.weight
-        bq = mlx_attention.q_proj.bias
-        bk = mlx_attention.k_proj.bias
-        bv = mlx_attention.v_proj.bias
+        q_norm = mlx_attention.q_norm.weight
+        k_norm = mlx_attention.k_norm.weight
         mx.random.seed(42)
         x = mx.random.uniform(
             -1.0, 1.0, shape=(batch_size, seq_len, hidden_size), dtype=precision
         )
 
-        user_attention = qwen2_week1.Qwen2MultiHeadAttention(
+        user_attention = qwen3_week1.Qwen3MultiHeadAttention(
             hidden_size=hidden_size,
             num_heads=num_heads,
             num_kv_heads=num_kv_heads,
+            head_dim=hidden_size // num_heads,
             wq=wq,
             wk=wk,
             wv=wv,
             wo=wo,
-            bq=bq,
-            bk=bk,
-            bv=bv,
+            q_norm=q_norm,
+            k_norm=k_norm,
             max_seq_len=max_seq_len,
             theta=theta,
+            rms_norm_eps=1e-6,
         )
 
         user_output = user_attention(x, mask=mask)

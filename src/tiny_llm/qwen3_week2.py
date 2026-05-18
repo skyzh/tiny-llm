@@ -1,15 +1,11 @@
 import mlx.core as mx
 from .basics import silu
-from .attention import (
-    scaled_dot_product_attention_grouped,
-    flash_attention,
-    causal_mask,
-)
+from .attention import scaled_dot_product_attention_grouped
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
 from typing import Any
 from .embedding import Embedding
-from .quantize import dequantize_linear, QuantizedWeights, quantized_linear
+from .quantize import dequantize_linear, QuantizedWeights
 from .kv_cache import TinyKvCache
 
 
@@ -52,11 +48,7 @@ class Qwen3MLP:
         w_up: QuantizedWeights,
         w_down: QuantizedWeights,
     ):
-        self.dim = dim
-        self.hidden_dim = hidden_dim
-        self.w_gate = w_gate
-        self.w_up = w_up
-        self.w_down = w_down
+        pass
 
     def __call__(self, x: mx.array) -> mx.array:
         pass
@@ -98,28 +90,13 @@ class Qwen3TransformerBlock:
         pass
 
 
-def assert_dtype(weights: mx.array, dtype: mx.Dtype):
-    if weights.dtype != dtype:
-        raise ValueError(f"{weights.dtype} != {dtype}")
-    else:
-        return weights
-
-
-def assert_quantized_weights_dtype(weights: QuantizedWeights, dtype: mx.Dtype):
-    if weights.scales.dtype != dtype:
-        raise ValueError(f"{weights.scales.dtype} != {dtype}")
-    if weights.biases.dtype != dtype:
-        raise ValueError(f"{weights.biases.dtype} != {dtype}")
-    else:
-        return weights
-
-
-class Qwen3Model:
+class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
         enable_flash_attn: bool = False,
     ):
+        self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
 
     def __call__(

@@ -160,7 +160,7 @@ value_pages: P, H_kv, page_size, D
 A Python list of page tensors is convenient for teaching the allocator, but a
 GPU kernel needs a single buffer so `page_id` can be turned into an address.
 
-### `src/tiny_llm/qwen2_week3.py`
+### `src/tiny_llm/qwen3_week3.py`
 
 The attention module should call the paged runtime directly:
 
@@ -245,7 +245,7 @@ still producing the same result as dense attention.
 ## Task 3: Dispatch from the Model
 
 ```
-src/tiny_llm/qwen2_week3.py
+src/tiny_llm/qwen3_week3.py
 ```
 
 Update the model so it can route to paged attention when the cache provides paged runtime metadata.
