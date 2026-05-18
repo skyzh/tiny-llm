@@ -37,11 +37,8 @@ def helper_test_task_3(model_name: str, iters: int = 10):
         cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
         input = mx.random.randint(low=0, high=tokenizer.vocab_size, shape=(1, 10))
         user_output = model(input, 0, cache)
-        # Component tests cover numerical equivalence; this checks model wiring
-        # with quantized weights and a KV cache.
-        assert user_output.shape == (1, 10, model.vocab_size)
-        assert user_output.dtype == mx.bfloat16
-        assert np.all(np.isfinite(np.array(user_output.astype(mx.float32))))
+        ref_output = mlx_model(input)
+        assert_model_logprobs_close(user_output, ref_output)
 
 
 @pytest.mark.skipif(
@@ -74,6 +71,7 @@ def helper_test_task_4(
     model = Qwen3ModelWeek2(mlx_model)
     for _ in range(iters):
         inputs = mx.random.randint(0, tokenizer.vocab_size, (1, seq_len))
+        ref_outputs = mlx_model(inputs)
         decode_cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
         for offset in range(seq_len):
             user_out = model(
@@ -81,9 +79,8 @@ def helper_test_task_4(
                 offset=offset,
                 cache=decode_cache,
             )
-            assert user_out.shape == (1, 1, model.vocab_size)
-            assert user_out.dtype == mx.bfloat16
-            assert np.all(np.isfinite(np.array(user_out.astype(mx.float32))))
+            ref_out = ref_outputs[:, offset : offset + 1, :]
+            assert_model_logprobs_close(user_out, ref_out)
 
 
 @pytest.mark.skipif(

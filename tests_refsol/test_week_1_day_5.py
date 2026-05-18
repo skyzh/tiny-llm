@@ -113,11 +113,8 @@ def helper_test_task_3(model_name: str, iters: int = 10):
     for _ in range(iters):
         input = mx.random.randint(low=0, high=tokenizer.vocab_size, shape=(1, 10))
         user_output = model(input)
-        # Component tests above check numerical equivalence. The full model test
-        # checks that the loaded model wires together and produces valid logits.
-        assert user_output.shape == (1, 10, model.vocab_size)
-        assert user_output.dtype == mx.bfloat16
-        assert np.all(np.isfinite(np.array(user_output.astype(mx.float32))))
+        ref_output = mlx_model(input)
+        assert_model_logprobs_close(user_output, ref_output)
 
 
 @pytest.mark.skipif(

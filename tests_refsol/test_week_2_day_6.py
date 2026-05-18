@@ -272,6 +272,7 @@ def helper_test_task_3(
         # Start each request at a staggered token index.
         staggered_start = [seq_len * i // requests for i in range(requests)]
         inputs = mx.random.randint(0, tokenizer.vocab_size, (requests, seq_len))
+        ref_outputs = mlx_model(inputs)
         for offset in range(seq_len + staggered_start[-1]):
             seq_idx = [offset - start for start in staggered_start]
 
@@ -302,10 +303,9 @@ def helper_test_task_3(
 
             for request_id, sidx in enumerate(seq_idx):
                 if 0 <= sidx < seq_len:
-                    user_out_r = user_out[request_id : request_id + 1, :, :]
-                    assert user_out_r.shape == (1, 1, model.vocab_size)
-                    assert user_out_r.dtype == mx.bfloat16
-                    assert np.all(np.isfinite(np.array(user_out_r.astype(mx.float32))))
+                    user_out_r = user_out[request_id, 0, :]
+                    ref_out_r = ref_outputs[request_id, sidx, :]
+                    assert_model_logprobs_close(user_out_r, ref_out_r)
 
 
 @pytest.mark.skipif(
