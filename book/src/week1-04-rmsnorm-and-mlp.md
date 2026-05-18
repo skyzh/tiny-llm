@@ -97,9 +97,16 @@ The `silu` function is defined as:
 $$
 \text{SiLU}(x) = x * \text{sigmoid}(x) = \frac{x}{1 + e^{-x}}
 $$
-In code, prefer `x * mx.sigmoid(x)`. It is algebraically equivalent to the
-division form, but it follows MLX's `nn.silu` path more closely for low-precision
-model activations.
+In code, compute the sigmoid part in a numerically stable way:
+
+```python
+sigmoid = 1 / (1 + mx.exp(-mx.abs(x)))
+sigmoid = mx.where(x < 0, 1 - sigmoid, sigmoid)
+return x * sigmoid
+```
+
+This is algebraically equivalent, avoids large positive inputs to `exp`, and
+matches MLX's low-precision GPU path more closely than the direct division form.
 
 Then implement `Qwen3MLP`. The structure for Qwen3's MLP block is:
 *  A gate linear projection ($W_{gate}$).
