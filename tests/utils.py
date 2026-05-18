@@ -55,7 +55,7 @@ def np_type_to_mx_type(np_type: np.dtype) -> mx.Dtype:
         raise ValueError(f"Unsupported numpy type: {np_type}")
 
 
-def qwen_3_06b_model_exists() -> bool:
+def qwen3_0_6b_model_exists() -> bool:
     try:
         huggingface_hub.snapshot_download(
             "Qwen/Qwen3-0.6B-MLX-4bit", local_files_only=True
@@ -66,7 +66,7 @@ def qwen_3_06b_model_exists() -> bool:
         return False
 
 
-def qwen_3_17b_model_exists() -> bool:
+def qwen3_1_7b_model_exists() -> bool:
     try:
         huggingface_hub.snapshot_download(
             "Qwen/Qwen3-1.7B-MLX-4bit", local_files_only=True
@@ -77,7 +77,7 @@ def qwen_3_17b_model_exists() -> bool:
         return False
 
 
-def qwen_3_4b_model_exists() -> bool:
+def qwen3_4b_model_exists() -> bool:
     try:
         huggingface_hub.snapshot_download(
             "Qwen/Qwen3-4B-MLX-4bit", local_files_only=True
