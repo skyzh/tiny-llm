@@ -46,20 +46,6 @@ def assert_allclose(
             assert False, f"result mismatch: {message}"
 
 
-def assert_model_logprobs_close(a: mx.array, b: mx.array):
-    a = a - mx.logsumexp(a, keepdims=True)
-    b = b - mx.logsumexp(b, keepdims=True)
-    # Qwen3 4-bit bf16 kernels differ in reduction order from the course kernel.
-    assert_allclose(
-        a,
-        b,
-        precision=mx.bfloat16,
-        rtol=1.0e-1,
-        atol=5.0,
-        message="model logprobs",
-    )
-
-
 def np_type_to_mx_type(np_type: np.dtype) -> mx.Dtype:
     if np_type == np.float32:
         return mx.float32

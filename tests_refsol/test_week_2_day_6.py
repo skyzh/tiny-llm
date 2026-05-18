@@ -305,7 +305,17 @@ def helper_test_task_3(
                 if 0 <= sidx < seq_len:
                     user_out_r = user_out[request_id, 0, :]
                     ref_out_r = ref_outputs[request_id, sidx, :]
-                    assert_model_logprobs_close(user_out_r, ref_out_r)
+                    user_out_r = user_out_r - mx.logsumexp(
+                        user_out_r, keepdims=True
+                    )
+                    ref_out_r = ref_out_r - mx.logsumexp(ref_out_r, keepdims=True)
+                    assert_allclose(
+                        user_out_r,
+                        ref_out_r,
+                        precision=mx.bfloat16,
+                        rtol=0.1,
+                        atol=5.0,
+                    )
 
 
 @pytest.mark.skipif(
