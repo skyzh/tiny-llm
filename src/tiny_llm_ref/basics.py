@@ -19,6 +19,7 @@ def linear(
 
 
 def silu(x: mx.array) -> mx.array:
+    # Avoid exp(large positive) when x is a large negative value.
     sigmoid = 1 / (1 + mx.exp(-mx.abs(x)))
     sigmoid = mx.where(x < 0, 1 - sigmoid, sigmoid)
     return x * sigmoid
