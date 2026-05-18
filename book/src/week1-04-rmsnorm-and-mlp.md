@@ -33,6 +33,7 @@ Where:
 
 The normalization is applied independently to each sample’s feature vector, typically over the last dimension of input.
 Note that, mean calculation should be performed with `float32` accumulation to maintain precision before taking the square root, even if the input and weights are in a lower precision format (e.g., `float16` or `bfloat16`).
+After computing the normalized value, cast it back to the original input dtype before applying `weight`. This matches the low-precision path used by MLX's fast RMSNorm kernels: the normalization statistics are accumulated in `float32`, while the final scaling by `weight` happens in the model dtype.
 
 ```
 D is the embedding dimension.
