@@ -97,11 +97,20 @@ The `silu` function is defined as:
 $$
 \text{SiLU}(x) = x * \text{sigmoid}(x) = \frac{x}{1 + e^{-x}}
 $$
-In code, compute the sigmoid part in a numerically stable way: for non-negative
-inputs, use the direct sigmoid form; for negative inputs, use the algebraically
-equivalent form that only exponentiates a non-positive value. This avoids large
-positive inputs to `exp` and matches MLX's low-precision GPU path more closely
-than the direct division form.
+Compute the sigmoid part in a numerically stable way:
+
+```text
+if x >= 0:
+    sigmoid(x) = 1 / (1 + exp(-x))
+else:
+    sigmoid(x) = exp(x) / (1 + exp(x))
+```
+
+The negative branch is algebraically equivalent to the direct sigmoid formula,
+but it avoids `exp(-x)` becoming `exp(large positive)` when `x` is a large
+negative value. In vector code, this can be expressed with `abs(x)`: compute the
+direct branch using `|x|`, then use `1 - y` for negative inputs. That matches
+MLX's low-precision GPU path more closely than the direct division form.
 
 Then implement `Qwen3MLP`. The structure for Qwen3's MLP block is:
 *  A gate linear projection ($W_{gate}$).
