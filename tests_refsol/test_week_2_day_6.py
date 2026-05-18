@@ -319,16 +319,16 @@ def helper_test_task_3(
 
 
 @pytest.mark.skipif(
-    not qwen_3_06b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
+    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
-def test_task_3_qwen_3_06b():
+def test_task_3_qwen3_0_6b():
     helper_test_task_3("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
 
 
 @pytest.mark.skipif(
-    not qwen_3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
+    not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
 )
-def test_task_3_qwen_3_4b():
+def test_task_3_qwen3_4b():
     helper_test_task_3(
         "Qwen/Qwen3-4B-MLX-4bit",
         seq_len=3,
@@ -336,9 +336,9 @@ def test_task_3_qwen_3_4b():
 
 
 @pytest.mark.skipif(
-    not qwen_3_17b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
+    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
 )
-def test_task_3_qwen_3_17b():
+def test_task_3_qwen3_1_7b():
     helper_test_task_3(
         "Qwen/Qwen3-1.7B-MLX-4bit",
         seq_len=3,
