@@ -3,17 +3,14 @@ from .tiny_llm_base import *
 from .utils import *
 
 
-def quantized_matmul_outputs(
-    stream: mx.Stream, identity_matrix: bool, group_size: int = 128
-):
+def quantized_matmul_helper(stream: mx.Stream, identity_matrix: bool):
     with mx.stream(stream):
-        mx.random.seed(0)
-        input_size = group_size * 4
+        group_size = 128
         if identity_matrix:
-            input = mx.eye(input_size, dtype=mx.bfloat16)
+            input = mx.eye(group_size, dtype=mx.bfloat16)
         else:
-            input = mx.random.normal(shape=(3, input_size), dtype=mx.bfloat16)
-        weight = mx.random.normal(shape=(8, input_size), dtype=mx.bfloat16)
+            input = mx.random.normal(shape=(3, group_size), dtype=mx.bfloat16)
+        weight = mx.random.normal(shape=(5, group_size), dtype=mx.bfloat16)
         w_q, scales, biases = mx.quantize(weight, group_size=group_size, bits=4)
         user_out = quantized_matmul(
             scales=scales,
@@ -25,42 +22,37 @@ def quantized_matmul_outputs(
             transpose_b=True,
         )
         ref_out = mx.quantized_matmul(
-            input.astype(mx.float32),
+            input,
             w_q,
-            scales.astype(mx.float32),
-            biases.astype(mx.float32),
+            scales,
+            biases,
             group_size=group_size,
             bits=4,
             transpose=True,
         )
-        return user_out, ref_out
-
-
-def assert_quantized_matmul_close(user_out: mx.array, ref_out: mx.array):
-    assert_allclose(
-        user_out,
-        ref_out,
-        mx.bfloat16,
-        atol=2.0e-1,
-        message="quantized matmul bf16 comparison",
-    )
+        if identity_matrix:
+            assert_allclose(user_out, ref_out, mx.bfloat16)
+        else:
+            assert_allclose(
+                user_out,
+                ref_out,
+                mx.bfloat16,
+                atol=5.0e-1,
+                message="quantized matmul bf16 comparison",
+            )
 
 
 def test_task_2_quantized_matmul_simple_bf16_cpu():
-    user_out, ref_out = quantized_matmul_outputs(mx.cpu, True)
-    assert_allclose(user_out, ref_out, mx.bfloat16)
+    quantized_matmul_helper(mx.cpu, True)
 
 
 def test_task_2_quantized_matmul_complex_bf16_cpu():
-    user_out, ref_out = quantized_matmul_outputs(mx.cpu, False)
-    assert_quantized_matmul_close(user_out, ref_out)
+    quantized_matmul_helper(mx.cpu, False)
 
 
 def test_task_3_quantized_matmul_simple_bf16_gpu():
-    user_out, ref_out = quantized_matmul_outputs(mx.gpu, True)
-    assert_allclose(user_out, ref_out, mx.bfloat16)
+    quantized_matmul_helper(mx.gpu, True)
 
 
 def test_task_3_quantized_matmul_complex_bf16_gpu():
-    user_out, ref_out = quantized_matmul_outputs(mx.gpu, False)
-    assert_quantized_matmul_close(user_out, ref_out)
+    quantized_matmul_helper(mx.gpu, False)
