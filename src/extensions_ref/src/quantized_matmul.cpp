@@ -205,7 +205,20 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     compute_encoder.set_bytes(K, 7);
 
     size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
-    const int x_size = 32;
+    // For decode/small-batch matmuls, avoid reserving 32 lanes for M when
+    // only a few rows are active. Keep the original 32-row tile otherwise.
+    int x_size = 32;
+    if (M <= 1) {
+        x_size = 1;
+    } else if (M <= 2) {
+        x_size = 2;
+    } else if (M <= 4) {
+        x_size = 4;
+    } else if (M <= 8) {
+        x_size = 8;
+    } else if (M <= 16) {
+        x_size = 16;
+    }
     const int y_size = tgp_size / x_size;
     if (tgp_size < x_size * y_size) {
         throw std::runtime_error("quantized_matmul: tgp_size must be larger than x*y");

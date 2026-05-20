@@ -14,6 +14,18 @@ class BenchRequest:
     max_new_tokens: int
 
 
+@dataclass
+class BatchRequestState:
+    """Per-request state while it moves from prefill into a decode batch."""
+
+    request: BenchRequest
+    kv_cache: list
+    offset: int = 0
+    generated_tokens: int = 0
+    next_token: int | None = None
+    is_prefill_done: bool = False
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Benchmark tiny-llm token throughput with synthetic token IDs."
@@ -32,6 +44,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-output-len", type=int, default=256)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument(
+        "--batch-decode",
+        action="store_true",
+        help="Run the Week 2 continuous-batching decode benchmark.",
+    )
+    parser.add_argument("--batch-size", type=int, default=5)
+    parser.add_argument(
+        "--prefill-step",
+        type=int,
+        default=128,
+        help="Maximum number of prompt tokens to prefill per scheduler step.",
+    )
+    parser.add_argument(
+        "--max-seq-len",
+        type=int,
+        default=512,
+        help="Maximum prompt+generated length for a batched request.",
+    )
     return parser.parse_args()
 
 
@@ -48,19 +78,29 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--min-output-len cannot be greater than --max-output-len")
     if args.warmup < 0:
         raise ValueError("--warmup must be >= 0")
+    if args.batch_decode and args.loader != "week2":
+        raise ValueError("--batch-decode is only supported with --loader week2")
+    if args.batch_decode and args.batch_size <= 0:
+        raise ValueError("--batch-size must be > 0")
+    if args.batch_decode and args.prefill_step <= 0:
+        raise ValueError("--prefill-step must be > 0")
+    if args.batch_decode and args.max_seq_len <= 0:
+        raise ValueError("--max-seq-len must be > 0")
+    if args.batch_decode and args.num_seqs < args.batch_size:
+        raise ValueError("--batch-decode requires --num-seqs >= --batch-size")
 
 
 def load_solution_modules(solution: str):
     if solution == "tiny_llm":
         from tiny_llm import models
-        from tiny_llm.kv_cache import TinyKvFullCache
+        from tiny_llm.kv_cache import BatchingKvCache, TinyKvFullCache
 
-        return "tiny_llm", models, TinyKvFullCache
+        return "tiny_llm", models, TinyKvFullCache, BatchingKvCache
     if solution in {"tiny_llm_ref", "ref"}:
         from tiny_llm_ref import models
-        from tiny_llm_ref.kv_cache import TinyKvFullCache
+        from tiny_llm_ref.kv_cache import BatchingKvCache, TinyKvFullCache
 
-        return "tiny_llm_ref", models, TinyKvFullCache
+        return "tiny_llm_ref", models, TinyKvFullCache, BatchingKvCache
     raise ValueError(f"Solution {solution} not supported for bench")
 
 
@@ -110,6 +150,14 @@ def sample_next_week1(model, y: mx.array) -> mx.array:
 
 def sample_next_week2(model, y: mx.array, offset: int, kv_cache: list) -> mx.array:
     output_logits = model(y[None, :], offset, kv_cache)
+    logits = output_logits[:, -1, :]
+    return mx.argmax(logits, axis=-1)
+
+
+def sample_next_week2_batched(
+    model, y: mx.array, offsets: list[int], kv_cache: list
+) -> mx.array:
+    output_logits = model(y, offsets, kv_cache)
     logits = output_logits[:, -1, :]
     return mx.argmax(logits, axis=-1)
 
@@ -165,6 +213,136 @@ def run_one_request_week2(
     return generated_tokens, prefill_time, decode_time
 
 
+def run_batch_requests_week2(
+    model,
+    requests: list[BenchRequest],
+    kv_cache_cls,
+    batching_kv_cache_cls,
+    *,
+    batch_size: int,
+    prefill_step: int,
+    max_seq_len: int,
+) -> tuple[int, int, float, float]:
+    """Benchmark Week 2 continuous batching without tokenizer/detokenizer overhead."""
+
+    decode_requests: list[BatchRequestState | None] = [None] * batch_size
+    batch_kv_cache = [
+        batching_kv_cache_cls(max_active_requests=batch_size, max_seq_len=max_seq_len)
+        for _ in range(model.num_hidden_layers)
+    ]
+    pending_prefill: BatchRequestState | None = None
+    next_request_idx = 0
+
+    generated_tokens = 0
+    decode_tokens = 0
+    prefill_time = 0.0
+    decode_time = 0.0
+
+    while True:
+        if (
+            next_request_idx >= len(requests)
+            and pending_prefill is None
+            and all(req is None for req in decode_requests)
+        ):
+            break
+
+        if pending_prefill is None and next_request_idx < len(requests):
+            pending_prefill = BatchRequestState(
+                request=requests[next_request_idx],
+                kv_cache=[kv_cache_cls() for _ in range(model.num_hidden_layers)],
+            )
+            next_request_idx += 1
+
+        if pending_prefill is not None and not pending_prefill.is_prefill_done:
+            remaining = (
+                len(pending_prefill.request.prompt_token_ids) - pending_prefill.offset
+            )
+            chunk_len = min(prefill_step, remaining)
+            chunk = pending_prefill.request.prompt_token_ids[
+                pending_prefill.offset : pending_prefill.offset + chunk_len
+            ]
+            t0 = perf_counter()
+            token = sample_next_week2(
+                model,
+                mx.array(chunk, dtype=mx.int32),
+                pending_prefill.offset,
+                pending_prefill.kv_cache,
+            )
+            mx.eval(token)
+            prefill_time += perf_counter() - t0
+            pending_prefill.offset += chunk_len
+
+            for layer_cache in pending_prefill.kv_cache:
+                mx.eval(layer_cache.key_values[0], layer_cache.key_values[1])
+
+            if pending_prefill.offset == len(pending_prefill.request.prompt_token_ids):
+                pending_prefill.is_prefill_done = True
+                pending_prefill.generated_tokens = 1
+                pending_prefill.next_token = token.item()
+                generated_tokens += 1
+
+        if pending_prefill is not None and pending_prefill.is_prefill_done:
+            if (
+                pending_prefill.generated_tokens
+                >= pending_prefill.request.max_new_tokens
+                or pending_prefill.offset >= max_seq_len
+            ):
+                for layer_cache in pending_prefill.kv_cache:
+                    layer_cache.release()
+                pending_prefill = None
+                continue
+
+            for slot, current in enumerate(decode_requests):
+                if current is None:
+                    for prefill_cache, batch_cache in zip(
+                        pending_prefill.kv_cache, batch_kv_cache
+                    ):
+                        batch_cache.add_request(prefill_cache, slot)
+                    decode_requests[slot] = pending_prefill
+                    pending_prefill = None
+                    break
+
+        if any(req is not None for req in decode_requests):
+            next_tokens = []
+            offsets = []
+            active_slots = []
+            for slot, req in enumerate(decode_requests):
+                if req is None:
+                    next_tokens.append(0)
+                    offsets.append(0)
+                    continue
+                next_tokens.append(req.next_token)
+                offsets.append(req.offset)
+                active_slots.append(slot)
+
+            t1 = perf_counter()
+            decoded = sample_next_week2_batched(
+                model,
+                mx.array(next_tokens, dtype=mx.int32).reshape(-1, 1),
+                offsets,
+                batch_kv_cache,
+            )
+            mx.eval(decoded)
+            decode_time += perf_counter() - t1
+
+            for slot in active_slots:
+                req = decode_requests[slot]
+                req.next_token = decoded[slot].item()
+                req.offset += 1
+                req.generated_tokens += 1
+                generated_tokens += 1
+                decode_tokens += 1
+                if (
+                    req.generated_tokens >= req.request.max_new_tokens
+                    or req.offset >= max_seq_len
+                ):
+                    for layer_cache in batch_kv_cache:
+                        layer_cache.remove_request(slot)
+                    decode_requests[slot] = None
+
+    return generated_tokens, decode_tokens, prefill_time, decode_time
+
+
 def safe_div(num: float, den: float) -> float:
     return num / den if den > 0 else 0.0
 
@@ -174,7 +352,9 @@ def main() -> None:
     validate_args(args)
 
     rng = Random(args.seed)
-    solution_name, models, kv_cache_cls = load_solution_modules(args.solution)
+    solution_name, models, kv_cache_cls, batching_kv_cache_cls = load_solution_modules(
+        args.solution
+    )
     model_name = models.shortcut_name_to_full_name(args.model)
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
@@ -199,12 +379,29 @@ def main() -> None:
                 enable_flash_attn=args.enable_flash_attn,
             )
 
-            def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
-                return run_one_request_week2(
-                    model,
-                    request,
-                    kv_cache_cls,
-                )
+            if args.batch_decode:
+
+                def run_benchmark(
+                    bench_requests: list[BenchRequest],
+                ) -> tuple[int, int, float, float]:
+                    return run_batch_requests_week2(
+                        model,
+                        bench_requests,
+                        kv_cache_cls,
+                        batching_kv_cache_cls,
+                        batch_size=args.batch_size,
+                        prefill_step=args.prefill_step,
+                        max_seq_len=args.max_seq_len,
+                    )
+
+            else:
+
+                def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
+                    return run_one_request_week2(
+                        model,
+                        request,
+                        kv_cache_cls,
+                    )
 
         requests = build_requests(
             rng=rng,
@@ -228,32 +425,50 @@ def main() -> None:
                 leave=False,
             )
             for i in warmup_iter:
-                run_one_request(requests[i % len(requests)])
+                if args.batch_decode and args.loader == "week2":
+                    run_benchmark([requests[i % len(requests)]])
+                else:
+                    run_one_request(requests[i % len(requests)])
 
-        total_prompt_tokens = 0
+        total_prompt_tokens = sum(len(request.prompt_token_ids) for request in requests)
+        progress = tqdm(total=len(requests), desc="Bench", dynamic_ncols=True)
+
         total_generated_tokens = 0
         total_decode_tokens = 0
         total_prefill_time = 0.0
         total_decode_time = 0.0
 
-        progress = tqdm(total=len(requests), desc="Bench", dynamic_ncols=True)
-
         t0 = perf_counter()
-        for request in requests:
-            generated_tokens, prefill_time, decode_time = run_one_request(request)
-            total_prompt_tokens += len(request.prompt_token_ids)
-            total_generated_tokens += generated_tokens
-            total_decode_tokens += max(0, generated_tokens - 1)
-            total_prefill_time += prefill_time
-            total_decode_time += decode_time
+        if args.batch_decode:
+            (
+                total_generated_tokens,
+                total_decode_tokens,
+                total_prefill_time,
+                total_decode_time,
+            ) = run_benchmark(requests)
+            progress.update(len(requests))
             elapsed = perf_counter() - t0
-            progress.update(1)
             progress.set_postfix(
                 {
                     "out_tok/s": f"{safe_div(total_generated_tokens, elapsed):.1f}",
                     "decode_tok/s": f"{safe_div(total_decode_tokens, total_decode_time):.1f}",
                 }
             )
+        else:
+            for request in requests:
+                generated_tokens, prefill_time, decode_time = run_one_request(request)
+                total_generated_tokens += generated_tokens
+                total_decode_tokens += max(0, generated_tokens - 1)
+                total_prefill_time += prefill_time
+                total_decode_time += decode_time
+                elapsed = perf_counter() - t0
+                progress.update(1)
+                progress.set_postfix(
+                    {
+                        "out_tok/s": f"{safe_div(total_generated_tokens, elapsed):.1f}",
+                        "decode_tok/s": f"{safe_div(total_decode_tokens, total_decode_time):.1f}",
+                    }
+                )
         total_time = perf_counter() - t0
         progress.close()
 
