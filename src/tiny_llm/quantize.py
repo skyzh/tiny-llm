@@ -1,26 +1,19 @@
-import mlx.core as mx
+import torch
 from typing import Any
 
 
-def dequantize_linear(mx_layer: Any) -> mx.array:
-    w = mx.dequantize(
-        mx_layer.weight,
-        mx_layer.scales,
-        mx_layer.biases,
-        mx_layer.group_size,
-        mx_layer.bits,
-    )
-    return w
+def dequantize_linear(mx_layer: Any) -> torch.Tensor:
+    pass
 
 
 class QuantizedWeights:
     def __init__(
         self,
-        scales: mx.array,
-        biases: mx.array,
+        scales: torch.Tensor,
+        biases: torch.Tensor,
         group_size: int,
         bits: int,
-        weight: mx.array,
+        weight: torch.Tensor,
     ):
         self.scales = scales
         self.biases = biases
@@ -30,30 +23,24 @@ class QuantizedWeights:
 
     @staticmethod
     def from_mlx_layer(mlx_layer: Any) -> "QuantizedWeights":
-        return QuantizedWeights(
-            scales=mlx_layer.scales,
-            biases=mlx_layer.biases,
-            group_size=mlx_layer.group_size,
-            bits=mlx_layer.bits,
-            weight=mlx_layer.weight,
-        )
+        pass
 
 
 def quantized_matmul(
-    scales: mx.array,
-    biases: mx.array,
+    scales: torch.Tensor,
+    biases: torch.Tensor,
     group_size: int,
     bits: int,
-    a: mx.array,
-    b: mx.array,
+    a: torch.Tensor,
+    b: torch.Tensor,
     transpose_b: bool = False,
-) -> mx.array:
+) -> torch.Tensor:
     pass
 
 
 def quantized_linear(
-    x: mx.array,
+    x: torch.Tensor,
     w: QuantizedWeights,
-    bias: mx.array | None = None,
-) -> mx.array:
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
     pass
