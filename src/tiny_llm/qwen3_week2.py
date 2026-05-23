@@ -1,4 +1,4 @@
-import mlx.core as mx
+import torch
 from .basics import silu
 from .attention import scaled_dot_product_attention_grouped
 from .layer_norm import RMSNorm
@@ -20,8 +20,8 @@ class Qwen3MultiHeadAttention:
         wk: QuantizedWeights,
         wv: QuantizedWeights,
         wo: QuantizedWeights,
-        q_norm: mx.array,
-        k_norm: mx.array,
+        q_norm: torch.Tensor,
+        k_norm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
@@ -31,11 +31,11 @@ class Qwen3MultiHeadAttention:
 
     def __call__(
         self,
-        x: mx.array,
+        x: torch.Tensor,
         offsets: list[int],
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
@@ -50,7 +50,7 @@ class Qwen3MLP:
     ):
         pass
 
-    def __call__(self, x: mx.array) -> mx.array:
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         pass
 
 
@@ -67,13 +67,13 @@ class Qwen3TransformerBlock:
         wk: QuantizedWeights,
         wv: QuantizedWeights,
         wo: QuantizedWeights,
-        q_norm: mx.array,
-        k_norm: mx.array,
+        q_norm: torch.Tensor,
+        k_norm: torch.Tensor,
         w_gate: QuantizedWeights,
         w_up: QuantizedWeights,
         w_down: QuantizedWeights,
-        w_input_layernorm: mx.array,
-        w_post_attention_layernorm: mx.array,
+        w_input_layernorm: torch.Tensor,
+        w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
@@ -82,11 +82,11 @@ class Qwen3TransformerBlock:
 
     def __call__(
         self,
-        x: mx.array,
+        x: torch.Tensor,
         offset: int,
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
@@ -96,13 +96,13 @@ class Qwen3ModelWeek2:
         mlx_model: Any,
         enable_flash_attn: bool = False,
     ):
-        self.num_hidden_layers = mlx_model.args.num_hidden_layers
+        self.num_hidden_layers = None
         pass
 
     def __call__(
         self,
-        inputs: mx.array,
+        inputs: torch.Tensor,
         offset: int,
         cache: list[TinyKvCache],
-    ) -> mx.array:
+    ) -> torch.Tensor:
         pass

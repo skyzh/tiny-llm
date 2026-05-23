@@ -1,4 +1,4 @@
-import mlx.core as mx
+import torch
 from .basics import linear, silu
 from .attention import scaled_dot_product_attention_grouped
 from .layer_norm import RMSNorm
@@ -15,12 +15,12 @@ class Qwen3MultiHeadAttention:
         num_heads: int,
         num_kv_heads: int,
         head_dim: int,
-        wq: mx.array,
-        wk: mx.array,
-        wv: mx.array,
-        wo: mx.array,
-        q_norm: mx.array,
-        k_norm: mx.array,
+        wq: torch.Tensor,
+        wk: torch.Tensor,
+        wv: torch.Tensor,
+        wo: torch.Tensor,
+        q_norm: torch.Tensor,
+        k_norm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
@@ -29,9 +29,9 @@ class Qwen3MultiHeadAttention:
 
     def __call__(
         self,
-        x: mx.array,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        x: torch.Tensor,
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
@@ -40,13 +40,13 @@ class Qwen3MLP:
         self,
         dim: int,
         hidden_dim: int,
-        w_gate: mx.array,
-        w_up: mx.array,
-        w_down: mx.array,
+        w_gate: torch.Tensor,
+        w_up: torch.Tensor,
+        w_down: torch.Tensor,
     ):
         pass
 
-    def __call__(self, x: mx.array) -> mx.array:
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         pass
 
 
@@ -59,17 +59,17 @@ class Qwen3TransformerBlock:
         head_dim: int,
         intermediate_size: int,
         rms_norm_eps: float,
-        wq: mx.array,
-        wk: mx.array,
-        wv: mx.array,
-        wo: mx.array,
-        q_norm: mx.array,
-        k_norm: mx.array,
-        w_gate: mx.array,
-        w_up: mx.array,
-        w_down: mx.array,
-        w_input_layernorm: mx.array,
-        w_post_attention_layernorm: mx.array,
+        wq: torch.Tensor,
+        wk: torch.Tensor,
+        wv: torch.Tensor,
+        wo: torch.Tensor,
+        q_norm: torch.Tensor,
+        k_norm: torch.Tensor,
+        w_gate: torch.Tensor,
+        w_up: torch.Tensor,
+        w_down: torch.Tensor,
+        w_input_layernorm: torch.Tensor,
+        w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
     ):
@@ -77,9 +77,9 @@ class Qwen3TransformerBlock:
 
     def __call__(
         self,
-        x: mx.array,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        x: torch.Tensor,
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
@@ -89,6 +89,6 @@ class Qwen3ModelWeek1:
 
     def __call__(
         self,
-        inputs: mx.array,
-    ) -> mx.array:
+        inputs: torch.Tensor,
+    ) -> torch.Tensor:
         pass

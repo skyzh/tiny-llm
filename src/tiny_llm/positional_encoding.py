@@ -1,4 +1,4 @@
-import mlx.core as mx
+import torch
 
 
 class RoPE:
@@ -12,6 +12,6 @@ class RoPE:
         pass
 
     def __call__(
-        self, x: mx.array, offset: list[slice] | slice | None = None
-    ) -> mx.array:
+        self, x: torch.Tensor, offset: list[slice] | slice | None = None
+    ) -> torch.Tensor:
         pass
