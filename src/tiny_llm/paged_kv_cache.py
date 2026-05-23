@@ -1,19 +1,19 @@
 from dataclasses import dataclass
 from typing import Optional
 
-import mlx.core as mx
+import torch
 
 from .kv_cache import TinyKvCache
 
 
 @dataclass
 class PagedKvMetadata:
-    key_pages: mx.array
-    value_pages: mx.array
-    block_table: mx.array
-    context_lens: mx.array
+    key_pages: torch.Tensor
+    value_pages: torch.Tensor
+    block_table: torch.Tensor
+    context_lens: torch.Tensor
     page_size: int
-    mask: mx.array | str | None = None
+    mask: torch.Tensor | str | None = None
 
 
 class TinyKvPagedPool:
@@ -31,15 +31,15 @@ class TinyKvPagedPool:
     def allocate_page(self) -> int:
         pass
 
-    def read_page(self, page_id: int) -> tuple[mx.array, mx.array]:
+    def read_page(self, page_id: int) -> tuple[torch.Tensor, torch.Tensor]:
         pass
 
     def write_page_slice(
         self,
         page_id: int,
         start: int,
-        key: mx.array,
-        value: mx.array,
+        key: torch.Tensor,
+        value: torch.Tensor,
     ) -> None:
         pass
 
@@ -55,37 +55,37 @@ class TinyKvPagedCache(TinyKvCache):
     def num_pages(self) -> int:
         pass
 
-    def gather_dense(self) -> tuple[mx.array, mx.array]:
+    def gather_dense(self) -> tuple[torch.Tensor, torch.Tensor]:
         pass
 
     def update_and_fetch(
         self,
-        key: mx.array,
-        value: mx.array,
+        key: torch.Tensor,
+        value: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
-    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        mask: torch.Tensor | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
         pass
 
-    def block_table(self, max_pages: int | None = None) -> mx.array:
+    def block_table(self, max_pages: int | None = None) -> torch.Tensor:
         pass
 
-    def context_lens(self) -> mx.array:
+    def context_lens(self) -> torch.Tensor:
         pass
 
     def paged_metadata(
         self,
         max_pages: int | None = None,
-        mask: mx.array | str | None = None,
+        mask: torch.Tensor | str | None = None,
     ) -> PagedKvMetadata:
         pass
 
     def update_and_fetch_paged(
         self,
-        key: mx.array,
-        value: mx.array,
+        key: torch.Tensor,
+        value: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
+        mask: torch.Tensor | str | None = None,
     ) -> PagedKvMetadata:
         pass
 

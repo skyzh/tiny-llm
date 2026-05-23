@@ -1,22 +1,22 @@
-import mlx.core as mx
-from mlx_lm.tokenizer_utils import TokenizerWrapper
+import torch
+from typing import Any, Callable
+
 from .qwen3_week1 import Qwen3ModelWeek1
 from .qwen3_week2 import Qwen3ModelWeek2
-from typing import Callable
 
 
 def simple_generate(
     model: Qwen3ModelWeek1,
-    tokenizer: TokenizerWrapper,
+    tokenizer: Any,
     prompt: str,
-    sampler: Callable[[mx.array], mx.array] | None,
+    sampler: Callable[[torch.Tensor], torch.Tensor] | None,
 ) -> str:
     def _step(model, y):
         pass
 
 
 def simple_generate_with_kv_cache(
-    model: Qwen3ModelWeek2, tokenizer: TokenizerWrapper, prompt: str
+    model: Qwen3ModelWeek2, tokenizer: Any, prompt: str
 ) -> str:
     def _step(model, y, offset, kv_cache):
         pass
@@ -25,8 +25,8 @@ def simple_generate_with_kv_cache(
 def speculative_generate(
     draft_model: Qwen3ModelWeek2,
     model: Qwen3ModelWeek2,
-    draft_tokenizer: TokenizerWrapper,
-    tokenizer: TokenizerWrapper,
+    draft_tokenizer: Any,
+    tokenizer: Any,
     prompt: str,
 ) -> str:
     pass

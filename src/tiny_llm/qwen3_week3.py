@@ -1,4 +1,4 @@
-import mlx.core as mx
+import torch
 from .kv_cache import TinyKvCache
 from .qwen3_week2 import (
     Qwen3MLP,
@@ -14,7 +14,7 @@ class Qwen3ModelWeek3:
         mlx_model: Any,
         page_size: int = 128,
     ):
-        self.num_hidden_layers = mlx_model.args.num_hidden_layers
+        self.num_hidden_layers = None
         pass
 
     def create_kv_cache(self) -> list[TinyKvCache]:
@@ -22,8 +22,8 @@ class Qwen3ModelWeek3:
 
     def __call__(
         self,
-        inputs: mx.array,
-        offset: int | list[int] | mx.array,
+        inputs: torch.Tensor,
+        offset: int | list[int] | torch.Tensor,
         cache: list[TinyKvCache],
-    ) -> mx.array:
+    ) -> torch.Tensor:
         pass
