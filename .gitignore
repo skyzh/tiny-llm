@@ -175,3 +175,14 @@ cython_debug/
 
 *.dylib
 *.metallib
+
+# Reflex viz apps
+viz/**/assets/
+viz/**/.web/
+viz/**/.states/
+viz/**/reflex.lock/
+viz/**/__pycache__/
+viz/**/.reflex/
+viz/**/node_modules/
+viz/**/*.db
+viz/**/bun.lockb

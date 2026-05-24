@@ -22,6 +22,9 @@ dependencies = [
     "pytest-benchmark>=5.1.0",
 ]
 
+[project.optional-dependencies]
+viz = ["reflex>=0.7.0"]
+
 [tool.pdm.scripts]
 pre_run = { shell = "pdm sync --no-self > /dev/null" }
 build-ext.cmd = "python build.py"
