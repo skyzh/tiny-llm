@@ -223,7 +223,7 @@ std::vector<mx::array> Axpby::jvp(const std::vector<mx::array> &primals, const s
     // jvp is just the tangent scaled by alpha
     // Similarly, if argnums = {1}, the jvp is just the tangent
     // scaled by beta
-    if (argnums.size() > 1) {
+    if (argnums.size() == 1) {
         auto scale = argnums[0] == 0 ? alpha_ : beta_;
         auto scale_arr = mx::array(scale, tangents[0].dtype());
         return {mx::multiply(scale_arr, tangents[0], stream())};
