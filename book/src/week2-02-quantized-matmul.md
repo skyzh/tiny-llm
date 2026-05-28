@@ -73,7 +73,7 @@ For each group of G consecutive values in a row:
 All quantized matmul tests use `group_size = 128`, matching the Qwen3 MLX
 4-bit weights used by the rest of the course. The tests cover both `float16`
 and `bfloat16` because different MLX checkpoints store their scales, biases,
-and activations in different 16-bit dtypes.
+and activations in different 16-bit data types.
 
 ### Affine Quantization
 
