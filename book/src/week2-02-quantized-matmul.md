@@ -192,11 +192,11 @@ This shows we can factor out the scale and bias per group, reducing the number o
 Input:
   A: M × N (float16 or bfloat16, activations)
   B_quantized: K × (N/8) (uint32, packed weights)
-  scales: K × (N/G) (same dtype as A)
-  biases: K × (N/G) (same dtype as A)
+  scales: K × (N/G) (float16/bfloat16)
+  biases: K × (N/G) (float16/bfloat16)
 
 Output:
-  C: M × K (same dtype as A)
+  C: M × K (float16/bfloat16)
 
 For each output element C[i, k]:
   sum = 0  # float accumulator
@@ -215,7 +215,7 @@ For each output element C[i, k]:
         a_value = A[i, g*G + p*8 + bit_offset/4]
         sum = sum + a_value * b_value
   
-  C[i, k] = same_dtype_as_A(sum)
+  C[i, k] = float16/bfloat16(sum)
 ```
 
 ## Task 1: Implement QuantizedWeights
