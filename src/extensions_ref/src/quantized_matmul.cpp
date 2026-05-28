@@ -23,8 +23,8 @@ mx::array quantized_matmul(const mx::array &scales,         // Input array scale
                            const bool transpose_b,          // Whether to transpose b
                            mx::StreamOrDevice s /* = {} */  // Stream on which to schedule the operation
 ) {
-    if (scales.dtype() != mx::bfloat16) {
-        throw std::runtime_error("quantized_matmul: scales must be bfloat16");
+    if (scales.dtype() != mx::float16 && scales.dtype() != mx::bfloat16) {
+        throw std::runtime_error("quantized_matmul: scales must be float16 or bfloat16");
     }
     if (scales.dtype() != biases.dtype()) {
         throw std::runtime_error("quantized_matmul: scales and biases must be the same dtype");
@@ -81,6 +81,7 @@ mx::array quantized_matmul(const mx::array &scales,         // Input array scale
         /* const std::vector<mx::array>& inputs = */ {scales, biases, a, b});
 }
 
+template <typename T>
 void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, const mx::array &a, const mx::array &b,
                            mx::array &out, mx::Stream stream) {
     out.set_data(mx::allocator::malloc(out.nbytes()));
@@ -99,7 +100,7 @@ void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, con
         throw std::runtime_error("quantized_matmul: b must be contiguous");
     }
 
-    encoder.dispatch([out_ptr = out.data<mx::bfloat16_t>(), out_shape = out.shape(), out_strides = out.strides(),
+    encoder.dispatch([out_ptr = out.data<T>(), out_shape = out.shape(), out_strides = out.strides(),
                       a = mx::array::unsafe_weak_copy(a), b = mx::array::unsafe_weak_copy(b),
                       scales = mx::array::unsafe_weak_copy(scales), biases = mx::array::unsafe_weak_copy(biases)]() {
         int M = a.shape()[0];
@@ -108,10 +109,10 @@ void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, con
         const int group_size = 128;
         const int bits = 4;
         const int group_per_row = N / group_size;
-        const mx::bfloat16_t *a_ptr = a.data<mx::bfloat16_t>();
+        const T *a_ptr = a.data<T>();
         const uint32_t *b_ptr = b.data<uint32_t>();
-        const mx::bfloat16_t *scales_ptr = scales.data<mx::bfloat16_t>();
-        const mx::bfloat16_t *biases_ptr = biases.data<mx::bfloat16_t>();
+        const T *scales_ptr = scales.data<T>();
+        const T *biases_ptr = biases.data<T>();
         uint32_t item_mask = (1 << bits) - 1;
         for (int i = 0; i < M; i++) {
             for (int k = 0; k < K; k++) {
@@ -121,8 +122,8 @@ void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, con
                         mx::elem_to_loc(k * group_per_row + group_idx, scales.shape(), scales.strides());
                     int64_t biases_loc =
                         mx::elem_to_loc(k * group_per_row + group_idx, biases.shape(), biases.strides());
-                    mx::bfloat16_t scale = scales_ptr[scales_loc];
-                    mx::bfloat16_t bias = biases_ptr[biases_loc];
+                    T scale = scales_ptr[scales_loc];
+                    T bias = biases_ptr[biases_loc];
                     int64_t b_loc = mx::elem_to_loc((k * N + group_idx * group_size) / 8, b.shape(), b.strides());
                     int64_t a_loc = mx::elem_to_loc(i * N + group_idx * group_size, a.shape(), a.strides());
                     const int packs_per_item = 32 / bits;
@@ -140,7 +141,7 @@ void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, con
                     }
                 }
                 int64_t out_loc = mx::elem_to_loc(i * K + k, out_shape, out_strides);
-                out_ptr[out_loc] = static_cast<mx::bfloat16_t>(sum);
+                out_ptr[out_loc] = static_cast<T>(sum);
             }
         }
     });
@@ -153,7 +154,13 @@ void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector
     auto &b = inputs[3];
     auto &out = outputs[0];
 
-    quantized_matmul_impl(scales, biases, a, b, out, stream());
+    if (out.dtype() == mx::float16) {
+        return quantized_matmul_impl<mx::float16_t>(scales, biases, a, b, out, stream());
+    } else if (out.dtype() == mx::bfloat16) {
+        return quantized_matmul_impl<mx::bfloat16_t>(scales, biases, a, b, out, stream());
+    } else {
+        throw std::runtime_error("quantized_matmul: output must be float16 or bfloat16");
+    }
 }
 
 void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -169,7 +176,8 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
 
     // Make a kernel from this metal library
     auto library = d.get_library("tiny_llm_ext_ref");
-    const char* kernel_name = "quantized_matmul_w4a16_g128_bf16";
+    const char* kernel_name = out.dtype() == mx::float16 ? "quantized_matmul_w4a16_g128_f16"
+                                                         : "quantized_matmul_w4a16_g128_bf16";
     auto kernel = d.get_kernel(kernel_name, library);
 
     // Prepare to encode kernel
