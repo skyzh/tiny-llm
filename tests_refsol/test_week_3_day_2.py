@@ -203,5 +203,9 @@ def test_task_3_incremental_decode_matches_week2_with_paged_attention():
         week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
         week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
         assert_allclose(
-            week3_out, week2_out, precision=mx.bfloat16, rtol=1e-3, atol=1e-3
+            week3_out,
+            week2_out,
+            precision=mx.bfloat16,
+            rtol=1e-3,
+            atol=1e-3,
         )

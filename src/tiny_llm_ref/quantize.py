@@ -11,12 +11,14 @@ class QuantizedWeights:
         group_size: int,
         bits: int,
         weight: mx.array,
+        mode: str = "affine",
     ):
         self.scales = scales
         self.biases = biases
         self.group_size = group_size
         self.bits = bits
         self.weight = weight
+        self.mode = mode
 
     @staticmethod
     def from_mlx_layer(mlx_layer: Any) -> "QuantizedWeights":
@@ -26,6 +28,7 @@ class QuantizedWeights:
             group_size=mlx_layer.group_size,
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,
+            mode=getattr(mlx_layer, "mode", "affine"),
         )
 
 

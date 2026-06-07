@@ -5,9 +5,10 @@ from .attention import paged_attention
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
 from typing import Any
-from .embedding import Embedding
-from .quantize import dequantize_linear, QuantizedWeights, quantized_linear
+from .embedding import QuantizedEmbedding
+from .quantize import QuantizedWeights, quantized_linear
 from .kv_cache import TinyKvCache
+from .moe import Moe
 from .paged_kv_cache import TinyKvPagedCache, TinyKvPagedPool
 
 
@@ -122,7 +123,6 @@ class Qwen3TransformerBlock:
         num_kv_heads: int,
         hidden_size: int,
         head_dim: int,
-        intermediate_size: int,
         rms_norm_eps: float,
         wq: QuantizedWeights,
         wk: QuantizedWeights,
@@ -130,17 +130,15 @@ class Qwen3TransformerBlock:
         wo: QuantizedWeights,
         q_norm: mx.array,
         k_norm: mx.array,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
         w_input_layernorm: mx.array,
         w_post_attention_layernorm: mx.array,
+        mlp: Qwen3MLP | Moe,
         max_seq_len: int = 32768,
         theta: int = 1000000,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
-        self.mlp = Qwen3MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
+        self.mlp = mlp
         self.input_layernorm = RMSNorm(hidden_size, w_input_layernorm, eps=rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(
             hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
@@ -175,6 +173,14 @@ class Qwen3TransformerBlock:
         return out
 
 
+def is_qwen3_moe_sparse_layer(args: Any, layer_idx: int) -> bool:
+    return (
+        getattr(args, "num_experts", 0) > 0
+        and layer_idx not in getattr(args, "mlp_only_layers", [])
+        and (layer_idx + 1) % getattr(args, "decoder_sparse_step", 1) == 0
+    )
+
+
 class Qwen3ModelWeek3:
     def __init__(
         self,
@@ -191,10 +197,10 @@ class Qwen3ModelWeek3:
         precision = mx.bfloat16
         self.precision = precision
 
-        self.embedding = Embedding(
+        self.embedding = QuantizedEmbedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
-            weight=dequantize_linear(mlx_model.model.embed_tokens),
+            weight=QuantizedWeights.from_mlx_layer(mlx_model.model.embed_tokens),
         )
         self.layers_inner = []
 
@@ -211,22 +217,43 @@ class Qwen3ModelWeek3:
             wo = QuantizedWeights.from_mlx_layer(
                 mlx_model.model.layers[i].self_attn.o_proj
             )
-            w_gate = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.gate_proj
-            )
-            w_up = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.up_proj
-            )
-            w_down = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.down_proj
-            )
+            if is_qwen3_moe_sparse_layer(mlx_model.args, i):
+                mlp = Moe(
+                    w_router=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.gate
+                    ),
+                    w_gate=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.switch_mlp.gate_proj
+                    ),
+                    w_up=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.switch_mlp.up_proj
+                    ),
+                    w_down=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.switch_mlp.down_proj
+                    ),
+                    num_experts_per_tok=mlx_model.args.num_experts_per_tok,
+                    norm_topk_prob=mlx_model.args.norm_topk_prob,
+                )
+            else:
+                mlp = Qwen3MLP(
+                    mlx_model.args.hidden_size,
+                    mlx_model.args.intermediate_size,
+                    QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.gate_proj
+                    ),
+                    QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.up_proj
+                    ),
+                    QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.down_proj
+                    ),
+                )
 
             layer = Qwen3TransformerBlock(
                 num_attention_heads=mlx_model.args.num_attention_heads,
                 num_kv_heads=mlx_model.args.num_key_value_heads,
                 hidden_size=mlx_model.args.hidden_size,
                 head_dim=mlx_model.args.head_dim,
-                intermediate_size=mlx_model.args.intermediate_size,
                 rms_norm_eps=mlx_model.args.rms_norm_eps,
                 wq=wq,
                 wk=wk,
@@ -234,13 +261,11 @@ class Qwen3ModelWeek3:
                 wo=wo,
                 q_norm=mlx_model.model.layers[i].self_attn.q_norm.weight,
                 k_norm=mlx_model.model.layers[i].self_attn.k_norm.weight,
-                w_gate=w_gate,
-                w_up=w_up,
-                w_down=w_down,
                 w_input_layernorm=mlx_model.model.layers[i].input_layernorm.weight,
                 w_post_attention_layernorm=mlx_model.model.layers[
                     i
                 ].post_attention_layernorm.weight,
+                mlp=mlp,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
             )
