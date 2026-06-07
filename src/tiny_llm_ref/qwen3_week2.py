@@ -7,8 +7,8 @@ from .attention import (
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
 from typing import Any
-from .embedding import Embedding
-from .quantize import dequantize_linear, QuantizedWeights, quantized_linear
+from .embedding import QuantizedEmbedding
+from .quantize import QuantizedWeights, quantized_linear
 from .kv_cache import TinyKvCache
 
 
@@ -200,10 +200,10 @@ class Qwen3ModelWeek2:
         precision = mx.bfloat16
         self.precision = precision
 
-        self.embedding = Embedding(
+        self.embedding = QuantizedEmbedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
-            weight=dequantize_linear(mlx_model.model.embed_tokens),
+            weight=QuantizedWeights.from_mlx_layer(mlx_model.model.embed_tokens),
         )
         self.layers_inner = []
 

@@ -218,10 +218,11 @@ For each output element C[i, k]:
   C[i, k] = float16/bfloat16(sum)
 ```
 
-## Task 1: Implement QuantizedWeights
+## Task 1: Implement QuantizedWeights and QuantizedEmbedding
 
 ```
 src/tiny_llm/quantize.py
+src/tiny_llm/embedding.py
 ```
 
 First, familiarize yourself with the `QuantizedWeights` class, which stores quantized weight information:
@@ -237,6 +238,17 @@ First, familiarize yourself with the `QuantizedWeights` class, which stores quan
 The `from_mlx_layer` static method extracts these fields from MLX's quantized linear layers when loading the model.
 
 Next, implement the `quantized_linear` function, which is a wrapper around `quantized_matmul` that mimics the standard `linear` function interface. And we'll implement `quantized_matmul` in the next task.
+
+The token embedding table should also stay quantized in Week 2. Add a
+`QuantizedEmbedding` wrapper with two call patterns:
+
+- `embedding(input_ids)` is a row lookup. Gather the matching packed rows,
+  scales, and biases, then call `mx.dequantize` on only those selected rows.
+- `embedding.as_linear(h)` is the tied output projection. Implement this with
+  `quantized_linear(h, embedding_weight)` so it uses your quantized matmul path
+  instead of materializing the full `vocab_size x hidden_size` table. This path
+  starts working once the quantized matmul kernel is implemented in the next
+  tasks.
 
 ## Task 2: Implement `quantized_matmul` (CPU version)
 
@@ -322,6 +334,12 @@ src/tiny_llm/qwen3_week2.py
 Integrate your quantized matmul into the Week 2 Qwen3 model so that inference runs on quantized weights end-to-end.
 
 Change the weight type from `mx.array` to `QuantizedWeights` for all linear layers in attention (`wq/wk/wv/wo`) and MLP (`w_gate/w_up/w_down`). Replace every `linear(x, w)` call with `quantized_linear(x, w)`. In the model loading code, use `QuantizedWeights.from_mlx_layer(...)` to extract quantized weight information from each MLX linear layer, instead of calling `mx.dequantize` to get a full 16-bit matrix. Make sure the Week 1 loader still dequantizes (since Week 1 layers expect plain `mx.array`), while the Week 2 loader does **not** dequantize.
+
+For embeddings, wire the `QuantizedEmbedding` from Task 1 into the loader:
+load `embed_tokens` with `QuantizedWeights.from_mlx_layer(...)` and pass it to
+`QuantizedEmbedding`. If the model has a separate `lm_head`, keep that head as
+`QuantizedWeights` too and apply it with `quantized_linear`; `lm_head` is a
+projection, not an embedding lookup.
 
 Qwen3 MLX quantized layers may use **float16** or **bfloat16** for the tensors involved in dequantization. Your kernel should accept `scales`, `biases`, and activations in either dtype, require them to match, and return the same dtype. If you see `nan` or garbage output, a dtype mismatch is the most likely cause.
 
