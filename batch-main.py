@@ -35,9 +35,11 @@ prompts = [
 random.shuffle(prompts)
 
 parser.add_argument("--solution", type=str, default="tiny_llm")
+parser.add_argument("--loader", type=str, choices=["week2", "week3"], default="week2")
 parser.add_argument("--device", type=str, default="gpu")
 parser.add_argument("--batch-size", type=int, default=5)
 parser.add_argument("--prefill-step", type=int, default=128)
+parser.add_argument("--max-seq-len", type=int, default=512)
 parser.add_argument("--enable-flash-attn", action="store_true")
 parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
@@ -57,11 +59,20 @@ args.model = models.shortcut_name_to_full_name(args.model)
 mlx_model, tokenizer = load(args.model)
 
 with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
+    dispatch_kwargs = {}
+    if args.loader == "week2":
+        dispatch_kwargs["enable_flash_attn"] = args.enable_flash_attn
+    elif args.enable_flash_attn:
+        print("--enable-flash-attn is only used by the week2 loader; ignoring it")
+
     print(
-        f"Using week2 loader with flash_attn={args.enable_flash_attn} thinking={args.enable_thinking} for {args.model}"
+        f"Using {args.loader} loader with thinking={args.enable_thinking} for {args.model}"
     )
     tiny_llm_model = models.dispatch_model(
-        args.model, mlx_model, week=2, enable_flash_attn=args.enable_flash_attn
+        args.model,
+        mlx_model,
+        week=int(args.loader.removeprefix("week")),
+        **dispatch_kwargs,
     )
     encoded_prompts = []
     for idx, prompt in enumerate(prompts):
@@ -81,6 +92,7 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         tiny_llm_model,
         tokenizer,
         encoded_prompts,
+        max_seq_len=args.max_seq_len,
         batch_size=args.batch_size,
         prefill_step=args.prefill_step,
     )
