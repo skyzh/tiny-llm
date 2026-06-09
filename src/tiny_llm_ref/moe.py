@@ -27,7 +27,6 @@ def grouped_expert_linear(
         transpose=True,
         group_size=w_experts.group_size,
         bits=w_experts.bits,
-        mode=w_experts.mode,
         sorted_indices=True,
     ).squeeze(-2)
     out_dim = w_experts.weight.shape[-2]

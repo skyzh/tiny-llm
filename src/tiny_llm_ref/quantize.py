@@ -11,14 +11,12 @@ class QuantizedWeights:
         group_size: int,
         bits: int,
         weight: mx.array,
-        mode: str = "affine",
     ):
         self.scales = scales
         self.biases = biases
         self.group_size = group_size
         self.bits = bits
         self.weight = weight
-        self.mode = mode
 
     @staticmethod
     def from_mlx_layer(mlx_layer: Any) -> "QuantizedWeights":
@@ -28,7 +26,6 @@ class QuantizedWeights:
             group_size=mlx_layer.group_size,
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,
-            mode=getattr(mlx_layer, "mode", "affine"),
         )
 
 
@@ -50,11 +47,18 @@ def quantized_linear(
         )
 
 
-def dequantize_linear(mx_layer: Any) -> mx.array:
+def dequantize_linear(mx_layer: Any, indices: mx.array | None = None) -> mx.array:
+    weight = mx_layer.weight
+    scales = mx_layer.scales
+    biases = mx_layer.biases
+    if indices is not None:
+        weight = weight[indices]
+        scales = scales[indices]
+        biases = biases[indices] if biases is not None else None
     w = mx.dequantize(
-        mx_layer.weight,
-        mx_layer.scales,
-        mx_layer.biases,
+        weight,
+        scales,
+        biases,
         mx_layer.group_size,
         mx_layer.bits,
     )

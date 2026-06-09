@@ -89,11 +89,13 @@ The useful pieces are:
 There is no shared expert in the Qwen3-MoE block we are following. The sparse
 feed-forward output is just the weighted top-k expert mixture.
 
-## The MLX Primitive
+## Grouped Quantized Matmul
 
-MLX does not give us a single high-level MoE block in `mlx.nn`. The relevant
-primitive for this chapter is `mx.gather_qmm`: it performs quantized matrix
-multiplication while selecting a different matrix for each row.
+MLX does not give us a single high-level MoE block in `mlx.nn`. It does have a
+lower-level primitive, `mx.gather_qmm`, that performs quantized matrix
+multiplication while selecting a different matrix for each row. In this chapter,
+we will build a narrow teaching version of that idea:
+`grouped_quantized_matmul`.
 
 For MoE, that means:
 
@@ -106,8 +108,9 @@ output:      N, O
 
 The row with `expert_ids[i] = e` should multiply by `weights[e]`.
 
-When the expert ids are sorted, pass `sorted_indices=True`. Keep the inverse
-order from the sort so the result can be restored to the original token order.
+Task 1 will assume the rows are already sorted by expert id. The MoE helper will
+keep the inverse order from the sort so the result can be restored to the
+original token order.
 
 ## Router Step
 
@@ -147,7 +150,7 @@ expert(x) = down_proj(SiLU(gate_proj(x)) * up_proj(x))
 ```
 
 The implementation should build token-expert jobs, group them by expert, and run
-the expert projections with `mx.gather_qmm`:
+the expert projections with `grouped_quantized_matmul`:
 
 ```plain
 selected expert ids -> expanded token-expert rows
@@ -161,53 +164,69 @@ The reorder is part of the model implementation. It keeps all token rows for the
 same expert contiguous so the expert bank can be applied with grouped matrix
 multiplication.
 
-## Task 1: Grouped Expert Linear
+## Task 1: Grouped Quantized Matmul
 
 ```
+src/extensions/src/quantized_matmul.cpp
+src/extensions/src/quantized_matmul.metal
+src/tiny_llm/quantize.py
 src/tiny_llm/moe.py
 ```
 
-Implement `grouped_expert_linear`. This is the MLX-shaped core of MoE.
+Implement `grouped_quantized_matmul`, then use it from `grouped_expert_linear`.
+This is the quantized grouped-matmul core of MoE.
 
-The function accepts:
+`grouped_quantized_matmul` accepts:
 
 ```plain
-x:           ..., D
-w_experts:   QuantizedWeights for num_experts, output_dim, D
-expert_ids:  ...
+a:           R, D
+w_experts:   packed QuantizedWeights for num_experts, output_dim, D
+expert_ids:  R, sorted by expert id
 ```
 
 It returns:
 
 ```plain
-out:         ..., output_dim
+out:         R, output_dim
+```
+
+Each row uses the expert selected by the matching row in `expert_ids`:
+
+```plain
+out[row] = a[row] @ dequantize(w_experts[expert_ids[row]]).T
 ```
 
 The implementation should:
 
 ```plain
+1. add a Python wrapper for grouped_quantized_matmul,
+2. extend the quantized matmul extension with a grouped entrypoint,
+3. read expert_ids[row] inside the kernel,
+4. use that expert id to choose the expert weight, scale, and bias row.
+```
+
+After that, implement `grouped_expert_linear` in `src/tiny_llm/moe.py`:
+
+```plain
 1. flatten token rows and expert ids,
 2. sort rows by expert id,
-3. call mx.gather_qmm with sorted_indices=True,
+3. call grouped_quantized_matmul,
 4. restore the original order.
 ```
 
-For the grouped matmul, the shape should look like:
+The call should look like:
 
 ```python
-out = mx.gather_qmm(
-    mx.expand_dims(grouped_rows, -2),
-    w_experts.weight,
+out = grouped_quantized_matmul(
     w_experts.scales,
     w_experts.biases,
-    lhs_indices=mx.arange(grouped_rows.shape[0]),
-    rhs_indices=grouped_expert_ids,
-    transpose=True,
     group_size=w_experts.group_size,
     bits=w_experts.bits,
-    mode=w_experts.mode,
-    sorted_indices=True,
-).squeeze(-2)
+    a=grouped_rows,
+    b=w_experts.weight,
+    expert_ids=grouped_expert_ids,
+    transpose_b=True,
+)
 ```
 
 This task maps to the same idea as `QuantizedSwitchLinear` in `mlx-lm`: each

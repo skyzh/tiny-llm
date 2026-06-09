@@ -243,7 +243,8 @@ The token embedding table should also stay quantized in Week 2. Add a
 `QuantizedEmbedding` wrapper with two call patterns:
 
 - `embedding(input_ids)` is a row lookup. Gather the matching packed rows,
-  scales, and biases, then call `mx.dequantize` on only those selected rows.
+  scales, and biases with the provided `dequantize_linear` helper so only those
+  selected rows are dequantized.
 - `embedding.as_linear(h)` is the tied output projection. Implement this with
   `quantized_linear(h, embedding_weight)` so it uses your quantized matmul path
   instead of materializing the full `vocab_size x hidden_size` table. This path
