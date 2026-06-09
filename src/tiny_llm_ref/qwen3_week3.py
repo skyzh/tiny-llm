@@ -123,7 +123,6 @@ class Qwen3TransformerBlock:
         num_kv_heads: int,
         hidden_size: int,
         head_dim: int,
-        intermediate_size: int,
         rms_norm_eps: float,
         wq: QuantizedWeights,
         wk: QuantizedWeights,
@@ -131,31 +130,15 @@ class Qwen3TransformerBlock:
         wo: QuantizedWeights,
         q_norm: mx.array,
         k_norm: mx.array,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
         w_input_layernorm: mx.array,
         w_post_attention_layernorm: mx.array,
-        w_router: QuantizedWeights | None = None,
-        num_experts_per_tok: int | None = None,
-        norm_topk_prob: bool = False,
+        mlp: Qwen3MLP | Moe,
         max_seq_len: int = 32768,
         theta: int = 1000000,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
-        if w_router is None:
-            self.mlp = Qwen3MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
-        else:
-            assert num_experts_per_tok is not None
-            self.mlp = Moe(
-                w_router=w_router,
-                w_gate=w_gate,
-                w_up=w_up,
-                w_down=w_down,
-                num_experts_per_tok=num_experts_per_tok,
-                norm_topk_prob=norm_topk_prob,
-            )
+        self.mlp = mlp
         self.input_layernorm = RMSNorm(hidden_size, w_input_layernorm, eps=rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(
             hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
@@ -235,42 +218,42 @@ class Qwen3ModelWeek3:
                 mlx_model.model.layers[i].self_attn.o_proj
             )
             if is_qwen3_moe_sparse_layer(mlx_model.args, i):
-                w_router = QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.gate
+                mlp = Moe(
+                    w_router=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.gate
+                    ),
+                    w_gate=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.switch_mlp.gate_proj
+                    ),
+                    w_up=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.switch_mlp.up_proj
+                    ),
+                    w_down=QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.switch_mlp.down_proj
+                    ),
+                    num_experts_per_tok=mlx_model.args.num_experts_per_tok,
+                    norm_topk_prob=mlx_model.args.norm_topk_prob,
                 )
-                w_gate = QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.switch_mlp.gate_proj
-                )
-                w_up = QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.switch_mlp.up_proj
-                )
-                w_down = QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.switch_mlp.down_proj
-                )
-                intermediate_size = mlx_model.args.moe_intermediate_size
-                num_experts_per_tok = mlx_model.args.num_experts_per_tok
-                norm_topk_prob = mlx_model.args.norm_topk_prob
             else:
-                w_router = None
-                w_gate = QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.gate_proj
+                mlp = Qwen3MLP(
+                    mlx_model.args.hidden_size,
+                    mlx_model.args.intermediate_size,
+                    QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.gate_proj
+                    ),
+                    QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.up_proj
+                    ),
+                    QuantizedWeights.from_mlx_layer(
+                        mlx_model.model.layers[i].mlp.down_proj
+                    ),
                 )
-                w_up = QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.up_proj
-                )
-                w_down = QuantizedWeights.from_mlx_layer(
-                    mlx_model.model.layers[i].mlp.down_proj
-                )
-                intermediate_size = mlx_model.args.intermediate_size
-                num_experts_per_tok = None
-                norm_topk_prob = False
 
             layer = Qwen3TransformerBlock(
                 num_attention_heads=mlx_model.args.num_attention_heads,
                 num_kv_heads=mlx_model.args.num_key_value_heads,
                 hidden_size=mlx_model.args.hidden_size,
                 head_dim=mlx_model.args.head_dim,
-                intermediate_size=intermediate_size,
                 rms_norm_eps=mlx_model.args.rms_norm_eps,
                 wq=wq,
                 wk=wk,
@@ -278,16 +261,11 @@ class Qwen3ModelWeek3:
                 wo=wo,
                 q_norm=mlx_model.model.layers[i].self_attn.q_norm.weight,
                 k_norm=mlx_model.model.layers[i].self_attn.k_norm.weight,
-                w_gate=w_gate,
-                w_up=w_up,
-                w_down=w_down,
                 w_input_layernorm=mlx_model.model.layers[i].input_layernorm.weight,
                 w_post_attention_layernorm=mlx_model.model.layers[
                     i
                 ].post_attention_layernorm.weight,
-                w_router=w_router,
-                num_experts_per_tok=num_experts_per_tok,
-                norm_topk_prob=norm_topk_prob,
+                mlp=mlp,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
             )
