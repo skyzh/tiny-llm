@@ -2,18 +2,11 @@ import mlx.core as mx
 from typing import Any
 
 
-def dequantize_linear(mx_layer: Any, indices: mx.array | None = None) -> mx.array:
-    weight = mx_layer.weight
-    scales = mx_layer.scales
-    biases = mx_layer.biases
-    if indices is not None:
-        weight = weight[indices]
-        scales = scales[indices]
-        biases = biases[indices] if biases is not None else None
+def dequantize_linear(mx_layer: Any) -> mx.array:
     w = mx.dequantize(
-        weight,
-        scales,
-        biases,
+        mx_layer.weight,
+        mx_layer.scales,
+        mx_layer.biases,
         mx_layer.group_size,
         mx_layer.bits,
     )
