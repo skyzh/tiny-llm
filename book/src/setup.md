@@ -58,7 +58,7 @@ The model parameters are hosted on Hugging Face. Once you authenticated your cli
 them with:
 
 ```bash
-hf login
+hf auth login
 hf download Qwen/Qwen3-0.6B-MLX-4bit
 hf download Qwen/Qwen3-1.7B-MLX-4bit
 hf download Qwen/Qwen3-4B-MLX-4bit
