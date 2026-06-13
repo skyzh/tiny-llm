@@ -88,8 +88,6 @@ def speculative_generate(
 ) -> str:
     draft_kv_cache = draft_model.create_kv_cache()
     kv_cache = model.create_kv_cache()
-    detokenizer = tokenizer.detokenizer
-    detokenizer.reset()
 
     def _step(model, y, offset, kv_cache, n_tokens=1):
         logits = model(y[None], offset, kv_cache)
@@ -102,52 +100,54 @@ def speculative_generate(
         y = sampler(logprobs)
         return y, logprobs.squeeze(0)
 
+    # prefill with the prompt, using the large model
     def _prefill(model, tokenizer, prompt, kv_cache):
         prefill_tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
-        token, _ = _step(model, prefill_tokens, 0, kv_cache)
+        offset = 0
+        token, _ = _step(model, prefill_tokens, offset, kv_cache)
         mx.eval(token)
         if token.item() == tokenizer.eos_token_id:
-            return token, prefill_tokens.size
-        return token, prefill_tokens.size
-
-    def _decode_one(token):
-        if token.item() == tokenizer.eos_token_id:
-            return False
-        detokenizer.add_token(token.item())
-        return True
-
-    def _draft_generate(model, last_token, offset, kv_cache, num_drafts):
-        tokens = []
-        current_offset = offset
-        for _ in range(num_drafts):
-            token, _ = _step(model, last_token, current_offset, kv_cache)
-            mx.eval(token)
-            tokens.append(token.item())
-            last_token = token
-            current_offset += 1
-        return tokens
-
-    def _rewind_cache(kv_cache, n_tokens):
-        for layer in kv_cache:
-            layer.rewind(n_tokens)
-
-    def _print_progress(progress):
-        newline = "\n"
-        print(f"+{progress} {detokenizer.text.replace(newline, ' ')[-80:]}")
+            return
+        offset = prefill_tokens.size
+        return token, offset
 
     try:
-        _draft_token, draft_offset = _prefill(
+        draft_token, draft_offset = _prefill(
             draft_model, draft_tokenizer, prompt, draft_kv_cache
         )
         token, offset = _prefill(model, tokenizer, prompt, kv_cache)
-        if token.item() == tokenizer.eos_token_id:
-            return detokenizer.text
+
+        def _decode_one(token, tokenizer):
+            if token.item() == tokenizer.eos_token_id:
+                return False
+            detokenizer = tokenizer.detokenizer
+            detokenizer.add_token(token.item())
+            return True
+
+        def draft_generate(model, last_token, offset, kv_cache, num_drafts):
+            tokens = []
+            current_offset = offset
+            for _ in range(num_drafts):
+                token, _ = _step(model, last_token, current_offset, kv_cache)
+                mx.eval(token)
+                tokens.append(token.item())
+                last_token = token
+                current_offset += 1
+            return tokens
 
         num_drafts = 4
 
+        def _rewind_cache(kv_cache, revert_len):
+            for layer in kv_cache:
+                layer.rewind(revert_len)
+
+        def _print_text(text, progress):
+            newline = "\n"
+            print(f"+{progress} {text.replace(newline, ' ')[-80:]}")
+
         # speculative decode
         while True:
-            draft_tokens = _draft_generate(
+            draft_tokens = draft_generate(
                 draft_model, token, draft_offset, draft_kv_cache, num_drafts
             )
             draft_offset += num_drafts
@@ -162,8 +162,8 @@ def speculative_generate(
             accept_all = True
             for i in range(len(new_tokens)):
                 if new_tokens[i] != draft_tokens[i]:
-                    # The accepted prefix is already emitted. Rewind both caches
-                    # so the next round starts from the target replacement token.
+                    # revert the full draft generation; re-generate next time
+                    # or we matched full, then no rewind and use the last token
                     assert i >= 1  # first token is always the same
                     revert_len = len(draft_tokens) - i
                     _rewind_cache(draft_kv_cache, revert_len - 1)
@@ -173,15 +173,15 @@ def speculative_generate(
                     offset -= revert_len
                     assert offset == draft_offset
                     assert offset == kv_cache[0].offset
-                    _print_progress(i)
+                    _print_text(tokenizer._detokenizer.text, i)
                     accept_all = False
                     break
-                if not _decode_one(new_tokens[i]):
-                    print(detokenizer.text)
-                    return detokenizer.text
+                if not _decode_one(new_tokens[i], tokenizer):
+                    print(tokenizer._detokenizer.text)
+                    return tokenizer._detokenizer.text
             if accept_all:
-                _print_progress(len(new_tokens))
-                _draft_generate(
+                _print_text(tokenizer._detokenizer.text, len(new_tokens))
+                draft_generate(
                     draft_model,
                     mx.array(draft_tokens[-1:]),
                     draft_offset,
