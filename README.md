@@ -47,7 +47,7 @@ Week 1 and 2 is complete. Week 3 is in progress.
 | 3.1            | Paged Attention - Part 1                                    | ✅    | ✅   | 🚧  |
 | 3.2            | Paged Attention - Part 2                                    | ✅    | ✅   | 🚧  |
 | 3.3            | MoE (Mixture of Experts)                                    | ✅    | ✅   | 🚧  |
-| 3.4            | Speculative Decoding                                        | 🚧    | ✅   | 🚧  |
+| 3.4            | Speculative Decoding                                        | ✅    | ✅   | ✅  |
 | 3.5            | RAG Pipeline                                                | 🚧    | 🚧   | 🚧  |
 | 3.6            | AI Agent     / Tool Calling                                 | 🚧    | 🚧   | 🚧  |
 | 3.7            | Long Context                                                | 🚧    | 🚧   | 🚧  |
