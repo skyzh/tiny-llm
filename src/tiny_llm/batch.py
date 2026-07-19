@@ -85,11 +85,11 @@ def _print_progress(
                 flush=True,
             )
             return
-        precentage = (
+        percentage = (
             pending_prefill_request.offset / pending_prefill_request.prefill_tokens.size
         ) * 100
         print(
-            f"{animation_frame} Prefill [req {pending_prefill_request.prompt_idx}]: {precentage:.2f}% ({pending_prefill_request.prefill_tokens.size - pending_prefill_request.offset} remaining tokens)",
+            f"{animation_frame} Prefill [req {pending_prefill_request.prompt_idx}]: {percentage:.2f}% ({pending_prefill_request.prefill_tokens.size - pending_prefill_request.offset} remaining tokens)",
             flush=True,
         )
     else:
