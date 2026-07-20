@@ -1,16 +1,18 @@
 # Week 1 Day 5: The Qwen3 Model
 
-In day 5, we will implement the Qwen3 model.
+On Day 5, we will combine the components from the previous chapters into the complete Qwen3 model.
 
-Before we start, please make sure you have downloaded the models:
+Model-level tests require the corresponding model files. Start with the default 0.6B model; download the larger models
+only if you want to test them as well:
 
 ```bash
 hf download Qwen/Qwen3-0.6B-MLX-4bit
+# Optional larger models:
 hf download Qwen/Qwen3-1.7B-MLX-4bit
 hf download Qwen/Qwen3-4B-MLX-4bit
 ```
 
-Otherwise, some of the tests will be skipped.
+Tests that require an unavailable model will be skipped.
 
 ## Task 1: Implement `Qwen3TransformerBlock`
 
@@ -23,7 +25,7 @@ src/tiny_llm/qwen3_week1.py
 - [A Simplified Explanation of the Transformer Block](https://medium.com/@akhileshkapse/a-simplified-explanation-of-the-transformer-block-must-read-blog-for-nlp-enthusiasts-12ef240a62ac)
 - [Attention is All You Need](https://arxiv.org/pdf/1706.03762)
 
-Qwen3 uses the following transformer block structure:
+Qwen3 uses the following Transformer block structure:
 
 ```
   input
@@ -43,14 +45,9 @@ Qwen3 uses the following transformer block structure:
 output
 ```
 
-You should pass all tests for this task by running:
+Run the tests for this task with:
 
 ```bash
-# Download the models if you haven't done so
-hf download Qwen/Qwen3-0.6B-MLX-4bit
-hf download Qwen/Qwen3-1.7B-MLX-4bit
-hf download Qwen/Qwen3-4B-MLX-4bit
-# Run the tests
 pdm run test --week 1 --day 5 -- -k task_1
 ```
 
@@ -64,8 +61,8 @@ src/tiny_llm/embedding.py
 
 - [LLM Embeddings Explained: A Visual and Intuitive Guide](https://huggingface.co/spaces/hesamation/primer-llm-embedding)
 
-The embedding layer maps one or more tokens (represented as an integer) to one or more vector of dimension `embedding_dim`.
-In this task, you will implement the embedding layer.
+The embedding layer maps token IDs (integers) to vectors of length `embedding_dim`. In this task, you will implement
+that lookup operation.
 
 ```
 Embedding::__call__
@@ -74,9 +71,10 @@ Input: N.. (tokens)
 Output: N.. x embedding_dim (vectors)
 ```
 
-This can be done with a simple array index lookup operation.
+This can be implemented with array indexing.
 
-In the Qwen3 model, the embedding layer can also be used as a linear layer to map the embeddings back to the token space.
+When input and output embeddings are tied, Qwen3 also uses the embedding weight as a linear projection from hidden vectors
+back to vocabulary logits.
 
 ```
 Embedding::as_linear
@@ -85,31 +83,24 @@ Input: N.. x embedding_dim
 Output: N.. x vocab_size
 ```
 
-You should pass all tests for this task by running:
+Run the tests for this task with:
 
 ```bash
-# Download the models if you haven't done so; we need to tokenizers
+# This task's tests use the 0.6B model and tokenizer.
 hf download Qwen/Qwen3-0.6B-MLX-4bit
-hf download Qwen/Qwen3-1.7B-MLX-4bit
-hf download Qwen/Qwen3-4B-MLX-4bit
-# Run the tests
 pdm run test --week 1 --day 5 -- -k task_2
 ```
 
 ## Task 3: Implement `Qwen3ModelWeek1`
 
-Now that we have built all the components of the Qwen3 model, we can implement the Qwen3ModelWeek1 class.
+Now that we have built all the Qwen3 components, we can implement `Qwen3ModelWeek1`.
 
 ```
 src/tiny_llm/qwen3_week1.py
 ```
 
-**📚 Readings**
-
-
-In this course, you will not implement the process of loading the model parameters from the tensor files. Instead, we
-will load the model using the `mlx-lm` library, and then we will place the loaded parameters into our model. Therefore,
-the `Qwen3ModelWeek1` class will take a MLX model as the constructor argument.
+You will not implement the process of reading model parameters from tensor files. Instead, load the model with `mlx_lm`,
+then transfer its parameters into our implementation. The `Qwen3ModelWeek1` constructor therefore accepts an MLX model.
 
 The Qwen3 model has the following layers:
 
@@ -117,7 +108,7 @@ The Qwen3 model has the following layers:
 input
 | (tokens: N..)
 Embedding
-| (N.. x hidden_size); note that hidden_size==embedding_dim
+| (N.. x hidden_size); note that hidden_size == embedding_dim
 Qwen3TransformerBlock
 | (N.. x hidden_size)
 Qwen3TransformerBlock
@@ -126,40 +117,40 @@ Qwen3TransformerBlock
 |
 RMSNorm 
 | (N.. x hidden_size)
-Embedding::as_linear  OR  Linear (lm_head)
+Embedding.as_linear OR linear (lm_head)
 | (N.. x vocab_size)
 output
 ```
 
-You can access the number of layers, hidden size, head dimension, and other model parameters from `mlx_model.args` which is defined in [ModelArgs](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py). You can reach the loaded weights from `mlx_model.model`; the layer names are easiest to inspect from the Qwen3 MLX model metadata on Hugging Face.
+Read the number of layers, hidden size, head dimension, and other configuration values from `mlx_model.args`, whose type
+is defined by [`ModelArgs`](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3.py). The loaded weights
+are available through `mlx_model.model`; use the Qwen3 implementation and model metadata to identify the corresponding
+layer names.
 
-By this point, you have implemented `RMSNorm` yourself. If your day 3 attention path still calls `mx.fast.rms_norm` for `q_norm` and `k_norm`, you can now replace those calls with `RMSNorm(head_dim, q_norm, eps=...)` and `RMSNorm(head_dim, k_norm, eps=...)`. They implement the same formula; the built-in call existed only to avoid teaching RMSNorm before the GQA chapter.
+By this point, you have implemented `RMSNorm`. Replace the temporary Day 3 calls to `mx.fast.rms_norm` with
+`RMSNorm(head_dim, q_norm, eps=...)` and `RMSNorm(head_dim, k_norm, eps=...)`. They implement the same formula; the built-in
+calls existed only to keep the GQA chapter focused on attention.
 
-Note that different
-size of the Qwen3 models use different strategies to map the embeddings back to the token space. Some models
-directly use the `Embedding::as_linear` layer, while others have a separate `lm_head` linear layer. You can
-decide which strategy to use based on the `mlx_model.args.tie_word_embeddings` argument. If it is true, then you should
-use `Embedding::as_linear`. Otherwise, the `lm_head` linear layer will be available and you should load its parameters.
+Different Qwen3 model variants map hidden vectors back to vocabulary logits in different ways. Some tie the input and
+output embeddings and use `Embedding.as_linear`; others have a separate `lm_head` linear layer. Select the strategy with
+`mlx_model.args.tie_word_embeddings`: if it is `True`, use `Embedding.as_linear`; otherwise, load and use `lm_head`.
 
-The input to the model is a sequence of tokens. The output is the logits (probability distribution) of the next token.
-In the next day, we will implement the process of generating the response from the model, and decide the next token
-based on the probability distribution output.
+The model takes a sequence of token IDs and returns unnormalized logits for every sequence position. On Day 6, we will
+use the final position's logits to select the next token and generate a response.
 
-Also note that the MLX model we are using is a quantized model. Therefore, you also need to
-dequantize the weights before loading them into our tiny-llm model. You can use the provided `quantize::dequantize_linear`
-function to dequantize the weights.
+The MLX models used in this course have quantized weights. Dequantize each linear or embedding layer before loading it
+into tiny-llm by using the provided `quantize.dequantize_linear` function.
 
-You also need to make sure that you set `mask=causal` when the input sequence is longer than 1. We will explain why
-in the next day.
+Pass `mask="causal"` to every Transformer block. For a one-token sequence the mask has no effect; for longer sequences,
+it prevents each position from attending to future tokens.
 
-You should pass all tests for this task by running:
+Run the tests for this task with:
 
 ```bash
-# Download the models if you haven't done so
+# Download each model you want to test. Missing models are skipped.
 hf download Qwen/Qwen3-0.6B-MLX-4bit
 hf download Qwen/Qwen3-1.7B-MLX-4bit
 hf download Qwen/Qwen3-4B-MLX-4bit
-# Run the tests
 pdm run test --week 1 --day 5 -- -k task_3
 ```
 

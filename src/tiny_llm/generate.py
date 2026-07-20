@@ -10,7 +10,7 @@ def simple_generate(
     tokenizer: TokenizerWrapper,
     prompt: str,
     sampler: Callable[[mx.array], mx.array] | None,
-) -> str:
+) -> None:
     def _step(model, y):
         pass
 
