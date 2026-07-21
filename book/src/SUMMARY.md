@@ -18,11 +18,11 @@
     - [Quantized Matmul (2 Days)](./week2-02-quantized-matmul.md)
     - [Flash Attention (2 Days)](./week2-04-flash-attention.md)
     - [Continuous Batching (2 Days)](./week2-06-prefill-and-batch.md)
-- [Week 3: Serving]()
+- [Week 3: Serving](./week3-overview.md)
     - [Paged Attention, Part 1](./week3-01-paged-attention-part1.md)
     - [Paged Attention, Part 2](./week3-02-paged-attention-part2.md)
     - [Mixture of Experts](./week3-03-moe.md)
-- [Week 4: Build a Tiny Coding Agent](./week4-overview.md)
+- [Week 4: Coding Agent](./week4-overview.md)
 
 ---
 

@@ -24,6 +24,9 @@ secure before adding command execution.
 
 ## Seven-Day Plan
 
+WIP
+
+<!--
 ### Day 1: From Generation to an Agent Loop
 
 Return generated text from the decoder, define an action protocol, and alternate
@@ -73,11 +76,12 @@ Complete the Week 2 exercises first, or use the included reference solution:
 pdm run agent "inspect this project and add a hello.py example"
 ```
 
-The demo uses `tiny_llm_ref`; change that import to `tiny_llm` after completing
-your Week 2 implementation. Run it from the workspace you want it to edit, and
-use `--max-steps` to cap tool calls. The default Qwen3 0.6B model keeps the demo
-accessible, but a larger instruct model will generally follow the JSON protocol
-more reliably.
+The demo defaults to `tiny_llm_ref`. Pass `--solution tiny_llm` to exercise your
+implementation, or select `--loader week3` to use the paged KV cache. It also
+supports the course's `--device`, `--enable-flash-attn`, and `--enable-thinking`
+options. Run it from the workspace you want it to edit, and use `--max-steps` and
+`--max-tokens` to cap work. The default Qwen3 4B model follows the JSON tool
+protocol more reliably; use `--model qwen3-0.6b` on memory-constrained machines.
 
 ## Suggested Milestones
 
@@ -85,5 +89,6 @@ more reliably.
 - Reliable: invalid actions produce useful feedback and the agent can recover.
 - Safe: writes are reviewable, command execution is allowlisted, and budgets bind.
 - Measurable: a repeatable task suite distinguishes progress from anecdotes.
+-->
 
 {{#include copyright.md}}

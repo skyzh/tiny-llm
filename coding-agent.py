@@ -1,6 +1,10 @@
 import argparse
+import importlib
 import json
+import sys
+from itertools import cycle
 from pathlib import Path
+from threading import Event, Thread
 
 SYSTEM = """You are a coding agent. Inspect the workspace before editing it.
 Reply with exactly one JSON object and no markdown. Available actions:
@@ -12,16 +16,44 @@ Paths must be relative. Keep changes small and never invent file contents."""
 ROOT = Path.cwd().resolve()
 
 
-def generate(model, tokenizer, messages):
+def run_with_spinner(label, function, *args):
+    if not sys.stdout.isatty():
+        return function(*args)
+    stopped = Event()
+
+    def animate():
+        for frame in cycle("|/-\\"):
+            print(f"\r{frame} {label}", end="", flush=True)
+            if stopped.wait(0.1):
+                break
+
+    thread = Thread(target=animate, daemon=True)
+    thread.start()
+    try:
+        return function(*args)
+    finally:
+        stopped.set()
+        thread.join()
+        print(f"\r{' ' * (len(label) + 2)}\r", end="", flush=True)
+
+
+def generate(model, tokenizer, messages, cache_type, args):
     import mlx.core as mx
 
-    kwargs = dict(tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    kwargs = dict(
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=args.enable_thinking,
+    )
     prompt = tokenizer.apply_chat_template(messages, **kwargs)
-    caches = model.create_kv_cache()
+    if args.loader == "week2":
+        caches = [cache_type() for _ in range(model.num_hidden_layers)]
+    else:
+        caches = model.create_kv_cache()
     tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
     output, offset = [], 0
     try:
-        for _ in range(256):
+        for _ in range(args.max_tokens):
             logits = model(tokens[None], offset, caches)[:, -1, :]
             token = int(mx.argmax(logits, axis=-1).item())
             if token == tokenizer.eos_token_id:
@@ -67,41 +99,76 @@ def run_tool(action):
         return f"error: {error}"
 
 
+def parse_action(response):
+    try:
+        action, _ = json.JSONDecoder().raw_decode(response[response.index("{") :])
+        return action
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="A tiny Week 4 coding agent.")
     parser.add_argument("task", nargs="+", help="coding task for the agent")
-    parser.add_argument("--model", default="qwen3-0.6b")
+    parser.add_argument("--model", default="qwen3-4b")
+    parser.add_argument(
+        "--solution",
+        choices=["tiny_llm", "tiny_llm_ref", "ref"],
+        default="tiny_llm_ref",
+    )
+    parser.add_argument("--loader", choices=["week2", "week3"], default="week2")
+    parser.add_argument("--device", choices=["cpu", "gpu"], default="gpu")
+    parser.add_argument("--enable-flash-attn", action="store_true")
+    parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--max-steps", type=int, default=8)
+    parser.add_argument("--max-tokens", type=int, default=256)
     args = parser.parse_args()
     from mlx_lm import load
-    from tiny_llm_ref import models
+    import mlx.core as mx
 
+    package = "tiny_llm_ref" if args.solution in {"tiny_llm_ref", "ref"} else "tiny_llm"
+    models = importlib.import_module(f"{package}.models")
+    cache_type = importlib.import_module(f"{package}.kv_cache").TinyKvFullCache
+    print(f"Using {package} with the {args.loader} loader on {args.device}")
     model_name = models.shortcut_name_to_full_name(args.model)
     mlx_model, tokenizer = load(model_name)
-    model = models.dispatch_model(model_name, mlx_model, week=2)
-    messages = [
-        {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": " ".join(args.task)},
-    ]
-    for step in range(args.max_steps):
-        response = generate(model, tokenizer, messages)
-        print(f"\n[{step + 1}] {response}")
-        try:
-            action = json.loads(response)
-        except json.JSONDecodeError:
-            action = None
-        if action and "final" in action:
-            return
-        result = (
-            run_tool(action)
-            if action and "tool" in action
-            else "error: reply with one valid JSON action"
+    dispatch_args = {"enable_flash_attn": args.enable_flash_attn}
+    if args.loader == "week3":
+        dispatch_args = {}
+        if args.enable_flash_attn:
+            print("--enable-flash-attn is only used by the week2 loader; ignoring it")
+    with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
+        model = models.dispatch_model(
+            model_name, mlx_model, week=int(args.loader[-1]), **dispatch_args
         )
-        print(f"tool> {result}")
-        messages += [
-            {"role": "assistant", "content": response},
-            {"role": "user", "content": f"Tool result:\n{result}"},
+        messages = [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": " ".join(args.task)},
         ]
+        for step in range(args.max_steps):
+            response = run_with_spinner(
+                "Model is working...",
+                generate,
+                model,
+                tokenizer,
+                messages,
+                cache_type,
+                args,
+            )
+            print(f"\n[{step + 1}] {response}")
+            action = parse_action(response)
+            if action and "final" in action:
+                return
+            if action and "tool" in action:
+                print(f"tool call> {json.dumps(action, ensure_ascii=False)}")
+                result = run_tool(action)
+            else:
+                result = "error: reply with one valid JSON action"
+            print(f"tool> {result}")
+            messages += [
+                {"role": "assistant", "content": response},
+                {"role": "user", "content": f"Tool result:\n{result}"},
+            ]
 
 
 if __name__ == "__main__":
