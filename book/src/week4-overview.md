@@ -83,6 +83,16 @@ options. Run it from the workspace you want it to edit, and use `--max-steps` an
 `--max-tokens` to cap work. The default Qwen3 4B model follows the JSON tool
 protocol more reliably; use `--model qwen3-0.6b` on memory-constrained machines.
 
+For a faster optimized executor, use MLX-LM directly. This keeps the same agent
+loop and tools but bypasses the educational Week 2/3 model and KV cache:
+
+```bash
+pdm run agent --solution mlx "inspect this project and summarize its files"
+```
+
+`--loader` and `--enable-flash-attn` are ignored in this mode because MLX-LM
+selects and manages its own optimized attention and cache implementations.
+
 ## Suggested Milestones
 
 - Minimal: the model can list, read, and create a file without leaving the root.

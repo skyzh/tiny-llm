@@ -46,6 +46,12 @@ def generate(model, tokenizer, messages, cache_type, args):
         enable_thinking=args.enable_thinking,
     )
     prompt = tokenizer.apply_chat_template(messages, **kwargs)
+    if args.solution == "mlx":
+        from mlx_lm import generate as mlx_generate
+
+        return mlx_generate(
+            model, tokenizer, prompt, max_tokens=args.max_tokens, verbose=False
+        )
     if args.loader == "week2":
         caches = [cache_type() for _ in range(model.num_hidden_layers)]
     else:
@@ -113,7 +119,7 @@ def main():
     parser.add_argument("--model", default="qwen3-4b")
     parser.add_argument(
         "--solution",
-        choices=["tiny_llm", "tiny_llm_ref", "ref"],
+        choices=["tiny_llm", "tiny_llm_ref", "ref", "mlx"],
         default="tiny_llm_ref",
     )
     parser.add_argument("--loader", choices=["week2", "week3"], default="week2")
@@ -126,10 +132,19 @@ def main():
     from mlx_lm import load
     import mlx.core as mx
 
-    package = "tiny_llm_ref" if args.solution in {"tiny_llm_ref", "ref"} else "tiny_llm"
-    models = importlib.import_module(f"{package}.models")
-    cache_type = importlib.import_module(f"{package}.kv_cache").TinyKvFullCache
-    print(f"Using {package} with the {args.loader} loader on {args.device}")
+    models = importlib.import_module("tiny_llm.models")
+    if args.solution == "mlx":
+        package, cache_type = "mlx", None
+        print(f"Using the MLX executor on {args.device}; --loader is ignored")
+        if args.enable_flash_attn:
+            print("MLX selects optimized attention automatically; ignoring the flag")
+    else:
+        package = (
+            "tiny_llm_ref" if args.solution in {"tiny_llm_ref", "ref"} else "tiny_llm"
+        )
+        models = importlib.import_module(f"{package}.models")
+        cache_type = importlib.import_module(f"{package}.kv_cache").TinyKvFullCache
+        print(f"Using {package} with the {args.loader} loader on {args.device}")
     model_name = models.shortcut_name_to_full_name(args.model)
     mlx_model, tokenizer = load(model_name)
     dispatch_args = {"enable_flash_attn": args.enable_flash_attn}
@@ -138,9 +153,12 @@ def main():
         if args.enable_flash_attn:
             print("--enable-flash-attn is only used by the week2 loader; ignoring it")
     with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-        model = models.dispatch_model(
-            model_name, mlx_model, week=int(args.loader[-1]), **dispatch_args
-        )
+        if args.solution == "mlx":
+            model = mlx_model
+        else:
+            model = models.dispatch_model(
+                model_name, mlx_model, week=int(args.loader[-1]), **dispatch_args
+            )
         messages = [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": " ".join(args.task)},
