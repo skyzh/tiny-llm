@@ -42,7 +42,7 @@ Every chapter builds on the same loop:
 
 The model does not edit files directly. It proposes an action; ordinary code
 decides whether that action is valid and performs it. This boundary makes agent
-behavior inspectable and testable.
+behavior easy to inspect and test.
 
 ```text
 task + session events
