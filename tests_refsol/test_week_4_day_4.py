@@ -1,0 +1,24 @@
+from .tiny_llm_base import append_tool_result, compact_messages, initial_messages
+
+
+def test_task_1_appends_complete_tool_turns():
+    messages = initial_messages("task", "system")
+    updated = append_tool_result(messages, '{"tool":"list_files"}', "file a.py")
+
+    assert updated[-2:] == [
+        {"role": "assistant", "content": '{"tool":"list_files"}'},
+        {"role": "user", "content": "Tool result:\nfile a.py"},
+    ]
+    assert messages == initial_messages("task", "system")
+
+
+def test_task_2_compaction_keeps_anchors_and_newest_complete_turn():
+    messages = initial_messages("task", "system")
+    messages = append_tool_result(messages, "old action" * 10, "old result" * 10)
+    messages = append_tool_result(messages, "new action", "new result")
+
+    compacted = compact_messages(messages, 50)
+
+    assert compacted[:2] == messages[:2]
+    assert compacted[-2:] == messages[-2:]
+    assert len(compacted) == 4
