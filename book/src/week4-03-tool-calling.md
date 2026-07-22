@@ -1,6 +1,6 @@
-# Week 4: Tool Calling and Agent Serving (WIP)
+# 🚧 Week 4: Tool Calling and Agent Serving
 
-> This chapter is a work in progress.
+> 🚧 This chapter is a work in progress.
 
 Tool calling turns model output into requests for external actions. Treat the
 boundary as an API, not as free-form text:

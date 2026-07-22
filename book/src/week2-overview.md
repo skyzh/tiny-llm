@@ -1,4 +1,4 @@
-# Week 2: Forging the Fast Path
+# Week 2: A Step Closer to vLLM
 
 > **Course status:** The new benchmarking, fused-operator, decode-attention,
 > and end-to-end optimization chapters are works in progress. The quantized

@@ -1,6 +1,6 @@
-# Week 2 Day 5: Decode Attention (WIP)
+# 🚧 Week 2 Day 5: Decode Attention
 
-> This newly introduced chapter is a work in progress.
+> 🚧 This newly introduced chapter is a work in progress.
 
 During single-request decode, the query length is one while the cached key/value
 sequence grows. The readable grouped-query implementation materializes scores

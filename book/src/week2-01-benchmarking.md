@@ -1,6 +1,6 @@
-# Week 2 Day 1: Benchmark MLX (WIP)
+# 🚧 Week 2 Day 1: Benchmark MLX
 
-> This newly introduced chapter is a work in progress.
+> 🚧 This newly introduced chapter is a work in progress.
 
 Optimization starts with a trustworthy comparison. In this chapter, we measure
 prefill and decode separately, synchronize MLX's lazy execution inside every

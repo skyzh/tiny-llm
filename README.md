@@ -8,7 +8,7 @@ can build the model serving infrastructure from scratch and dig into the optimiz
 
 The goal is to learn the techniques behind efficiently serving a large language model (e.g., Qwen3 models).
 
-In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen3 model to generate responses (e.g., attention, RoPE, etc). In week 2, **Forging the Fast Path**, you will optimize the single-request decode path with efficient Metal kernels and work toward 80-90% of MLX's performance. In week 3, **Build a Mini vLLM**, you will turn that fast model into a serving engine with continuous batching, optimized prefill, and paged attention. In week 4, you will use the engine to build applications such as coding agents and RAG.
+In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen3 model to generate responses (e.g., attention, RoPE, etc). In week 2, **A Step Closer to vLLM**, you will optimize the single-request decode path with efficient Metal kernels and work toward 80-90% of MLX's performance. In week 3, **Build a Mini vLLM**, you will turn that fast model into a serving engine with continuous batching, optimized prefill, and paged attention. In week 4, you will use the engine to build applications such as coding agents and RAG.
 
 Why MLX: nowadays it's easier to get a macOS-based local development environment than setting up an NVIDIA GPU.
 
@@ -45,9 +45,9 @@ introduced material and all Week 4 application material are work in progress.
 | 2.5            | End-to-End Decode Optimization                               | 🚧    | 🚧   | 🚧  |
 | 3.1            | Key-Value Cache and Continuous Batching                      | ✅    | ✅   | ✅  |
 | 3.2            | Flash Attention for Prefill                                  | ✅    | ✅   | ✅  |
-| 3.3            | Paged Attention                                               | ✅    | ✅   | 🚧  |
+| 3.3            | Paged Attention                                               | ✅    | ✅   | ✅  |
 | 3.4            | Chunked Prefill                                               | ✅    | ✅   | ✅  |
-| 3.5 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | 🚧  |
+| 3.5 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | ✅  |
 | 3.6 (optional) | Speculative Decoding                                         | 🚧    | ✅   | 🚧  |
 | 4.1            | CLI Coding Agent                                              | 🚧    | 🚧   | 🚧  |
 | 4.2            | RAG Pipeline                                                  | 🚧    | 🚧   | 🚧  |

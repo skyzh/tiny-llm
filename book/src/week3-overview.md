@@ -1,8 +1,8 @@
 # Week 3: Build a Mini vLLM
 
-> **Course status:** KV cache, continuous batching, FlashAttention, and chunked
-> prefill come from the original course. Paged attention and the optional
-> extensions remain works in progress.
+> **Course status:** KV cache, continuous batching, FlashAttention, chunked
+> prefill, paged attention, and MoE come from the original course. Speculative
+> decoding remains a work in progress.
 
 Week 3 takes the optimized single-request model from Week 2 and builds a serving
 engine around it. The optimized operator layer remains unchanged; this week is

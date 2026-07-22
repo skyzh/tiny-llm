@@ -13,7 +13,7 @@
     - [The Qwen3 Model](./week1-05-qwen3-model.md)
     - [Generating the Response](./week1-06-generate-response.md)
     - [Sampling and Preparing for Week 2](./week1-07-sampling-prepare.md)
-- [Week 2: Forging the Fast Path](./week2-overview.md)
+- [Week 2: A Step Closer to vLLM](./week2-overview.md)
     - [🚧 Benchmark MLX](./week2-01-benchmarking.md)
     - [Quantized Matmul](./week2-02-quantized-matmul.md)
     - [🚧 Fast Model Operators](./week2-03-fast-operators.md)
@@ -24,10 +24,10 @@
     - [Continuous Batching](./week3-02-continuous-batching.md)
     - [FlashAttention for Prefill](./week3-03-flash-attention.md)
     - [Chunked Prefill](./week3-04-chunked-prefill.md)
-    - [WIP: Paged Attention, Part 1](./week3-05-paged-attention-part1.md)
-    - [WIP: Paged Attention, Part 2](./week3-06-paged-attention-part2.md)
-    - [WIP: Optional Mixture of Experts](./week3-optional-moe.md)
-    - [WIP: Optional Speculative Decoding](./week3-optional-speculative-decoding.md)
+    - [Paged Attention, Part 1](./week3-05-paged-attention-part1.md)
+    - [Paged Attention, Part 2](./week3-06-paged-attention-part2.md)
+    - [Optional: Mixture of Experts](./week3-optional-moe.md)
+    - [🚧 Optional: Speculative Decoding](./week3-optional-speculative-decoding.md)
 - [🚧 Week 4: Build a Coding Agent](./week4-overview.md)
 
 ---

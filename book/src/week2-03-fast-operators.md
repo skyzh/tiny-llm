@@ -1,6 +1,6 @@
-# Week 2 Day 4: Fast Model Operators (WIP)
+# 🚧 Week 2 Day 4: Fast Model Operators
 
-> This newly introduced chapter is a work in progress.
+> 🚧 This newly introduced chapter is a work in progress.
 
 The Week 1 operators favor readable equations. That makes them useful for
 learning, but it also makes one model operation appear to MLX as a chain of
