@@ -47,11 +47,24 @@ def quantized_matmul(
     a: mx.array,
     b: mx.array,
     transpose_b: bool = False,
+    use_simdgroup: bool = True,
 ) -> mx.array:
     pass
 
 
 def quantized_matvec_custom(
+    scales: mx.array,
+    biases: mx.array,
+    group_size: int,
+    bits: int,
+    a: mx.array,
+    b: mx.array,
+    transpose_b: bool = False,
+) -> mx.array:
+    pass
+
+
+def quantized_matmul_vanilla(
     scales: mx.array,
     biases: mx.array,
     group_size: int,

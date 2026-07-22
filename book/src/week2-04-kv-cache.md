@@ -1,4 +1,4 @@
-# Week 2 Day 2: Key-Value Cache
+# Week 2 Day 5: KV Cache
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
@@ -107,7 +107,7 @@ method, `update_and_fetch`, which:
 2. Appends them along the sequence dimension.
 3. Returns the complete cached `K` and `V`, the updated offset, and the mask.
 
-On Day 2, the cache passes `mask` through unchanged and does not use
+On Day 5, the cache passes `mask` through unchanged and does not use
 `mask_length`. Those parameters become important in Week 3 for batching.
 
 You may implement this in `kv_cache.py` as `TinyKvFullCache`:
@@ -142,8 +142,9 @@ src/tiny_llm/qwen3_week2.py
 ```
 
 Keep the readable Week 1 model and its full-prefix generation loop unchanged.
-Add cache-aware model calls to the separate `qwen3_week2.py` model, which the
-remaining Week 2 chapters will optimize behind explicit operator interfaces.
+Add cache-aware calls to the separate `qwen3_week2.py` model. At this point its
+quantized projections and fast operators already come from Days 2-4; this
+chapter supplies the incremental state that Day 6 decode attention consumes.
 
 - Give each layer its own cache.
 - Add an `offset` argument to the model. It is the number of tokens already in
@@ -175,10 +176,10 @@ sequence length after the update. This matches the Week 1 GQA convention: `L`
 is the query length, while `S` is the key/value source length. During
 single-token decoding, `L = 1` and `S` grows by one on each call.
 
-As Week 2 progresses, the linear layers remain `QuantizedWeights`, while
-RMSNorm, RoPE, SwiGLU, and decode attention move behind
-`week2_kernels.py`. The dense cache remains the common incremental-decode
-foundation throughout those changes.
+The linear layers remain `QuantizedWeights`, RMSNorm, RoPE, and SwiGLU remain
+behind `week2_kernels.py`, and Day 6 adds decode attention through that same
+optimization interface. The dense cache is their common incremental-decode
+foundation.
 
 ## Task 3: Create Request-Scoped Caches
 
@@ -194,7 +195,7 @@ To verify correctness, run the following test, which is similar to the Week 1
 model test:
 
 ```bash
-pdm run test --week 2 --day 2
+pdm run test --week 2 --day 5
 ```
 
 ## Task 4: Connect the Serving Loop

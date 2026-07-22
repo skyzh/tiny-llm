@@ -1,4 +1,5 @@
 import mlx.core as mx
+from extensions_ref import tiny_llm_ext_ref
 from .basics import linear
 from .quantize import QuantizedWeights, dequantize_weights, quantized_linear
 
@@ -33,11 +34,19 @@ class QuantizedEmbedding:
         self.weight = weight
 
     def __call__(self, x: mx.array) -> mx.array:
-        biases = self.weight.biases[x] if self.weight.biases is not None else None
-        return dequantize_weights(
-            self.weight.weight[x],
-            self.weight.scales[x],
-            biases,
+        if self.weight.biases is None:
+            return dequantize_weights(
+                self.weight.weight[x],
+                self.weight.scales[x],
+                None,
+                self.weight.group_size,
+                self.weight.bits,
+            )
+        return tiny_llm_ext_ref.quantized_embedding(
+            x,
+            self.weight.scales,
+            self.weight.biases,
+            self.weight.weight,
             self.weight.group_size,
             self.weight.bits,
         )

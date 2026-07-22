@@ -691,30 +691,20 @@ FlashAttention is less compelling for one-token decode. Decode has almost no
 query-tile reuse and is closer to a matrix-vector problem; use a dedicated
 decode or paged-attention kernel for that phase.
 
-## Task 4: Model Integration
+## Task 4: Preserve the Week Boundary
 
-```plain
-src/tiny_llm/qwen3_week2.py
+```
+src/tiny_llm/attention.py::flash_attention
 ```
 
-Connect the kernel to `Qwen3MultiHeadAttention` and propagate
-`enable_flash_attn` through the model. Preserve Q, K, V, and the result as BF16;
-do not cast the full tensors to FP32. Pass causal mode directly so the wrapper
-does not allocate an `L × S` mask. FP32 is limited to the scalar scale,
-additive-mask values, matrix accumulators, and online-softmax state inside the
-fused operation.
+Keep the FlashAttention implementation behind the Week 3 attention interface.
+Do **not** edit `qwen3_week2.py`: that would make the runnable Week 2 checkpoint
+depend on a later assignment. At this point, test and benchmark the operator in
+isolation for representative prefill shapes.
 
-Run generation with FlashAttention enabled:
-
-```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen3-4b --enable-flash-attn
-```
-
-Benchmark both paths:
-
-```bash
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-4b
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-4b --enable-flash-attn
-```
+Days 4 and 5 reuse the same online-softmax and tiling ideas while walking a
+paged KV cache. That is the Week 3 model integration point. The dense Day 2
+kernel remains a correctness oracle and a useful prefill baseline, while the
+Week 2 model remains unchanged and independently runnable.
 
 {{#include copyright.md}}

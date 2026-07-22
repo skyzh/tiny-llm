@@ -12,9 +12,9 @@ performance target against MLX on the same machine.
 ## What We Will Cover
 
 - Synchronized benchmarking and a matched MLX baseline
-- A dense per-request key-value cache for incremental decoding
-- Quantized matrix-vector and matrix-matrix multiplication
+- Vanilla, SIMD-group matrix, and SIMD matrix-vector quantized multiplication
 - Fast RMSNorm, RoPE, and SwiGLU operations
+- A dense per-request key-value cache for incremental decoding
 - The optimized decode-attention primitive
 - Last-token-only logits and end-to-end graph cleanup
 - An acceptance target of 80-90% of MLX decode throughput
@@ -32,11 +32,16 @@ extension API registers our C++ primitive and dispatches our Metal kernels.
 Those facilities are the platform on which the course implementation runs;
 they are not substitutes for the operator implementations themselves.
 
-Unlike Week 1, the Week 2 model prefills a dense KV cache once, passes only the
-new token during decode, keeps its linear and embedding weights quantized, and
-imports optimized operations from `week2_kernels.py`. Week 1 continues to use
-its readable full-prefix generation loop and Python RMSNorm, RoPE, attention,
-and MLP implementations.
+The order is intentional. Days 2-3 establish quantized model weights, Day 4
+adds the fast operators required by the Week 2 model, and Day 5 introduces its
+dense KV cache. Decode attention can then consume a real cache on Day 6. A
+later chapter never becomes an undeclared prerequisite for an earlier one.
+
+Unlike Week 1, the completed Week 2 model prefills a dense KV cache once,
+passes only the new token during decode, keeps its linear and embedding weights
+quantized, and imports optimized operations from `week2_kernels.py`. Week 1
+continues to use its readable full-prefix generation loop and Python RMSNorm,
+RoPE, attention, and MLP implementations.
 
 Week 3 imports these Week 2 interfaces rather than copying or replacing them.
 That boundary lets each week's model remain understandable and runnable on its
@@ -49,12 +54,15 @@ each optimization.
 
 ## Expected Performance Contribution
 
-**Estimated overall improvement: 400-500% over the readable Week 1 decode
-path, with a goal of at least 80% of matched MLX throughput.** On an M1 Pro, the
-current work-in-progress reference measured a median 173.7 decode tok/s versus
-319.9 tok/s for MLX at a 128-token prompt: 54.3% of MLX and about 5.7x the
-original 30.4 tok/s Week 1 baseline. The custom path has not reached the target
-yet; the synchronized benchmark, not the estimate, is the authority.
+**Estimated overall improvement: 600-750% over the readable Week 1 decode
+path, with a goal of at least 80% of matched MLX throughput.** On an M1 Pro,
+the current work-in-progress reference measures about 247-252 decode tok/s
+versus about 317 tok/s for MLX at a 128-token prompt: roughly 78-79% of MLX and
+about 8.1x the original 30.4 tok/s Week 1 baseline. Prefill improved from about
+1,005 to 2,052 tok/s when the vanilla quantized matmul was replaced with the
+course's `simdgroup_matrix` kernel. The custom decode path is now close to, but
+has not yet reached, the 80% acceptance boundary; the synchronized benchmark,
+not the estimate, is the authority.
 
 {{#include copyright.md}}
 

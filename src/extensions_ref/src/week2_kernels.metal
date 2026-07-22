@@ -11,19 +11,39 @@ template <typename T>
     constant const int& rows [[buffer(3)]],
     constant const int& dim [[buffer(4)]],
     constant const float& eps [[buffer(5)]],
+    threadgroup float* partial_sums [[threadgroup(0)]],
     uint row [[threadgroup_position_in_grid]],
+    uint thread_index [[thread_index_in_threadgroup]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
     if (row >= rows) return;
+    constexpr int threads_per_threadgroup = 256;
+    constexpr int simdgroups_per_threadgroup = threads_per_threadgroup / 32;
     float sum = 0.0f;
-    for (int col = lane; col < dim; col += 32) {
+    for (int col = thread_index; col < dim; col += threads_per_threadgroup) {
         const float value = static_cast<float>(x[row * dim + col]);
         sum += value * value;
     }
-    const float inv = rsqrt(simd_sum(sum) / static_cast<float>(dim) + eps);
-    for (int col = lane; col < dim; col += 32) {
-        const T normalized = static_cast<T>(static_cast<float>(x[row * dim + col]) * inv);
-        out[row * dim + col] =
-            static_cast<T>(static_cast<float>(normalized) * static_cast<float>(weight[col]));
+    sum = simd_sum(sum);
+    if (lane == 0) {
+        partial_sums[simdgroup] = sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (simdgroup == 0) {
+        float threadgroup_sum =
+            lane < simdgroups_per_threadgroup ? partial_sums[lane] : 0.0f;
+        threadgroup_sum = simd_sum(threadgroup_sum);
+        if (lane == 0) {
+            partial_sums[0] = threadgroup_sum;
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    const float inv =
+        rsqrt(partial_sums[0] / static_cast<float>(dim) + eps);
+    for (int col = thread_index; col < dim; col += threads_per_threadgroup) {
+        out[row * dim + col] = static_cast<T>(
+            static_cast<float>(x[row * dim + col]) * inv *
+            static_cast<float>(weight[col]));
     }
 }
 
@@ -40,29 +60,48 @@ template <typename T>
     constant const float& base [[buffer(8)]],
     constant const int& traditional [[buffer(9)]],
     uint index [[thread_position_in_grid]]) {
-    const int total = batch * length * heads * head_dim;
+    constexpr int heads_per_thread = 4;
+    const int half_dim = dims / 2;
+    const int tail_dims = head_dim - dims;
+    const int items_per_head_block = half_dim + tail_dims;
+    const int head_blocks = (heads + heads_per_thread - 1) / heads_per_thread;
+    const int total = batch * length * head_blocks * items_per_head_block;
     if (index >= total) return;
-    const int d = index % head_dim;
-    const int h = (index / head_dim) % heads;
-    const int l = (index / (head_dim * heads)) % length;
-    const int b = index / (head_dim * heads * length);
-    if (d >= dims) {
-        out[index] = x[index];
+    const int item = index % items_per_head_block;
+    const int head_block = (index / items_per_head_block) % head_blocks;
+    const int l = (index / (items_per_head_block * head_blocks)) % length;
+    const int b = index / (items_per_head_block * head_blocks * length);
+    const int first_head = head_block * heads_per_thread;
+    const int last_head = min(first_head + heads_per_thread, heads);
+    const int row_base = (b * length + l) * heads * head_dim;
+
+    if (item >= half_dim) {
+        const int d = dims + item - half_dim;
+        for (int h = first_head; h < last_head; ++h) {
+            const int element = row_base + h * head_dim + d;
+            out[element] = x[element];
+        }
         return;
     }
-    const int half_dim = dims / 2;
-    const int pair = traditional ? d / 2 : d % half_dim;
-    const float angle =
-        static_cast<float>(offsets[b] + l) * pow(base, -static_cast<float>(pair) / half_dim);
-    const float c = cos(angle);
-    const float s = sin(angle);
-    const int row_base = ((b * length + l) * heads + h) * head_dim;
-    const int real_idx = traditional ? row_base + pair * 2 : row_base + pair;
-    const int imag_idx = traditional ? real_idx + 1 : real_idx + half_dim;
-    const float real = static_cast<float>(x[real_idx]);
-    const float imag = static_cast<float>(x[imag_idx]);
-    const bool output_real = traditional ? (d % 2 == 0) : (d < half_dim);
-    out[index] = static_cast<T>(output_real ? real * c - imag * s : imag * c + real * s);
+    const int pair = item;
+    const float frequency_power = -static_cast<float>(pair) / half_dim;
+    const float angle = sizeof(T) == sizeof(float)
+        ? static_cast<float>(offsets[b] + l) * pow(base, frequency_power)
+        : static_cast<float>(offsets[b] + l) *
+            fast::exp2(frequency_power * log2(base));
+    const float c =
+        sizeof(T) == sizeof(float) ? cos(angle) : fast::cos(angle);
+    const float s =
+        sizeof(T) == sizeof(float) ? sin(angle) : fast::sin(angle);
+    for (int h = first_head; h < last_head; ++h) {
+        const int head_base = row_base + h * head_dim;
+        const int real_idx = traditional ? head_base + pair * 2 : head_base + pair;
+        const int imag_idx = traditional ? real_idx + 1 : real_idx + half_dim;
+        const float real = static_cast<float>(x[real_idx]);
+        const float imag = static_cast<float>(x[imag_idx]);
+        out[real_idx] = static_cast<T>(real * c - imag * s);
+        out[imag_idx] = static_cast<T>(imag * c + real * s);
+    }
 }
 
 template <typename T>
@@ -93,8 +132,10 @@ template <typename T>
     constant const float& scale [[buffer(11)]],
     constant const int& is_causal [[buffer(12)]],
     constant const int& has_mask [[buffer(13)]],
+    threadgroup float* scratch [[threadgroup(0)]],
     uint query_index [[threadgroup_position_in_grid]],
     uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
     if (query_index >= q_rows * length) return;
     const int query_row = query_index / length;
@@ -105,24 +146,36 @@ template <typename T>
     const int kv_row = batch * num_kv_heads + kv_head;
 
     constexpr int max_values_per_lane = 8;
-    constexpr int simdgroups_per_query = 4;
+    constexpr int simdgroups_per_query = 32;
     float accumulator[max_values_per_lane] = {0.0f};
+    float query_values[max_values_per_lane] = {0.0f};
     float max_score = -1e30f;
     float sum = 0.0f;
     const int values_per_lane = (dim + 31) / 32;
 
+    for (int item = 0; item < values_per_lane; ++item) {
+        const int d = lane + item * 32;
+        if (d < dim && item < max_values_per_lane) {
+            query_values[item] =
+                static_cast<float>(q[query_index * dim + d]) * scale;
+        }
+    }
+
     for (int position = simdgroup; position < context; position += simdgroups_per_query) {
         if (is_causal && position > context - length + query_position) continue;
         float partial = 0.0f;
-        for (int d = lane; d < dim; d += 32) {
-            partial += static_cast<float>(q[query_index * dim + d]) *
-                       static_cast<float>(k[(kv_row * context + position) * dim + d]);
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane + item * 32;
+            if (d < dim && item < max_values_per_lane) {
+                partial += query_values[item] *
+                           static_cast<float>(k[(kv_row * context + position) * dim + d]);
+            }
         }
-        float score = simd_sum(partial) * scale;
+        float score = simd_sum(partial);
         if (has_mask) score += mask[query_index * context + position];
         const float new_max = max(max_score, score);
-        const float old_factor = exp(max_score - new_max);
-        const float score_factor = exp(score - new_max);
+        const float old_factor = fast::exp(max_score - new_max);
+        const float score_factor = fast::exp(score - new_max);
         sum = sum * old_factor + score_factor;
         for (int item = 0; item < values_per_lane; ++item) {
             const int d = lane + item * 32;
@@ -134,9 +187,11 @@ template <typename T>
         max_score = new_max;
     }
 
-    threadgroup float partial_accumulators[simdgroups_per_query * 256];
-    threadgroup float partial_maxima[simdgroups_per_query];
-    threadgroup float partial_sums[simdgroups_per_query];
+    threadgroup float* partial_accumulators = scratch;
+    threadgroup float* partial_maxima =
+        partial_accumulators + simdgroups_per_query * dim;
+    threadgroup float* partial_sums = partial_maxima + simdgroups_per_query;
+    threadgroup float* partial_factors = partial_sums + simdgroups_per_query;
     if (lane == 0) {
         partial_maxima[simdgroup] = max_score;
         partial_sums[simdgroup] = sum;
@@ -149,25 +204,33 @@ template <typename T>
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    if (simdgroup != 0) return;
-    float global_max = partial_maxima[0];
-    for (int group = 1; group < simdgroups_per_query; ++group) {
-        global_max = max(global_max, partial_maxima[group]);
-    }
-    float global_sum = 0.0f;
-    for (int group = 0; group < simdgroups_per_query; ++group) {
-        global_sum += partial_sums[group] * exp(partial_maxima[group] - global_max);
-    }
-    for (int item = 0; item < values_per_lane; ++item) {
-        const int d = lane + item * 32;
-        if (d < dim && item < max_values_per_lane) {
-            float value_sum = 0.0f;
-            for (int group = 0; group < simdgroups_per_query; ++group) {
-                value_sum += partial_accumulators[group * dim + d] *
-                             exp(partial_maxima[group] - global_max);
-            }
-            out[query_index * dim + d] = static_cast<T>(value_sum / global_sum);
+    float global_max = -1e30f;
+    if (simdgroup == 0) {
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            global_max = max(global_max, partial_maxima[group]);
         }
+        if (lane < simdgroups_per_query) {
+            partial_factors[lane] =
+                fast::exp(partial_maxima[lane] - global_max);
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (thread_index == 0) {
+        float global_sum = 0.0f;
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            global_sum += partial_sums[group] * partial_factors[group];
+        }
+        partial_sums[0] = global_sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (thread_index < dim) {
+        float value_sum = 0.0f;
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            value_sum += partial_accumulators[group * dim + thread_index] *
+                         partial_factors[group];
+        }
+        out[query_index * dim + thread_index] =
+            static_cast<T>(value_sum / partial_sums[0]);
     }
 }
 

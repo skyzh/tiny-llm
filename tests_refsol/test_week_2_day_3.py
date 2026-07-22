@@ -1,40 +1,13 @@
-"""Week 2 Days 3-4 quantized-operator tests."""
-
-import inspect
+"""Week 2 Day 3 SIMD quantized-kernel tests."""
 
 import mlx.core as mx
 
-import tiny_llm_ref.embedding as embedding_module
-import tiny_llm_ref.quantize as quantize_module
-from tiny_llm_ref.embedding import QuantizedEmbedding
-from tiny_llm_ref.quantize import QuantizedWeights
-
-from .tiny_llm_base import quantized_matmul, quantized_matvec_custom
+from .tiny_llm_base import (
+    quantized_matmul,
+    quantized_matmul_vanilla,
+    quantized_matvec_custom,
+)
 from .utils import assert_allclose
-
-
-def test_task_1_quantized_embedding_dequantizes_selected_rows():
-    weight = mx.random.normal((7, 256)).astype(mx.bfloat16)
-    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-    quantized = QuantizedWeights(scales, biases, 128, 4, packed)
-    embedding = QuantizedEmbedding(7, 256, quantized)
-    indices = mx.array([[1, 4]])
-
-    result = embedding(indices)
-    expected = mx.dequantize(
-        packed[indices], scales[indices], biases[indices], group_size=128, bits=4
-    )
-    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
-
-
-def test_week2_quantization_path_uses_course_owned_operators():
-    source = (
-        inspect.getsource(quantize_module.quantized_matmul)
-        + inspect.getsource(quantize_module.dequantize_weights)
-        + inspect.getsource(embedding_module.QuantizedEmbedding.__call__)
-    )
-    assert "mx.quantized_matmul" not in source
-    assert "mx.dequantize" not in source
 
 
 def quantized_matmul_helper(
@@ -80,22 +53,6 @@ def quantized_matmul_helper(
             )
 
 
-def test_task_2_quantized_matmul_simple_bf16_cpu():
-    quantized_matmul_helper(mx.cpu, mx.bfloat16, True)
-
-
-def test_task_2_quantized_matmul_complex_bf16_cpu():
-    quantized_matmul_helper(mx.cpu, mx.bfloat16, False)
-
-
-def test_task_2_quantized_matmul_simple_f16_cpu():
-    quantized_matmul_helper(mx.cpu, mx.float16, True)
-
-
-def test_task_2_quantized_matmul_complex_f16_cpu():
-    quantized_matmul_helper(mx.cpu, mx.float16, False)
-
-
 def test_task_3_quantized_matmul_simple_bf16_gpu():
     quantized_matmul_helper(mx.gpu, mx.bfloat16, True)
 
@@ -110,6 +67,35 @@ def test_task_3_quantized_matmul_simple_f16_gpu():
 
 def test_task_3_quantized_matmul_complex_f16_gpu():
     quantized_matmul_helper(mx.gpu, mx.float16, False)
+
+
+def test_task_3_simdgroup_matmul_matches_vanilla_gpu():
+    with mx.stream(mx.gpu):
+        input = mx.random.normal((128, 256)).astype(mx.bfloat16)
+        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        tiled = quantized_matmul(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        assert_allclose(tiled, vanilla, mx.bfloat16, atol=1.0, rtol=2e-2)
+
+
+def test_task_3_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
+    """A non-multiple-of-eight prefill must not accumulate in bfloat16."""
+    with mx.stream(mx.gpu):
+        input = mx.random.normal((10, 256)).astype(mx.bfloat16)
+        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        tiled = quantized_matmul(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
 def quantized_matvec_custom_helper(num_rows: int):

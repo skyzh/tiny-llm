@@ -52,6 +52,41 @@ The model may use `mlx_lm` for loading and `mlx.core` for arrays, device
 execution, synchronization, and extension dispatch, but its learned operators
 must resolve to the Python/C++/Metal implementations from this course.
 
+## Optimization Ledger
+
+Record both retained and rejected experiments. End-to-end effects overlap, so
+the table uses representative ranges rather than pretending every row is
+independently additive.
+
+| Change | Decision | Representative effect and reason |
+|---|---|---|
+| Keep weights quantized | Keep | Several-fold decode gain over Week 1 by reducing weight traffic. |
+| Two-column SIMD matvec | Keep | About +5.7% in its first isolated end-to-end ablation; shares activation loads across columns. |
+| Eight-column vocabulary matvec | Keep | Best measured layout for the very wide tied output head; smaller projections use two columns to avoid register pressure. |
+| Remove matvec activation barrier | Keep | Roughly 238.6 → 247-252 tok/s; a cache-hot 2 KB vector was cheaper to reread than to copy and synchronize in every threadgroup. |
+| Vanilla → `simdgroup_matrix` prefill | Keep | About 1,005 → 2,052 prefill tok/s; 8×8 matrix fragments replace scalar dot products. |
+| Direct quantized embedding | Keep | Roughly 20% lower isolated latency in a representative run, about 1% end to end; gathers and dequantizes without intermediate arrays. |
+| 256-thread RMSNorm | Keep | Closes most of the gap left by a one-SIMD-group reduction. |
+| Four-head RoPE reuse | Keep | Avoids repeated angle/sine/cosine work; current isolated latency is within roughly 7-14% of MLX. |
+| Fused SwiGLU | Keep | One dispatch and no intermediates; approximately equal to MLX in isolated measurements. |
+| 32-group online decode attention | Keep | Owns the complete attention algorithm; 8 and 16 groups exposed less parallel work on the course context. |
+| No decode causal-mask graph | Keep | Pass `None` when `L = 1`; every cached position is already valid. |
+| Normalize RoPE offsets once | Keep | Builds one batch offset array per model call rather than once per layer. |
+| Last-token logits | Keep | Avoids vocabulary projection for prompt positions that generation never samples. |
+| Fuse Q/K/V and gate/up projections | Reject | About 242 → 227 tok/s; fewer Python calls did not offset a more complex kernel and dispatch map. |
+| Concatenate quantized weights at runtime | Reject | About 235 → 217 tok/s; constructing larger arrays added work and memory traffic. |
+| Preallocate chunked dense KV cache | Reject | About 235 → 229 tok/s; strided logical slices hurt the following operations. Paging belongs in Week 3. |
+| Share 32×16 prefill tiles in threadgroup memory | Reject | About 2,052 → 1,848 prefill tok/s; barriers outweighed reduced global loads at 128 tokens. |
+| Broadcast scale/bias within the wide matvec | Reject | Increased vocabulary-head latency; extra loop structure and broadcasts outweighed parameter-load savings. |
+| Four-output ordinary matvec | Reject | About 249 → 232 tok/s; extra register pressure outweighed activation reuse. |
+| Affine identity in the ordinary matvec | Reject | About 249 → 244.5 tok/s; fewer arithmetic instructions did not improve the executed schedule. |
+| Four SIMD groups per matvec threadgroup | Reject | Two runs near 248.5 tok/s; smaller threadgroups added scheduling overhead without useful new parallelism. |
+| Sixteen groups for the vocabulary matvec | Reject | About 250.6 → 247.2 tok/s; a 512-thread scheduling unit offset the reduction in threadgroup count. |
+
+This ledger is also a scheduling lesson. Fewer loads, fewer graph nodes, or
+fewer dispatches are hypotheses. Only synchronized end-to-end measurement says
+whether their occupancy, barrier, register, and layout tradeoffs helped.
+
 ## Expected Performance Contribution
 
 **Estimated decode improvement: 5-15% beyond the operator kernels, with an
@@ -60,10 +95,12 @@ graph cleanup avoid work outside the transformer blocks. Report the final
 measured ratio; do not present this estimate as a substitute for it.
 
 The current M1 Pro checkpoint uses Qwen3-0.6B-MLX-4bit, a 128-token prompt, 64
-timed decode tokens, and two warmups. Across three otherwise idle runs, median
-decode throughput was 173.7 tok/s for the course-owned path and 319.9 tok/s for
-MLX, or 54.3%. This work-in-progress result does not satisfy the 80% target; it
-identifies the remaining kernel-optimization work without replacing those
-kernels with MLX-provided implementations.
+timed decode tokens, and two warmups. Recent stable course-owned runs are about
+247-252 decode tok/s; the matched MLX run is about 317 tok/s. That is roughly
+78-79% of MLX, about one percentage point below the 80% boundary. Prefill is
+about 2,040-2,054 tok/s versus roughly 4,393 tok/s for MLX. This work-in-progress
+result is reported honestly while the remaining quantized-projection gap is
+optimized; the required path does not substitute MLX-provided operators to
+manufacture a passing number.
 
 {{#include copyright.md}}

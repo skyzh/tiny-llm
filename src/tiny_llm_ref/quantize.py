@@ -86,6 +86,7 @@ def quantized_matmul(
     a: mx.array,
     b: mx.array,
     transpose_b: bool = False,
+    use_simdgroup: bool = True,
 ) -> mx.array:
     *N, D = a.shape
     a = a.reshape(-1, D)
@@ -97,6 +98,7 @@ def quantized_matmul(
         mx.contiguous(a),
         mx.contiguous(b),
         transpose_b,
+        use_simdgroup,
     )
     return result.reshape(*N, -1)
 
@@ -124,3 +126,24 @@ def quantized_matvec_custom(
         transpose_b,
     )
     return result.reshape(*N, -1)
+
+
+def quantized_matmul_vanilla(
+    scales: mx.array,
+    biases: mx.array,
+    group_size: int,
+    bits: int,
+    a: mx.array,
+    b: mx.array,
+    transpose_b: bool = False,
+) -> mx.array:
+    return quantized_matmul(
+        scales,
+        biases,
+        group_size,
+        bits,
+        a,
+        b,
+        transpose_b,
+        use_simdgroup=False,
+    )

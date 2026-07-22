@@ -4,6 +4,9 @@ from extensions_ref import tiny_llm_ext_ref
 from .basics import softmax
 
 
+_NO_ATTENTION_MASK = mx.zeros((1,), dtype=mx.float32)
+
+
 class FastRMSNorm:
     def __init__(self, dim: int, weight: mx.array, eps: float = 1e-5):
         self.dim = dim
@@ -126,7 +129,7 @@ def decode_attention_custom(
             )
         )
     else:
-        mask = mx.zeros((1,), dtype=mx.float32)
+        mask = _NO_ATTENTION_MASK
 
     result = tiny_llm_ext_ref.decode_attention(
         query,

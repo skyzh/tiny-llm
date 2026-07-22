@@ -7,6 +7,7 @@ from .kv_cache import TinyKvCache
 from .week2_kernels import (
     FastRMSNorm,
     FastRoPE,
+    decode_attention_custom,
     scaled_dot_product_attention,
     swiglu,
 )
@@ -89,6 +90,14 @@ class Qwen3MultiHeadAttention:
                 scale=self.scale,
                 mask=mask,
             ).astype(x.dtype)
+        elif L <= 8 and not isinstance(mask, mx.array):
+            x = decode_attention_custom(
+                projection_q,
+                projection_k,
+                projection_v,
+                scale=self.scale,
+                mask=mask,
+            )
         else:
             x = scaled_dot_product_attention(
                 projection_q,
@@ -281,8 +290,15 @@ class Qwen3ModelWeek2:
         logits_to_keep: int | None = None,
     ) -> mx.array:
         h = self.embedding(inputs)
+        mask = None if inputs.shape[1] == 1 else "causal"
+        if isinstance(offset, int):
+            rope_offsets = mx.full((inputs.shape[0],), offset, dtype=mx.int32)
+        elif isinstance(offset, list):
+            rope_offsets = mx.array(offset, dtype=mx.int32)
+        else:
+            rope_offsets = offset
         for layer in range(self.num_hidden_layers):
-            h = self.layers_inner[layer](h, offset, cache[layer], mask="causal")
+            h = self.layers_inner[layer](h, rope_offsets, cache[layer], mask=mask)
         if logits_to_keep is not None:
             if logits_to_keep <= 0:
                 raise ValueError("logits_to_keep must be positive")

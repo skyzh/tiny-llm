@@ -3,7 +3,7 @@
 import mlx.core as mx
 
 from tiny_llm_ref.attention import scaled_dot_product_attention_grouped
-from tiny_llm_ref.week2_kernels import (
+from .tiny_llm_base import (
     decode_attention_custom,
     scaled_dot_product_attention,
 )

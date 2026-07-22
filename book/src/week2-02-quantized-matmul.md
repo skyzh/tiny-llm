@@ -1,4 +1,4 @@
-# Week 2 Days 3-4: Quantized Matmul
+# Week 2 Days 2-3: Quantized Matmul
 
 In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and
@@ -311,7 +311,7 @@ Build and test the extension:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_2
+pdm run test --week 2 --day 2 -- -k task_2
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -322,22 +322,119 @@ src/extensions/src/quantized_matmul.cpp
 ```
 
 Write the Metal kernels and connect `eval_gpu` to them. The Python
-`quantized_matmul` wrapper must always dispatch this course-owned primitive on
-GPU; do not route the required path through `mx.quantized_matmul`.
+`quantized_matmul` wrapper always dispatches this course-owned primitive on
+GPU; the required path never routes through `mx.quantized_matmul`.
 
-The code calls its two paths `matmul` and `matvec`. The first is matrix-matrix
-multiplication. The second is matrix-vector multiplication: one side has a
-single row or a small handful of rows. Prefill has a larger activation row count
-`M` and benefits from a two-dimensional matrix grid. Decode normally has
-`M = 1`, so it needs the matrix-vector layout to give many GPU lanes useful
-work within one output row.
+Do this in three measured stages. They expose the same math but schedule
+different shapes differently:
 
-### Metal Kernel
+1. **Vanilla matmul:** one Metal thread computes one output element. This is
+   the direct GPU translation of the CPU loop and the correctness baseline.
+2. **SIMD-group matmul:** for prefill, one SIMD group computes an 8×8 output
+   tile with `simdgroup_matrix` multiply-accumulate instructions.
+3. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
+   activation row and calculate several output columns together.
 
-Implement two kernel layouts in `quantized_matmul.metal`:
+Keep the vanilla function callable as `quantized_matmul_vanilla`. An
+optimization is much easier to trust when it can be compared directly with
+the implementation it replaces.
 
-- For larger `M`, tile output rows and columns across a two-dimensional thread
-  grid.
+### Stage 1: Vanilla Matmul
+
+Start with a two-dimensional grid over output row `i` and output column `k`.
+Each thread walks all `N` input values, unpacks eight int4 weights from each
+`uint32`, applies the group scale and bias, and accumulates one `C[i, k]` in
+float32. This kernel repeats activation loads and does not share work, but its
+control flow mirrors the equation and is a useful debugging oracle.
+
+### Stage 2: `simdgroup_matrix` Matmul
+
+Prefill has many activation rows, so it can use the GPU's 8×8 SIMD matrix
+fragments. Each of the 32 lanes owns two elements of a fragment. For every
+eight-wide reduction tile:
+
+- load an 8×8 activation fragment;
+- unpack and dequantize an 8×8 weight fragment directly from the transposed
+  `K × N` packed layout;
+- issue `simdgroup_multiply_accumulate`;
+- retain the output fragment in registers until the reduction finishes.
+
+Keep the activation and dequantized-weight fragments in float16 or bfloat16,
+but use a float32 accumulator fragment. A 16-bit accumulator can pass an
+isolated loose-tolerance test while its error compounds visibly through every
+transformer layer. Cast only when storing the final output tile.
+
+The reference writes this scheduling and fragment mapping directly in the
+course Metal file. It learns the tiling idea from production matrix kernels,
+but does not instantiate an MLX Steel template or call an MLX matmul kernel.
+Eight independent SIMD groups share one threadgroup dispatch.
+
+This first tiled kernel deliberately stays small. A follow-up experiment made
+one threadgroup compute a 32×16 output block and copied shared A/B tiles through
+threadgroup memory. It reduced global reads but added two barriers for every
+eight reduction values. At the 128-token course workload it regressed prefill
+from about 2,052 to 1,848 tok/s. More reuse is not automatically faster when
+synchronization and a rigid tile reduce scheduling freedom.
+
+### Stage 3: SIMD Matvec
+
+Decode normally has `M = 1`; an 8×8 matrix tile would leave most rows empty.
+Instead, one SIMD group reduces the input dimension and uses `simd_sum` to
+combine lane-local partial sums. The regular projection kernel calculates two
+output columns per SIMD group. The much wider tied vocabulary projection uses
+eight columns so each activation load is reused across more weights.
+
+The wide path also uses the affine identity
+
+$$
+\sum_j a_j(sq_j+b) = s\sum_j a_jq_j + b\sum_j a_j
+$$
+
+to avoid applying the bias separately to every unpacked value. Do not apply a
+micro-optimization blindly to every shape: applying this rearrangement to the
+two-output projection kernel reduced the measured full-model result from about
+249 to 244.5 tok/s, while the extra live accumulators that help the vocabulary
+projection also make smaller projections more difficult to schedule.
+
+Likewise, raising the ordinary projection tile from two to four output columns
+increased register pressure enough to reduce decode to about 232 tok/s. The
+best measured split is two columns for normal projections and eight only for
+the unusually wide vocabulary projection.
+
+The first matvec copied the 2 KB activation vector into threadgroup memory and
+waited at a barrier. Removing that copy was faster: the vector is cache-hot,
+while every projection paid the synchronization cost. The measured decode
+rate rose from roughly 238.6 to 246-249 tok/s. This is GPU scheduling in
+practice: dispatch shape, occupancy, cache behavior, and barriers are part of
+the algorithm.
+
+After removing the barrier, grouping four SIMD groups per threadgroup instead
+of eight was effectively neutral to slightly slower (about 248.5 tok/s in two
+runs). Independent work does not guarantee a win from smaller threadgroups;
+the extra threadgroups also add scheduling overhead. Keep eight for this M1
+Pro workload and remeasure on different hardware.
+
+Doubling only the wide vocabulary kernel to sixteen SIMD groups also regressed
+the final run from 250.6 to 247.2 tok/s. Fewer threadgroups did not compensate
+for the larger 512-thread scheduling unit, so the retained kernel uses eight
+groups for both projection shapes.
+
+### Direct Quantized Embedding
+
+Embedding lookup is another quantized operation. A generic composition must
+gather packed rows, create shifts, unpack values, repeat scales and biases,
+cast, and combine several arrays. The reference adds a small Metal kernel that
+maps one thread to one requested embedding element and performs gather,
+unpack, and affine dequantization in one dispatch. It accepts both int32 input
+IDs and the uint32 IDs produced by sampling, avoiding a per-token cast node.
+
+### Kernel Requirements
+
+Implement all three kernel layouts in `quantized_matmul.metal`:
+
+- First, implement the vanilla one-thread-per-output matrix grid.
+- For larger `M`, replace it with 8×8 `simdgroup_matrix` tiles while retaining
+  the vanilla entry point for tests and benchmarks.
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
 - The kernel should support both `half` and `bfloat16_t` inputs and outputs.
@@ -363,7 +460,8 @@ pattern:
 3. Bind the input and output buffers and the dimension constants (`M`, `N`,
    `K`). The buffer order must match the kernel signature.
 4. Select the matrix-vector layout for `M <= 8`; otherwise select the
-   matrix-matrix layout.
+   SIMD-group matrix layout. Keep an explicit flag for dispatching the vanilla
+   path in direct comparisons.
    Calculate a SIMD-aligned thread-group configuration and tile output columns
    so packed input values and activations can be reused.
 5. Dispatch with `dispatchThreadgroups`.
@@ -375,9 +473,9 @@ pdm run build-ext
 pdm run test --week 2 --day 3 -- -k gpu
 ```
 
-The direct tests cover `M = 1` and `M = 8`. The result should agree with an MLX
-oracle within the chosen floating-point tolerance, but the implementation under
-test must be yours.
+The direct tests cover matvec at `M = 1` and `M = 8`, compare the SIMD-group
+matmul with vanilla matmul at `M = 128`, and compare both with an MLX oracle.
+The oracle checks the result; it is not the implementation under test.
 
 ## Task 4: Model Integration
 
@@ -425,10 +523,17 @@ pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 
 ## Expected Performance Contribution
 
-**Estimated decode improvement: 150-250% over the Week 1 baseline.** In other
-words, this chapter should make decode roughly 2.5-3.5x as fast, because every
-generated token otherwise rereads large dequantized matrices. The exact gain
-depends on model size and memory bandwidth; use the Day 1 benchmark rather than
-adding this estimate to later percentages.
+**Estimated decode improvement: 150-250% over a dequantized Week 1 model, plus
+about 5-10% from the specialized matvec schedule once weights are already
+quantized.** On the M1 Pro reference, the first two-column SIMD matvec improved
+the then-current end-to-end decode path by about 5.7%. Removing its activation
+barrier later added roughly another 3-4% on the fully course-owned path.
+
+For prefill, the measured vanilla-to-`simdgroup_matrix` replacement improved
+throughput from about 1,005 to 2,052 tok/s, or **about 104%**. The direct
+embedding kernel reduced its isolated latency by roughly 20% in a representative
+run but changed end-to-end decode by only about 1%, because projection weights
+remain the dominant traffic. These percentages overlap with later chapters and
+must not be added together.
 
 {{#include copyright.md}}

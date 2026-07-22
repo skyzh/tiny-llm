@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 5: Fast Operators
+# 🚧 Week 2 Day 4: Fast Kernels
 
 > 🚧 This newly introduced chapter is a work in progress.
 
@@ -43,8 +43,11 @@ purpose-built kernel versus a graph of several general-purpose kernels.
 
 ## Task 1: RMSNorm
 
-Implement one SIMD group per input row. Each lane accumulates a regularly spaced subset
-of squared values in `float`, and `simd_sum` combines the 32 partial sums:
+Begin with one SIMD group per input row, then profile it. A 1024-element hidden
+row gives 32 lanes too much serial work. The optimized kernel launches 256
+threads, or eight SIMD groups, per row. Each group reduces its portion with
+`simd_sum`; lane zero writes eight partial sums to threadgroup memory; the first
+SIMD group performs the second reduction:
 
 ```plain
 sum_sq = simd_sum(each lane's partial sum)
@@ -52,7 +55,7 @@ inverse_rms = rsqrt(sum_sq / hidden_size + epsilon)
 output[i] = input[i] * inverse_rms * weight[i]
 ```
 
-The same lanes then normalize and scale their elements. This fuses the
+All 256 lanes then normalize and scale their strided elements. This fuses the
 reduction and output pass into one dispatch and avoids materializing the
 squared tensor. Instantiate the kernel for float32, float16, and bfloat16.
 For half-precision inputs, round the normalized value to the model dtype before
@@ -61,14 +64,18 @@ boundary and prevents tiny per-layer differences from compounding in deeper
 models.
 
 The C++ primitive validates shape and dtype, allocates the output through MLX,
-binds the buffers and scalar constants, and launches exactly one 32-lane SIMD
-group per row.
+binds the buffers and scalar constants, allocates eight float partial sums, and
+launches one 256-thread group per row. The two-level reduction was the largest
+small-operator improvement in the measured stack; a single SIMD group left too
+little parallel work available.
 
 ## Task 2: RoPE
 
-Implement RoPE for the model's native `B, L, H, D` layout. Give each Metal
-thread one output element. From its flat index, recover batch, token, head, and
-head-dimension coordinates; then compute the pair index and rotation angle:
+Implement RoPE for the model's native `B, L, H, D` layout. A naive element
+kernel calculates the same angle, sine, and cosine separately for both members
+of every pair and again for every head. Instead, assign one thread a pair index
+and a block of four heads. Compute the angle once, then rotate both elements of
+that pair across the four heads:
 
 ```plain
 angle = (batch_offset + token_position) * base ** (-pair / (dims / 2))
@@ -82,10 +89,13 @@ per-batch offsets matters once requests at different decode positions share a
 batch.
 
 Unlike a graph that builds position arrays, gathers sine and cosine values,
-splits the head, performs several element-by-element operations, and concatenates the
-result, this kernel reads each input pair and writes each rotated element
-directly. It also avoids layout transposes by accepting the model's existing
-layout.
+splits the head, performs several element-by-element operations, and
+concatenates the result, this kernel reads each input pair and writes each
+rotated element directly. Reusing trigonometry across four heads is the key
+optimization. For float16 and bfloat16, use Metal's `fast::exp2`, `fast::sin`,
+and `fast::cos`; retain precise functions for float32 so strict correctness
+tests remain meaningful. Normalize a batch's offsets once in the model call,
+outside the layer loop, instead of rebuilding the same array in every layer.
 
 ## Task 3: SwiGLU
 
@@ -96,7 +106,7 @@ output = (gate / (1 + exp(-gate))) * up
 ```
 
 Implement it as one thread per element. That thread loads `gate` and `up`,
-evaluates SiLU, multiplies the branches, and performs one output write. The
+evaluates SiLU with one exponential, multiplies the branches, and performs one output write. The
 Week 1 form is easier to inspect, but it describes `abs`, `exp`, division,
 selection, and multiplication as separate array operations. The fused kernel
 removes those intermediate tensors and dispatch boundaries.
@@ -110,7 +120,7 @@ serving model does not regress.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 4
 ```
 
 Compare against the readable equations with tolerances rather than bit-for-bit
@@ -121,7 +131,12 @@ inside a timed iteration when measuring these lazy operations.
 
 **Estimated decode improvement: 5-15% after quantized matmul.** Each operator
 is small, but a Qwen3 decode token invokes it many times across all layers, so
-eliminating launches and intermediate memory traffic accumulates. The range is
-an end-to-end estimate and overlaps with later changes; it is not additive.
+eliminating launches and intermediate memory traffic accumulates. In current
+isolated measurements, course RMSNorm is within about 2-9% of MLX's operator,
+RoPE within about 7-14%, and SwiGLU approximately equal or slightly faster.
+The earlier one-SIMD-group RMSNorm materially limited the full model; its
+256-thread two-level reduction closed most of that gap. These isolated ratios
+are more stable than attributing an end-to-end percentage to three overlapping
+replacements, and the 5-15% range is not additive with other chapters.
 
 {{#include copyright.md}}

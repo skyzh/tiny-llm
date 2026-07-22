@@ -9,19 +9,20 @@ namespace tiny_llm_ext_ref {
 
 void load_library(mx::Device d, const char *path);
 
-mx::array quantized_matmul(const mx::array &scales,   // Input array scales
-                           const mx::array &biases,   // Input array biases
-                           const int group_size,      // Group size
-                           const int bits,            // Number of bits
-                           const mx::array &a,        // Input array a (not quantized)
-                           const mx::array &b,        // Input array b (quantized)
-                           const bool transpose_b,    // Whether to transpose b
+mx::array quantized_matmul(const mx::array &scales,  // Input array scales
+                           const mx::array &biases,  // Input array biases
+                           const int group_size,     // Group size
+                           const int bits,           // Number of bits
+                           const mx::array &a,       // Input array a (not quantized)
+                           const mx::array &b,       // Input array b (quantized)
+                           const bool transpose_b,   // Whether to transpose b
+                           const bool use_simdgroup = true,
                            mx::StreamOrDevice s = {}  // Stream on which to schedule the operation
 );
 
 class QuantizedMatmul : public mx::Primitive {
 public:
-    explicit QuantizedMatmul(mx::Stream stream) : mx::Primitive(stream) {};
+    QuantizedMatmul(mx::Stream stream, bool use_simdgroup) : mx::Primitive(stream), use_simdgroup_(use_simdgroup) {};
 
     void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
     void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
@@ -32,6 +33,24 @@ public:
     }
 
     const char *name() const override { return "QuantizedMatmul"; }
+
+private:
+    bool use_simdgroup_;
+};
+
+mx::array quantized_embedding(const mx::array &indices, const mx::array &scales, const mx::array &biases,
+                              const mx::array &weight, int group_size, int bits, mx::StreamOrDevice s = {});
+
+class QuantizedEmbedding : public mx::Primitive {
+public:
+    explicit QuantizedEmbedding(mx::Stream stream) : mx::Primitive(stream) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("QuantizedEmbedding has no vmap implementation.");
+    }
+    const char *name() const override { return "QuantizedEmbedding"; }
 };
 
 mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::StreamOrDevice s = {});

@@ -300,7 +300,10 @@ void Week2RMSNorm::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx
     encoder.set_bytes(rows, 3);
     encoder.set_bytes(dim, 4);
     encoder.set_bytes(eps_, 5);
-    encoder.dispatch_threadgroups(MTL::Size(rows, 1, 1), MTL::Size(32, 1, 1));
+    constexpr int threads_per_threadgroup = 256;
+    constexpr int simdgroups_per_threadgroup = threads_per_threadgroup / 32;
+    encoder.set_threadgroup_memory_length(simdgroups_per_threadgroup * sizeof(float), 0);
+    encoder.dispatch_threadgroups(MTL::Size(rows, 1, 1), MTL::Size(threads_per_threadgroup, 1, 1));
 }
 
 void Week2RoPE::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -327,8 +330,11 @@ void Week2RoPE::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::a
     encoder.set_bytes(dims_, 7);
     encoder.set_bytes(base_, 8);
     encoder.set_bytes(traditional, 9);
-    const size_t threads = std::min<size_t>(out.size(), kernel->maxTotalThreadsPerThreadgroup());
-    encoder.dispatch_threads(MTL::Size(out.size(), 1, 1), MTL::Size(threads, 1, 1));
+    constexpr int heads_per_thread = 4;
+    const int head_blocks = (heads + heads_per_thread - 1) / heads_per_thread;
+    const int work_items = batch * length * head_blocks * (dims_ / 2 + head_dim - dims_);
+    const size_t threads = std::min<size_t>(work_items, kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(work_items, 1, 1), MTL::Size(threads, 1, 1));
 }
 
 void Week2SwiGLU::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -381,7 +387,9 @@ void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &inputs, std::v
     encoder.set_bytes(scale_, 11);
     encoder.set_bytes(is_causal, 12);
     encoder.set_bytes(has_mask, 13);
-    encoder.dispatch_threadgroups(MTL::Size(q_rows * length, 1, 1), MTL::Size(128, 1, 1));
+    constexpr int simdgroups_per_query = 32;
+    encoder.set_threadgroup_memory_length(simdgroups_per_query * (dim + 3) * sizeof(float), 0);
+    encoder.dispatch_threadgroups(MTL::Size(q_rows * length, 1, 1), MTL::Size(simdgroups_per_query * 32, 1, 1));
 }
 
 #else

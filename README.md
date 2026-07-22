@@ -39,18 +39,19 @@ introduced material and all Week 4 application material are work in progress.
 | 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
 | 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
 | 2.1            | Benchmarking and the MLX Baseline                            | 🚧    | 🚧   | 🚧  |
-| 2.2            | Key-Value Cache                                               | ✅    | ✅   | ✅  |
-| 2.3            | Quantized Matrix-Vector and Matrix-Matrix Kernels            | ✅    | ✅   | ✅  |
-| 2.4            | Fused RMSNorm, RoPE, and SwiGLU Kernels                      | 🚧    | 🚧   | 🚧  |
-| 2.5            | Decode Attention                                             | 🚧    | 🚧   | 🚧  |
-| 2.6            | End-to-End Decode Optimization                               | 🚧    | 🚧   | 🚧  |
+| 2.2            | Vanilla Quantized Matmul                                     | ✅    | ✅   | ✅  |
+| 2.3            | SIMD Matmul and Matvec                                       | ✅    | ✅   | ✅  |
+| 2.4            | Fast RMSNorm, RoPE, and SwiGLU                               | 🚧    | 🚧   | 🚧  |
+| 2.5            | Key-Value Cache                                              | ✅    | ✅   | ✅  |
+| 2.6            | Decode Attention                                             | 🚧    | 🚧   | 🚧  |
+| 2.7            | Full-Model Tuning                                            | 🚧    | 🚧   | 🚧  |
 | 3.1            | Continuous Batching                                           | ✅    | ✅   | ✅  |
 | 3.2            | Flash Attention for Prefill                                  | ✅    | ✅   | ✅  |
 | 3.3            | Chunked Prefill                                               | ✅    | ✅   | ✅  |
 | 3.4            | Paged KV Cache                                                | ✅    | ✅   | ✅  |
 | 3.5            | Paged Attention                                               | ✅    | ✅   | ✅  |
 | 3.6 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | ✅  |
-| 3.7 (optional) | Speculative Decoding                                         | 🚧    | ✅   | 🚧  |
+| 3.7 (optional) | Speculative Decoding                                         | 🚧    | 🚧   | 🚧  |
 | 4.1            | CLI Coding Agent                                              | 🚧    | 🚧   | 🚧  |
 | 4.2            | RAG Pipeline                                                  | 🚧    | 🚧   | 🚧  |
 | 4.3            | Tool Calling and Agent Serving                               | 🚧    | 🚧   | 🚧  |

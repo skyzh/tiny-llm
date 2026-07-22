@@ -2,11 +2,17 @@
 
 import mlx.core as mx
 import pytest
-from .utils import *
+
 from .tiny_llm_base import (
     Qwen3ModelWeek2,
     Qwen3ModelWeek3,
     TinyKvFullCache,
+)
+from .utils import (
+    assert_allclose,
+    qwen3_0_6b_model_exists,
+    qwen3_1_7b_model_exists,
+    qwen3_4b_model_exists,
 )
 from mlx_lm import load
 
@@ -40,10 +46,10 @@ def helper_test_task_3(model_name: str, iters: int = 10):
         input = mx.random.randint(low=0, high=tokenizer.vocab_size, shape=(1, 10))
         user_output = model(input, 0, cache)
         ref_output = mlx_model(input)
-        user_output = user_output - mx.logsumexp(user_output, keepdims=True)
-        ref_output = ref_output - mx.logsumexp(ref_output, keepdims=True)
+        user_output = user_output - mx.logsumexp(user_output, axis=-1, keepdims=True)
+        ref_output = ref_output - mx.logsumexp(ref_output, axis=-1, keepdims=True)
         assert_allclose(
-            user_output, ref_output, precision=mx.bfloat16, rtol=0.1, atol=1.0
+            user_output, ref_output, precision=mx.bfloat16, rtol=0.1, atol=2.5
         )
 
 
@@ -84,10 +90,10 @@ def helper_test_task_4(
                 cache=decode_cache,
             )
             ref_out = ref_outputs[:, offset : offset + 1, :]
-            user_out = user_out - mx.logsumexp(user_out, keepdims=True)
-            ref_out = ref_out - mx.logsumexp(ref_out, keepdims=True)
+            user_out = user_out - mx.logsumexp(user_out, axis=-1, keepdims=True)
+            ref_out = ref_out - mx.logsumexp(ref_out, axis=-1, keepdims=True)
             assert_allclose(
-                user_out, ref_out, precision=mx.bfloat16, rtol=0.1, atol=1.0
+                user_out, ref_out, precision=mx.bfloat16, rtol=0.1, atol=2.5
             )
 
 

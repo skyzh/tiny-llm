@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import mlx.core as mx
 
 from .tiny_llm_base import (
+    FastRMSNorm,
+    FastRoPE,
     Qwen3ModelWeek2,
     Qwen3ModelWeek3,
     TinyKvFullCache,
@@ -219,6 +221,16 @@ def test_task_1_model_layer_caches_keep_independent_page_metadata():
             assert value_page.shape[2] == week3_model.page_size
 
 
+def test_task_3_week3_model_reuses_week2_fast_kernels():
+    week3_model = Qwen3ModelWeek3(_fake_qwen3_mlx_model(), page_size=4)
+    for layer in week3_model.layers_inner:
+        assert isinstance(layer.input_layernorm, FastRMSNorm)
+        assert isinstance(layer.post_attention_layernorm, FastRMSNorm)
+        assert isinstance(layer.self_attn.q_norm, FastRMSNorm)
+        assert isinstance(layer.self_attn.k_norm, FastRMSNorm)
+        assert isinstance(layer.self_attn.rope, FastRoPE)
+
+
 def test_task_3_incremental_decode_matches_week2():
     mlx_model = _fake_qwen3_mlx_model()
     week2_model = Qwen3ModelWeek2(mlx_model)
@@ -233,6 +245,4 @@ def test_task_3_incremental_decode_matches_week2():
         week3_out = week3_model(token, offset, week3_cache)
         week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
         week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
-        assert_allclose(
-            week3_out, week2_out, precision=mx.bfloat16, rtol=0.1, atol=1.0
-        )
+        assert_allclose(week3_out, week2_out, precision=mx.bfloat16, rtol=0.1, atol=1.0)

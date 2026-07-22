@@ -1,47 +1,91 @@
-"""Week 2 Day 2 dense KV-cache tests."""
+"""Week 2 Day 2 vanilla quantization tests."""
+
+import inspect
+import importlib
 
 import mlx.core as mx
-import pytest
 
-from .tiny_llm_base import TinyKvFullCache
+from .tiny_llm_base import QuantizedEmbedding, QuantizedWeights, quantized_matmul
 from .utils import assert_allclose
 
+embedding_module = importlib.import_module(QuantizedEmbedding.__module__)
+quantize_module = importlib.import_module(quantized_matmul.__module__)
 
-def test_task_1_full_cache_appends_chunks():
-    cache = TinyKvFullCache()
-    key_1 = mx.random.normal((1, 2, 3, 4)).astype(mx.float32)
-    value_1 = mx.random.normal((1, 2, 3, 4)).astype(mx.float32)
-    key_2 = mx.random.normal((1, 2, 2, 4)).astype(mx.float32)
-    value_2 = mx.random.normal((1, 2, 2, 4)).astype(mx.float32)
 
-    cached_key, cached_value, offset, mask = cache.update_and_fetch(
-        key_1, value_1, mask="causal"
+def test_task_1_quantized_embedding_dequantizes_selected_rows():
+    weight = mx.random.normal((7, 256)).astype(mx.bfloat16)
+    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+    embedding = QuantizedEmbedding(
+        7, 256, QuantizedWeights(scales, biases, 128, 4, packed)
     )
-    assert offset == 3
-    assert mask == "causal"
-    assert_allclose(cached_key, key_1, mx.float32)
-    assert_allclose(cached_value, value_1, mx.float32)
+    indices = mx.array([[1, 4]])
 
-    cached_key, cached_value, offset, _ = cache.update_and_fetch(key_2, value_2)
-    assert offset == 5
-    assert_allclose(cached_key, mx.concat([key_1, key_2], axis=2), mx.float32)
-    assert_allclose(cached_value, mx.concat([value_1, value_2], axis=2), mx.float32)
+    result = embedding(indices)
+    expected = mx.dequantize(
+        packed[indices], scales[indices], biases[indices], group_size=128, bits=4
+    )
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def test_task_1_full_cache_rewind():
-    cache = TinyKvFullCache()
-    key = mx.random.normal((1, 2, 5, 4)).astype(mx.float32)
-    value = mx.random.normal((1, 2, 5, 4)).astype(mx.float32)
-    cache.update_and_fetch(key, value)
-    cache.rewind(2)
-    assert cache.offset == 3
-    assert_allclose(cache.key_values[0], key[:, :, :3], mx.float32)
-    assert_allclose(cache.key_values[1], value[:, :, :3], mx.float32)
+def test_task_1_quantized_embedding_accepts_sampled_uint32_tokens():
+    weight = mx.random.normal((7, 256)).astype(mx.bfloat16)
+    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+    embedding = QuantizedEmbedding(
+        7, 256, QuantizedWeights(scales, biases, 128, 4, packed)
+    )
+    indices = mx.array([[1, 4]], dtype=mx.uint32)
+
+    result = embedding(indices)
+    expected = mx.dequantize(
+        packed[indices], scales[indices], biases[indices], group_size=128, bits=4
+    )
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def test_task_1_dense_cache_has_no_paged_metadata():
-    cache = TinyKvFullCache()
-    key = mx.zeros((1, 1, 1, 4))
-    value = mx.zeros((1, 1, 1, 4))
-    with pytest.raises(NotImplementedError):
-        cache.update_and_fetch_paged(key, value)
+def test_week2_quantization_path_uses_course_owned_operators():
+    source = (
+        inspect.getsource(quantize_module.quantized_matmul)
+        + inspect.getsource(quantize_module.dequantize_weights)
+        + inspect.getsource(embedding_module.QuantizedEmbedding.__call__)
+    )
+    assert "mx.quantized_matmul" not in source
+    assert "mx.dequantize" not in source
+
+
+def quantized_matmul_cpu_helper(precision: mx.Dtype, identity_matrix: bool):
+    with mx.stream(mx.cpu):
+        if identity_matrix:
+            input = mx.eye(128, dtype=precision)
+        else:
+            input = mx.random.normal((3, 128), dtype=precision)
+        weight = mx.random.normal((5, 128), dtype=precision)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        result = quantized_matmul(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        expected = mx.quantized_matmul(
+            input,
+            packed,
+            scales,
+            biases,
+            group_size=128,
+            bits=4,
+            transpose=True,
+        )
+        assert_allclose(result, expected, precision, atol=5e-1)
+
+
+def test_task_2_vanilla_bf16_identity_cpu():
+    quantized_matmul_cpu_helper(mx.bfloat16, True)
+
+
+def test_task_2_vanilla_bf16_random_cpu():
+    quantized_matmul_cpu_helper(mx.bfloat16, False)
+
+
+def test_task_2_vanilla_f16_identity_cpu():
+    quantized_matmul_cpu_helper(mx.float16, True)
+
+
+def test_task_2_vanilla_f16_random_cpu():
+    quantized_matmul_cpu_helper(mx.float16, False)
