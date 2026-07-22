@@ -1,4 +1,4 @@
-# Week 3 Day 3: Mixture of Experts
+# Week 3 Optional: Mixture of Experts
 
 In this chapter, we will implement the feed-forward shape of **Mixture of
 Experts**, or **MoE**, for the Qwen3 family.
@@ -297,8 +297,14 @@ logits = model(tokens, offset, cache)
 
 No scheduler API change in `src/tiny_llm/batch.py` is required for correctness.
 
+Run the focused tests with:
+
+```bash
+pdm run test --week 3 --day 7
+```
+
 Run this task through the normal generation entrypoints instead of adding a
-separate unit test. For example:
+separate serving entrypoint. For example:
 
 ```bash
 hf download Qwen/Qwen3-30B-A3B-MLX-4bit

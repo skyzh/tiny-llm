@@ -1,6 +1,6 @@
-# Week 2 Days 2-3: Quantized Matmul
+# Week 2 Days 2-3: Quantized Matvec and Matmul
 
-In this chapter, we will implement quantized matrix multiplication. Quantizing
+In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and
 the memory traffic required for each generated token.
 
@@ -265,7 +265,22 @@ wrapper with two call patterns:
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
-## Task 2: Implement `quantized_matmul` (CPU version)
+## Task 2: Implement the Required Quantized Matmul Path
+
+Implement `quantized_matmul` as a shape-preserving wrapper around
+`mx.quantized_matmul`. Flatten all leading activation dimensions into `M`, call
+the primitive with the checkpoint's scales, biases, group size, bit width, and
+transpose flag, then restore the leading dimensions.
+
+This production primitive is the required end-to-end path. It provides a fair
+route to the Week 2 acceptance target while we study the lower-level kernel
+separately.
+
+```bash
+pdm run test --week 2 --day 2 -- -k quantized_matmul
+```
+
+## Stretch 1: Implement a Custom CPU Primitive
 
 Implement quantized matrix multiplication as an MLX C++ extension. Follow the
 existing `axpby` example: read `axpby.h`, `axpby.cpp`, and its binding in
@@ -300,28 +315,31 @@ Write the CPU implementation as a template, following `axpby`'s dtype-dispatch
 pattern. Dispatch with `mx::float16_t` or `mx::bfloat16_t` according to the
 output dtype.
 
-You can test your implementation by running:
+You can compare the custom implementation with the native path by running:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 2 -- -k task_2
 ```
 
-## Task 3: Implement `quantized_matmul` (GPU version)
+## Stretch 2: Implement a Custom SIMD Quantized Matvec
 
 ```
 src/extensions/src/quantized_matmul.metal
 src/extensions/src/quantized_matmul.cpp
 ```
 
-Write the Metal kernel and connect `eval_gpu` to it. The math remains identical
-to the CPU implementation from Task 2; only its execution model changes.
+Write the Metal kernel and connect `eval_gpu` to it. Expose it in Python as
+`quantized_matvec_custom` so callers cannot confuse the educational kernel with
+the required fast path. The math remains identical to the CPU implementation;
+only its execution model changes.
 
 ### Metal Kernel
 
 You need to implement one kernel entry in `quantized_matmul.metal`:
 
-- Use a **one-thread-per-output-element** mapping: each thread computes `out[i, k]`.
+- Assign one SIMD group to an output tile. Cooperatively reduce the input
+  dimension and compute several output columns per group.
 - The kernel should support both `half` and `bfloat16_t` inputs and outputs.
 - Apply the same group-wise dequantization loop as the CPU version:
   - Iterate over groups of 128 values.
@@ -344,17 +362,22 @@ pattern:
 2. Load the quantized matmul kernel matching the output dtype from the Metal library.
 3. Bind the input and output buffers and the dimension constants (`M`, `N`,
    `K`). The buffer order must match the kernel signature.
-4. Calculate a 2D thread group configuration: use `kernel->maxTotalThreadsPerThreadgroup()` to determine the total threads, then split between the M and K dimensions (e.g., 32 threads for M, the rest for K).
+4. Calculate a SIMD-aligned thread group configuration and tile output columns
+   so packed input values and activations can be reused.
 5. Dispatch with `dispatchThreadgroups`.
 
 You can test your implementation by running:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k task_3
+pdm run test --week 2 --day 2 -- -k task_4
 ```
 
-## Task 4: Model Integration
+The direct tests cover `M = 1` and `M = 8`. Benchmark the kernel honestly. A
+clear teaching kernel may still trail MLX's production QMV; matching it is the
+stretch goal, not a requirement for the end-to-end path.
+
+## Task 3: Model Integration
 
 ```
 src/tiny_llm/qwen3_week2.py

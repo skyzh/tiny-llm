@@ -77,6 +77,10 @@ A shell working directory is not a security sandbox. During this course, run the
 agent only in a disposable exercise workspace. A production agent would need a
 container, virtual machine, or similarly strong isolation boundary.
 
+The week then extends that loop with retrieval-augmented generation and a
+serving-oriented tool API. These application layers consume the Week 3 engine;
+they do not change the model kernels.
+
 ## Seven-Day Plan
 
 | Day | Topic | Working milestone |

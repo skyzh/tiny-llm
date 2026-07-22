@@ -2,7 +2,6 @@ import mlx.core as mx
 import mlx.nn as nn
 import tiny_llm_ref
 from .utils import assert_allclose
-import numpy as np
 
 
 def evaluate(function):

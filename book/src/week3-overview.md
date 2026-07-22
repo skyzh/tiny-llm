@@ -1,20 +1,19 @@
 # Week 3: Serving
 
-In Week 3 of the course, we move from the "tiny vLLM" baseline to the next layer of serving-system ideas. Week 2 gave us the core runtime loop: KV cache, quantized kernels, FlashAttention, chunked prefill, and continuous batching. Week 3 is where we start addressing the limitations of that baseline and connect the model runtime to more realistic serving features.
+Week 3 takes the optimized single-request model from Week 2 and builds a serving
+engine around it. The optimized operator layer remains unchanged; this week is
+about cache ownership, scheduling, prefill, and runtime metadata.
 
 ## What We’ll Cover
 
-* Paged attention
-    * Part 1: paged KV cache and the page-table abstraction
-    * Part 2: block tables, paged runtime metadata, and the real attention path
-* Additional serving optimizations
-    * MoE routing and serving considerations
-    * speculative decoding
-    * long-context techniques
-* Model interaction with the outside world
-    * retrieval-augmented generation (RAG)
-    * tool calling / agent-style execution
+- A dense key-value cache and its lifecycle
+- Continuous batching and request-slot reuse
+- FlashAttention for prefill
+- Chunked prefill and scheduler fairness
+- Paged KV storage and page-walking attention
+- Optional MoE and speculative-decoding extensions
 
-The goal of Week 3 is not just to make the model faster. It is to understand how a serving system evolves once the basic decode loop already works: how memory is managed, how runtime metadata flows into kernels, and how the serving stack coordinates with external systems.
+Week 4 owns application concerns such as RAG and tool calling. This separation
+keeps Week 3 focused on the reusable serving substrate.
 
 {{#include copyright.md}}

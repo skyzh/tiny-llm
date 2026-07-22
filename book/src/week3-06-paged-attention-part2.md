@@ -1,4 +1,4 @@
-# Week 3 Day 2: Paged Attention, Part 2
+# Week 3 Day 6: Paged Attention, Part 2
 
 In this chapter, we move from **paged KV storage** to the runtime metadata and execution path needed for **real paged attention**.
 
@@ -88,7 +88,7 @@ block_table:    B, max_pages
 context_lens:   B
 ```
 
-Compared with the Week 2 dense path, the important difference is that the source length is no longer represented as one contiguous tensor dimension. It is reconstructed logically from the page table.
+Compared with the earlier dense path, the important difference is that the source length is no longer represented as one contiguous tensor dimension. It is reconstructed logically from the page table.
 
 In this chapter, `paged_attention` should read pages directly from a GPU
 kernel. The runtime contract is now: model code and batching code pass pages
@@ -118,7 +118,7 @@ The runtime should be able to:
 3. update the current layer cache's `context_len`,
 4. run attention over the full logical context using `block_table`
 
-This is the point where decode stops paying the repeated dense-repack cost from Week 2.
+This is the point where decode stops paying the repeated dense-repack cost from Day 2.
 
 ## How This Maps to `tiny-llm`
 
@@ -139,7 +139,7 @@ Metal kernel:
 3. visit K/V in small tiles instead of materializing dense K/V,
 4. merge each tile into the output with online softmax.
 
-The important change from Week 2 is the K/V address calculation. Week 2 can
+The important change from dense attention is the K/V address calculation. Dense attention can
 advance through dense K/V by pointer arithmetic. Week 3 must translate each
 logical key position through `block_table` first:
 
@@ -147,7 +147,7 @@ logical key position through `block_table` first:
 logical key position -> logical page -> physical page id -> slot in page
 ```
 
-After that lookup, the online-softmax update is the same idea as Week 2
+After that lookup, the online-softmax update is the same idea as Day 3
 FlashAttention. We still avoid a dense K/V gather before attention.
 
 The page pool should therefore expose contiguous physical storage:
@@ -171,7 +171,7 @@ x = paged_attention(...)
 
 Week 3 cache handles are expected to provide paged metadata. If a dense cache is
 passed to the Week 3 model, that is a programming error rather than a signal to
-silently fall back to Week 2 attention.
+silently fall back to dense attention.
 
 ### `src/tiny_llm/batch.py`
 
@@ -181,7 +181,7 @@ The scheduler now needs to prepare runtime metadata instead of only dense K/V:
 - padded batch `block_table`
 - `context_lens`
 
-This is where continuous batching and paged attention finally connect. In Week 2, batching worked by repacking tensors. In Week 3, batching should work by reusing page tables and updating only the new slots.
+This is where continuous batching and paged attention finally connect. On Day 2, batching worked by repacking tensors. Here, batching should work by reusing page tables and updating only the new slots.
 
 ## Recommended Incremental Rollout
 
@@ -264,5 +264,9 @@ Update request admission, slot reuse, and request removal so that:
 - active decode steps reuse page metadata instead of rebuilding dense K/V.
 
 After this chapter, the serving stack has the right structure for a real high-throughput runtime: paging is no longer just a storage trick, but part of the execution model itself.
+
+```bash
+pdm run test --week 3 --day 6
+```
 
 {{#include copyright.md}}

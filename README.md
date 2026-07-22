@@ -26,7 +26,7 @@ You may join skyzh's Discord server and study with the tiny-llm community.
 
 ## Roadmap
 
-Week 1 is complete. The performance-focused Week 2 and serving-focused Week 3 are being reorganized. Week 4 is in progress.
+Weeks 1 through 3 are complete. Week 4 application material is in progress.
 
 | Week + Chapter | Topic                                                       | Code | Test | Doc |
 | -------------- | ----------------------------------------------------------- | ---- | ---- | --- |
@@ -37,17 +37,17 @@ Week 1 is complete. The performance-focused Week 2 and serving-focused Week 3 ar
 | 1.5            | Load the Model                                              | ✅    | ✅   | ✅  |
 | 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
 | 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
-| 2.1            | Benchmarking and the MLX Baseline                            | 🚧    | 🚧   | 🚧  |
-| 2.2            | Quantized Matrix-Vector and Matrix-Matrix Kernels            | 🚧    | ✅   | 🚧  |
-| 2.3            | Fused RMSNorm, RoPE, and SwiGLU Kernels                      | 🚧    | 🚧   | 🚧  |
-| 2.4            | Decode Attention                                             | 🚧    | 🚧   | 🚧  |
-| 2.5            | End-to-End Decode Optimization                               | 🚧    | 🚧   | 🚧  |
-| 3.1            | Key-Value Cache and Continuous Batching                      | ✅    | ✅   | 🚧  |
-| 3.2            | Flash Attention for Prefill                                  | ✅    | ✅   | 🚧  |
-| 3.3            | Paged Attention                                               | ✅    | ✅   | 🚧  |
-| 3.4            | Chunked Prefill                                               | ✅    | ✅   | 🚧  |
-| 3.5 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | 🚧  |
-| 3.6 (optional) | Speculative Decoding                                         | 🚧    | ✅   | 🚧  |
+| 2.1            | Benchmarking and the MLX Baseline                            | ✅    | ✅   | ✅  |
+| 2.2            | Quantized Matrix-Vector and Matrix-Matrix Kernels            | ✅    | ✅   | ✅  |
+| 2.3            | Fused RMSNorm, RoPE, and SwiGLU Kernels                      | ✅    | ✅   | ✅  |
+| 2.4            | Decode Attention                                             | ✅    | ✅   | ✅  |
+| 2.5            | End-to-End Decode Optimization                               | ✅    | ✅   | ✅  |
+| 3.1            | Key-Value Cache and Continuous Batching                      | ✅    | ✅   | ✅  |
+| 3.2            | Flash Attention for Prefill                                  | ✅    | ✅   | ✅  |
+| 3.3            | Paged Attention                                               | ✅    | ✅   | ✅  |
+| 3.4            | Chunked Prefill                                               | ✅    | ✅   | ✅  |
+| 3.5 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | ✅  |
+| 3.6 (optional) | Speculative Decoding                                         | 🚧    | ✅   | ✅  |
 | 4.1            | CLI Coding Agent                                              | ✅    | 🚧   | ✅  |
 | 4.2            | RAG Pipeline                                                  | 🚧    | 🚧   | 🚧  |
 | 4.3            | Tool Calling and Agent Serving                               | 🚧    | 🚧   | 🚧  |

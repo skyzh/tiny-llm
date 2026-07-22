@@ -1,8 +1,8 @@
-# Week 3 Day 1: Paged Attention, Part 1
+# Week 3 Day 5: Paged Attention, Part 1
 
 In this chapter, we will design the **paged KV cache**. This is the storage abstraction behind paged attention.
 
-By the end of Week 2, our serving stack already supports:
+By the end of Week 3 Day 4, our serving stack already supports:
 
 - per-request KV cache
 - chunked prefill
@@ -18,7 +18,7 @@ Paged attention starts by fixing the storage layout.
 - [vLLM Paged Attention Design](https://docs.vllm.ai/en/v0.18.0/design/paged_attention/)
 - [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)
 
-## Why the Week 2 KV Layout Becomes Expensive
+## Why the Dense KV Layout Becomes Expensive
 
 Right now, the mental model looks like this:
 
@@ -132,7 +132,7 @@ When new K/V arrives for one layer:
 3. otherwise allocate a new page and continue writing
 4. update cache metadata such as `page_lens` and `offset`
 
-This replaces the Week 2 pattern of repeatedly concatenating along the sequence dimension.
+This replaces the dense-cache pattern of repeatedly concatenating along the sequence dimension.
 
 ## Prefill with Pages
 
@@ -278,5 +278,9 @@ Build a compatibility path that reconstructs dense K/V from pages and compares i
 This gives us a correctness check before we change the attention path itself.
 
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
+
+```bash
+pdm run test --week 3 --day 5
+```
 
 {{#include copyright.md}}

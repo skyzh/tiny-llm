@@ -1,4 +1,4 @@
-# Week 2 Day 1: Key-Value Cache
+# Week 3 Day 1: Key-Value Cache
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
@@ -131,14 +131,15 @@ key, value = self.key_values  # B, H, offset, D
 return key, value, self.offset, mask
 ```
 
-## Task 2: Use the Key-Value Cache
+## Task 2: Preserve the Optimized Model Boundary
 
 ```
-src/tiny_llm/qwen3_week2.py
+src/tiny_llm/qwen3_week3.py
 ```
 
-With the cache in place, update the Week 1 Qwen3 implementation to use it.
-Implement `Qwen3MultiHeadAttention` in `qwen3_week2.py`.
+Week 2 already defined the optimized attention and MLP interfaces. Import those
+components into `qwen3_week3.py`; do not copy them or replace the Week 2 file.
+The Week 3 model adds cache ownership around the same optimized computation.
 
 - Give each layer its own cache.
 - Add an `offset` argument to the model. It is the number of tokens already in
@@ -170,37 +171,37 @@ sequence length after the update. This matches the Week 1 GQA convention: `L`
 is the query length, while `S` is the key/value source length. During
 single-token decoding, `L = 1` and `S` grows by one on each call.
 
-Week 2 also changes linear-layer weights from `mx.array` to `QuantizedWeights`.
-For this task, move dequantization from the model loader into the modules that
-use those weights. Later in the week, you will replace that temporary step with
-your own quantized matrix multiplication.
+The linear-layer weights remain `QuantizedWeights`, and RMSNorm, RoPE, SwiGLU,
+and decode attention still come from `week2_kernels.py`. This is the incremental
+course boundary: Week 3 adds serving state without regressing Week 2 operators.
 
-## Task 3: Implement the Model
+## Task 3: Create Request-Scoped Caches
 
 ```
-src/tiny_llm/qwen3_week2.py
+src/tiny_llm/qwen3_week3.py
 ```
 
-Complete the rest of the model using the Week 1 implementation as a base, and
-pass the appropriate layer cache through every Transformer block.
+Implement `create_kv_cache` so every request gets one cache handle per
+Transformer layer. Pass the matching layer cache through every block and keep
+the caller's offset consistent with the cache's logical length.
 
 To verify correctness, run the following test, which is similar to the Week 1
 model test:
 
 ```bash
-pdm run test --week 2 --day 1
+pdm run test --week 3 --day 1
 ```
 
-## Task 4: Implement Decoding
+## Task 4: Connect the Serving Loop
 
 ```
 src/tiny_llm/generate.py
 ```
 
-Complete `simple_generate_with_kv_cache` in `generate.py`. The first model call
-prefills the cache with the complete prompt. Each later call passes only the
-token produced by the preceding step, together with the number of tokens already
-cached.
+The first model call prefills the cache with the complete prompt. Each later
+call passes only the token produced by the preceding step, together with the
+number of tokens already cached. The same lifecycle will be owned by the
+continuous-batching scheduler on Day 2.
 
 For example:
 
@@ -215,15 +216,15 @@ decode:  _step(model, [8], 7)  # returns 9
 You can test your implementation with:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run main --solution tiny_llm --loader week2 --model qwen3-4b
+pdm run main --solution tiny_llm --loader week3 --model qwen3-0.6b
+pdm run main --solution tiny_llm --loader week3 --model qwen3-4b
 ```
 
-You can also benchmark throughput and compare your implementation with the reference solution:
+You can also run the serving loop with your implementation and the reference solution:
 
 ```bash
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
+pdm run batch-main --solution tiny_llm --model qwen3-0.6b
+pdm run batch-main --solution tiny_llm_ref --model qwen3-0.6b
 ```
 
 {{#include copyright.md}}
