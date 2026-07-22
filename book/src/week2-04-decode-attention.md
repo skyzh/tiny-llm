@@ -39,7 +39,7 @@ For the required Python path, reshape query heads into `H_kv` groups and a
 repeat dimension. Broadcasting then pairs several query heads with one KV head
 without physically repeating the key and value tensors. Compute scaled scores,
 apply the course's softmax helper, and multiply by value. This remains
-inspectable and lets MLX choose efficient basic matmul kernels.
+easy to inspect and lets MLX choose efficient basic matmul kernels.
 
 ## Task 2: Try Online Softmax in Metal
 
@@ -47,7 +47,7 @@ Expose a separate `decode_attention_custom` function for the Metal experiment.
 Assign four 32-lane SIMD groups to each query row. Each group visits every
 fourth cached position; within a group:
 
-1. Each lane multiplies a strided subset of query and key values.
+1. Each lane multiplies a regularly spaced subset of query and key values.
 2. `simd_sum` combines those partial dot products into one score.
 3. Apply the scale, optional mask, and causal check.
 4. Update a running maximum, softmax denominator, and weighted value

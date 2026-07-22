@@ -4,7 +4,7 @@
 
 RAG adds external context before generation. Build a small local pipeline:
 
-1. split documents into inspectable chunks;
+1. split documents into chunks that are easy to inspect;
 2. embed and index those chunks;
 3. retrieve the top matches for a question;
 4. render citations and retrieved text into the prompt;

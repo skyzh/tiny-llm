@@ -314,7 +314,7 @@ pdm run build-ext
 pdm run test --week 2 --day 2 -- -k task_2
 ```
 
-## Task 3: Implement Metal Matmul and Matvec
+## Task 3: Implement Metal Matrix Products
 
 ```
 src/extensions/src/quantized_matmul.metal
@@ -325,11 +325,12 @@ Write the Metal kernels and connect `eval_gpu` to them. The Python
 `quantized_matmul` wrapper must always dispatch this course-owned primitive on
 GPU; do not route the required path through `mx.quantized_matmul`.
 
-Matmul means matrix-matrix multiplication. Matvec means matrix-vector
-multiplication: one side has a single row or a small handful of rows. Prefill
-has a larger activation row count `M` and benefits from a two-dimensional
-matmul grid. Decode normally has `M = 1`, so it needs a separate matvec layout
-that gives many GPU lanes useful work within one output row.
+The code calls its two paths `matmul` and `matvec`. The first is matrix-matrix
+multiplication. The second is matrix-vector multiplication: one side has a
+single row or a small handful of rows. Prefill has a larger activation row count
+`M` and benefits from a two-dimensional matrix grid. Decode normally has
+`M = 1`, so it needs the matrix-vector layout to give many GPU lanes useful
+work within one output row.
 
 ### Metal Kernel
 
@@ -361,7 +362,8 @@ pattern:
 2. Load the quantized matmul kernel matching the output dtype from the Metal library.
 3. Bind the input and output buffers and the dimension constants (`M`, `N`,
    `K`). The buffer order must match the kernel signature.
-4. Select the matvec layout for `M <= 8`; otherwise select the matmul layout.
+4. Select the matrix-vector layout for `M <= 8`; otherwise select the
+   matrix-matrix layout.
    Calculate a SIMD-aligned thread-group configuration and tile output columns
    so packed input values and activations can be reused.
 5. Dispatch with `dispatchThreadgroups`.

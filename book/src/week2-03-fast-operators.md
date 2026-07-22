@@ -26,7 +26,7 @@ memory passes the graph describes.
 
 For example, readable RMSNorm casts, squares, reduces, takes a reciprocal square
 root, multiplies, casts again, and applies a learned weight. A compiler may fuse
-some adjacent pointwise work, but the row reduction is a boundary. Intermediate
+some adjacent element-by-element work, but the row reduction is a boundary. Intermediate
 values and multiple dispatches remain possible.
 
 A course-owned Metal kernel gives us explicit control over the whole model
@@ -43,7 +43,7 @@ purpose-built kernel versus a graph of several general-purpose kernels.
 
 ## Task 1: RMSNorm
 
-Implement one SIMD group per input row. Each lane accumulates a strided subset
+Implement one SIMD group per input row. Each lane accumulates a regularly spaced subset
 of squared values in `float`, and `simd_sum` combines the 32 partial sums:
 
 ```plain
@@ -82,7 +82,7 @@ per-batch offsets matters once requests at different decode positions share a
 batch.
 
 Unlike a graph that builds position arrays, gathers sine and cosine values,
-splits the head, performs several pointwise operations, and concatenates the
+splits the head, performs several element-by-element operations, and concatenates the
 result, this kernel reads each input pair and writes each rotated element
 directly. It also avoids layout transposes by accepting the model's existing
 layout.
@@ -97,7 +97,7 @@ output = (gate / (1 + exp(-gate))) * up
 
 Implement it as one thread per element. That thread loads `gate` and `up`,
 evaluates SiLU, multiplies the branches, and performs one output write. The
-Week 1 form is more inspectable, but it describes `abs`, `exp`, division,
+Week 1 form is easier to inspect, but it describes `abs`, `exp`, division,
 selection, and multiplication as separate array operations. The fused kernel
 removes those intermediate tensors and dispatch boundaries.
 
