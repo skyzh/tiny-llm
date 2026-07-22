@@ -1,3 +1,5 @@
+import inspect
+
 import mlx.core as mx
 import pytest
 
@@ -12,9 +14,15 @@ from tiny_llm_ref.qwen3_week3 import (
     Qwen3MultiHeadAttention as Qwen3MultiHeadAttentionWeek3,
 )
 from tiny_llm_ref.quantize import QuantizedWeights
+import tiny_llm_ref.week2_kernels as week2_kernels
 from tiny_llm_ref.week2_kernels import FastRMSNorm, FastRoPE, swiglu
 
 from .utils import assert_allclose
+
+
+def test_week2_fast_operators_are_course_owned():
+    source = inspect.getsource(week2_kernels)
+    assert "mx.fast" not in source
 
 
 def test_fast_rms_norm_matches_week1_implementation():

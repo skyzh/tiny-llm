@@ -48,14 +48,34 @@ def quantized_linear(
 
 
 def dequantize_linear(mx_layer: Any) -> mx.array:
-    w = mx.dequantize(
+    return mx.dequantize(
         mx_layer.weight,
         mx_layer.scales,
         mx_layer.biases,
         mx_layer.group_size,
         mx_layer.bits,
     )
-    return w
+
+
+def dequantize_weights(
+    weight: mx.array,
+    scales: mx.array,
+    biases: mx.array | None,
+    group_size: int,
+    bits: int,
+) -> mx.array:
+    if bits <= 0 or 32 % bits != 0:
+        raise ValueError("bits must divide a 32-bit packed weight")
+    values_per_word = 32 // bits
+    shifts = mx.arange(0, 32, bits, dtype=mx.uint32)
+    values = (weight[..., None] >> shifts) & ((1 << bits) - 1)
+    values = values.reshape(*weight.shape[:-1], weight.shape[-1] * values_per_word)
+    values = values.astype(mx.float32)
+    expanded_scales = mx.repeat(scales, group_size, axis=-1).astype(mx.float32)
+    if biases is None:
+        return (values * expanded_scales).astype(scales.dtype)
+    expanded_biases = mx.repeat(biases, group_size, axis=-1).astype(mx.float32)
+    return (values * expanded_scales + expanded_biases).astype(scales.dtype)
 
 
 def quantized_matmul(
@@ -69,14 +89,14 @@ def quantized_matmul(
 ) -> mx.array:
     *N, D = a.shape
     a = a.reshape(-1, D)
-    result = mx.quantized_matmul(
-        a,
-        b,
-        scales,
-        biases,
-        transpose=transpose_b,
-        group_size=group_size,
-        bits=bits,
+    result = tiny_llm_ext_ref.quantized_matmul(
+        mx.contiguous(scales),
+        mx.contiguous(biases),
+        group_size,
+        bits,
+        mx.contiguous(a),
+        mx.contiguous(b),
+        transpose_b,
     )
     return result.reshape(*N, -1)
 

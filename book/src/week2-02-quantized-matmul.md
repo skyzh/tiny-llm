@@ -258,29 +258,17 @@ Keep the token embedding table quantized as well. Add a `QuantizedEmbedding`
 wrapper with two call patterns:
 
 - `embedding(input_ids)` performs a row lookup. Gather the matching packed
-  weights, scales, and biases, then call `mx.dequantize` only on those rows.
+  weights, scales, and biases. Unpack each `uint32` with shifts and masks,
+  repeat each group's scale and bias across its 128 values, and compute
+  `q * scale + bias` with basic `mlx.core` array operations. Do not call
+  `mx.dequantize`.
 - `embedding.as_linear(h)` is the tied output projection. Implement this with
   `quantized_linear(h, embedding_weight)` so it uses your quantized matmul path
   instead of materializing the full `vocab_size x hidden_size` table. This path
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
-## Task 2: Implement the Required Quantized Matmul Path
-
-Implement `quantized_matmul` as a shape-preserving wrapper around
-`mx.quantized_matmul`. Flatten all leading activation dimensions into `M`, call
-the primitive with the checkpoint's scales, biases, group size, bit width, and
-transpose flag, then restore the leading dimensions.
-
-This production primitive is the required end-to-end path. It provides a fair
-route to the Week 2 acceptance target while we study the lower-level kernel
-separately.
-
-```bash
-pdm run test --week 2 --day 2 -- -k quantized_matmul
-```
-
-## Stretch 1: Implement a Custom CPU Primitive
+## Task 2: Implement a CPU Primitive
 
 Implement quantized matrix multiplication as an MLX C++ extension. Follow the
 existing `axpby` example: read `axpby.h`, `axpby.cpp`, and its binding in
@@ -315,31 +303,42 @@ Write the CPU implementation as a template, following `axpby`'s dtype-dispatch
 pattern. Dispatch with `mx::float16_t` or `mx::bfloat16_t` according to the
 output dtype.
 
-You can compare the custom implementation with the native path by running:
+The extension API is infrastructure: it lets an `mx.array` graph node schedule
+the C++ loop you wrote. MLX owns the array lifetime and command encoder, but it
+does not supply the quantized multiplication.
+
+Build and test the extension:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 2 -- -k task_2
 ```
 
-## Stretch 2: Implement a Custom SIMD Quantized Matvec
+## Task 3: Implement Metal Matmul and Matvec
 
 ```
 src/extensions/src/quantized_matmul.metal
 src/extensions/src/quantized_matmul.cpp
 ```
 
-Write the Metal kernel and connect `eval_gpu` to it. Expose it in Python as
-`quantized_matvec_custom` so callers cannot confuse the educational kernel with
-the required fast path. The math remains identical to the CPU implementation;
-only its execution model changes.
+Write the Metal kernels and connect `eval_gpu` to them. The Python
+`quantized_matmul` wrapper must always dispatch this course-owned primitive on
+GPU; do not route the required path through `mx.quantized_matmul`.
+
+Matmul means matrix-matrix multiplication. Matvec means matrix-vector
+multiplication: one side has a single row or a small handful of rows. Prefill
+has a larger activation row count `M` and benefits from a two-dimensional
+matmul grid. Decode normally has `M = 1`, so it needs a separate matvec layout
+that gives many GPU lanes useful work within one output row.
 
 ### Metal Kernel
 
-You need to implement one kernel entry in `quantized_matmul.metal`:
+Implement two kernel layouts in `quantized_matmul.metal`:
 
-- Assign one SIMD group to an output tile. Cooperatively reduce the input
-  dimension and compute several output columns per group.
+- For larger `M`, tile output rows and columns across a two-dimensional thread
+  grid.
+- For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
+  the input dimension and compute several output columns per group.
 - The kernel should support both `half` and `bfloat16_t` inputs and outputs.
 - Apply the same group-wise dequantization loop as the CPU version:
   - Iterate over groups of 128 values.
@@ -362,7 +361,8 @@ pattern:
 2. Load the quantized matmul kernel matching the output dtype from the Metal library.
 3. Bind the input and output buffers and the dimension constants (`M`, `N`,
    `K`). The buffer order must match the kernel signature.
-4. Calculate a SIMD-aligned thread group configuration and tile output columns
+4. Select the matvec layout for `M <= 8`; otherwise select the matmul layout.
+   Calculate a SIMD-aligned thread-group configuration and tile output columns
    so packed input values and activations can be reused.
 5. Dispatch with `dispatchThreadgroups`.
 
@@ -370,14 +370,14 @@ You can test your implementation by running:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k task_4
+pdm run test --week 2 --day 2 -- -k gpu
 ```
 
-The direct tests cover `M = 1` and `M = 8`. Benchmark the kernel honestly. A
-clear teaching kernel may still trail MLX's production QMV; matching it is the
-stretch goal, not a requirement for the end-to-end path.
+The direct tests cover `M = 1` and `M = 8`. The result should agree with an MLX
+oracle within the chosen floating-point tolerance, but the implementation under
+test must be yours.
 
-## Task 3: Model Integration
+## Task 4: Model Integration
 
 ```
 src/tiny_llm/qwen3_week2.py
@@ -390,9 +390,8 @@ Change the weight type from `mx.array` to `QuantizedWeights` for every attention
 projection (`wq`, `wk`, `wv`, and `wo`) and MLP projection (`w_gate`, `w_up`,
 and `w_down`). Replace `linear(x, w)` with `quantized_linear(x, w)`. In the Week
 2 model loader, use `QuantizedWeights.from_mlx_layer(...)` instead of
-materializing a 16-bit matrix with `mx.dequantize`. Keep the Week 1 loader's
-dequantization behavior because its layers still expect plain `mx.array`
-weights.
+materializing a 16-bit matrix. Keep the Week 1 model's readable boundary; its
+layers still expect plain `mx.array` weights.
 
 For embeddings, wire the `QuantizedEmbedding` from Task 1 into the loader:
 load `embed_tokens` with `QuantizedWeights.from_mlx_layer(...)` and pass it to
@@ -421,5 +420,13 @@ You can also benchmark throughput and compare your implementation with the refer
 pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b
 pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 ```
+
+## Expected Performance Contribution
+
+**Estimated decode improvement: 150-250% over the Week 1 baseline.** In other
+words, this chapter should make decode roughly 2.5-3.5x as fast, because every
+generated token otherwise rereads large dequantized matrices. The exact gain
+depends on model size and memory bandwidth; use the Day 1 benchmark rather than
+adding this estimate to later percentages.
 
 {{#include copyright.md}}

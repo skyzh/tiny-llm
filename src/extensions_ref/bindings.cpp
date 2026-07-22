@@ -31,6 +31,13 @@ NB_MODULE(_ext, m) {
             array: ``a * b``
       )");
 
+    m.def("rms_norm", &tiny_llm_ext_ref::rms_norm, "x"_a, "weight"_a, "eps"_a, "stream"_a = nb::none());
+    m.def("rope", &tiny_llm_ext_ref::rope, "x"_a, "offsets"_a, "dims"_a, "base"_a, "traditional"_a = false,
+          "stream"_a = nb::none());
+    m.def("swiglu", &tiny_llm_ext_ref::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
+    m.def("decode_attention", &tiny_llm_ext_ref::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
+          "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
+
     m.def("flash_attention", &tiny_llm_ext_ref::flash_attention, "query"_a, "key"_a, "value"_a, "mask"_a,
           "scale"_a = 1.0, "mask_mode"_a = 0, "num_kv_heads"_a, "num_heads"_a, "stream"_a = nb::none(), R"(
         Flash attention layer

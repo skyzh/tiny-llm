@@ -1,156 +1,127 @@
-# 🚧 Week 2 Day 4: Fast Model Operators
+# 🚧 Week 2 Day 4: Fast Operators
 
 > 🚧 This newly introduced chapter is a work in progress.
 
-The Week 1 operators favor readable equations. That makes them useful for
-learning, but it also makes one model operation appear to MLX as a chain of
-smaller array operations. Week 2 replaces those chains with specialized or
-fused work while preserving the same math.
+Week 1 expresses RMSNorm, RoPE, and SiLU as readable `mlx.core` equations.
+Week 2 keeps those implementations intact and writes three course-owned Metal
+kernels behind a separate interface:
 
 ```plain
 src/tiny_llm/week2_kernels.py
-src/tiny_llm_ref/week2_kernels.py
+src/extensions/src/week2_kernels.cpp
+src/extensions/src/week2_kernels.metal
 ```
 
-## Python Is Not Doing the Arithmetic
+We still use MLX arrays and its extension API. MLX schedules the graph node,
+owns its buffers, and dispatches the Metal function, but the arithmetic inside
+that function is ours. The required solution does not call `mx.fast.rms_norm`,
+`mx.fast.rope`, or an MLX-provided SiLU implementation.
 
-Calling the Week 1 implementation "Python" can be misleading. Python builds a
-lazy MLX computation graph; MLX still executes its array operations with native
-CPU or Metal kernels. There is no Python loop visiting every tensor element.
+## Why a Metal Kernel Helps
 
-The difference is the amount of work described by each graph node. Consider
-the readable RMSNorm:
+Calling the Week 1 code "Python" does not mean Python visits every tensor
+element. Python builds a lazy graph whose individual array operations already
+run as native kernels. The important difference is how many operations and
+memory passes the graph describes.
 
-```python
-x = x.astype(mx.float32)
-x = x * mx.rsqrt(mx.mean(mx.square(x), axis=-1, keepdims=True) + eps)
-x = x.astype(orig_dtype)
-return x * weight.astype(orig_dtype)
+For example, readable RMSNorm casts, squares, reduces, takes a reciprocal square
+root, multiplies, casts again, and applies a learned weight. A compiler may fuse
+some adjacent pointwise work, but the row reduction is a boundary. Intermediate
+values and multiple dispatches remain possible.
+
+A course-owned Metal kernel gives us explicit control over the whole model
+operator:
+
+- one dispatch replaces several graph operations;
+- values stay in registers or SIMD-group storage between steps;
+- float accumulation is used where numerical stability needs it;
+- inputs are read once when practical, and only the final tensor is written;
+- the grid matches decode shapes instead of a generic tensor operation.
+
+That is the useful comparison: not "Metal versus Python arithmetic," but one
+purpose-built kernel versus a graph of several general-purpose kernels.
+
+## Task 1: RMSNorm
+
+Implement one SIMD group per input row. Each lane accumulates a strided subset
+of squared values in `float`, and `simd_sum` combines the 32 partial sums:
+
+```plain
+sum_sq = simd_sum(each lane's partial sum)
+inverse_rms = rsqrt(sum_sq / hidden_size + epsilon)
+output[i] = input[i] * inverse_rms * weight[i]
 ```
 
-This graph contains casts, a square, a reduction, an inverse square root, and
-several multiplications. MLX can fuse some compatible per-element operations,
-but a reduction is an important boundary. Values may need to be written to and
-read from memory between stages, and each dispatched kernel has a fixed launch
-cost.
+The same lanes then normalize and scale their elements. This fuses the
+reduction and output pass into one dispatch and avoids materializing the
+squared tensor. Instantiate the kernel for float32, float16, and bfloat16.
+For half-precision inputs, round the normalized value to the model dtype before
+applying the learned weight. That matches the readable operator's numerical
+boundary and prevents tiny per-layer differences from compounding in deeper
+models.
 
-`mx.fast.rms_norm`, by contrast, presents RMSNorm as one operation. Its backend
-can reduce a row, normalize it, and apply the weight in a purpose-built kernel,
-keeping partial results in fast on-chip storage where possible.
+The C++ primitive validates shape and dtype, allocates the output through MLX,
+binds the buffers and scalar constants, and launches exactly one 32-lane SIMD
+group per row.
 
-The optimization pattern is the same for the three operators in this chapter:
+## Task 2: RoPE
 
-| Operator | Readable Week 1 graph | Faster Week 2 path | Main saving |
-| --- | --- | --- | --- |
-| RMSNorm | Cast, square, mean, reciprocal square root, scale | `mx.fast.rms_norm` | Fused reduction and scaling |
-| RoPE | Gather sine/cosine tables, multiply, add, concatenate | `mx.fast.rope` | Fewer temporary tensors and dispatches |
-| SwiGLU | Manual SiLU expression, then multiply by the up branch | One fusible MLX expression | One pass over the activation |
+Implement RoPE for the model's native `B, L, H, D` layout. Give each Metal
+thread one output element. From its flat index, recover batch, token, head, and
+head-dimension coordinates; then compute the pair index and rotation angle:
 
-These operators are smaller than the model's linear layers, but decode invokes
-them repeatedly with very little work in each invocation. In a 28-layer Qwen3
-model, one generated token passes through 113 RMSNorm calls, 56 RoPE
-applications, and 28 SwiGLU activations. Reducing a small fixed cost matters
-when it is paid that many times for every token.
+```plain
+angle = (batch_offset + token_position) * base ** (-pair / (dims / 2))
+real' = real * cos(angle) - imag * sin(angle)
+imag' = imag * cos(angle) + real * sin(angle)
+```
 
-## Task 1: Fast RMSNorm
+Accept either one scalar offset or one offset per batch row in the Python
+wrapper. Normalize both cases to an int32 array before dispatch. Supporting
+per-batch offsets matters once requests at different decode positions share a
+batch.
 
-Implement `FastRMSNorm` with `mx.fast.rms_norm`. Preserve the constructor and
-call shape of the readable `RMSNorm` so the model can select the implementation
-without changing its surrounding logic.
-
-The specialized kernel improves two things:
-
-1. **Memory traffic.** The readable graph can materialize values around the
-   row-wise reduction. A fused kernel can load an input row, accumulate its sum
-   of squares, and reuse the data while normalizing and scaling.
-2. **Dispatch overhead.** One model-level operation becomes one optimized
-   primitive instead of several generic graph operations.
-
-Keep the accumulation behavior in mind when testing. The fast kernel and the
-readable float32 expression may round values in a different order, so compare
-them with a tolerance rather than requiring bit-for-bit equality.
-
-## Task 2: Fast RoPE
-
-Implement `FastRoPE` with `mx.fast.rope`. The Qwen model stores tensors as
-`B, L, H, D`, while the primitive expects `B, H, L, D`, so transpose on entry
-and restore the original layout on return. Support both one scalar offset and
-one offset per batch element.
-
-The Week 1 implementation makes the rotation explicit. It gathers sine and
-cosine values for the current positions, splits each head into two halves,
-computes four products and two sums, then concatenates the result. Those steps
-are easy to inspect, but they introduce several graph nodes and temporary
-values.
-
-The fast primitive applies the same rotation in a tuned kernel. MLX receives the
-position offset directly and does not need the Python model to assemble the
-rotation from separate array operations. This is particularly useful in decode,
-where the model rotates one new query and key position per layer while the
-offset advances on every token.
-
-The transposes do not perform arithmetic. They describe the layout expected by
-the kernel and restore the model-facing layout afterward. Whether a transpose
-requires a copy depends on how the consuming kernel handles the resulting
-strides, so keep layout changes next to the primitive and verify them in the
-end-to-end benchmark.
+Unlike a graph that builds position arrays, gathers sine and cosine values,
+splits the head, performs several pointwise operations, and concatenates the
+result, this kernel reads each input pair and writes each rotated element
+directly. It also avoids layout transposes by accepting the model's existing
+layout.
 
 ## Task 3: SwiGLU
 
-Express SwiGLU as one array expression:
+SwiGLU combines the gate and up branches:
 
-```python
-gate * mx.sigmoid(gate) * up
+```plain
+output = (gate / (1 + exp(-gate))) * up
 ```
 
-The Week 1 `silu` spells out a numerically stable sigmoid using `abs`, `exp`,
-division, `where`, and multiplication. It is excellent for showing the formula,
-but the MLP only needs the combined result `SiLU(gate) * up`.
+Implement it as one thread per element. That thread loads `gate` and `up`,
+evaluates SiLU, multiplies the branches, and performs one output write. The
+Week 1 form is more inspectable, but it describes `abs`, `exp`, division,
+selection, and multiplication as separate array operations. The fused kernel
+removes those intermediate tensors and dispatch boundaries.
 
-Keeping the Week 2 form in one expression gives MLX a simple per-element graph
-that it can fuse into one generated kernel. The kernel can load `gate` and `up`,
-compute the activation, multiply the branches, and write the result once. This
-optimization does not require a handwritten Metal extension; MLX generates the
-fused backend work from the lazy graph.
+## Task 4: Integrate and Test
 
-Do not change the Week 1 `silu` implementation. The separate Week 2 function
-makes the readable and optimized forms directly comparable and keeps the course
-incremental.
-
-## Why This Helps Decode More Than Prefill
-
-During prefill, large matrix multiplications and attention tiles provide enough
-work to amortize a kernel launch. During single-token decode, tensor shapes are
-small in the token dimension, so fixed costs account for a larger fraction of
-latency. Decode also repeats the same sequence of operators once per layer and
-once per generated token.
-
-The useful mental model is therefore not "Metal is faster than Python." Both
-versions already use native MLX kernels. The improvement comes from:
-
-- dispatching fewer kernels;
-- reading and writing fewer intermediate tensors;
-- using a kernel specialized for the reduction or rotation;
-- exposing a simple graph that MLX can fuse; and
-- paying those fixed costs fewer times across every layer and token.
-
-These changes should be evaluated end to end. A microbenchmark can show that an
-individual operator is cheaper, but token throughput is the acceptance metric.
-Synchronize lazy execution with `mx.eval`, warm up both paths, stop other
-CPU- and GPU-intensive workloads, and compare several runs under the same
-thermal and power conditions.
-
-## Task 4: Integrate the Layer
-
-Update `qwen3_week2.py` to import the Week 2 operations. `qwen3_week3.py` must
-reuse the same interfaces so serving features do not regress to the readable
-Week 1 kernels.
+Expose all three kernels through a C++ MLX primitive and thin Python wrappers.
+Import those wrappers only in `qwen3_week2.py`; `qwen3_week1.py` must continue
+using its readable operators. Week 3 should import the Week 2 interfaces so the
+serving model does not regress.
 
 ```bash
+pdm run build-ext
 pdm run test --week 2 --day 4
 ```
 
-The tests compare the fast operations with the readable versions, exercise
-scalar and per-batch RoPE offsets, and verify the Week 1/2/3 boundaries.
+Compare against the readable equations with tolerances rather than bit-for-bit
+equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
+inside a timed iteration when measuring these lazy operations.
+
+## Expected Performance Contribution
+
+**Estimated decode improvement: 5-15% after quantized matmul.** Each operator
+is small, but a Qwen3 decode token invokes it many times across all layers, so
+eliminating launches and intermediate memory traffic accumulates. The range is
+an end-to-end estimate and overlaps with later changes; it is not additive.
 
 {{#include copyright.md}}

@@ -64,17 +64,20 @@ template <typename T>
     device const int &M [[buffer(5)]],
     device const int &N [[buffer(6)]],
     device const int &K [[buffer(7)]],
+    threadgroup T* activations [[threadgroup(0)]],
     uint output_tile [[threadgroup_position_in_grid]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
     constexpr int bits = 4;
     constexpr int group_size = 128;
     constexpr int packs_per_item = 32 / bits;
     constexpr uint32_t mask = (1 << bits) - 1;
 
-    constexpr int outputs_per_simdgroup = 8;
-    const int column_tiles = (K + outputs_per_simdgroup - 1) / outputs_per_simdgroup;
+    constexpr int simdgroups_per_threadgroup = 8;
+    const int column_tiles = (K + simdgroups_per_threadgroup - 1) / simdgroups_per_threadgroup;
     const int row = output_tile / column_tiles;
-    const int column_base = (output_tile - row * column_tiles) * outputs_per_simdgroup;
+    const int column = (output_tile - row * column_tiles) * simdgroups_per_threadgroup + simdgroup;
     if (row >= M) {
         return;
     }
@@ -82,44 +85,34 @@ template <typename T>
     const int packed_cols = N / packs_per_item;
     const int groups_per_row = N / group_size;
     const int a_base = row * N;
-    float sums[outputs_per_simdgroup] = {0.0f};
+    for (int d = thread_index; d < N; d += simdgroups_per_threadgroup * 32) {
+        activations[d] = a[a_base + d];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (column >= K) {
+        return;
+    }
+
+    float sum = 0.0f;
+    const int params_base = column * groups_per_row;
 
     for (int packed_col = lane; packed_col < packed_cols; packed_col += 32) {
         const int group = packed_col / (group_size / packs_per_item);
-        const int a_idx = a_base + packed_col * packs_per_item;
-        float activations[packs_per_item];
+        const int a_idx = packed_col * packs_per_item;
+        const float scale = static_cast<float>(scales[params_base + group]);
+        const float bias = static_cast<float>(biases[params_base + group]);
+        const uint32_t packed = b[column * packed_cols + packed_col];
 
         #pragma clang loop unroll(full)
         for (int pack = 0; pack < packs_per_item; ++pack) {
-            activations[pack] = static_cast<float>(a[a_idx + pack]);
-        }
-
-        #pragma clang loop unroll(full)
-        for (int output = 0; output < outputs_per_simdgroup; ++output) {
-            const int column = column_base + output;
-            if (column >= K) {
-                continue;
-            }
-            const int params_base = column * groups_per_row;
-            const float scale = static_cast<float>(scales[params_base + group]);
-            const float bias = static_cast<float>(biases[params_base + group]);
-            const uint32_t packed = b[column * packed_cols + packed_col];
-
-            #pragma clang loop unroll(full)
-            for (int pack = 0; pack < packs_per_item; ++pack) {
-                const float weight = static_cast<float>((packed >> (pack * bits)) & mask) * scale + bias;
-                sums[output] += activations[pack] * weight;
-            }
+            const float weight = static_cast<float>((packed >> (pack * bits)) & mask) * scale + bias;
+            sum += static_cast<float>(activations[a_idx + pack]) * weight;
         }
     }
 
-    #pragma clang loop unroll(full)
-    for (int output = 0; output < outputs_per_simdgroup; ++output) {
-        const float sum = simd_sum(sums[output]);
-        const int column = column_base + output;
-        if (lane == 0 && column < K) {
-            out[row * K + column] = static_cast<T>(sum);
-        }
+    sum = simd_sum(sum);
+    if (lane == 0) {
+        out[row * K + column] = static_cast<T>(sum);
     }
 }
 

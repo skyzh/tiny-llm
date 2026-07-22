@@ -1,10 +1,10 @@
 #include <cstdint>
 
 #include "mlx/array.h"
-#include "mlx/device.h"
-#include "mlx/dtype.h"
 #include "mlx/backend/common/utils.h"
 #include "mlx/backend/cpu/encoder.h"
+#include "mlx/device.h"
+#include "mlx/dtype.h"
 #include "mlx/utils.h"
 #include "tiny_llm_ext.h"
 
@@ -132,7 +132,8 @@ void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, con
                         uint8_t *b_bytes = reinterpret_cast<uint8_t *>(&b_val);
                         for (int pack_idx = 0; pack_idx < packs_per_item; pack_idx++) {
                             uint8_t item_val = (b_bytes[pack_idx / 2] >> ((pack_idx % 2) * bits)) & item_mask;
-                            float b = static_cast<float>(item_val) * static_cast<float>(scale) + static_cast<float>(bias);
+                            float b =
+                                static_cast<float>(item_val) * static_cast<float>(scale) + static_cast<float>(bias);
                             float a = static_cast<float>(a_ptr[a_loc]);
                             sum += a * b;
                             a_loc += 1;
@@ -177,13 +178,13 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     // Make a kernel from this metal library
     auto library = d.get_library("tiny_llm_ext_ref");
     const bool use_matvec = a.shape()[0] <= 8;
-    const char* kernel_name;
+    const char *kernel_name;
     if (use_matvec) {
-        kernel_name = out.dtype() == mx::float16 ? "quantized_matvec_w4a16_g128_f16"
-                                                 : "quantized_matvec_w4a16_g128_bf16";
+        kernel_name =
+            out.dtype() == mx::float16 ? "quantized_matvec_w4a16_g128_f16" : "quantized_matvec_w4a16_g128_bf16";
     } else {
-        kernel_name = out.dtype() == mx::float16 ? "quantized_matmul_w4a16_g128_f16"
-                                                 : "quantized_matmul_w4a16_g128_bf16";
+        kernel_name =
+            out.dtype() == mx::float16 ? "quantized_matmul_w4a16_g128_f16" : "quantized_matmul_w4a16_g128_bf16";
     }
     auto kernel = d.get_kernel(kernel_name, library);
 
@@ -220,10 +221,11 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     compute_encoder.set_bytes(K, 7);
 
     if (use_matvec) {
-        constexpr int outputs_per_simdgroup = 8;
-        const int column_tiles = (K + outputs_per_simdgroup - 1) / outputs_per_simdgroup;
+        constexpr int simdgroups_per_threadgroup = 8;
+        const int column_tiles = (K + simdgroups_per_threadgroup - 1) / simdgroups_per_threadgroup;
+        compute_encoder.set_threadgroup_memory_length(N * a.itemsize(), 0);
         MTL::Size num_threadgroups = MTL::Size(M * column_tiles, 1, 1);
-        MTL::Size num_threads_per_group = MTL::Size(32, 1, 1);
+        MTL::Size num_threads_per_group = MTL::Size(simdgroups_per_threadgroup * 32, 1, 1);
         compute_encoder.dispatch_threadgroups(num_threadgroups, num_threads_per_group);
         return;
     }

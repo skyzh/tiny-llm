@@ -16,7 +16,7 @@
 - [Week 2: A Step Closer to vLLM](./week2-overview.md)
     - [🚧 Benchmark MLX](./week2-01-benchmarking.md)
     - [Quantized Matmul](./week2-02-quantized-matmul.md)
-    - [🚧 Fast Model Operators](./week2-03-fast-operators.md)
+    - [🚧 Fast Operators](./week2-03-fast-operators.md)
     - [🚧 Decode Attention](./week2-04-decode-attention.md)
     - [🚧 End-to-End Optimization](./week2-05-end-to-end.md)
 - [Week 3: Build a Mini vLLM](./week3-overview.md)

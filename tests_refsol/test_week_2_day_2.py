@@ -1,6 +1,38 @@
+import inspect
+
 import mlx.core as mx
+
+import tiny_llm_ref.embedding as embedding_module
+import tiny_llm_ref.quantize as quantize_module
+from tiny_llm_ref.embedding import QuantizedEmbedding
+from tiny_llm_ref.quantize import QuantizedWeights
+
 from .tiny_llm_base import quantized_matmul, quantized_matvec_custom
 from .utils import assert_allclose
+
+
+def test_task_1_quantized_embedding_dequantizes_selected_rows():
+    weight = mx.random.normal((7, 256)).astype(mx.bfloat16)
+    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+    quantized = QuantizedWeights(scales, biases, 128, 4, packed)
+    embedding = QuantizedEmbedding(7, 256, quantized)
+    indices = mx.array([[1, 4]])
+
+    result = embedding(indices)
+    expected = mx.dequantize(
+        packed[indices], scales[indices], biases[indices], group_size=128, bits=4
+    )
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
+
+
+def test_week2_quantization_path_uses_course_owned_operators():
+    source = (
+        inspect.getsource(quantize_module.quantized_matmul)
+        + inspect.getsource(quantize_module.dequantize_weights)
+        + inspect.getsource(embedding_module.QuantizedEmbedding.__call__)
+    )
+    assert "mx.quantized_matmul" not in source
+    assert "mx.dequantize" not in source
 
 
 def quantized_matmul_helper(

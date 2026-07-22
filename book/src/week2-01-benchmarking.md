@@ -50,9 +50,10 @@ pdm run bench --solution mlx --loader week2 --model qwen3-0.6b \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```
 
-Run both commands more than once when the machine is changing temperature or
-running other GPU workloads. Keep the median or a representative stable run,
-and report the hardware with the result.
+Benchmark on an otherwise idle machine: stop other CPU- and GPU-intensive
+workloads, keep power mode and ambient conditions fixed, and let the machine
+return to a stable temperature before comparing runs. Run each command several
+times, report the median, and include the hardware with the result.
 
 ## Acceptance Target
 
@@ -63,8 +64,15 @@ reference decode throughput / MLX decode throughput >= 0.80
 ```
 
 Reaching 80-90% is the acceptance range, not a promise that every educational
-kernel individually matches its production counterpart. We will use native MLX
-primitives at the required boundary when a teaching kernel misses the target,
-and keep the teaching kernel as an explicit stretch exercise.
+kernel individually matches its MLX counterpart. MLX is the comparison
+baseline; the Week 2 solution must reach the target with course-owned operator
+implementations.
+
+## Expected Performance Contribution
+
+**Estimated decode improvement: 0%.** Benchmarking does not make the model
+faster. It prevents us from claiming gains that came from unsynchronized work,
+different inputs, or machine noise, and gives every later percentage a common
+denominator.
 
 {{#include copyright.md}}

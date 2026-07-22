@@ -34,6 +34,84 @@ public:
     const char *name() const override { return "QuantizedMatmul"; }
 };
 
+mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::StreamOrDevice s = {});
+mx::array rope(const mx::array &x, const mx::array &offsets, int dims, float base, bool traditional,
+               mx::StreamOrDevice s = {});
+mx::array swiglu(const mx::array &gate, const mx::array &up, mx::StreamOrDevice s = {});
+mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
+                           float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads,
+                           mx::StreamOrDevice s = {});
+
+class Week2RMSNorm : public mx::Primitive {
+public:
+    Week2RMSNorm(mx::Stream stream, float eps) : mx::Primitive(stream), eps_(eps) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2RMSNorm has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2RMSNorm"; }
+
+private:
+    float eps_;
+};
+
+class Week2RoPE : public mx::Primitive {
+public:
+    Week2RoPE(mx::Stream stream, int dims, float base, bool traditional)
+        : mx::Primitive(stream), dims_(dims), base_(base), traditional_(traditional) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2RoPE has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2RoPE"; }
+
+private:
+    int dims_;
+    float base_;
+    bool traditional_;
+};
+
+class Week2SwiGLU : public mx::Primitive {
+public:
+    explicit Week2SwiGLU(mx::Stream stream) : mx::Primitive(stream) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2SwiGLU has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2SwiGLU"; }
+};
+
+class Week2DecodeAttention : public mx::Primitive {
+public:
+    Week2DecodeAttention(mx::Stream stream, float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads)
+        : mx::Primitive(stream),
+          scale_(scale),
+          is_causal_(is_causal),
+          has_mask_(has_mask),
+          num_heads_(num_heads),
+          num_kv_heads_(num_kv_heads) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2DecodeAttention has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2DecodeAttention"; }
+
+private:
+    float scale_;
+    bool is_causal_;
+    bool has_mask_;
+    int num_heads_;
+    int num_kv_heads_;
+};
+
 mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
                           const float scale, const int mask_mode, const int num_kv_heads, const int num_heads,
                           mx::StreamOrDevice s = {});

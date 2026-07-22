@@ -35,3 +35,13 @@ def scaled_dot_product_attention(
     mask: mx.array | str | None = None,
 ) -> mx.array:
     pass
+
+
+def decode_attention_custom(
+    query: mx.array,
+    key: mx.array,
+    value: mx.array,
+    scale: float,
+    mask: mx.array | str | None = None,
+) -> mx.array:
+    pass
