@@ -1,6 +1,6 @@
 import mlx.core as mx
 
-from .attention import paged_attention
+from .attention import flash_attention, paged_attention
 from typing import Any
 from .embedding import QuantizedEmbedding
 from .quantize import QuantizedWeights, quantized_linear
@@ -26,6 +26,7 @@ class Qwen3MultiHeadAttention:
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
+        use_flash_attention: bool = False,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -42,6 +43,7 @@ class Qwen3MultiHeadAttention:
         self.rope = FastRoPE(self.head_dim, max_seq_len, theta)
         self.q_norm = FastRMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
         self.k_norm = FastRMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
+        self.use_flash_attention = use_flash_attention
 
     def __call__(
         self,
@@ -68,22 +70,37 @@ class Qwen3MultiHeadAttention:
         projection_k = projection_k.transpose(0, 2, 1, 3)
         projection_v = projection_v.transpose(0, 2, 1, 3)
 
-        metadata = cache.update_and_fetch_paged(
-            projection_k.astype(mx.float32),
-            projection_v.astype(mx.float32),
-            mask_length=L,
-            mask=mask,
-        )
-        x = paged_attention(
-            projection_q.astype(mx.float32),
-            metadata.key_pages,
-            metadata.value_pages,
-            metadata.block_table,
-            metadata.context_lens,
-            metadata.page_size,
-            scale=self.scale,
-            mask=metadata.mask,
-        ).astype(x.dtype)
+        if self.use_flash_attention and L > 8:
+            key, value, _, mask = cache.update_and_fetch(
+                projection_k.astype(mx.float32),
+                projection_v.astype(mx.float32),
+                mask_length=L,
+                mask=mask,
+            )
+            x = flash_attention(
+                projection_q.astype(mx.float32),
+                key,
+                value,
+                scale=self.scale,
+                mask=mask,
+            ).astype(x.dtype)
+        else:
+            metadata = cache.update_and_fetch_paged(
+                projection_k.astype(mx.float32),
+                projection_v.astype(mx.float32),
+                mask_length=L,
+                mask=mask,
+            )
+            x = paged_attention(
+                projection_q.astype(mx.float32),
+                metadata.key_pages,
+                metadata.value_pages,
+                metadata.block_table,
+                metadata.context_lens,
+                metadata.page_size,
+                scale=self.scale,
+                mask=metadata.mask,
+            ).astype(x.dtype)
         x = x.transpose(0, 2, 1, 3).reshape(B, L, self.num_heads * self.head_dim)
         return quantized_linear(x, self.wo)
 
@@ -132,6 +149,7 @@ class Qwen3TransformerBlock:
         mlp: Qwen3MLP | Moe,
         max_seq_len: int = 32768,
         theta: int = 1000000,
+        use_flash_attention: bool = False,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
@@ -156,6 +174,7 @@ class Qwen3TransformerBlock:
             max_seq_len=max_seq_len,
             theta=theta,
             rms_norm_eps=rms_norm_eps,
+            use_flash_attention=use_flash_attention,
         )
 
     def __call__(
@@ -185,6 +204,8 @@ class Qwen3ModelWeek3:
         self,
         mlx_model: Any,
         page_size: int = 128,
+        enable_flash_attn: bool = False,
+        enable_performance_lab: bool = False,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
@@ -196,38 +217,34 @@ class Qwen3ModelWeek3:
         precision = mx.bfloat16
         self.precision = precision
 
+        def week3_weights(layer: Any) -> QuantizedWeights:
+            return QuantizedWeights.from_mlx_layer(
+                layer, use_simdgroup_matmul=enable_performance_lab
+            )
+
         self.embedding = QuantizedEmbedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
-            weight=QuantizedWeights.from_mlx_layer(mlx_model.model.embed_tokens),
+            weight=week3_weights(mlx_model.model.embed_tokens),
+            use_custom_kernel=enable_performance_lab,
         )
         self.layers_inner = []
 
         for i in range(mlx_model.args.num_hidden_layers):
-            wq = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.q_proj
-            )
-            wk = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.k_proj
-            )
-            wv = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.v_proj
-            )
-            wo = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.o_proj
-            )
+            wq = week3_weights(mlx_model.model.layers[i].self_attn.q_proj)
+            wk = week3_weights(mlx_model.model.layers[i].self_attn.k_proj)
+            wv = week3_weights(mlx_model.model.layers[i].self_attn.v_proj)
+            wo = week3_weights(mlx_model.model.layers[i].self_attn.o_proj)
             if is_qwen3_moe_sparse_layer(mlx_model.args, i):
                 mlp = Moe(
-                    w_router=QuantizedWeights.from_mlx_layer(
-                        mlx_model.model.layers[i].mlp.gate
-                    ),
-                    w_gate=QuantizedWeights.from_mlx_layer(
+                    w_router=week3_weights(mlx_model.model.layers[i].mlp.gate),
+                    w_gate=week3_weights(
                         mlx_model.model.layers[i].mlp.switch_mlp.gate_proj
                     ),
-                    w_up=QuantizedWeights.from_mlx_layer(
+                    w_up=week3_weights(
                         mlx_model.model.layers[i].mlp.switch_mlp.up_proj
                     ),
-                    w_down=QuantizedWeights.from_mlx_layer(
+                    w_down=week3_weights(
                         mlx_model.model.layers[i].mlp.switch_mlp.down_proj
                     ),
                     num_experts_per_tok=mlx_model.args.num_experts_per_tok,
@@ -237,15 +254,9 @@ class Qwen3ModelWeek3:
                 mlp = Qwen3MLP(
                     mlx_model.args.hidden_size,
                     mlx_model.args.intermediate_size,
-                    QuantizedWeights.from_mlx_layer(
-                        mlx_model.model.layers[i].mlp.gate_proj
-                    ),
-                    QuantizedWeights.from_mlx_layer(
-                        mlx_model.model.layers[i].mlp.up_proj
-                    ),
-                    QuantizedWeights.from_mlx_layer(
-                        mlx_model.model.layers[i].mlp.down_proj
-                    ),
+                    week3_weights(mlx_model.model.layers[i].mlp.gate_proj),
+                    week3_weights(mlx_model.model.layers[i].mlp.up_proj),
+                    week3_weights(mlx_model.model.layers[i].mlp.down_proj),
                 )
 
             layer = Qwen3TransformerBlock(
@@ -267,6 +278,7 @@ class Qwen3ModelWeek3:
                 mlp=mlp,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
+                use_flash_attention=enable_flash_attn,
             )
             self.layers_inner.append(layer)
         self.norm = FastRMSNorm(
@@ -275,7 +287,7 @@ class Qwen3ModelWeek3:
             eps=mlx_model.args.rms_norm_eps,
         )
         if not mlx_model.args.tie_word_embeddings:
-            self.w_lm_head = QuantizedWeights.from_mlx_layer(mlx_model.lm_head)
+            self.w_lm_head = week3_weights(mlx_model.lm_head)
         else:
             self.w_lm_head = None
         self.mlx_model = mlx_model

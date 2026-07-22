@@ -21,21 +21,26 @@ class QuantizedWeights:
         group_size: int,
         bits: int,
         weight: mx.array,
+        use_simdgroup_matmul: bool = False,
     ):
         self.scales = scales
         self.biases = biases
         self.group_size = group_size
         self.bits = bits
         self.weight = weight
+        self.use_simdgroup_matmul = use_simdgroup_matmul
 
     @staticmethod
-    def from_mlx_layer(mlx_layer: Any) -> "QuantizedWeights":
+    def from_mlx_layer(
+        mlx_layer: Any, use_simdgroup_matmul: bool = False
+    ) -> "QuantizedWeights":
         return QuantizedWeights(
             scales=mlx_layer.scales,
             biases=mlx_layer.biases,
             group_size=mlx_layer.group_size,
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,
+            use_simdgroup_matmul=use_simdgroup_matmul,
         )
 
 
@@ -47,7 +52,17 @@ def quantized_matmul(
     a: mx.array,
     b: mx.array,
     transpose_b: bool = False,
-    use_simdgroup: bool = True,
+    use_simdgroup: bool = False,
+) -> mx.array:
+    pass
+
+
+def dequantize_weights(
+    weight: mx.array,
+    scales: mx.array,
+    biases: mx.array | None,
+    group_size: int,
+    bits: int,
 ) -> mx.array:
     pass
 

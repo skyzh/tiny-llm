@@ -211,3 +211,31 @@ def test_task_3_incremental_decode_matches_week2_with_paged_attention():
             rtol=0.1,
             atol=1.0,
         )
+
+
+def test_week3_flash_prefill_matches_paged_prefill():
+    mlx_model = _fake_qwen3_mlx_model()
+    paged_model = Qwen3ModelWeek3(mlx_model, page_size=4)
+    flash_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_flash_attn=True)
+    inputs = mx.array([[1, 5, 7, 3, 9, 11, 4, 2, 8]], dtype=mx.int32)
+
+    paged_out = paged_model(inputs, 0, paged_model.create_kv_cache())
+    flash_out = flash_model(inputs, 0, flash_model.create_kv_cache())
+    paged_out = paged_out - mx.logsumexp(paged_out, axis=-1, keepdims=True)
+    flash_out = flash_out - mx.logsumexp(flash_out, axis=-1, keepdims=True)
+    assert_allclose(
+        flash_out,
+        paged_out,
+        precision=mx.bfloat16,
+        rtol=0.1,
+        atol=1.0,
+    )
+
+
+def test_week3_default_does_not_require_the_later_performance_lab():
+    model = Qwen3ModelWeek3(_fake_qwen3_mlx_model())
+    assert not model.embedding.use_custom_kernel
+    assert not model.embedding.weight.use_simdgroup_matmul
+    assert all(
+        not layer.self_attn.wq.use_simdgroup_matmul for layer in model.layers_inner
+    )

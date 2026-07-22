@@ -172,6 +172,7 @@ def main() -> None:
                 prefill_x,
                 prefill_weights.weight,
                 True,
+                use_simdgroup=True,
             ),
             args.warmup,
             args.iterations,

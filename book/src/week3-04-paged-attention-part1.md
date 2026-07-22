@@ -279,6 +279,16 @@ This gives us a correctness check before we change the attention path itself.
 
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
 
+## What Paging Buys on a Mac
+
+Apple silicon's unified memory removes a CPU-to-GPU copy boundary, but it does
+not remove allocation, fragmentation, or copying inside the GPU-visible heap.
+Fixed-size pages still let a server reuse freed capacity, grow requests without
+reserving their maximum sequence length, and batch requests with different
+context lengths. These are capacity and lifecycle wins. They should be measured
+with live-request count, allocated bytes, fragmentation, and scheduler
+throughput—not inferred from one request's token latency.
+
 ```bash
 pdm run test --week 3 --day 4
 ```

@@ -78,8 +78,9 @@ agent only in a disposable exercise workspace. A production agent would need a
 container, virtual machine, or similarly strong isolation boundary.
 
 The week then extends that loop with retrieval-augmented generation and a
-serving-oriented tool API. These application layers consume the Week 3 engine;
-they do not change the model kernels.
+serving-oriented tool API. The WIP milestone is to move these application
+layers onto the Week 3 engine without changing the model kernels; the initial
+demo still calls the model directly.
 
 ## Seven-Day Plan
 

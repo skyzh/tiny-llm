@@ -1,12 +1,17 @@
-"""Week 2 Day 7 end-to-end optimized model tests."""
+"""Week 3 performance-lab tests."""
 
+import importlib
+import inspect
 import mlx.core as mx
 import pytest
 
 from .tiny_llm_base import (
+    QuantizedEmbedding,
+    QuantizedWeights,
     Qwen3ModelWeek2,
     Qwen3ModelWeek3,
-    TinyKvFullCache,
+    quantized_matmul,
+    quantized_matmul_vanilla,
 )
 from .utils import (
     assert_allclose,
@@ -15,6 +20,71 @@ from .utils import (
     qwen3_4b_model_exists,
 )
 from mlx_lm import load
+
+
+def test_week2_model_does_not_depend_on_week3_flash_attention():
+    module = importlib.import_module(Qwen3ModelWeek2.__module__)
+    assert "flash_attention" not in inspect.getsource(module)
+
+
+def test_performance_lab_simdgroup_matmul_matches_vanilla_gpu():
+    with mx.stream(mx.gpu):
+        inputs = mx.random.normal((128, 256)).astype(mx.bfloat16)
+        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        tiled = quantized_matmul(
+            scales,
+            biases,
+            128,
+            4,
+            inputs,
+            packed,
+            transpose_b=True,
+            use_simdgroup=True,
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, inputs, packed, transpose_b=True
+        )
+        assert_allclose(tiled, vanilla, mx.bfloat16, atol=1.0, rtol=2e-2)
+
+
+def test_performance_lab_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
+    """A non-multiple-of-eight prefill must not accumulate in bfloat16."""
+    with mx.stream(mx.gpu):
+        inputs = mx.random.normal((10, 256)).astype(mx.bfloat16)
+        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        tiled = quantized_matmul(
+            scales,
+            biases,
+            128,
+            4,
+            inputs,
+            packed,
+            transpose_b=True,
+            use_simdgroup=True,
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, inputs, packed, transpose_b=True
+        )
+        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
+
+
+def test_performance_lab_custom_embedding_matches_readable_path():
+    weight = mx.random.normal((17, 256)).astype(mx.bfloat16)
+    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+    quantized = QuantizedWeights(scales, biases, 128, 4, packed)
+    readable = QuantizedEmbedding(17, 256, quantized)
+    custom = QuantizedEmbedding(17, 256, quantized, use_custom_kernel=True)
+    indices = mx.array([[1, 4, 9]], dtype=mx.int32)
+    assert_allclose(
+        custom(indices),
+        readable(indices),
+        mx.bfloat16,
+        atol=2e-2,
+        rtol=2e-2,
+    )
+
 
 # TODO: task 1 tests
 
@@ -40,9 +110,12 @@ def test_utils_qwen3_1_7b():
 
 def helper_test_task_3(model_name: str, iters: int = 10):
     mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model)
+    model = Qwen3ModelWeek3(mlx_model, enable_performance_lab=True)
+    assert model.embedding.use_custom_kernel
+    assert model.embedding.weight.use_simdgroup_matmul
+    assert all(layer.self_attn.wq.use_simdgroup_matmul for layer in model.layers_inner)
     for iteration in range(iters):
-        cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
+        cache = model.create_kv_cache()
         input = (mx.arange(10, dtype=mx.int32) + iteration * 10).reshape(
             1, 10
         ) % tokenizer.vocab_size
@@ -80,11 +153,11 @@ def helper_test_task_4(
     iters: int = 1,
 ):
     mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model)
+    model = Qwen3ModelWeek3(mlx_model, enable_performance_lab=True)
     for _ in range(iters):
         inputs = mx.random.randint(0, tokenizer.vocab_size, (1, seq_len))
         ref_outputs = mlx_model(inputs)
-        decode_cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
+        decode_cache = model.create_kv_cache()
         for offset in range(seq_len):
             user_out = model(
                 inputs=inputs[:, offset : offset + 1],

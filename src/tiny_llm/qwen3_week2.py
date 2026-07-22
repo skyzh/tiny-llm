@@ -27,7 +27,6 @@ class Qwen3MultiHeadAttention:
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
-        use_flash_attention: bool = False,
     ):
         pass
 
@@ -78,7 +77,6 @@ class Qwen3TransformerBlock:
         w_post_attention_layernorm: mx.array,
         max_seq_len: int = 32768,
         theta: int = 1000000,
-        use_flash_attention: bool = False,
     ):
         pass
 
@@ -93,11 +91,7 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
-    def __init__(
-        self,
-        mlx_model: Any,
-        enable_flash_attn: bool = False,
-    ):
+    def __init__(self, mlx_model: Any):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
 

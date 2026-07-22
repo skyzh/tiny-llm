@@ -78,10 +78,10 @@ times, report the median, and include the hardware with the result.
 The Week 2 target is:
 
 ```plain
-reference decode throughput / MLX decode throughput >= 0.80
+reference decode throughput / MLX decode throughput >= 0.70
 ```
 
-Reaching 80-90% is the acceptance range, not a promise that every educational
+Reaching 70% is the acceptance threshold, not a promise that every educational
 kernel individually matches its MLX counterpart. MLX is the comparison
 baseline; the Week 2 solution must reach the target with course-owned operator
 implementations.

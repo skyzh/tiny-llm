@@ -1,4 +1,4 @@
-# 🚧 Week 3 Day 7 (Optional): Speculative Decoding
+# 🚧 Week 3 Day 8 (Optional): Speculative Decoding
 
 > 🚧 This optional chapter remains a work in progress.
 

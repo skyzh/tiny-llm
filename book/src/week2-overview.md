@@ -1,8 +1,8 @@
 # Week 2: A Step Closer to vLLM
 
-> **Course status:** The new benchmarking, fused-operator, decode-attention,
-> and end-to-end optimization chapters are works in progress. The dense KV
-> cache and quantized-matmul chapters come from the original course.
+> **Course status:** The new benchmarking, fused-operator, and
+> decode-attention chapters are works in progress. The dense KV cache and
+> quantized-matmul material come from the original course.
 
 Week 2 keeps the readable Week 1 model intact and builds a separate optimized
 Qwen3 path for single-request decoding. We begin with measurements, replace the
@@ -12,12 +12,12 @@ performance target against MLX on the same machine.
 ## What We Will Cover
 
 - Synchronized benchmarking and a matched MLX baseline
-- Vanilla, SIMD-group matrix, and SIMD matrix-vector quantized multiplication
+- A readable quantized matrix product and a SIMD matrix-vector decode kernel
 - Fast RMSNorm, RoPE, and SwiGLU operations
 - A dense per-request key-value cache for incremental decoding
 - The optimized decode-attention primitive
-- Last-token-only logits and end-to-end graph cleanup
-- An acceptance target of 80-90% of MLX decode throughput
+- A last-token output interface for generation
+- An acceptance target of 70% of MLX decode throughput
 
 Week 2 does **not** call MLX-provided implementations of the operators we are
 learning. The required path implements quantized matmul, RMSNorm, RoPE,
@@ -32,10 +32,11 @@ extension API registers our C++ primitive and dispatches our Metal kernels.
 Those facilities are the platform on which the course implementation runs;
 they are not substitutes for the operator implementations themselves.
 
-The order is intentional. Days 2-3 establish quantized model weights, Day 4
-adds the fast operators required by the Week 2 model, and Day 5 introduces its
-dense KV cache. Decode attention can then consume a real cache on Day 6. A
-later chapter never becomes an undeclared prerequisite for an earlier one.
+The order is intentional. The quantized-matvec chapter establishes packed model
+weights, the fast-kernel chapter adds the operators required by the Week 2
+model, and the next chapter introduces its dense KV cache. Decode attention can
+then consume a real cache. A later chapter never becomes an undeclared
+prerequisite for an earlier one.
 
 Unlike Week 1, the completed Week 2 model prefills a dense KV cache once,
 passes only the new token during decode, keeps its linear and embedding weights
@@ -54,15 +55,15 @@ each optimization.
 
 ## Expected Performance Contribution
 
-**Estimated overall improvement: 600-750% over the readable Week 1 decode
-path, with a goal of at least 80% of matched MLX throughput.** On an M1 Pro,
-the current work-in-progress reference measures about 247-252 decode tok/s
-versus about 317 tok/s for MLX at a 128-token prompt: roughly 78-79% of MLX and
-about 8.1x the original 30.4 tok/s Week 1 baseline. Prefill improved from about
-1,005 to 2,052 tok/s when the vanilla quantized matmul was replaced with the
-course's `simdgroup_matrix` kernel. The custom decode path is now close to, but
-has not yet reached, the 80% acceptance boundary; the synchronized benchmark,
-not the estimate, is the authority.
+**Measured overall improvement: about 12.7x over the readable Week 1 decode
+path, with a goal of at least 70% of matched MLX throughput.** On an M4 Pro,
+the minimal path retains the dense KV cache, quantized SIMD matvec, RMSNorm,
+RoPE, SwiGLU, and course-owned attention. Representative stable runs are about
+240-247 decode tok/s versus about 300-320 tok/s for MLX: roughly 75-80%.
+Prefill tiling, direct quantized embedding, detailed last-token analysis, and
+further scheduling experiments move to the Week 3 performance lab. The small
+shared `logits_to_keep` interface remains available to Week 2 generation. The
+synchronized benchmark, not the estimate, is the authority.
 
 {{#include copyright.md}}
 

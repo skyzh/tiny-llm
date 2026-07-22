@@ -28,17 +28,19 @@ class QuantizedEmbedding:
         vocab_size: int,
         embedding_dim: int,
         weight: QuantizedWeights,
+        use_custom_kernel: bool = False,
     ):
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
         self.weight = weight
+        self.use_custom_kernel = use_custom_kernel
 
     def __call__(self, x: mx.array) -> mx.array:
-        if self.weight.biases is None:
+        if not self.use_custom_kernel or self.weight.biases is None:
             return dequantize_weights(
                 self.weight.weight[x],
                 self.weight.scales[x],
-                None,
+                None if self.weight.biases is None else self.weight.biases[x],
                 self.weight.group_size,
                 self.weight.bits,
             )

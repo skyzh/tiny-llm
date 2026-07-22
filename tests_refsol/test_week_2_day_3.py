@@ -69,42 +69,13 @@ def test_task_3_quantized_matmul_complex_f16_gpu():
     quantized_matmul_helper(mx.gpu, mx.float16, False)
 
 
-def test_task_3_simdgroup_matmul_matches_vanilla_gpu():
-    with mx.stream(mx.gpu):
-        input = mx.random.normal((128, 256)).astype(mx.bfloat16)
-        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales, biases, 128, 4, input, packed, transpose_b=True
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, input, packed, transpose_b=True
-        )
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=1.0, rtol=2e-2)
-
-
-def test_task_3_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
-    """A non-multiple-of-eight prefill must not accumulate in bfloat16."""
-    with mx.stream(mx.gpu):
-        input = mx.random.normal((10, 256)).astype(mx.bfloat16)
-        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales, biases, 128, 4, input, packed, transpose_b=True
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, input, packed, transpose_b=True
-        )
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
-
-
 def test_task_3_optimized_matvec_matches_vanilla_gpu():
     """The scalar baseline must remain callable for a decode-shaped input."""
     with mx.stream(mx.gpu):
         input = mx.random.normal((1, 256)).astype(mx.bfloat16)
         weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
         packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        optimized = quantized_matmul(
+        optimized = quantized_matvec_custom(
             scales, biases, 128, 4, input, packed, transpose_b=True
         )
         vanilla = quantized_matmul_vanilla(

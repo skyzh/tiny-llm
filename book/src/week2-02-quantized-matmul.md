@@ -1,4 +1,4 @@
-# Week 2 Days 2-3: Quantized Matmul
+# Week 2: Quantized Matvec
 
 In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and
@@ -261,7 +261,9 @@ wrapper with two call patterns:
   weights, scales, and biases. Unpack each `uint32` with shifts and masks,
   repeat each group's scale and bias across its 128 values, and compute
   `q * scale + bias` with basic `mlx.core` array operations. Do not call
-  `mx.dequantize`.
+  `mx.dequantize`. Put this readable unpacking logic in
+  `dequantize_weights(...)` so the embedding and its direct tests share one
+  explicit implementation.
 - `embedding.as_linear(h)` is the tied output projection. Implement this with
   `quantized_linear(h, embedding_weight)` so it uses your quantized matmul path
   instead of materializing the full `vocab_size x hidden_size` table. This path
@@ -325,14 +327,12 @@ Write the Metal kernels and connect `eval_gpu` to them. The Python
 `quantized_matmul` wrapper always dispatches this course-owned primitive on
 GPU; the required path never routes through `mx.quantized_matmul`.
 
-Do this in three measured stages. They expose the same math but schedule
+Do this in two measured stages. They expose the same math but schedule
 different shapes differently:
 
 1. **Vanilla matmul:** one Metal thread computes one output element. This is
    the direct GPU translation of the CPU loop and the correctness baseline.
-2. **SIMD-group matmul:** for prefill, one SIMD group computes an 8×8 output
-   tile with `simdgroup_matrix` multiply-accumulate instructions.
-3. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
+2. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
    activation row and calculate several output columns together.
 
 Keep the vanilla function callable as `quantized_matmul_vanilla`. An
@@ -347,36 +347,15 @@ Each thread walks all `N` input values, unpacks eight int4 weights from each
 float32. This kernel repeats activation loads and does not share work, but its
 control flow mirrors the equation and is a useful debugging oracle.
 
-### Stage 2: `simdgroup_matrix` Matmul
+### Prefill Tiling Moves to Week 3
 
-Prefill has many activation rows, so it can use the GPU's 8×8 SIMD matrix
-fragments. Each of the 32 lanes owns two elements of a fragment. For every
-eight-wide reduction tile:
+Prefill has many activation rows and benefits from a different matrix-matrix
+schedule. Week 2 keeps the vanilla kernel for that shape so its required path
+stays focused on decode. The optional Week 3 performance lab adds 8×8
+`simdgroup_matrix` tiles and studies reuse, barriers, register pressure, and
+threadgroup scheduling.
 
-- load an 8×8 activation fragment;
-- unpack and dequantize an 8×8 weight fragment directly from the transposed
-  `K × N` packed layout;
-- issue `simdgroup_multiply_accumulate`;
-- retain the output fragment in registers until the reduction finishes.
-
-Keep the activation and dequantized-weight fragments in float16 or bfloat16,
-but use a float32 accumulator fragment. A 16-bit accumulator can pass an
-isolated loose-tolerance test while its error compounds visibly through every
-transformer layer. Cast only when storing the final output tile.
-
-The reference writes this scheduling and fragment mapping directly in the
-course Metal file. It learns the tiling idea from production matrix kernels,
-but does not instantiate an MLX Steel template or call an MLX matmul kernel.
-Eight independent SIMD groups share one threadgroup dispatch.
-
-This first tiled kernel deliberately stays small. A follow-up experiment made
-one threadgroup compute a 32×16 output block and copied shared A/B tiles through
-threadgroup memory. It reduced global reads but added two barriers for every
-eight reduction values. At the 128-token course workload it regressed prefill
-from about 2,052 to 1,848 tok/s. More reuse is not automatically faster when
-synchronization and a rigid tile reduce scheduling freedom.
-
-### Stage 3: SIMD Matvec
+### Stage 2: SIMD Matvec
 
 Decode normally has `M = 1`; an 8×8 matrix tile would leave most rows empty.
 Instead, one SIMD group reduces the input dimension and uses `simd_sum` to
@@ -419,22 +398,17 @@ the final run from 250.6 to 247.2 tok/s. Fewer threadgroups did not compensate
 for the larger 512-thread scheduling unit, so the retained kernel uses eight
 groups for both projection shapes.
 
-### Direct Quantized Embedding
+### Direct Quantized Embedding Moves to Week 3
 
-Embedding lookup is another quantized operation. A generic composition must
-gather packed rows, create shifts, unpack values, repeat scales and biases,
-cast, and combine several arrays. The reference adds a small Metal kernel that
-maps one thread to one requested embedding element and performs gather,
-unpack, and affine dequantization in one dispatch. It accepts both int32 input
-IDs and the uint32 IDs produced by sampling, avoiding a per-token cast node.
+Week 2 performs row lookup and dequantization with basic `mlx.core` array
+operations. The optional Week 3 performance lab fuses row gather, int4
+unpacking, and affine dequantization into one Metal dispatch.
 
 ### Kernel Requirements
 
-Implement all three kernel layouts in `quantized_matmul.metal`:
+Implement both required kernel layouts in `quantized_matmul.metal`:
 
 - First, implement the vanilla one-thread-per-output matrix grid.
-- For larger `M`, replace it with 8×8 `simdgroup_matrix` tiles while retaining
-  the vanilla entry point for tests and benchmarks.
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
 - The kernel should support both `half` and `bfloat16_t` inputs and outputs.
@@ -459,9 +433,8 @@ pattern:
 2. Load the quantized matmul kernel matching the output dtype from the Metal library.
 3. Bind the input and output buffers and the dimension constants (`M`, `N`,
    `K`). The buffer order must match the kernel signature.
-4. Select the matrix-vector layout for `M <= 8`; otherwise select the
-   SIMD-group matrix layout. Keep an explicit flag for dispatching the vanilla
-   path in direct comparisons.
+4. Select the matrix-vector layout for `M <= 8`; otherwise select the vanilla
+   matrix layout. Keep both paths explicit for direct comparisons.
    Calculate a SIMD-aligned thread-group configuration and tile output columns
    so packed input values and activations can be reused.
 5. Dispatch with `dispatchThreadgroups`.
@@ -473,9 +446,9 @@ pdm run build-ext
 pdm run test --week 2 --day 3 -- -k gpu
 ```
 
-The direct tests cover matvec at `M = 1` and `M = 8`, compare the SIMD-group
-matmul with vanilla matmul at `M = 128`, and compare both with an MLX oracle.
-The oracle checks the result; it is not the implementation under test.
+The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
+`M = 128`, and compare them with an MLX oracle. The oracle checks the result;
+it is not the implementation under test.
 
 ## Task 4: Model Integration
 
@@ -532,15 +505,9 @@ SIMD matvec improved the then-current end-to-end decode path by about 5.7%.
 Removing its activation barrier later added roughly another 3-4% on the fully
 course-owned path.
 
-For prefill, `simdgroup_matrix` was about 1.9x faster than the course's scalar
-quantized kernel on the M4 Pro and improved the earlier M1 Pro end-to-end
-checkpoint from about 1,005 to 2,052 tok/s. It was nevertheless slower than
-the M4 Pro's dense Week 1 matrix multiplication for this small model: keeping
-the weights packed reduced storage and decode traffic, but did not win this
-compute-dense shape. The direct embedding kernel was about 16% faster than a
-dense gather in the isolated M4 Pro run but improved end-to-end decode by only
-0.8%; an earlier M1 Pro comparison against the dequantization graph measured
-roughly 20%. Report the exact baseline. These percentages overlap with later
-chapters and must not be added together.
+Prefill tiling and direct quantized embedding are measured in the optional
+Week 3 performance lab. They are intentionally excluded from the minimal Week
+2 acceptance path. Percentages from later chapters overlap with this one and
+must not be added together.
 
 {{#include copyright.md}}

@@ -43,6 +43,7 @@ parser.add_argument("--batch-size", type=int, default=5)
 parser.add_argument("--prefill-step", type=int, default=128)
 parser.add_argument("--max-seq-len", type=int, default=512)
 parser.add_argument("--enable-flash-attn", action="store_true")
+parser.add_argument("--enable-performance-lab", action="store_true")
 parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
 
@@ -62,10 +63,13 @@ mlx_model, tokenizer = load(args.model)
 
 with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
     dispatch_kwargs = {}
-    if args.loader == "week2":
+    if args.loader == "week3":
         dispatch_kwargs["enable_flash_attn"] = args.enable_flash_attn
+        dispatch_kwargs["enable_performance_lab"] = args.enable_performance_lab
     elif args.enable_flash_attn:
-        print("--enable-flash-attn is only used by the week2 loader; ignoring it")
+        print("--enable-flash-attn belongs to Week 3; ignoring it")
+    elif args.enable_performance_lab:
+        print("--enable-performance-lab belongs to Week 3; ignoring it")
 
     print(
         f"Using {args.loader} loader with thinking={args.enable_thinking} for {args.model}"

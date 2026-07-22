@@ -14,7 +14,13 @@ class Embedding:
 
 
 class QuantizedEmbedding:
-    def __init__(self, vocab_size: int, embedding_dim: int, weight: QuantizedWeights):
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        weight: QuantizedWeights,
+        use_custom_kernel: bool = False,
+    ):
         pass
 
     def __call__(self, x: mx.array) -> mx.array:

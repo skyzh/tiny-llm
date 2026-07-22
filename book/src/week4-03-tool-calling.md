@@ -11,9 +11,10 @@ boundary as an API, not as free-form text:
 - return structured observations to the model;
 - stop on a final answer, a budget, or repeated failures.
 
-Serving an agent adds request state that lasts across many model calls. Reuse
-the Week 3 scheduler and cache abstractions, but keep durable agent state,
-conversation history, and model KV state separate. This makes retries and cache
-eviction explicit instead of coupling them to the tool executor.
+Serving an agent adds request state that lasts across many model calls. The
+target for this WIP chapter is to reuse the Week 3 scheduler and cache
+abstractions while keeping durable agent state, conversation history, and model
+KV state separate. This will make retries and cache eviction explicit instead
+of coupling them to the tool executor.
 
 {{#include copyright.md}}

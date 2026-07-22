@@ -11,21 +11,26 @@ class QuantizedWeights:
         group_size: int,
         bits: int,
         weight: mx.array,
+        use_simdgroup_matmul: bool = False,
     ):
         self.scales = scales
         self.biases = biases
         self.group_size = group_size
         self.bits = bits
         self.weight = weight
+        self.use_simdgroup_matmul = use_simdgroup_matmul
 
     @staticmethod
-    def from_mlx_layer(mlx_layer: Any) -> "QuantizedWeights":
+    def from_mlx_layer(
+        mlx_layer: Any, use_simdgroup_matmul: bool = False
+    ) -> "QuantizedWeights":
         return QuantizedWeights(
             scales=mlx_layer.scales,
             biases=mlx_layer.biases,
             group_size=mlx_layer.group_size,
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,
+            use_simdgroup_matmul=use_simdgroup_matmul,
         )
 
 
@@ -34,16 +39,37 @@ def quantized_linear(
     w: QuantizedWeights,
     bias: mx.array | None = None,
 ) -> mx.array:
+    rows = 1
+    for size in x.shape[:-1]:
+        rows *= size
+    operation = quantized_matvec_custom if rows <= 8 else quantized_matmul
+    kwargs = {}
+    if operation is quantized_matmul:
+        kwargs["use_simdgroup"] = w.use_simdgroup_matmul
     if bias is not None:
         return (
-            quantized_matmul(
-                w.scales, w.biases, w.group_size, w.bits, x, w.weight, True
+            operation(
+                w.scales,
+                w.biases,
+                w.group_size,
+                w.bits,
+                x,
+                w.weight,
+                True,
+                **kwargs,
             )
             + bias
         )
     else:
-        return quantized_matmul(
-            w.scales, w.biases, w.group_size, w.bits, x, w.weight, True
+        return operation(
+            w.scales,
+            w.biases,
+            w.group_size,
+            w.bits,
+            x,
+            w.weight,
+            True,
+            **kwargs,
         )
 
 
@@ -86,7 +112,7 @@ def quantized_matmul(
     a: mx.array,
     b: mx.array,
     transpose_b: bool = False,
-    use_simdgroup: bool = True,
+    use_simdgroup: bool = False,
 ) -> mx.array:
     *N, D = a.shape
     a = a.reshape(-1, D)

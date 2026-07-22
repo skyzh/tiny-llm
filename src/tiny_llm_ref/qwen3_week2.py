@@ -1,5 +1,4 @@
 import mlx.core as mx
-from .attention import flash_attention
 from typing import Any
 from .embedding import QuantizedEmbedding
 from .quantize import QuantizedWeights, quantized_linear
@@ -29,7 +28,6 @@ class Qwen3MultiHeadAttention:
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
-        use_flash_attention: bool = False,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -49,7 +47,6 @@ class Qwen3MultiHeadAttention:
         self.rope = FastRoPE(self.head_dim, max_seq_len, theta)
         self.q_norm = FastRMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
         self.k_norm = FastRMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
-        self.use_flash_attention = use_flash_attention
 
     def __call__(
         self,
@@ -82,15 +79,7 @@ class Qwen3MultiHeadAttention:
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        if self.use_flash_attention and L > 8:
-            x = flash_attention(
-                projection_q.astype(mx.float32),
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
-                scale=self.scale,
-                mask=mask,
-            ).astype(x.dtype)
-        elif L <= 8 and not isinstance(mask, mx.array):
+        if L <= 8:
             x = decode_attention_custom(
                 projection_q,
                 projection_k,
@@ -157,7 +146,6 @@ class Qwen3TransformerBlock:
         w_post_attention_layernorm: mx.array,
         max_seq_len: int = 32768,
         theta: int = 1000000,
-        use_flash_attention: bool = False,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
@@ -182,7 +170,6 @@ class Qwen3TransformerBlock:
             max_seq_len=max_seq_len,
             theta=theta,
             rms_norm_eps=rms_norm_eps,
-            use_flash_attention=use_flash_attention,
         )
 
     def __call__(
@@ -200,11 +187,7 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
-    def __init__(
-        self,
-        mlx_model: Any,
-        enable_flash_attn: bool = False,
-    ):
+    def __init__(self, mlx_model: Any):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size
@@ -263,7 +246,6 @@ class Qwen3ModelWeek2:
                 ].post_attention_layernorm.weight,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
-                use_flash_attention=enable_flash_attn,
             )
             self.layers_inner.append(layer)
         self.norm = FastRMSNorm(

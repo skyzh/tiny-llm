@@ -34,9 +34,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default="qwen3-0.6b")
     parser.add_argument("--solution", type=str, default="tiny_llm")
     parser.add_argument(
-        "--loader", type=str, default="week2", choices=["week1", "week2"]
+        "--loader",
+        type=str,
+        default="week2",
+        choices=["week1", "week2", "week3"],
     )
     parser.add_argument("--enable-flash-attn", action="store_true")
+    parser.add_argument("--enable-performance-lab", action="store_true")
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)
     parser.add_argument("--min-input-len", type=int, default=64)
@@ -191,9 +195,8 @@ def run_one_request_week1(
 def run_one_request_week2(
     model,
     request: BenchRequest,
-    kv_cache_cls,
 ) -> tuple[int, float, float]:
-    kv_cache = [kv_cache_cls() for _ in range(model.num_hidden_layers)]
+    kv_cache = model.create_kv_cache()
     context = mx.array(request.prompt_token_ids, dtype=mx.int32)
     offset = 0
 
@@ -388,7 +391,8 @@ def main() -> None:
     model_name = shortcut_name_to_full_name(args.model)
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
-        f"Model={model_name} FlashAttn={args.enable_flash_attn}"
+        f"Model={model_name} FlashAttn={args.enable_flash_attn} "
+        f"PerformanceLab={args.enable_performance_lab}"
     )
     mlx_model, tokenizer = load(model_name)
 
@@ -410,11 +414,19 @@ def main() -> None:
                     request,
                 )
         else:
+            dispatch_kwargs = {}
+            if args.loader == "week3":
+                dispatch_kwargs["enable_flash_attn"] = args.enable_flash_attn
+                dispatch_kwargs["enable_performance_lab"] = args.enable_performance_lab
+            elif args.enable_flash_attn:
+                print("--enable-flash-attn belongs to Week 3; ignoring it")
+            elif args.enable_performance_lab:
+                print("--enable-performance-lab belongs to Week 3; ignoring it")
             model = models.dispatch_model(
                 model_name,
                 mlx_model,
-                week=2,
-                enable_flash_attn=args.enable_flash_attn,
+                week=int(args.loader.removeprefix("week")),
+                **dispatch_kwargs,
             )
 
             if args.batch_decode:
@@ -438,7 +450,6 @@ def main() -> None:
                     return run_one_request_week2(
                         model,
                         request,
-                        kv_cache_cls,
                     )
 
         requests = build_requests(

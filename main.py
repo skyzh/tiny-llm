@@ -22,6 +22,7 @@ parser.add_argument("--sampler-top-p", type=float, default=None)
 parser.add_argument("--sampler-top-k", type=int, default=None)
 parser.add_argument("--enable-thinking", action="store_true")
 parser.add_argument("--enable-flash-attn", action="store_true")
+parser.add_argument("--enable-performance-lab", action="store_true")
 
 args = parser.parse_args()
 
@@ -71,36 +72,49 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         tiny_llm_model = mlx_model
     else:
         if args.loader == "week1":
+            if args.enable_flash_attn:
+                print("--enable-flash-attn belongs to Week 3; ignoring it")
+            if args.enable_performance_lab:
+                print("--enable-performance-lab belongs to Week 3; ignoring it")
             print(f"Using week1 loader for {args.model}")
             tiny_llm_model = models.dispatch_model(args.model, mlx_model, week=1)
         elif args.loader == "week2":
             print(
-                f"Using week2 loader with flash_attn={args.enable_flash_attn} thinking={args.enable_thinking} for {args.model}"
+                f"Using week2 loader with thinking={args.enable_thinking} for {args.model}"
             )
-            tiny_llm_model = models.dispatch_model(
-                args.model, mlx_model, week=2, enable_flash_attn=args.enable_flash_attn
-            )
+            if args.enable_flash_attn:
+                print("--enable-flash-attn belongs to Week 3; ignoring it")
+            if args.enable_performance_lab:
+                print("--enable-performance-lab belongs to Week 3; ignoring it")
+            tiny_llm_model = models.dispatch_model(args.model, mlx_model, week=2)
             if draft_mlx_model is not None:
                 print(f"Using draft model {args.draft_model}")
                 draft_tiny_llm_model = models.dispatch_model(
                     args.draft_model,
                     draft_mlx_model,
                     week=2,
-                    enable_flash_attn=args.enable_flash_attn,
                 )
             else:
                 draft_tiny_llm_model = None
         elif args.loader == "week3":
             print(
-                f"Using week3 loader with thinking={args.enable_thinking} for {args.model}"
+                f"Using week3 loader with flash_attn={args.enable_flash_attn} thinking={args.enable_thinking} for {args.model}"
             )
-            tiny_llm_model = models.dispatch_model(args.model, mlx_model, week=3)
+            tiny_llm_model = models.dispatch_model(
+                args.model,
+                mlx_model,
+                week=3,
+                enable_flash_attn=args.enable_flash_attn,
+                enable_performance_lab=args.enable_performance_lab,
+            )
             if draft_mlx_model is not None:
                 print(f"Using draft model {args.draft_model}")
                 draft_tiny_llm_model = models.dispatch_model(
                     args.draft_model,
                     draft_mlx_model,
                     week=3,
+                    enable_flash_attn=args.enable_flash_attn,
+                    enable_performance_lab=args.enable_performance_lab,
                 )
             else:
                 draft_tiny_llm_model = None

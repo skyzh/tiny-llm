@@ -265,6 +265,28 @@ Update request admission, slot reuse, and request removal so that:
 
 After this chapter, the serving stack has the right structure for a real high-throughput runtime: paging is no longer just a storage trick, but part of the execution model itself.
 
+## Performance Reality on Apple Silicon
+
+The current course kernel proves that attention can walk pages without a dense
+K/V repack, but it is not faster yet. On the same M4 Pro operator benchmark,
+representative timings were:
+
+| Batch / context | Dense course attention | Course paged attention | MLX attention |
+|---|---:|---:|---:|
+| 1 / 128 | 175 µs | 784 µs | 144 µs |
+| 1 / 512 | 217 µs | 694 µs | 157 µs |
+| 1 / 2048 | 315 µs | 2,100 µs | 204 µs |
+| 8 / 512 | 489 µs | 3,553 µs | 304 µs |
+| 8 / 2048 | 1,371 µs | 13,611 µs | 816 µs |
+
+The page-table loads and irregular access are real costs. Paged attention can
+improve a Mac serving system when it avoids repeated dense repacks, admits more
+concurrent requests, and reuses pages over many scheduling steps. To improve
+the kernel itself, group adjacent logical pages, coalesce K/V loads within a
+SIMD group, keep online-softmax state in registers, specialize the one-token
+decode case, and batch page-table metadata once per scheduler step. Measure
+aggregate request throughput and memory use as well as kernel latency.
+
 ```bash
 pdm run test --week 3 --day 5
 ```

@@ -1,12 +1,14 @@
 # Week 3: Build a Mini vLLM
 
 > **Course status:** Continuous batching, FlashAttention, chunked prefill,
-> paged attention, and MoE come from the original course. Speculative decoding
-> remains a work in progress.
+> paged attention, and MoE come from the original course. The performance lab
+> and speculative decoding remain works in progress.
 
 Week 3 takes the optimized single-request model from Week 2 and builds a serving
-engine around it. The optimized operator layer remains unchanged; this week is
-about multi-request cache ownership, scheduling, prefill, and runtime metadata.
+engine around it. The Week 2 operator interfaces remain intact; this week adds
+opt-in prefill kernels, multi-request cache ownership, scheduling, and runtime
+metadata. It also contains a performance lab for optimizations deliberately
+left out of the minimal Week 2 checkpoint.
 
 ## What We’ll Cover
 
@@ -14,7 +16,16 @@ about multi-request cache ownership, scheduling, prefill, and runtime metadata.
 - FlashAttention for prefill
 - Chunked prefill and scheduler fairness
 - Paged KV storage and page-walking attention
+- Optional prefill, embedding, and scheduling experiments
 - Optional MoE and speculative-decoding extensions
+
+On Apple silicon, FlashAttention and paged attention are not automatic latency
+wins. FlashAttention has the best opportunity at long prefill lengths, where
+avoiding an `L x S` intermediate can save substantial memory traffic. Paged
+attention primarily improves serving capacity, cache reuse, and batching; its
+page-table indirection can make a single request slower. This week measures
+those tradeoffs rather than assuming an algorithm with a production name is
+already production-fast.
 
 Week 4 owns application concerns such as RAG and tool calling. This separation
 keeps Week 3 focused on the reusable serving substrate.
