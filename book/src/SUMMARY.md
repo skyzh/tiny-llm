@@ -22,7 +22,14 @@
     - [Paged Attention, Part 1](./week3-01-paged-attention-part1.md)
     - [Paged Attention, Part 2](./week3-02-paged-attention-part2.md)
     - [Mixture of Experts](./week3-03-moe.md)
-- [Week 4: Coding Agent](./week4-overview.md)
+- [Week 4: Build a Coding Agent](./week4/overview.md)
+    - [Day 1: From Generation to an Agent Loop](./week4/day1-agent-loop.md)
+    - [Day 2: Tools and Structured Actions](./week4/day2-tools.md)
+    - [Day 3: Safe Editing and Validation](./week4/day3-safe-editing.md)
+    - [Day 4: Sessions and Resume](./week4/day4-sessions.md)
+    - [Day 5: Context and Compaction](./week4/day5-compaction.md)
+    - [Day 6: Control and Recovery](./week4/day6-control-recovery.md)
+    - [Day 7: Evaluation and Capstone](./week4/day7-evaluation.md)
 
 ---
 
