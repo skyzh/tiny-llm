@@ -5,8 +5,9 @@ from time import perf_counter
 
 import mlx.core as mx
 from mlx_lm import load
-from model_names import shortcut_name_to_full_name
 from tqdm.auto import tqdm
+
+from model_names import shortcut_name_to_full_name
 
 
 @dataclass
@@ -204,26 +205,30 @@ def run_one_request_week2(
     request: BenchRequest,
 ) -> tuple[int, float, float]:
     kv_cache = model.create_kv_cache()
-    context = mx.array(request.prompt_token_ids, dtype=mx.int32)
-    offset = 0
+    try:
+        context = mx.array(request.prompt_token_ids, dtype=mx.int32)
+        offset = 0
 
-    t0 = perf_counter()
-    token = sample_next_week2(model, context, offset, kv_cache)
-    mx.eval(token)
-    prefill_time = perf_counter() - t0
-    offset += context.size
-
-    generated_tokens = 1
-    decode_time = 0.0
-
-    for _ in range(request.max_new_tokens - 1):
-        t1 = perf_counter()
-        token = sample_next_week2(model, token, offset, kv_cache)
+        t0 = perf_counter()
+        token = sample_next_week2(model, context, offset, kv_cache)
         mx.eval(token)
-        decode_time += perf_counter() - t1
-        offset += 1
-        generated_tokens += 1
-    return generated_tokens, prefill_time, decode_time
+        prefill_time = perf_counter() - t0
+        offset += context.size
+
+        generated_tokens = 1
+        decode_time = 0.0
+
+        for _ in range(request.max_new_tokens - 1):
+            t1 = perf_counter()
+            token = sample_next_week2(model, token, offset, kv_cache)
+            mx.eval(token)
+            decode_time += perf_counter() - t1
+            offset += 1
+            generated_tokens += 1
+        return generated_tokens, prefill_time, decode_time
+    finally:
+        for layer_cache in kv_cache:
+            layer_cache.release()
 
 
 def run_one_request_mlx(
@@ -514,7 +519,9 @@ def main() -> None:
             progress.set_postfix(
                 {
                     "out_tok/s": f"{safe_div(total_generated_tokens, elapsed):.1f}",
-                    "decode_tok/s": f"{safe_div(total_decode_tokens, total_decode_time):.1f}",
+                    "decode_tok/s": (
+                        f"{safe_div(total_decode_tokens, total_decode_time):.1f}"
+                    ),
                 }
             )
         else:
@@ -529,7 +536,9 @@ def main() -> None:
                 progress.set_postfix(
                     {
                         "out_tok/s": f"{safe_div(total_generated_tokens, elapsed):.1f}",
-                        "decode_tok/s": f"{safe_div(total_decode_tokens, total_decode_time):.1f}",
+                        "decode_tok/s": (
+                            f"{safe_div(total_decode_tokens, total_decode_time):.1f}"
+                        ),
                     }
                 )
         total_time = perf_counter() - t0

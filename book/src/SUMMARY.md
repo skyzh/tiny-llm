@@ -29,6 +29,7 @@
     - [🚧 Optional: Performance Lab](./week3-performance-lab.md)
     - [🚧 Optional: Speculative Decoding](./week3-optional-speculative-decoding.md)
 - [🚧 Week 4: Build a Coding Agent](./week4-overview.md)
+- [🚧 Appendix: Performance by Chapter](./appendix-performance.md)
 
 ---
 

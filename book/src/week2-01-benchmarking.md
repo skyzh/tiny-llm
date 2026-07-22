@@ -23,8 +23,9 @@ prompt length from distorting the decode number.
 Both sides of the Week 2 comparison must use a KV cache: prefill the prompt
 once, then pass only the newly generated token on each decode step. Comparing a
 cached MLX baseline with a course model that recomputes the full prefix would
-measure two different algorithms and make the kernel target meaningless. Day 5
-implements the dense cache used by every later Week 2 benchmark.
+measure two different algorithms and make the kernel target meaningless. The
+KV Cache chapter (Chapter 2.4) implements the dense cache used by every later
+Week 2 benchmark.
 
 ## Synchronize Lazy Work
 

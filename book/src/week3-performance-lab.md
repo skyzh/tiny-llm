@@ -162,12 +162,17 @@ single-token causal flag was not measurable. Graph cleanup avoids work outside
 the transformer blocks, but small changes below the run-to-run noise floor
 must be reported as such.
 
-On that same M4 Pro, the performance-lab path based on Week 2 improved decode
-from about 19.4 tok/s for Week 1 to about 246 tok/s, or about **12.7x**. Its
-prefill measured about 2,042 tok/s versus about 3,318 for the dense Week 1
-model, because the educational quantized prefill kernel did not win this
-compute-dense shape. The stable matched MLX decode was about 320 tok/s, putting
-the dense course path at 76.8% of MLX on this machine.
+An earlier dense ablation based on the Week 2 path improved decode from about
+19.4 tok/s for Week 1 to about 246 tok/s, or about **12.7x**. Its prefill
+measured about 2,042 tok/s versus about 3,318 for the dense Week 1 model. That
+number isolates the lab kernels from Week 3 paging; it is not the output of the
+integrated `--loader week3` command above.
+
+On the completed paged stack, the matched command measured about 1,334 prefill
+tok/s and 37.8 decode tok/s without FlashAttention in one representative M4 Pro
+run. The paged-attention teaching kernel dominates decode there. Use the
+performance appendix's progression runner to compare both configurations with
+Week 1 and MLX on the same machine instead of combining their numbers.
 
 One-factor cached-decode ablations give the following attribution. Each row
 uses two models with the same loaded weights, alternates optimized and vanilla
