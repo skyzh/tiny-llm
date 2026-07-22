@@ -41,9 +41,11 @@ def test_utils_qwen3_1_7b():
 def helper_test_task_3(model_name: str, iters: int = 10):
     mlx_model, tokenizer = load(model_name)
     model = Qwen3ModelWeek2(mlx_model)
-    for _ in range(iters):
+    for iteration in range(iters):
         cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
-        input = mx.random.randint(low=0, high=tokenizer.vocab_size, shape=(1, 10))
+        input = (mx.arange(10, dtype=mx.int32) + iteration * 10).reshape(
+            1, 10
+        ) % tokenizer.vocab_size
         user_output = model(input, 0, cache)
         ref_output = mlx_model(input)
         user_output = user_output - mx.logsumexp(user_output, axis=-1, keepdims=True)

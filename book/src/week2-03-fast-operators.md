@@ -57,11 +57,12 @@ output[i] = input[i] * inverse_rms * weight[i]
 
 All 256 lanes then normalize and scale their strided elements. This fuses the
 reduction and output pass into one dispatch and avoids materializing the
-squared tensor. Instantiate the kernel for float32, float16, and bfloat16.
-For half-precision inputs, round the normalized value to the model dtype before
-applying the learned weight. That matches the readable operator's numerical
-boundary and prevents tiny per-layer differences from compounding in deeper
-models.
+squared tensor. Instantiate the kernel for float32, float16, and bfloat16. Keep
+the reduction, normalization, and weight multiplication in float, then cast the
+final result once. The readable Week 1 equation rounds once before applying the
+weight, so compare the two with a tolerance rather than expecting bit-identical
+results. The single final cast also tracks the MLX model more closely in the
+Qwen3-4B end-to-end correctness test.
 
 The C++ primitive validates shape and dtype, allocates the output through MLX,
 binds the buffers and scalar constants, allocates eight float partial sums, and
@@ -129,14 +130,13 @@ inside a timed iteration when measuring these lazy operations.
 
 ## Expected Performance Contribution
 
-**Estimated decode improvement: 5-15% after quantized matmul.** Each operator
-is small, but a Qwen3 decode token invokes it many times across all layers, so
-eliminating launches and intermediate memory traffic accumulates. In current
-isolated measurements, course RMSNorm is within about 2-9% of MLX's operator,
-RoPE within about 7-14%, and SwiGLU approximately equal or slightly faster.
-The earlier one-SIMD-group RMSNorm materially limited the full model; its
-256-thread two-level reduction closed most of that gap. These isolated ratios
-are more stable than attributing an end-to-end percentage to three overlapping
-replacements, and the 5-15% range is not additive with other chapters.
+**Measured operator improvement: about 34-39% over the readable Week 1
+equations at decode shapes.** In repeated Qwen3-0.6B M4 Pro runs, RMSNorm was
+about 1.36x faster, RoPE about 1.34x, and SwiGLU about 1.39x. Replacing one
+component at a time across the complete cached-decode model improved throughput
+by 32.9%, 27.2%, and 11.9%, respectively. Each decode token invokes these
+operators many times across all layers, so small per-call savings accumulate.
+The optimized operators were also close to MLX in the same isolated run. The
+three end-to-end percentages overlap and must not be added together.
 
 {{#include copyright.md}}

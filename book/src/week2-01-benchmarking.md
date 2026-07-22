@@ -40,6 +40,18 @@ elapsed = perf_counter() - start
 
 The isolated benchmarks in `benches/` use the same rule. Evaluate input setup
 before invoking the benchmark fixture so setup does not leak into the result.
+The Week 2 operator ladder compares the readable implementation, the optimized
+course implementation, and MLX at the selected model's real tensor shapes:
+
+```bash
+pdm run bench-week2-operators --model qwen3-0.6b --context 128
+```
+
+For the measurements quoted later in this week, the machine was an M4 Pro with
+a 20-core GPU and 64 GB of memory. Each operator used 20 warmup iterations and
+100 synchronized timed iterations in each of three fresh processes. The
+reported result is the median process-level speedup. The matched end-to-end
+commands used two complete warmups and three fresh measured runs.
 
 ## Record a Matched Baseline
 
@@ -76,7 +88,7 @@ implementations.
 
 ## Expected Performance Contribution
 
-**Estimated decode improvement: 0%.** Benchmarking does not make the model
+**Expected decode improvement: 0%.** Benchmarking does not make the model
 faster. It prevents us from claiming gains that came from unsynchronized work,
 different inputs, or machine noise, and gives every later percentage a common
 denominator.

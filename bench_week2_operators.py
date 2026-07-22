@@ -6,9 +6,13 @@ import mlx.core as mx
 from mlx_lm import load
 
 from model_names import shortcut_name_to_full_name
-from tiny_llm_ref.embedding import QuantizedEmbedding
+from tiny_llm_ref.basics import silu
+from tiny_llm_ref.embedding import Embedding, QuantizedEmbedding
+from tiny_llm_ref.layer_norm import RMSNorm
+from tiny_llm_ref.positional_encoding import RoPE
 from tiny_llm_ref.quantize import (
     QuantizedWeights,
+    dequantize_weights,
     quantized_linear,
     quantized_matmul,
     quantized_matmul_vanilla,
@@ -57,7 +61,7 @@ def report_matmul_progression(
 ) -> None:
     print(
         f"{name:<22} vanilla={vanilla_us:>9.1f} us  "
-        f"simdgroup={simdgroup_us:>9.1f} us  mlx={mlx_us:>9.1f} us  "
+        f"optimized={simdgroup_us:>9.1f} us  mlx={mlx_us:>9.1f} us  "
         f"speedup={vanilla_us / simdgroup_us:>5.2f}x"
     )
 
@@ -65,7 +69,9 @@ def report_matmul_progression(
 def main() -> None:
     args = parse_args()
     if args.context <= 0 or args.warmup < 0 or args.iterations <= 0:
-        raise ValueError("context and iterations must be positive; warmup cannot be negative")
+        raise ValueError(
+            "context and iterations must be positive; warmup cannot be negative"
+        )
 
     model, _ = load(shortcut_name_to_full_name(args.model))
     layer = model.model.layers[0]
@@ -82,9 +88,22 @@ def main() -> None:
     embedding = QuantizedEmbedding(
         model.args.vocab_size, hidden_size, embedding_weights
     )
+    dense_embedding = Embedding(
+        model.args.vocab_size,
+        hidden_size,
+        dequantize_weights(
+            embedding_weights.weight,
+            embedding_weights.scales,
+            embedding_weights.biases,
+            embedding_weights.group_size,
+            embedding_weights.bits,
+        ),
+    )
     token = mx.array([[42]], dtype=mx.int32)
-    report(
+    mx.eval(dense_embedding.weight)
+    report_matmul_progression(
         "quantized embedding",
+        benchmark(lambda: dense_embedding(token), args.warmup, args.iterations),
         benchmark(lambda: embedding(token), args.warmup, args.iterations),
         benchmark(
             lambda: model.model.embed_tokens(token),
@@ -124,7 +143,20 @@ def main() -> None:
             args.warmup,
             args.iterations,
         )
-        report(name, course_us, mlx_us)
+        vanilla_us = benchmark(
+            lambda x=x, weights=weights: quantized_matmul_vanilla(
+                weights.scales,
+                weights.biases,
+                weights.group_size,
+                weights.bits,
+                x,
+                weights.weight,
+                True,
+            ),
+            args.warmup,
+            args.iterations,
+        )
+        report_matmul_progression(name, vanilla_us, course_us, mlx_us)
 
     prefill_weights = QuantizedWeights.from_mlx_layer(layer.self_attn.q_proj)
     prefill_x = mx.random.normal((args.context, hidden_size)).astype(precision)
@@ -178,9 +210,15 @@ def main() -> None:
         layer.input_layernorm.weight,
         eps=model.args.rms_norm_eps,
     )
+    readable_rms = RMSNorm(
+        hidden_size,
+        layer.input_layernorm.weight,
+        eps=model.args.rms_norm_eps,
+    )
     mx.eval(x_norm)
-    report(
+    report_matmul_progression(
         "RMSNorm",
+        benchmark(lambda: readable_rms(x_norm), args.warmup, args.iterations),
         benchmark(lambda: rms(x_norm), args.warmup, args.iterations),
         benchmark(
             lambda: mx.fast.rms_norm(
@@ -193,9 +231,18 @@ def main() -> None:
 
     x_rope = mx.random.normal((1, 1, num_heads, head_dim)).astype(precision)
     rope = FastRoPE(head_dim, model.args.max_position_embeddings, model.args.rope_theta)
+    readable_rope = RoPE(
+        head_dim, model.args.max_position_embeddings, model.args.rope_theta
+    )
     mx.eval(x_rope)
-    report(
+    mx.eval(readable_rope.cos_freqs, readable_rope.sin_freqs)
+    report_matmul_progression(
         "RoPE",
+        benchmark(
+            lambda: readable_rope(x_rope, slice(17, 18)),
+            args.warmup,
+            args.iterations,
+        ),
         benchmark(lambda: rope(x_rope, 17), args.warmup, args.iterations),
         benchmark(
             lambda: mx.fast.rope(
@@ -214,8 +261,9 @@ def main() -> None:
     gate = mx.random.normal((1, 1, model.args.intermediate_size)).astype(precision)
     up = mx.random.normal(gate.shape).astype(precision)
     mx.eval(gate, up)
-    report(
+    report_matmul_progression(
         "SwiGLU",
+        benchmark(lambda: silu(gate) * up, args.warmup, args.iterations),
         benchmark(lambda: swiglu(gate, up), args.warmup, args.iterations),
         benchmark(
             lambda: gate * mx.sigmoid(gate) * up,
@@ -229,27 +277,29 @@ def main() -> None:
     value = mx.random.normal(key.shape).astype(precision)
     scale = head_dim**-0.5
     mx.eval(query, key, value)
-    report(
-        "SDPA (two matmuls)",
-        benchmark(
-            lambda: scaled_dot_product_attention(query, key, value, scale, None),
-            args.warmup,
-            args.iterations,
-        ),
-        benchmark(
-            lambda: mx.fast.scaled_dot_product_attention(
-                query, key, value, scale=scale, mask=None
-            ),
-            args.warmup,
-            args.iterations,
-        ),
+    readable_attention_us = benchmark(
+        lambda: scaled_dot_product_attention(query, key, value, scale, None),
+        args.warmup,
+        args.iterations,
     )
     custom_attention_us = benchmark(
         lambda: decode_attention_custom(query, key, value, scale, None),
         args.warmup,
         args.iterations,
     )
-    print(f"{'SDPA (online Metal)':<22} course={custom_attention_us:>9.1f} us")
+    mlx_attention_us = benchmark(
+        lambda: mx.fast.scaled_dot_product_attention(
+            query, key, value, scale=scale, mask=None
+        ),
+        args.warmup,
+        args.iterations,
+    )
+    report_matmul_progression(
+        "decode attention",
+        readable_attention_us,
+        custom_attention_us,
+        mlx_attention_us,
+    )
 
 
 if __name__ == "__main__":

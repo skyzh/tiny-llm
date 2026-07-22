@@ -146,7 +146,10 @@ def helper_test_task_3(
         ]
         # Start each request at a staggered token index.
         staggered_start = [seq_len * i // requests for i in range(requests)]
-        inputs = mx.random.randint(0, tokenizer.vocab_size, (requests, seq_len))
+        inputs = (
+            mx.arange(requests * seq_len, dtype=mx.int32).reshape(requests, seq_len)
+            % tokenizer.vocab_size
+        )
         ref_outputs = mlx_model(inputs)
         for offset in range(seq_len + staggered_start[-1]):
             seq_idx = [offset - start for start in staggered_start]

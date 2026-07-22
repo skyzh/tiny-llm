@@ -123,13 +123,17 @@ online softmax changes the floating-point reduction order.
 
 ## Expected Performance Contribution
 
-**Estimated decode change: -5% to +5% at short context; longer context remains
-a measurement exercise.** Quantized weight reads dominate short-context
-decode. On the current 128-token benchmark, the fully custom kernel is several
-tok/s slower end to end than the readable two-matmul ablation even though their
-isolated latency is close. It is still the required Week 2 path because it owns
-the attention implementation rather than delegating matmul to MLX. Do not claim
-the theoretical memory saving as a speedup: report context length, SIMD-group
-schedule, and measured throughput honestly.
+**Measured operator change: about +7% at context 128, -5% at context 512, and
+-28% at context 2,048 versus the readable bfloat16 composition on an M4 Pro.**
+Against Week 1's integrated float32 attention path, the same kernel was about
+18% faster at 128, 11% faster at 512, and indistinguishable from noise at
+2,048. Quantized weight reads dominate short-context end-to-end decode, and the
+fixed 32-group schedule does not scale monotonically. The custom kernel remains
+the required path because it owns the attention implementation rather than
+delegating matmul to MLX. Do not claim the theoretical memory saving as a
+speedup: report dtype, context length, schedule, and measured throughput.
+In the complete context-128 model, replacing only the readable composition
+with the custom kernel changed decode throughput by just +0.2%, which is below
+the practical noise floor.
 
 {{#include copyright.md}}

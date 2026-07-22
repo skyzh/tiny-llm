@@ -247,7 +247,10 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
 
     // Make a kernel from this metal library
     auto library = d.get_library("tiny_llm_ext_ref");
-    const bool use_matvec = a.shape()[0] <= 8;
+    // The readable scalar kernel must remain independently benchmarkable at
+    // every shape. Only select the optimized matvec when the caller requested
+    // the optimized path.
+    const bool use_matvec = use_simdgroup_ && a.shape()[0] <= 8;
     const char *kernel_name;
     if (use_matvec) {
         const bool use_wide_matvec = b.shape()[0] >= 8192;

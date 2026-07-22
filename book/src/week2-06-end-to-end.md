@@ -89,10 +89,38 @@ whether their occupancy, barrier, register, and layout tradeoffs helped.
 
 ## Expected Performance Contribution
 
-**Estimated decode improvement: 5-15% beyond the operator kernels, with an
-overall goal of at least 80% of matched MLX throughput.** Last-token logits and
-graph cleanup avoid work outside the transformer blocks. Report the final
-measured ratio; do not present this estimate as a substitute for it.
+**Measured prefill improvement from last-token logits: about 40x for the output
+projection alone and 1.29x for the complete model on Qwen3-0.6B on an M4 Pro.**
+Normalizing RoPE offsets once saved about 2% per isolated call. Omitting the
+single-token causal flag was not measurable. Graph cleanup avoids work outside
+the transformer blocks, but small changes below the run-to-run noise floor
+must be reported as such.
+
+On that same M4 Pro, the complete Week 2 path improved decode from about 19.4
+tok/s for Week 1 to about 246 tok/s, or about **12.7x**. Prefill moved in the
+other direction, from about 3,318 to 2,042 tok/s, because the dense Week 1
+matrix multiplication was faster than the educational quantized prefill
+kernel for this model and GPU. The stable matched MLX decode was about 320
+tok/s, putting the course path at 76.8% of MLX on this machine. Reaching 80%
+requires about another 4.2% course throughput.
+
+One-factor cached-decode ablations give the following attribution. Each row
+uses two models with the same loaded weights, alternates optimized and vanilla
+runs, and changes only the named component:
+
+| Replacement | Vanilla tok/s | Optimized tok/s | Throughput gain |
+|---|---:|---:|---:|
+| Quantized embedding gather | 243.87 | 245.75 | +0.8% |
+| RMSNorm Metal kernel | 185.28 | 246.16 | +32.9% |
+| RoPE Metal kernel | 193.38 | 245.92 | +27.2% |
+| Fused SwiGLU | 219.14 | 245.29 | +11.9% |
+| Online decode attention | 245.17 | 245.73 | +0.2% |
+
+These rows are reverse ablations from the finished model and are not additive.
+As a diagnostic only, temporarily replacing the course QMV with MLX improved
+throughput by 14.5%, replacing attention improved it by 9.8%, and replacing
+both reached about 309.7 tok/s. Those substitutions are not part of the solution;
+they identify the two course-owned kernels with the largest remaining ceiling.
 
 The current M1 Pro checkpoint uses Qwen3-0.6B-MLX-4bit, a 128-token prompt, 64
 timed decode tokens, and two warmups. Recent stable course-owned runs are about

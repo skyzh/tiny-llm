@@ -98,6 +98,21 @@ def test_task_3_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
         assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
+def test_task_3_optimized_matvec_matches_vanilla_gpu():
+    """The scalar baseline must remain callable for a decode-shaped input."""
+    with mx.stream(mx.gpu):
+        input = mx.random.normal((1, 256)).astype(mx.bfloat16)
+        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        optimized = quantized_matmul(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        assert_allclose(optimized, vanilla, mx.bfloat16, atol=0.5, rtol=2e-2)
+
+
 def quantized_matvec_custom_helper(num_rows: int):
     with mx.stream(mx.gpu):
         group_size = 128

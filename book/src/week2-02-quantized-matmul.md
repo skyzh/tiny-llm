@@ -523,17 +523,24 @@ pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 
 ## Expected Performance Contribution
 
-**Estimated decode improvement: 150-250% over a dequantized Week 1 model, plus
-about 5-10% from the specialized matvec schedule once weights are already
-quantized.** On the M1 Pro reference, the first two-column SIMD matvec improved
-the then-current end-to-end decode path by about 5.7%. Removing its activation
-barrier later added roughly another 3-4% on the fully course-owned path.
+**Measured decode-kernel improvement: about 1.4-1.9x for ordinary projections
+and about 10.5x for the vocabulary head over the scalar quantized kernel.** In
+a Qwen3-0.6B M4 Pro run, the Q/K/V/O projection speedups ranged from 1.39-1.65x,
+the gate/up/down projections from 1.86-1.89x, and the 151,936-row tied output
+head reached about 10.5x. On the earlier M1 Pro reference, the first two-column
+SIMD matvec improved the then-current end-to-end decode path by about 5.7%.
+Removing its activation barrier later added roughly another 3-4% on the fully
+course-owned path.
 
-For prefill, the measured vanilla-to-`simdgroup_matrix` replacement improved
-throughput from about 1,005 to 2,052 tok/s, or **about 104%**. The direct
-embedding kernel reduced its isolated latency by roughly 20% in a representative
-run but changed end-to-end decode by only about 1%, because projection weights
-remain the dominant traffic. These percentages overlap with later chapters and
-must not be added together.
+For prefill, `simdgroup_matrix` was about 1.9x faster than the course's scalar
+quantized kernel on the M4 Pro and improved the earlier M1 Pro end-to-end
+checkpoint from about 1,005 to 2,052 tok/s. It was nevertheless slower than
+the M4 Pro's dense Week 1 matrix multiplication for this small model: keeping
+the weights packed reduced storage and decode traffic, but did not win this
+compute-dense shape. The direct embedding kernel was about 16% faster than a
+dense gather in the isolated M4 Pro run but improved end-to-end decode by only
+0.8%; an earlier M1 Pro comparison against the dequantization graph measured
+roughly 20%. Report the exact baseline. These percentages overlap with later
+chapters and must not be added together.
 
 {{#include copyright.md}}
