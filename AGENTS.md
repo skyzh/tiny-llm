@@ -79,3 +79,11 @@ pdm run build-ext
 - Use `--` before pytest args (`-k`, `-q`, `--collect-only`, etc.).
 - `pdm run test --week X --day Y` auto-copies `tests_refsol/test_week_X_day_Y.py` into `tests/`.
 - Model-dependent tests (0.5B/1.5B/7B) skip when models are not downloaded locally.
+
+## GitHub CLI
+
+- The `gh` CLI is installed, authenticated, and expected to work in this
+  repository.
+- If a `gh` command fails because of sandbox or network restrictions, retry it
+  with the required authorization. Do not infer that GitHub or `gh` is
+  unavailable from a sandboxed failure.

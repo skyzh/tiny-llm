@@ -86,19 +86,17 @@ class Qwen3MultiHeadAttention:
         )
         if self.use_flash_attention:
             x = flash_attention(
-                projection_q.astype(mx.float32),
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
+                projection_q,
+                projection_k,
+                projection_v,
                 scale=self.scale,
                 mask=mask,
             ).astype(x.dtype)
         else:
-            if isinstance(mask, str) and mask == "causal":
-                mask = causal_mask(L, projection_k.shape[-2], mx.float32)
             x = scaled_dot_product_attention_grouped(
-                projection_q.astype(mx.float32),
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
+                projection_q,
+                projection_k,
+                projection_v,
                 scale=self.scale,
                 mask=mask,
             ).astype(x.dtype)

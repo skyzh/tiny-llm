@@ -1,13 +1,21 @@
 import pytest
 import time
 import mlx.core as mx
-from tiny_llm_ref import flash_attention
+from .tiny_llm_base import *
+from .utils import *
 
-from .utils import AVAILABLE_STREAMS, AVAILABLE_STREAMS_IDS, assert_allclose
 
-
-def attention_helper(stream: mx.Stream, H_q, H, L, E, S, BATCH, mask_mode: str):
-    precision = mx.float32
+def attention_helper(
+    stream: mx.Stream,
+    H_q,
+    H,
+    L,
+    E,
+    S,
+    BATCH,
+    mask_mode: str,
+    precision=mx.float32,
+):
     with mx.stream(stream):
         q_shape = (BATCH, H_q, L, E)
         kv_shape = (BATCH, H, S, E)
@@ -41,7 +49,12 @@ def attention_helper(stream: mx.Stream, H_q, H, L, E, S, BATCH, mask_mode: str):
                 mask=mask,
             )
             mx.eval(user_output)  # so that any error will be caught here
-            assert_allclose(user_output, reference_output, precision=mx.float16)
+            comparison_precision = (
+                mx.bfloat16 if precision == mx.bfloat16 else mx.float16
+            )
+            assert_allclose(
+                user_output, reference_output, precision=comparison_precision
+            )
 
 
 def time_flash_attention(
@@ -170,6 +183,16 @@ def test_task_3_flash_attention_gpu(mask_mode: str):
 @pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
 def test_task_3_flash_attention_gpu_large(mask_mode: str):
     attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, mask_mode)
+
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_3_flash_attention_gpu_d128_partial_tiles(mask_mode: str):
+    attention_helper(mx.gpu, 8, 2, 35, 128, 47, 1, mask_mode)
+
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_3_flash_attention_gpu_bf16_d128(mask_mode: str):
+    attention_helper(mx.gpu, 8, 2, 35, 128, 47, 1, mask_mode, precision=mx.bfloat16)
 
 
 def test_task_3_flash_attention_gpu_causal_mask_faster_than_all_zero_mask():

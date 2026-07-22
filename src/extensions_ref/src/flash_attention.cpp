@@ -9,17 +9,17 @@
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
-#include "mlx/backend/metal/kernels/steel/attn/params.h"
 #include "mlx/backend/metal/utils.h"
 #endif
 
 namespace tiny_llm_ext_ref {
 mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
-                          const float scale, const bool is_causal, const int num_kv_heads, const int num_heads,
+                          const float scale, const int mask_mode, const int num_kv_heads, const int num_heads,
                           mx::StreamOrDevice s) {
-    if (q.dtype() != mx::float32 || k.dtype() != mx::float32 || v.dtype() != mx::float32 ||
+    if ((q.dtype() != mx::float32 && q.dtype() != mx::bfloat16) || k.dtype() != q.dtype() || v.dtype() != q.dtype() ||
         mask.dtype() != mx::float32) {
-        throw std::runtime_error("flash_attention: all input arrays must be float32");
+        throw std::runtime_error(
+            "flash_attention: q, k, and v must have the same float32 or bfloat16 dtype; mask must be float32");
     }
     if (q.shape().size() != 3 || k.shape().size() != 3 || v.shape().size() != 3) {
         throw std::runtime_error("flash_attention: all input arrays must be 3D");
@@ -52,19 +52,19 @@ mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::arra
     if (q.shape()[0] / num_heads != k.shape()[0] / num_kv_heads) {
         throw std::runtime_error("flash_attention: number of heads mismatch");
     }
-    if (k.shape()[0] != v.shape()[0]) {
-        throw std::runtime_error("flash_attention: k and v batch/head dimensions must match");
-    }
     if (k.shape()[1] != v.shape()[1]) {
         throw std::runtime_error("flash_attention: k.shape[1] must be equal to v.shape[1]");
+    }
+    if (k.shape()[0] != v.shape()[0]) {
+        throw std::runtime_error("flash_attention: k and v batch/head dimensions must match");
     }
     if (mask_mode == 2 &&
         (mask.shape()[0] != q.shape()[0] || mask.shape()[1] != q.shape()[1] || mask.shape()[2] != k.shape()[1])) {
         throw std::runtime_error("flash_attention: mask must be broadcastable to q, k, v");
     }
 
-    return mx::array(q.shape(), mx::float32,
-                     std::make_shared<FlashAttention>(to_stream(s), scale, is_causal, num_kv_heads, num_heads),
+    return mx::array(q.shape(), q.dtype(),
+                     std::make_shared<FlashAttention>(to_stream(s), scale, mask_mode, num_kv_heads, num_heads),
                      {q, k, v, mask});
 }
 
@@ -76,7 +76,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
     auto &out = outputs[0];
 
     if (out.dtype() != mx::float32) {
-        throw std::runtime_error("flash_attention: output dtype must be float32");
+        throw std::runtime_error("flash_attention: the CPU path only supports float32");
     }
 
     out.set_data(mx::allocator::malloc(out.nbytes()));
@@ -102,7 +102,7 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
     encoder.dispatch([out_ptr = out.data<float>(), out_shape = out.shape(), q = mx::array::unsafe_weak_copy(q),
                       k = mx::array::unsafe_weak_copy(k), v = mx::array::unsafe_weak_copy(v),
                       mask = mx::array::unsafe_weak_copy(mask), num_heads = num_heads_, num_kv_heads = num_kv_heads_,
-                      scale = scale_, is_causal = is_causal_]() {
+                      scale = scale_, mask_mode = mask_mode_]() {
         const int64_t N = q.shape()[0];
         const int64_t L = q.shape()[1];
         const int64_t S = k.shape()[1];
@@ -141,8 +141,9 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                 for (int64_t j = 0; j < Tc; j++) {
                     int64_t row_max = i * Br + br_upper_bound - 1;
                     int64_t col_min = j * Bc;
-                    // Causal masking: if the entire block of K is masked out by causal mask, we can skip the computation for this block.
-                    if (is_causal && col_min > row_max + causal_offset) {
+                    // Causal masking: if the entire block of K is masked out by causal mask, we can skip the
+                    // computation for this block.
+                    if (mask_mode == 1 && col_min > row_max + causal_offset) {
                         continue;
                     }
                     int bc_upper_bound = std::min(S - j * Bc, Bc);
@@ -172,14 +173,12 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                     }
 
                     // Add mask and scale
-                    int64_t row_min = i * Br;
-                    int64_t col_max = j * Bc + bc_upper_bound - 1;
-                    bool block_all_valid = is_causal && (col_max <= row_min + causal_offset);
                     for (int64_t a = 0; a < br_upper_bound; a++) {
                         for (int64_t b = 0; b < bc_upper_bound; b++) {
                             s_i[a * Bc + b] *= scale;
-                            // If the block is all valid, we don't need to add mask because it's all zeros. Otherwise we need to add mask for each element.
-                            if (!block_all_valid) {
+                            if (mask_mode == 1 && j * Bc + b > i * Br + a + causal_offset) {
+                                s_i[a * Bc + b] = -std::numeric_limits<float>::infinity();
+                            } else if (mask_mode == 2) {
                                 int m_idx_1 = n;
                                 int m_idx_2 = i * Br + a;
                                 int m_idx_3 = j * Bc + b;
@@ -267,14 +266,13 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     const auto &mask = inputs[3];
     auto &out = outputs[0];
 
-    if (out.dtype() != mx::float32) {
-        throw std::runtime_error("flash_attention: output dtype must be float32");
-    }
-
     out.set_data(mx::allocator::malloc(out.nbytes()));
 
     auto &s = stream();
     auto &d = mx::metal::device(s.device);
+
+    auto library = d.get_library("tiny_llm_ext_ref");
+    auto &compute_encoder = d.get_command_encoder(s.index);
 
     if (!q.flags().row_contiguous) {
         throw std::runtime_error("flash_attention: q must be contiguous");
@@ -294,40 +292,53 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     const int S = k.shape()[1];
     const int E = q.shape()[2];
 
-    compute_encoder.set_bytes(static_cast<int>(is_causal_), 7);
-    compute_encoder.set_bytes(N, 8);
-    compute_encoder.set_bytes(L, 9);
-    compute_encoder.set_bytes(S, 10);
-    compute_encoder.set_bytes(E, 11);
-
-    // Make sure the data type matches with the metal kernel: otherwise you'll get flaky issues and stuck :(
-    compute_encoder.set_bytes(num_kv_heads_, 12);
-    compute_encoder.set_bytes(num_heads_, 13);
-    compute_encoder.set_bytes(scale_, 14);
-
-    size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
-    size_t simd_width = kernel->threadExecutionWidth();
-
-    const int Br = 16;
-    const int Bc = 32;
-    if (simd_width * Br > tgp_size) {
-        throw std::runtime_error("flash_attention: threadgroup exceeds the kernel thread limit");
-    }
-    if (Bc != simd_width) {
-        throw std::runtime_error("flash_attention: the K/V tile width must match the SIMD width");
+    if (E <= 0 || E > 128) {
+        throw std::runtime_error("flash_attention: E must be in the range [1, 128]");
     }
 
-    const int Tr = (L + Br - 1) / Br;
-    const int Tc = (S + Bc - 1) / Bc;
+    if (E == 128 && q.dtype() == mx::bfloat16) {
+        auto kernel = d.get_kernel("flash_attention_mma_bf16_d128", library);
+        compute_encoder.set_compute_pipeline_state(kernel);
+        compute_encoder.set_input_array(q, 0);
+        compute_encoder.set_input_array(k, 1);
+        compute_encoder.set_input_array(v, 2);
+        compute_encoder.set_input_array(mask, 3);
+        compute_encoder.set_output_array(out, 4);
+        compute_encoder.set_bytes(mask_mode_, 5);
+        compute_encoder.set_bytes(N, 6);
+        compute_encoder.set_bytes(L, 7);
+        compute_encoder.set_bytes(S, 8);
+        compute_encoder.set_bytes(num_kv_heads_, 9);
+        compute_encoder.set_bytes(num_heads_, 10);
+        compute_encoder.set_bytes(scale_, 11);
 
-    compute_encoder.set_bytes(Br, 15);
-    compute_encoder.set_bytes(Bc, 16);
-    compute_encoder.set_bytes(Tr, 17);
-    compute_encoder.set_bytes(Tc, 18);
+        const int batch_size = N / num_heads_;
+        const int query_blocks = (L + 63) / 64;
+        compute_encoder.dispatch_threadgroups(MTL::Size(query_blocks, num_heads_, batch_size), MTL::Size(32, 8, 1));
+        return;
+    }
 
-    MTL::Size num_threadgroups = MTL::Size(N, Tr, 1);
-    MTL::Size num_threads_per_group = MTL::Size(simd_width, Br, 1);
+    if (q.dtype() != mx::float32) {
+        throw std::runtime_error("flash_attention: bfloat16 GPU inputs require E == 128");
+    }
 
-    compute_encoder.dispatch_threadgroups(num_threadgroups, num_threads_per_group);
+    auto kernel = d.get_kernel("flash_attention_scalar_f32", library);
+    compute_encoder.set_compute_pipeline_state(kernel);
+    compute_encoder.set_input_array(q, 0);
+    compute_encoder.set_input_array(k, 1);
+    compute_encoder.set_input_array(v, 2);
+    compute_encoder.set_input_array(mask, 3);
+    compute_encoder.set_output_array(out, 4);
+    compute_encoder.set_bytes(mask_mode_, 5);
+    compute_encoder.set_bytes(N, 6);
+    compute_encoder.set_bytes(L, 7);
+    compute_encoder.set_bytes(S, 8);
+    compute_encoder.set_bytes(E, 9);
+    compute_encoder.set_bytes(num_kv_heads_, 10);
+    compute_encoder.set_bytes(num_heads_, 11);
+    compute_encoder.set_bytes(scale_, 12);
+
+    const int query_blocks = (L + 15) / 16;
+    compute_encoder.dispatch_threadgroups(MTL::Size(N, query_blocks, 1), MTL::Size(32, 16, 1));
 }
 }  // namespace tiny_llm_ext_ref

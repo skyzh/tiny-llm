@@ -1,9 +1,10 @@
 # Week 2 Days 4-5: FlashAttention-2
 
-In this chapter, we will implement FlashAttention-2 for the Week 2 Qwen3
-serving pipeline. Its tiled algorithm avoids materializing the complete
-attention matrix, reducing memory traffic and improving throughput for long
-contexts.
+In this chapter, we will implement a small FlashAttention-style Metal kernel
+for the Week 2 Qwen3 serving pipeline. The goal is to learn the tiled,
+IO-aware algorithm and map both matrix multiplications to Metal's public
+`simdgroup_matrix` API. We will not reuse an MLX attention-kernel
+implementation.
 
 **📚 Readings**
 
@@ -11,52 +12,36 @@ contexts.
 - [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135)
 - [FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning](https://arxiv.org/abs/2307.08691)
 - [MLX Extension Development Guide](https://ml-explore.github.io/mlx/build/html/dev/extensions.html)
-- [MLX steel attention kernel (reference)](https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/steel/attn/kernels/steel_attention.h)
+- [Metal Shading Language Specification](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf)
+- [Metal Feature Set Tables](https://developer.apple.com/metal/feature-sets/)
 
 ## Why FlashAttention?
 
-The central observation behind FlashAttention is that attention is often
-**IO-bound**, not compute-bound.
-
-In the standard implementation, we compute:
+Standard attention computes:
 
 1. `S = QK^T`
 2. `P = softmax(S + mask)`
 3. `O = PV`
 
-This path materializes large `L x S` score and probability tensors in device
-memory. At long context lengths, writing and reading these intermediates can
-dominate runtime.
+This path materializes an `L x S` score tensor, and sometimes a separate
+probability tensor, in device memory. FlashAttention instead streams K/V tiles
+through on-chip memory and combines them with online softmax. Its auxiliary
+memory is linear rather than quadratic in sequence length.
 
-For example, if `L = S = 4096`:
+For Qwen3-4B, one BF16 score tensor at `L = S = 4096` occupies:
 
 ```plain
-One L x S matrix: 4096 x 4096 = 16,777,216 elements
-float32 storage: ~64 MB per matrix per head
-Scores + probabilities: ~128 MB temporary memory per head
+1 batch × 32 query heads × 4096 × 4096 × 2 bytes = 1 GiB
 ```
 
-This is about 128 MB of temporary storage per head before accounting for Q, K,
-V, or the output.
-
-### IO-Aware Exact Attention
-
-FlashAttention processes Q, K, and V in tiles and combines them with **online
-softmax** updates. Instead of storing the complete attention matrix in device
-memory, it keeps per-row running statistics (`m` and `l`) and a partial output
-(`o`) in faster on-chip storage.
-
-This gives three practical benefits:
-
-- **Exactness**: It computes standard softmax attention rather than an
-  approximation.
-- **Lower memory**: activation memory scales linearly with sequence length instead of quadratically.
-- **Higher throughput**: fewer device-memory accesses, which are often the real
-  bottleneck.
+Avoiding that allocation is useful on unified-memory Apple silicon too.
+However, lower memory use does not automatically mean lower latency. Two
+optimized matrix multiplications can beat a fused kernel whose inner matrix
+multiplications are poorly mapped to the GPU.
 
 ## Online Softmax Recap
 
-For one query row, split keys/values into tiles `j = 1..T`:
+For one query row, split keys and values into tiles `j = 1..T`:
 
 $$
 m^{(j)} = \max\left(m^{(j-1)}, \max(s^{(j)})\right)
@@ -76,314 +61,298 @@ $$
 o = \frac{o^{(T)}}{l^{(T)}}
 $$
 
-Both kernels in this chapter use this recurrence. The remaining work maps it to
-CPU loops and Metal threadgroups.
+The running maximum prevents overflow. The correction factor
+`exp(old_max - new_max)` rescales both the previous denominator and the
+previous output when a later tile contains a larger score.
 
-## Task 1: Implement `flash_attention` Wrapper
+## The Qwen3 Target
 
+The optimized course path is deliberately specialized instead of pretending
+one kernel is ideal for every model:
+
+```plain
+Qwen3-4B attention
+query heads: 32
+KV heads:     8
+head_dim:     128
+dtype:        bfloat16
 ```
+
+The supported dense Qwen3 models used by this course have `head_dim = 128`,
+including Qwen3-4B. Do not derive this value as `hidden_size / num_heads`:
+Qwen3 stores `head_dim` explicitly and its attention projection width can
+differ from `hidden_size`.
+
+## Task 1: Implement the Python Wrapper
+
+```plain
 src/tiny_llm/attention.py
 ```
 
-Implement `flash_attention(query, key, value, scale=None, mask=None)` as the
-Python wrapper for the `tiny_llm_ext` extension API.
-
-Follow the same shape convention as Week 1 and Week 2 attention:
+Implement `flash_attention(query, key, value, scale=None, mask=None)` using the
+same model-facing layout as the earlier attention chapter:
 
 ```plain
 query: B..., H_q, L, E
 key:   B..., H,   S, E
 value: B..., H,   S, E
-mask:  B..., H_q, L, S
 out:   B..., H_q, L, E
 ```
 
-When `scale` is `None`, compute `factor` with `mx.rsqrt`. Flatten the batch and
-head dimensions before calling C++, then restore the original layout on return.
-Make `query`, `key`, and `value` contiguous before passing them to the
-extension. Broadcast the mask to `B..., H_q, L, S`, reshape it to `(N, L, S)`,
-and cast it to `float32` so both kernels receive the same representation. Use an
-all-zero mask when no mask is requested.
+Flatten batch and head dimensions before calling C++, then restore the original
+layout. Make Q, K, and V contiguous, but preserve their BF16 dtype.
 
-## Task 2: Implement `flash_attention` (CPU version)
+Pass a small integer mask mode to the extension:
 
-```
+| Mode | Meaning | Mask buffer |
+| ---: | --- | --- |
+| 0 | no mask | one-element placeholder |
+| 1 | causal | one-element placeholder |
+| 2 | additive mask | contiguous broadcasted `(N, L, S)` FP32 array |
+
+Do not construct a dense all-zero or causal mask. Doing so reintroduces the
+quadratic allocation that the fused kernel is intended to avoid.
+
+## Task 2: Implement the CPU Reference
+
+```plain
 src/extensions/src/tiny_llm_ext.h
 src/extensions/bindings.cpp
 src/extensions/src/flash_attention.cpp
 src/extensions/CMakeLists.txt
 ```
 
-Add the MLX primitive and its CPU implementation. As in the quantized-matmul
-chapter, declare the primitive in `tiny_llm_ext.h`, expose it in `bindings.cpp`,
-and register `flash_attention.cpp` in `CMakeLists.txt`.
+Add the MLX primitive, binding, and CPU evaluator. The readable CPU path uses
+FP32 and tiled online softmax with `Br = 32` and `Bc = 32`. It is a correctness
+reference, not the performance path.
 
-Before creating the lazy output array, validate all shape and dtype constraints
-in C++. The inputs must be 3D `float32` tensors, `num_heads` must be divisible
-by `num_kv_heads`, and the flattened batch dimensions for Q and KV must agree.
+Map grouped-query heads with:
 
-Implement `FlashAttention::eval_cpu(...)` with tiled online softmax. Use
-`Br = 32` and `Bc = 32`; the GPU section explains these tile sizes. Iterate
-over `(n, i, j)` tiles, map query heads to KV heads with
-`q_kv_heads_ratio = num_heads / num_kv_heads`, and accumulate in `float32`.
-Apply the mask to each score tile before updating `m_i` and `l_i`.
-
-Use causal mode for a block-level optimization. Skip a tile if every position in
-it is masked; if every position is valid, avoid reading and adding the mask.
-Causal attention may have `L != S`, so include the `S - L` offset when deciding
-whether a tile is valid.
-
-You can test your implementation by running:
-
-```bash
-pdm run build-ext
-pdm run test --week 2 --day 4 -- -k task_2
+```plain
+q_kv_ratio = num_heads / num_kv_heads
+kv_head = query_head / q_kv_ratio
 ```
 
-## Task 3: Implement `flash_attention` (GPU version)
+For causal attention, a key is visible when:
 
+```plain
+key_index <= query_index + (S - L)
 ```
+
+The `S - L` offset is required when Q contains only the new tokens but K/V also
+contain cached tokens. Skip a K/V tile entirely when all of its keys are in the
+future.
+
+## Task 3: Implement the Metal Kernels
+
+```plain
 src/extensions/src/flash_attention.metal
 src/extensions/src/flash_attention.cpp
 src/extensions/CMakeLists.txt
 ```
 
-Now implement the GPU path for the same algorithm.
+### Why the First Scalar Mapping Is Slow
 
-### GPU Parallelization Strategy
+A kernel can implement the FlashAttention recurrence correctly and still be
+slower than ordinary attention. The original mapping had four main problems:
 
-The key to an efficient GPU implementation is understanding how to map the tiled algorithm to Metal's execution model.
+- It launched `32 × 32 = 1024` threads per threadgroup. A hardware maximum is
+  a budget, not an occupancy target.
+- Each score used a serial 128-element dot product instead of a matrix
+  instruction.
+- `P @ V` looped over 128 output columns and performed a SIMD reduction for
+  every column.
+- Q/K/V were converted to FP32 and dense no-mask/causal arrays were created,
+  even though Week 2 Qwen activations are BF16.
 
-#### Why Br = 32 and Bc = 32?
+The ordinary implementation writes a quadratic score tensor, but its QK and
+PV operations are highly optimized matrix kernels. Eliminating the tensor
+cannot compensate for slow scalar arithmetic.
 
-The tile sizes follow the execution model used by this kernel:
+### Keep a General Fallback
 
-| Constraint | Source | Value |
-|------------|--------|-------|
-| SIMD width | Apple GPU fixed | 32 |
-| Max threads per threadgroup | Hardware limit | 1024 |
-| Bc | = SIMD width (for efficient `simd_sum`/`simd_max`) | 32 |
-| Br | = 1024 / 32 | 32 |
-| Threadgroup memory | 32 KB budget | Fits `q_local[32][128]` + `o_i[32][128]` |
+Use a small scalar kernel for FP32 head dimensions below 128. A useful mapping
+is a `16 × 32` query/key tile with 512 threads: one SIMD group owns one query
+row, and one lane owns one key. This path keeps the implementation general and
+testable.
 
-With `Br = 32` and `Bc = 32`, each threadgroup contains `32 x 32 = 1024`
-threads.
+The performance path is a separate BF16, `E = 128` specialization. Specialize
+the common model shape instead of adding branches and dynamic loops to its hot
+path.
 
-#### Grid and Threadgroup Layout
+### BF16 SIMD-Matrix Tile
 
-```plain
-Grid (num_threadgroups):
-┌───────────────────────┬───────────────────────┬───────────────────────┐
-│ TG(0, 0)              │ TG(1, 0)              │ TG(2, 0)              │
-│ head=0, qtile=0       │ head=1, qtile=0       │ head=2, qtile=0       │
-├───────────────────────┼───────────────────────┼───────────────────────┤
-│ TG(0, 1)              │ TG(1, 1)              │ TG(2, 1)              │
-│ head=0, qtile=1       │ head=1, qtile=1       │ head=2, qtile=1       │
-├───────────────────────┼───────────────────────┼───────────────────────┤
-│ ...                   │ ...                   │ ...                   │
-└───────────────────────┴───────────────────────┴───────────────────────┘
-     X: N (heads)         Y: Tr (query blocks)
-```
-
-Each threadgroup computes one `(head, Q-tile)` output block.
-
-#### Thread Mapping Within a Threadgroup
-
-Each threadgroup handles one `Br x E` Q block for one head:
+Use this tile on the optimized path:
 
 ```plain
-Threadgroup = 32 SIMD groups × 32 threads/group = 1024 threads
-
-┌────────────────────────────────────────────────┐
-│ SIMD group 0  → Q[0, :]  (handles row 0)       │ ← 32 threads
-│ SIMD group 1  → Q[1, :]  (handles row 1)       │ ← 32 threads
-│ SIMD group 2  → Q[2, :]  (handles row 2)       │ ← 32 threads
-│ ...                                             │
-│ SIMD group 31 → Q[31, :] (handles row 31)      │ ← 32 threads
-└────────────────────────────────────────────────┘
+BQ = 64 query rows
+BK = 32 key/value rows
+D  = 128
+8 SIMD groups × 32 lanes = 256 threads
 ```
 
-Inside that single threadgroup, the kernel runs a **serial** loop over all K/V tiles `j = 0..Tc-1`.
-
-#### Computing S = Q @ K^T
-
-Each thread computes one element of the 32×32 score matrix. Here's how the matrix multiplication maps to threads:
+Each SIMD group owns eight query rows. Metal's public
+`simdgroup_matrix<T, 8, 8>` distributes one 8×8 fragment across its 32 lanes,
+with two fragment elements per lane.
 
 ```plain
-Q block [Br=32, E=128]              K^T [E=128, Bc=32]
-┌───────────────────────┐           ┌───┬───┬───┬─...─┬───┐
-│ Q[0,:]  (128 elements)│           │   │   │   │     │   │
-├───────────────────────┤           │ K │ K │ K │     │ K │
-│ Q[1,:]                │           │[0]│[1]│[2]│ ... │[31]│
-├───────────────────────┤     @     │ T │ T │ T │     │ T │
-│ Q[2,:]                │           │   │   │   │     │   │
-├───────────────────────┤           │128│128│128│     │128│
-│ ...                   │           │   │   │   │     │   │
-├───────────────────────┤           │   │   │   │     │   │
-│ Q[31,:]               │           │   │   │   │     │   │
-└───────────────────────┘           └───┴───┴───┴─...─┴───┘
-        ↑                                 ↑
-   simd_gid = a                      simd_lid = b
-   (which row)                       (which column)
+one SIMD group
+
+Q fragment [8, 8] × Kᵀ fragment [8, 8] -> score fragment [8, 8]
+
+D=128: 16 multiply-accumulate steps
+BK=32: 4 score fragments
+
+P fragment [8, 8] × V fragment [8, 8] -> output fragment [8, 8]
+
+BK=32: 4 multiply-accumulate steps
+D=128: 16 output fragments
 ```
 
-The result is a `Br x Bc` score block with one element per thread:
+Use native `bfloat` matrix operands and FP32 accumulator fragments. Keep the
+row maxima, row sums, and online-softmax output accumulators in FP32, then
+convert only the final output to BF16. This matches the Week 2 model without
+whole-tensor dtype conversions.
+
+### Threadgroup Memory and Registers
+
+Stage Q once and stream K/V through a reused allocation:
 
 ```plain
-                    simd_lid (b)
-              0     1     2    ...   31
-            ┌─────┬─────┬─────┬─...─┬─────┐
-          0 │S0,0 │S0,1 │S0,2 │     │S0,31│  ← SIMD group 0 (32 threads)
-            ├─────┼─────┼─────┼─...─┼─────┤
-simd_gid  1 │S1,0 │S1,1 │S1,2 │     │S1,31│  ← SIMD group 1
-  (a)       ├─────┼─────┼─────┼─...─┼─────┤
-          2 │S2,0 │S2,1 │S2,2 │     │S2,31│  ← SIMD group 2
-            ├─────┼─────┼─────┼─...─┼─────┤
-        ... │ ... │ ... │ ... │     │ ... │
-            ├─────┼─────┼─────┼─...─┼─────┤
-         31 │S31,0│S31,1│S31,2│     │S31,31│ ← SIMD group 31
-            └─────┴─────┴─────┴─...─┴─────┘
-
-Thread (a=2, b=5) computes:
-  S[2,5] = Q[2,0]*K[5,0] + Q[2,1]*K[5,1] + ... + Q[2,127]*K[5,127]
-         = dot product of Q row 2 with K row 5 (128 multiply-adds)
+threadgroup BF16 Q tile:  64 × 130
+threadgroup BF16 K/V:    128 × 34
+total:                   about 25 KiB
 ```
 
-After computing `S[a,b]`, each thread holds one attention score. All 32 threads
-in a SIMD group cooperate on the row-wise reductions:
+K is transposed while loading so QK can consume ordinary row-major 8×8
+fragments. After QK and softmax, reuse the same allocation for row-major V.
+The output's 16 matrix fragments and online-softmax statistics remain in
+registers.
 
-```plain
-SIMD group 2 (threads with simd_gid=2):
-  Thread b=0 has S[2,0]
-  Thread b=1 has S[2,1]
-  ...
-  Thread b=31 has S[2,31]
+The two-element padding makes each BF16 row stride odd when measured in
+32-bit threadgroup-memory banks. Padding should be chosen from the element
+width and bank mapping; copying a padding value from an FP32 or CUDA kernel is
+not generally correct.
 
-  simd_max(s_a_b) → all 32 threads get max(S[2,0], S[2,1], ..., S[2,31])
-  simd_sum(p_a_b) → all 32 threads get sum(P[2,0], P[2,1], ..., P[2,31])
-```
+### Per-Tile Sequence
+
+For every K/V tile:
+
+1. Cooperatively load and transpose K into threadgroup memory.
+2. Compute four 8×8 score fragments with
+   `simdgroup_multiply_accumulate` over the 16 D fragments.
+3. Apply scale and mask, then reduce each eight-row fragment's maximum.
+4. Update online-softmax maxima and sums in FP32.
+5. Convert the probabilities to BF16 matrix fragments.
+6. Reuse the K allocation for V and compute all 16 output fragments.
+7. Rescale the previous output whenever the running maximum changes.
+
+For causal prefill, stop the K/V loop at the last tile that can contain a
+visible key. This avoids approximately half the matrix work when `L = S`.
+
+### Do Not Import an MLX Kernel
+
+The extension necessarily uses MLX's public C++ extension and command-encoder
+interfaces, but the Metal shader should include only public Metal headers:
 
 ```metal
-float rowmax = simd_max(s_a_b);  // max across 32 threads in same SIMD group
-float rowsum = simd_sum(p_a_b);  // sum across 32 threads in same SIMD group
+#include <metal_simdgroup>
+#include <metal_simdgroup_matrix>
+#include <metal_stdlib>
 ```
 
-#### Computing O = P @ V inside a SIMD group
+Do not include MLX Steel headers or instantiate an MLX attention template. The
+point of this task is to implement and understand the fragment mapping,
+softmax recurrence, storage layout, and synchronization directly.
 
-After softmax, the kernel must accumulate the output tile. It cannot assign one
-thread to each output element as it did for `S = Q @ K^T`, because the output
-dimensions differ:
+### Correctness Cases
 
-```plain
-Q @ K^T:                         P @ V:
-┌─────────┐   ┌─────────┐       ┌─────────┐   ┌─────────────────┐
-│ Q       │   │ K^T     │       │ P       │   │ V               │
-│[Br, E]  │ @ │[E, Bc]  │       │[Br, Bc] │ @ │[Bc, E]          │
-│[32,128] │   │[128,32] │       │[32, 32] │   │[32, 128]        │
-└─────────┘   └─────────┘       └─────────┘   └─────────────────┘
-         ↓                               ↓
-   S [Br, Bc]                      O [Br, E]
-   [32, 32]                        [32, 128]
-   = 1024 elements                 = 4096 elements
-        ↓                               ↓
-   1024 threads ✓                  1024 threads ✗
-   (one per element)               (not enough!)
+Test more than aligned self-attention:
+
+- no mask, additive mask, and causal mask;
+- BF16 D=128 and the FP32 fallback;
+- partial query and key tiles, such as `L=35, S=47`;
+- grouped-query attention;
+- `L != S` causal offsets.
+
+Evaluate the lazy result before comparing it. A kernel can compile and appear
+to run while a lane-coordinate or partial-tile error remains hidden.
+
+### Benchmark the GPU Work, Not Graph Construction
+
+MLX evaluates lazily. Initialize Q/K/V before timing and force every iteration
+to complete:
+
+```python
+def evaluate_attention(fn):
+    result = fn()
+    mx.eval(result)
+    mx.synchronize()
+    return result
 ```
 
-`S = Q @ K^T` has 1,024 output elements and 1,024 threads. By contrast,
-`O = P @ V` has 4,096 output elements because **E = 128**, while **Bc = 32**.
+On an Apple M4 Pro with MLX 0.29.1, single-request Qwen3-4B causal prefill
+(`Hq=32`, `Hkv=8`, `D=128`, BF16) measured approximately:
 
-Instead, loop over the 128 output columns and use a SIMD reduction for each one:
+| Tokens | Explicit attention | MLX fused | Course SIMD-matrix kernel |
+| ---: | ---: | ---: | ---: |
+| 128 | 0.293 ms | 0.205 ms | 0.538 ms |
+| 512 | 1.272 ms | 0.569 ms | 1.899 ms |
+| 1024 | 4.755 ms | 1.635 ms | 5.418 ms |
+| 2048 | 17.084 ms | 5.584 ms | 19.015 ms |
+| 4096 | 66.724 ms | 21.181 ms | 72.717 ms |
 
-```plain
-For each output element O[a, c]:
-  
-  O[a, c] = sum over b: P[a, b] * V[b, c]
-            └───────────────────────────┘
-                   32 terms (Bc = 32)
-                         ↓
-            simd_sum can handle this!
+The standalone educational kernel does not beat the explicit implementation
+on this GPU. At 4096 tokens it is about 9% slower, but it avoids the explicit
+path's roughly 1 GiB score tensor. That is still a meaningful implementation:
+it demonstrates the correct IO-aware algorithm and has bounded scratch memory.
 
-  Thread assignment:
-    - simd_gid = a (which output row)
-    - simd_lid = b (which term in the sum)
-    
-  Code:
-    for c in 0..E-1:                      // loop 128 times
-        val = P[a, b] * V[b, c]           // each lane computes one term
-        result = simd_sum(val)            // reduce 32 terms → 1 result
-        if simd_lid == 0:
-            o_i[a, c] += result           // only lane 0 writes
-```
+It also shows why production FlashAttention kernels are complex. MLX's fused
+implementation remains about 3.4× faster at 2048 tokens because it adds deeper
+specialization and scheduling work beyond merely using matrix instructions.
+Do not report memory efficiency as a latency speedup.
 
-Although this mapping does not parallelize the `E` dimension, it does
-parallelize the 32-term reduction over `Bc`, which exactly matches the SIMD
-width.
+### Does FlashAttention Make Sense on Metal?
 
-#### Memory Hierarchy
+Yes for memory-bounded prefill, but not for exactly the same reasons or with
+the same implementation as an NVIDIA kernel.
 
-```plain
-┌─────────────────────────────────────────────────────────┐
-│ Device Memory                                           │
-│ Q[N, L, E], K[N_kv, S, E], V[N_kv, S, E]               │
-└─────────────────────────────────────────────────────────┘
-                    ↓ load once per Q block
-┌─────────────────────────────────────────────────────────┐
-│ Threadgroup Memory (SRAM, 32KB)                         │
-│ q_local[Br][E]  ← Q block, reused for all Tc iterations │
-│ o_i[Br][E]      ← accumulated output                    │
-└─────────────────────────────────────────────────────────┘
-                    ↓
-┌─────────────────────────────────────────────────────────┐
-│ Registers (per thread)                                  │
-│ m_i, l_i, s_a_b, p_a_b                                  │
-└─────────────────────────────────────────────────────────┘
-```
+Apple GPUs have unified memory, SIMD width 32, Metal threadgroup memory, and a
+public 8×8 SIMD-group matrix API. They do not expose the same warp-level tensor
+core and asynchronous-copy model as H100/H200. Tile size, bank padding,
+occupancy, and synchronization must therefore be retuned for Metal.
 
-K and V blocks are streamed from global memory in the inner loop over Tc. The Q block is loaded once into threadgroup memory and reused across all K/V tiles.
+Apple's feature tables list SIMD-scoped matrix multiply beginning with Apple
+GPU family 7, which includes M1-series GPUs. Check the runtime GPU family if the
+course is extended beyond Apple silicon rather than assuming this path exists
+on every Metal device.
 
-### Implementation
-
-In `flash_attention.metal`, implement `flash_attention_f32_e128` with one
-threadgroup per `(n, i)` tile, where `n` is the flattened batch-and-head index
-and `i` is the query-tile index. Store local Q and partial O in threadgroup
-memory, and use `simd_max` and `simd_sum` for row-wise reductions.
-
-In `eval_gpu(...)`, load the kernel, bind the inputs, output, and scalar
-constants (`N`, `L`, `S`, `E`, head counts, `scale`, and tile sizes), then
-dispatch over `(N, Tr, 1)`. Keep the same contiguity checks as the CPU path. Add
-`src/flash_attention.metal` to `mlx_build_metallib(...)` in `CMakeLists.txt`.
-
-You can test your implementation by running:
-
-```bash
-pdm run build-ext
-pdm run test --week 2 --day 4 -- -k task_3
-```
+FlashAttention is less compelling for one-token decode. Decode has almost no
+query-tile reuse and is closer to a matrix-vector problem; use a dedicated
+decode or paged-attention kernel for that phase.
 
 ## Task 4: Model Integration
 
-```
+```plain
 src/tiny_llm/qwen3_week2.py
 ```
 
-Finally, connect the kernel to the model. Keep grouped attention as the fallback,
-add `use_flash_attention` to `Qwen3MultiHeadAttention`, and propagate
-`enable_flash_attn` from the model constructor into each block. After updating
-the KV cache, construct the `L x S` causal mask, run attention in `float32`, and
-cast the result back to the activation dtype.
+Connect the kernel to `Qwen3MultiHeadAttention` and propagate
+`enable_flash_attn` through the model. Preserve Q, K, V, and the result as BF16;
+do not cast the full tensors to FP32. Pass causal mode directly so the wrapper
+does not allocate an `L × S` mask.
 
-You can run generation with FlashAttention enabled:
+Run generation with FlashAttention enabled:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b --enable-flash-attn
+pdm run main --solution tiny_llm --loader week2 --model qwen3-4b --enable-flash-attn
 ```
 
-You can also benchmark throughput with and without FlashAttention:
+Benchmark both paths:
 
 ```bash
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b --enable-flash-attn
+pdm run bench --solution tiny_llm --loader week2 --model qwen3-4b
+pdm run bench --solution tiny_llm --loader week2 --model qwen3-4b --enable-flash-attn
 ```
 
 {{#include copyright.md}}
