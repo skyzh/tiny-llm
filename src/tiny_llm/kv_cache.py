@@ -28,6 +28,21 @@ class TinyKvCache(ABC):
             the sequence length and mask to construct a dense batch.
         """
 
+    def release(self):
+        pass
+
+    def update_and_fetch_paged(
+        self,
+        key: mx.array,
+        value: mx.array,
+        mask_length: int | None = None,
+        mask: mx.array | str | None = None,
+    ) -> "PagedKvMetadata":
+        pass
+
+    def rewind(self, n: int):
+        pass
+
 
 class BatchingKvCache(TinyKvCache):
     def __init__(self, max_active_requests: int, max_seq_len: int):
@@ -41,6 +56,15 @@ class BatchingKvCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        pass
+
+    def update_and_fetch_paged(
+        self,
+        keys: mx.array,
+        values: mx.array,
+        mask_length: int | None = None,
+        mask: mx.array | str | None = None,
+    ) -> "PagedKvMetadata":
         pass
 
     def add_request(self, prefilled: TinyKvCache, id: int):
@@ -62,4 +86,7 @@ class TinyKvFullCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        pass
+
+    def rewind(self, n: int):
         pass

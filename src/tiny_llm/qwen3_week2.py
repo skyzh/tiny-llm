@@ -34,7 +34,7 @@ class Qwen3MultiHeadAttention:
     def __call__(
         self,
         x: mx.array,
-        offsets: list[int],
+        offsets: int | list[int] | mx.array,
         cache: TinyKvCache,
         mask: mx.array | str | None = None,
     ) -> mx.array:
@@ -99,6 +99,9 @@ class Qwen3ModelWeek2:
         enable_flash_attn: bool = False,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
+        pass
+
+    def create_kv_cache(self) -> list[TinyKvCache]:
         pass
 
     def __call__(
