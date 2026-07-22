@@ -104,6 +104,15 @@ pdm run bench --solution tiny_llm_ref --loader week3 \
   --enable-performance-lab --model qwen3-0.6b
 ```
 
+Measure the serving engine separately with the continuous-batching mode. This
+reports aggregate output and decode throughput rather than treating one
+request's latency as the Week 3 result:
+
+```bash
+pdm run bench --solution tiny_llm_ref --loader week3 --batch-decode \
+  --num-seqs 16 --batch-size 4 --model qwen3-0.6b
+```
+
 Before accepting the result, inspect the Week 2 source for accidental shortcuts.
 The model may use `mlx_lm` for loading and `mlx.core` for arrays, device
 execution, synchronization, and extension dispatch, but its learned operators

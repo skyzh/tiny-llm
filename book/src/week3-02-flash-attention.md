@@ -1,9 +1,9 @@
-# Week 2 Days 4-5: FlashAttention-2
+# Week 3 Day 2: FlashAttention for Prefill
 
 > **Status:** Under review (WIP).
 
 In this chapter, we will implement a small FlashAttention-style Metal kernel
-for the Week 2 Qwen3 serving pipeline. The goal is to learn the tiled,
+for the Week 3 Qwen3 prefill path. The goal is to learn the tiled,
 IO-aware algorithm and map both matrix multiplications to Metal's public
 `simdgroup_matrix` API. We will not reuse an MLX attention-kernel
 implementation.
@@ -85,9 +85,9 @@ including Qwen3-4B. Do not derive this value as `hidden_size / num_heads`:
 Qwen3 stores `head_dim` explicitly and its attention projection width can
 differ from `hidden_size`.
 
-### Week 2 Dtype Contract
+### Week 3 Dtype Contract
 
-Yes: Week 2 uses BF16 by default. `Qwen3ModelWeek2` sets its model precision to
+Yes: Week 3 uses BF16 by default. `Qwen3ModelWeek3` sets its model precision to
 `mx.bfloat16`, and the quantized projections produce BF16 Q, K, and V. The
 FlashAttention path must not upcast those complete tensors to FP32.
 
@@ -95,13 +95,13 @@ Use mixed precision at these boundaries:
 
 | Value | Dtype | Reason |
 | --- | --- | --- |
-| Q, K, V in device memory | BF16 | matches the Week 2 model and halves traffic versus FP32 |
+| Q, K, V in device memory | BF16 | matches the Week 3 model and halves traffic versus FP32 |
 | Q/K/V threadgroup tiles | BF16 | preserves the bandwidth and capacity benefit |
 | attention scale | FP32 | avoids rounding the scalar before repeated use |
 | score and output accumulators | FP32 | protects dot products and online softmax |
 | running max and sum | FP32 | numerical stability |
 | additive mask inside the extension | FP32 | preserves `-inf` and additive bias behavior |
-| final attention output | BF16 | feeds the next Week 2 layer without a full-tensor cast |
+| final attention output | BF16 | feeds the next Week 3 layer without a full-tensor cast |
 
 “Use BF16” therefore does not mean performing the softmax recurrence in BF16.
 It means keeping model-sized tensors BF16 and promoting only register-resident
@@ -151,8 +151,8 @@ src/extensions/CMakeLists.txt
 
 Add the MLX primitive, binding, and CPU evaluator. The readable CPU path uses
 FP32 and tiled online softmax with `Br = 32` and `Bc = 32`. It is a correctness
-reference, not the Week 2 model path. The intentional CPU exception keeps the
-algorithm easy to inspect; the required model-facing GPU path is BF16.
+reference, not the optimized GPU model path. The intentional CPU exception
+keeps the algorithm easy to inspect; the required model-facing GPU path is BF16.
 
 Map grouped-query heads with:
 
@@ -199,7 +199,7 @@ output       FP32                      BF16
 
               variable D               fixed D = 128
                    |                         |
-                   +---- correctness --------+---- Week 2 model
+                   +---- correctness --------+---- Week 3 model
 ```
 
 The fallback remains useful for FP32 tests and smaller head dimensions. Qwen3
@@ -439,7 +439,7 @@ Test more than aligned self-attention:
 - `L != S` causal offsets.
 
 Assert that the BF16 GPU result is still BF16. A numerically close FP32 result
-would hide a model-sized upcast and fail the Week 2 dtype contract.
+would hide a model-sized upcast and fail the Week 3 dtype contract.
 
 Evaluate the lazy result before comparing it. A kernel can compile and appear
 to run while a lane-coordinate or partial-tile error remains hidden.
@@ -700,7 +700,9 @@ src/tiny_llm/attention.py::flash_attention
 Keep the FlashAttention implementation behind the Week 3 attention interface.
 Do **not** edit `qwen3_week2.py`: that would make the runnable Week 2 checkpoint
 depend on a later assignment. At this point, test and benchmark the operator in
-isolation for representative prefill shapes.
+isolation for representative prefill shapes. The BF16 model integration is a
+Metal GPU path; the course CLIs reject `--device cpu --enable-flash-attn`
+instead of silently upcasting every model-sized tensor for the CPU reference.
 
 Days 4 and 5 reuse the same online-softmax and tiling ideas while walking a
 paged KV cache. That is the Week 3 model integration point. The dense Day 2

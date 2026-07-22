@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import mlx.core as mx
+import pytest
 
 from .tiny_llm_base import (
     BatchingKvCache,
@@ -41,7 +42,7 @@ def _quantized_layer(
     )
 
 
-def _fake_qwen3_mlx_model() -> SimpleNamespace:
+def _fake_qwen3_mlx_model(head_dim: int = 32) -> SimpleNamespace:
     mx.random.seed(0)
     args = SimpleNamespace(
         num_hidden_layers=2,
@@ -49,7 +50,7 @@ def _fake_qwen3_mlx_model() -> SimpleNamespace:
         vocab_size=128,
         num_attention_heads=4,
         num_key_value_heads=2,
-        head_dim=32,
+        head_dim=head_dim,
         intermediate_size=256,
         rms_norm_eps=1e-5,
         max_position_embeddings=128,
@@ -214,13 +215,15 @@ def test_task_3_incremental_decode_matches_week2_with_paged_attention():
 
 
 def test_week3_flash_prefill_matches_paged_prefill():
-    mlx_model = _fake_qwen3_mlx_model()
+    mlx_model = _fake_qwen3_mlx_model(head_dim=128)
     paged_model = Qwen3ModelWeek3(mlx_model, page_size=4)
     flash_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_flash_attn=True)
     inputs = mx.array([[1, 5, 7, 3, 9, 11, 4, 2, 8]], dtype=mx.int32)
+    paged_cache = paged_model.create_kv_cache()
+    flash_cache = flash_model.create_kv_cache()
 
-    paged_out = paged_model(inputs, 0, paged_model.create_kv_cache())
-    flash_out = flash_model(inputs, 0, flash_model.create_kv_cache())
+    paged_out = paged_model(inputs, 0, paged_cache)
+    flash_out = flash_model(inputs, 0, flash_cache)
     paged_out = paged_out - mx.logsumexp(paged_out, axis=-1, keepdims=True)
     flash_out = flash_out - mx.logsumexp(flash_out, axis=-1, keepdims=True)
     assert_allclose(
@@ -230,6 +233,23 @@ def test_week3_flash_prefill_matches_paged_prefill():
         rtol=0.1,
         atol=1.0,
     )
+    next_token = mx.array([[13]], dtype=mx.int32)
+    paged_out = paged_model(next_token, inputs.shape[1], paged_cache)
+    flash_out = flash_model(next_token, inputs.shape[1], flash_cache)
+    paged_out = paged_out - mx.logsumexp(paged_out, axis=-1, keepdims=True)
+    flash_out = flash_out - mx.logsumexp(flash_out, axis=-1, keepdims=True)
+    assert_allclose(
+        flash_out,
+        paged_out,
+        precision=mx.bfloat16,
+        rtol=0.1,
+        atol=1.0,
+    )
+
+
+def test_week3_flash_rejects_unsupported_head_dimension():
+    with pytest.raises(ValueError, match="head_dim=128"):
+        Qwen3ModelWeek3(_fake_qwen3_mlx_model(), enable_flash_attn=True)
 
 
 def test_week3_default_does_not_require_the_later_performance_lab():

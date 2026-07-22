@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch-decode",
         action="store_true",
-        help="Run the Week 2 continuous-batching decode benchmark.",
+        help="Run the Week 3 continuous-batching serving benchmark.",
     )
     parser.add_argument("--batch-size", type=int, default=5)
     parser.add_argument(
@@ -83,8 +83,15 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--min-output-len cannot be greater than --max-output-len")
     if args.warmup < 0:
         raise ValueError("--warmup must be >= 0")
-    if args.batch_decode and args.loader != "week2":
-        raise ValueError("--batch-decode is only supported with --loader week2")
+    if args.batch_decode and args.loader == "week1":
+        raise ValueError("--batch-decode requires --loader week2 or week3")
+    if (
+        args.solution != "mlx"
+        and args.loader == "week3"
+        and args.enable_flash_attn
+        and args.device != "gpu"
+    ):
+        raise ValueError("Week 3 FlashAttention requires --device gpu")
     if args.batch_decode and args.batch_size <= 0:
         raise ValueError("--batch-size must be > 0")
     if args.batch_decode and args.prefill_step <= 0:
@@ -246,17 +253,17 @@ def run_one_request_mlx(
     return generated_tokens, prefill_time, decode_time
 
 
-def run_batch_requests_week2(
+def run_batch_requests_serving(
     model,
     requests: list[BenchRequest],
-    kv_cache_cls,
+    cache_factory,
     batching_kv_cache_cls,
     *,
     batch_size: int,
     prefill_step: int,
     max_seq_len: int,
 ) -> tuple[int, int, float, float]:
-    """Benchmark Week 2 continuous batching without tokenizer/detokenizer overhead."""
+    """Benchmark continuous batching without tokenizer/detokenizer overhead."""
 
     decode_requests: list[BatchRequestState | None] = [None] * batch_size
     batch_kv_cache = [
@@ -282,7 +289,7 @@ def run_batch_requests_week2(
         if pending_prefill is None and next_request_idx < len(requests):
             pending_prefill = BatchRequestState(
                 request=requests[next_request_idx],
-                kv_cache=[kv_cache_cls() for _ in range(model.num_hidden_layers)],
+                kv_cache=cache_factory(),
             )
             next_request_idx += 1
 
@@ -420,7 +427,7 @@ def main() -> None:
                 dispatch_kwargs["enable_performance_lab"] = args.enable_performance_lab
             elif args.enable_flash_attn:
                 print("--enable-flash-attn belongs to Week 3; ignoring it")
-            elif args.enable_performance_lab:
+            if args.loader != "week3" and args.enable_performance_lab:
                 print("--enable-performance-lab belongs to Week 3; ignoring it")
             model = models.dispatch_model(
                 model_name,
@@ -430,14 +437,21 @@ def main() -> None:
             )
 
             if args.batch_decode:
+                cache_factory = (
+                    model.create_kv_cache
+                    if args.loader == "week3"
+                    else lambda: [
+                        kv_cache_cls() for _ in range(model.num_hidden_layers)
+                    ]
+                )
 
                 def run_benchmark(
                     bench_requests: list[BenchRequest],
                 ) -> tuple[int, int, float, float]:
-                    return run_batch_requests_week2(
+                    return run_batch_requests_serving(
                         model,
                         bench_requests,
-                        kv_cache_cls,
+                        cache_factory,
                         batching_kv_cache_cls,
                         batch_size=args.batch_size,
                         prefill_step=args.prefill_step,
@@ -474,7 +488,7 @@ def main() -> None:
                 leave=False,
             )
             for i in warmup_iter:
-                if args.batch_decode and args.loader == "week2":
+                if args.batch_decode:
                     run_benchmark([requests[i % len(requests)]])
                 else:
                     run_one_request(requests[i % len(requests)])

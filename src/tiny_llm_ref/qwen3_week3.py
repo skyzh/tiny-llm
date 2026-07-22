@@ -1,12 +1,13 @@
+from typing import Any
+
 import mlx.core as mx
 
 from .attention import flash_attention, paged_attention
-from typing import Any
 from .embedding import QuantizedEmbedding
-from .quantize import QuantizedWeights, quantized_linear
 from .kv_cache import TinyKvCache
 from .moe import Moe
 from .paged_kv_cache import TinyKvPagedCache, TinyKvPagedPool
+from .quantize import QuantizedWeights, quantized_linear
 from .week2_kernels import FastRMSNorm, FastRoPE, swiglu
 
 
@@ -72,22 +73,22 @@ class Qwen3MultiHeadAttention:
 
         if self.use_flash_attention and L > 8:
             key, value, _, mask = cache.update_and_fetch(
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
+                projection_k,
+                projection_v,
                 mask_length=L,
                 mask=mask,
             )
             x = flash_attention(
-                projection_q.astype(mx.float32),
+                projection_q,
                 key,
                 value,
                 scale=self.scale,
                 mask=mask,
-            ).astype(x.dtype)
+            )
         else:
             metadata = cache.update_and_fetch_paged(
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
+                projection_k,
+                projection_v,
                 mask_length=L,
                 mask=mask,
             )
@@ -207,6 +208,8 @@ class Qwen3ModelWeek3:
         enable_flash_attn: bool = False,
         enable_performance_lab: bool = False,
     ):
+        if enable_flash_attn and mlx_model.args.head_dim != 128:
+            raise ValueError("Week 3 FlashAttention requires head_dim=128")
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size

@@ -49,7 +49,7 @@ introduced material and all Week 4 application material are work in progress.
 | 3.4            | Paged KV Cache                                                | ✅    | ✅   | ✅  |
 | 3.5            | Paged Attention                                               | ✅    | ✅   | ✅  |
 | 3.6 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | ✅  |
-| 3.7            | Performance Lab                                               | 🚧    | 🚧   | 🚧  |
+| 3.7 (optional) | Performance Lab                                               | 🚧    | 🚧   | 🚧  |
 | 3.8 (optional) | Speculative Decoding                                         | 🚧    | 🚧   | 🚧  |
 | 4.1            | CLI Coding Agent                                              | 🚧    | 🚧   | 🚧  |
 | 4.2            | RAG Pipeline                                                  | 🚧    | 🚧   | 🚧  |

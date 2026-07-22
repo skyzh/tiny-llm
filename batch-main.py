@@ -47,6 +47,9 @@ parser.add_argument("--enable-performance-lab", action="store_true")
 parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
 
+if args.loader == "week3" and args.enable_flash_attn and args.device != "gpu":
+    parser.error("Week 3 FlashAttention requires --device gpu")
+
 if args.solution == "tiny_llm":
     print("Using your tiny_llm solution")
     from tiny_llm import models, batch_generate
@@ -68,7 +71,7 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         dispatch_kwargs["enable_performance_lab"] = args.enable_performance_lab
     elif args.enable_flash_attn:
         print("--enable-flash-attn belongs to Week 3; ignoring it")
-    elif args.enable_performance_lab:
+    if args.loader != "week3" and args.enable_performance_lab:
         print("--enable-performance-lab belongs to Week 3; ignoring it")
 
     print(

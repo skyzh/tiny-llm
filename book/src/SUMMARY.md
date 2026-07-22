@@ -26,7 +26,7 @@
     - [Paged Attention, Part 1](./week3-04-paged-attention-part1.md)
     - [Paged Attention, Part 2](./week3-05-paged-attention-part2.md)
     - [Optional: Mixture of Experts](./week3-optional-moe.md)
-    - [🚧 Performance Lab](./week3-performance-lab.md)
+    - [🚧 Optional: Performance Lab](./week3-performance-lab.md)
     - [🚧 Optional: Speculative Decoding](./week3-optional-speculative-decoding.md)
 - [🚧 Week 4: Build a Coding Agent](./week4-overview.md)
 

@@ -250,6 +250,15 @@ src/tiny_llm/qwen3_week3.py
 
 Update the model so it can route to paged attention when the cache provides paged runtime metadata.
 
+The optional dense FlashAttention prefill and the paged decode path must share
+one request cache. When `enable_flash_attn=True` and the current query has more
+than eight tokens, append BF16 K/V to the paged cache, gather its logical dense
+view, and run the Week 3 FlashAttention kernel. Subsequent short decode steps
+append the same BF16 dtype and pass page metadata directly to paged attention.
+The paged wrapper may promote values at its extension boundary, but changing
+the cache dtype between prefill and decode is an error. Keep this dispatch
+behind the Week 3 model so Week 2 remains independent.
+
 ## Task 4: Connect It to Continuous Batching
 
 ```
