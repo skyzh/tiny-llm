@@ -1,4 +1,7 @@
-# Week 4: Build a Coding Agent
+# 🚧 Week 4: Build a Coding Agent
+
+> 🚧 **Course status:** The daily chapters are drafts and are not included in
+> the rendered book yet.
 
 Weeks 1 through 3 turned tokens into text, made decoding efficient, and
 introduced serving techniques. Week 4 adds the next layer: an agent loop that
