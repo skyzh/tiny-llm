@@ -7,7 +7,7 @@ from datetime import datetime
 
 
 def _step(model, y, offsets, kv_cache):
-    logits = model(y, offsets, kv_cache)
+    logits = model(y, offsets, kv_cache, logits_to_keep=1)
     logits = logits[:, -1, :]
     logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
     sampler = lambda x: mx.argmax(x, axis=-1)

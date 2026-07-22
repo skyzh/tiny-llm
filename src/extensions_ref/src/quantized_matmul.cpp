@@ -176,8 +176,15 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
 
     // Make a kernel from this metal library
     auto library = d.get_library("tiny_llm_ext_ref");
-    const char* kernel_name = out.dtype() == mx::float16 ? "quantized_matmul_w4a16_g128_f16"
-                                                         : "quantized_matmul_w4a16_g128_bf16";
+    const bool use_matvec = a.shape()[0] <= 8;
+    const char* kernel_name;
+    if (use_matvec) {
+        kernel_name = out.dtype() == mx::float16 ? "quantized_matvec_w4a16_g128_f16"
+                                                 : "quantized_matvec_w4a16_g128_bf16";
+    } else {
+        kernel_name = out.dtype() == mx::float16 ? "quantized_matmul_w4a16_g128_f16"
+                                                 : "quantized_matmul_w4a16_g128_bf16";
+    }
     auto kernel = d.get_kernel(kernel_name, library);
 
     // Prepare to encode kernel
@@ -212,19 +219,18 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     compute_encoder.set_bytes(N, 6);
     compute_encoder.set_bytes(K, 7);
 
+    if (use_matvec) {
+        constexpr int outputs_per_simdgroup = 8;
+        const int column_tiles = (K + outputs_per_simdgroup - 1) / outputs_per_simdgroup;
+        MTL::Size num_threadgroups = MTL::Size(M * column_tiles, 1, 1);
+        MTL::Size num_threads_per_group = MTL::Size(32, 1, 1);
+        compute_encoder.dispatch_threadgroups(num_threadgroups, num_threads_per_group);
+        return;
+    }
+
     size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
-    // For decode/small-batch matmuls, avoid reserving 32 lanes for M when
-    // only a few rows are active. Keep the original 32-row tile otherwise.
     int x_size = 32;
-    if (M <= 1) {
-        x_size = 1;
-    } else if (M <= 2) {
-        x_size = 2;
-    } else if (M <= 4) {
-        x_size = 4;
-    } else if (M <= 8) {
-        x_size = 8;
-    } else if (M <= 16) {
+    if (M <= 16) {
         x_size = 16;
     }
     const int y_size = tgp_size / x_size;

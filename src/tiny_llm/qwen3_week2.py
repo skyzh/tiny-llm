@@ -104,5 +104,6 @@ class Qwen3ModelWeek2:
         inputs: mx.array,
         offset: int,
         cache: list[TinyKvCache],
+        logits_to_keep: int | None = None,
     ) -> mx.array:
         pass
