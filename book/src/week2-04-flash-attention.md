@@ -276,6 +276,55 @@ For every K/V tile:
 For causal prefill, stop the K/V loop at the last tile that can contain a
 visible key. This avoids approximately half the matrix work when `L = S`.
 
+### Implemented Optimization Inventory
+
+The following table is the complete inventory of performance choices in the
+course implementation. These are present in the Python wrapper, C++ dispatch,
+or Metal shader; they are not suggestions borrowed from the later Steel
+comparison.
+
+| Layer | Implemented optimization | What it saves or improves |
+| --- | --- | --- |
+| Python | Preserve BF16 Q/K/V and make only contiguous views | avoids three full-tensor FP32 conversions and keeps device traffic at two bytes per element |
+| Python | Represent no-mask and causal mode with an integer plus a one-element placeholder | avoids allocating and reading an `N × L × S` mask; only a real additive mask is broadcast and materialized |
+| C++ | Dispatch BF16 `D=128` directly to a dedicated kernel | removes dynamic head-dimension loops and dtype branches from the Qwen3 hot path |
+| C++ | Use a three-dimensional grid over query block, query head, and batch | gives each threadgroup one independent output tile without flattening/division work in the tile loop |
+| C++/Metal | Map a query head to its KV head with integer GQA indexing | reads the original eight Qwen3-4B KV heads instead of physically repeating K/V for all 32 query heads |
+| Metal | Use a `64 × 32` compile-time tile with 256 threads | replaces the original 1024-thread launch and gives each of eight SIMD groups ownership of eight query rows |
+| Metal | Use 8×8 `simdgroup_matrix` operations for both QKᵀ and PV | replaces serial dot products and per-output-column SIMD reductions with the GPU's matrix path |
+| Metal | Cooperatively stage Q once per query tile | reuses each Q element across every streamed K/V tile instead of rereading Q from device memory |
+| Metal | Transpose K while cooperatively loading it | produces the row-major `[D, BK]` layout required by QKᵀ without a separate transpose kernel or buffer |
+| Metal | Stream K and V through one padded threadgroup allocation | keeps total threadgroup storage near 25 KiB and avoids simultaneously reserving separate K and V tiles |
+| Metal | Pad BF16 threadgroup rows by two elements | changes the 32-bit bank stride from an even pattern and reduces systematic bank conflicts for fragment loads |
+| Metal | Keep score fragments, output fragments, and online-softmax state in registers | avoids round trips through threadgroup or device memory between QKᵀ, softmax, and PV |
+| Metal | Reduce each fragment row with two lane shuffles | uses the known 8×8 fragment lane mapping instead of a threadgroup reduction and synchronization |
+| Metal | Use online softmax and rescale the accumulated output when the running maximum changes | fuses exact softmax with PV and never materializes the quadratic score or probability tensor |
+| Metal | Convert only the four probability fragments per tile back to BF16 | enables BF16 PV matrix instructions while retaining FP32 scores, softmax state, and output accumulation |
+| Metal | Bound the causal K/V tile loop before entering it | skips every tile wholly to the right of the causal frontier; the current kernel still evaluates its runtime element-level causal condition in every processed tile |
+| Metal | Use `fast::exp` for register-resident softmax exponentials | selects Metal's lower-latency approximate exponential while the stable max subtraction controls the input range |
+| Metal | Zero-fill partial Q/K/V tiles during cooperative loads | lets one kernel handle arbitrary sequence tails without a second launch or out-of-bounds reads |
+| Metal | Synchronize only at shared-tile ownership transitions | barriers protect Q/K readiness, K-to-V reuse, V readiness, and V-to-next-K reuse; matrix and softmax register work needs no threadgroup barrier |
+| Metal | Divide by the online denominator only at the final BF16 store | avoids normalizing and rewriting the output after every K/V tile |
+| Dispatch | Keep the variable-`D` FP32 scalar kernel separate | preserves a readable correctness fallback without adding generality or extra branches to the Qwen3 specialization |
+
+Two details are easy to miss when reading the shader. First, the manual
+`matrix_coord` mapping gives every lane exactly two elements of each 8×8
+fragment. `row_max` and `row_sum` therefore need only the `xor(1)` and
+`xor(8)` exchanges that connect the lanes holding the same row; a reduction
+over all 32 lanes would mix different rows. Second, the final barrier in the
+K/V loop is required even though PV writes only registers: it prevents an
+early SIMD group from overwriting the shared V tile with the next K tile while
+another SIMD group is still reading V.
+
+The current implementation deliberately does **not** include function-constant
+mask variants, unchecked aligned interior loaders, Q pre-scaling with
+`fast::exp2`, FP32 probability/V fragments, overlapped or double-buffered V
+loads, GQA sharing within a threadgroup, tile autotuning, or a decode-specific
+kernel. Those are the follow-up exercises below. Keeping this boundary explicit
+is important: `simdgroup_matrix` alone delivers the largest structural fix,
+while these unimplemented scheduling and specialization techniques explain
+most of the remaining gap to MLX Steel.
+
 ### Do Not Import an MLX Kernel
 
 The extension necessarily uses MLX's public C++ extension and command-encoder
