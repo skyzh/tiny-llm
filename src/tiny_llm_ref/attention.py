@@ -55,7 +55,7 @@ def scaled_dot_product_attention_grouped(
 
     scores = mx.matmul(query, key.swapaxes(-2, -1)) * factor
     if mask is not None:
-        if mask == "causal":
+        if isinstance(mask, str) and mask == "causal":
             mask = causal_mask(L, S, scores.dtype)
             scores = scores + mask
         else:
@@ -125,6 +125,8 @@ def flash_attention(
 
     *B, H_q, L, E = query.shape
     _, H, S, _ = key.shape
+    assert key.shape == value.shape
+    assert query.shape[:-3] == key.shape[:-3]
     assert H_q % H == 0
     query = query.reshape(-1, L, E)
     key = key.reshape(-1, S, E)

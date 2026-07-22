@@ -25,8 +25,11 @@ mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::arra
     if (num_heads % num_kv_heads != 0) {
         throw std::runtime_error("flash_attention: num_heads must be divisible by num_kv_heads");
     }
-    if (mask.shape().size() != 3) {
-        throw std::runtime_error("flash_attention: mask must be 3D");
+    if (mask_mode < 0 || mask_mode > 2) {
+        throw std::runtime_error("flash_attention: mask_mode must be 0 (none), 1 (causal), or 2 (additive)");
+    }
+    if (mask_mode == 2 && mask.shape().size() != 3) {
+        throw std::runtime_error("flash_attention: an additive mask must be 3D");
     }
 
     // Q: [N, L, E]
@@ -47,10 +50,14 @@ mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::arra
     if (q.shape()[0] / num_heads != k.shape()[0] / num_kv_heads) {
         throw std::runtime_error("flash_attention: number of heads mismatch");
     }
+    if (k.shape()[0] != v.shape()[0]) {
+        throw std::runtime_error("flash_attention: k and v batch/head dimensions must match");
+    }
     if (k.shape()[1] != v.shape()[1]) {
         throw std::runtime_error("flash_attention: k.shape[1] must be equal to v.shape[1]");
     }
-    if (mask.shape()[0] != q.shape()[0] || mask.shape()[1] != q.shape()[1] || mask.shape()[2] != k.shape()[1]) {
+    if (mask_mode == 2 &&
+        (mask.shape()[0] != q.shape()[0] || mask.shape()[1] != q.shape()[1] || mask.shape()[2] != k.shape()[1])) {
         throw std::runtime_error("flash_attention: mask must be broadcastable to q, k, v");
     }
 
@@ -188,7 +195,9 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                             rowmax = std::max(rowmax, s_i[a * Bc + b]);
                         }
                         float max = std::max(m_i[a], rowmax);
-                        m_i_diff[a] = m_i[a] - max;
+                        m_i_diff[a] = m_i[a] == -std::numeric_limits<float>::infinity()
+                            ? -std::numeric_limits<float>::infinity()
+                            : m_i[a] - max;
                         m_i[a] = max;
                     }
 
@@ -196,7 +205,9 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                     std::vector<float> p(Br * Bc, 0.0);
                     for (int64_t a = 0; a < br_upper_bound; a++) {
                         for (int64_t b = 0; b < bc_upper_bound; b++) {
-                            p[a * Bc + b] = std::exp(s_i[a * Bc + b] - m_i[a]);
+                            p[a * Bc + b] = s_i[a * Bc + b] == -std::numeric_limits<float>::infinity()
+                                ? 0.0f
+                                : std::exp(s_i[a * Bc + b] - m_i[a]);
                         }
                     }
 
@@ -276,7 +287,7 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     compute_encoder.set_input_array(k, 1);
     compute_encoder.set_input_array(v, 2);
     compute_encoder.set_input_array(mask, 3);
-    compute_encoder.set_output_array(out, 4);    
+    compute_encoder.set_output_array(out, 4);
     compute_encoder.set_vector_bytes(mask.shape(), 5);
     compute_encoder.set_vector_bytes(mask.strides(), 6);
 
@@ -312,25 +323,17 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
     size_t simd_width = kernel->threadExecutionWidth();
 
-    const int Br = 32;
+    const int Br = 16;
     const int Bc = 32;
     if (simd_width * Br > tgp_size) {
-        throw std::runtime_error("flash_attention: simd_width * Br must be equal to tgp_size");
+        throw std::runtime_error("flash_attention: threadgroup exceeds the kernel thread limit");
     }
-    if (Bc > simd_width) {
-        throw std::runtime_error("flash_attention: Bc must be less than simd_width");
-    }
-
-    if (E > 128) {
-        throw std::runtime_error("flash_attention: E must be less than 128");
+    if (Bc != simd_width) {
+        throw std::runtime_error("flash_attention: the K/V tile width must match the SIMD width");
     }
 
-    if (Br > 32) {
-        throw std::runtime_error("flash_attention: Br must be less than 32");
-    }
-
-    if (Bc > 32) {
-        throw std::runtime_error("flash_attention: Bc must be less than 32");
+    if (E <= 0 || E > 128) {
+        throw std::runtime_error("flash_attention: E must be in the range [1, 128]");
     }
 
     const int Tr = (L + Br - 1) / Br;
@@ -342,7 +345,7 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     compute_encoder.set_bytes(Tc, 18);
 
     MTL::Size num_threadgroups = MTL::Size(N, Tr, 1);
-    MTL::Size num_threads_per_group = MTL::Size(Br, simd_width, 1);
+    MTL::Size num_threads_per_group = MTL::Size(simd_width, Br, 1);
 
     compute_encoder.dispatch_threadgroups(num_threadgroups, num_threads_per_group);
 }

@@ -93,6 +93,8 @@ class Qwen3MultiHeadAttention:
                 mask=mask,
             ).astype(x.dtype)
         else:
+            if isinstance(mask, str) and mask == "causal":
+                mask = causal_mask(L, projection_k.shape[-2], mx.float32)
             x = scaled_dot_product_attention_grouped(
                 projection_q.astype(mx.float32),
                 projection_k.astype(mx.float32),

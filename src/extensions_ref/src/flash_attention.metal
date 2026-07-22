@@ -27,38 +27,57 @@ using namespace metal;
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
 
-    int n = group_id.x;
-    int i = group_id.y; // loop over Tr
-    int a = simd_gid; // max=Br
-    int b = simd_lid; // max=Bc
+    constexpr int BR = 16;
+    constexpr int BC = 32;
+    constexpr int MAX_E = 128;
+    constexpr int OUTPUTS_PER_LANE = MAX_E / BC;
+    constexpr int THREADS_PER_GROUP = BR * BC;
 
-    bool is_i_in_range = i * Br + a < L && a < Br;
+    const int n = group_id.x;
+    const int query_block = group_id.y;
+    const int query_row_in_block = simd_gid;
+    const int query_row = query_block * BR + query_row_in_block;
+    const int lane = simd_lid;
+    const int thread_idx = query_row_in_block * BC + lane;
+    const bool query_in_range = n < N && query_row < L;
+
     const int q_kv_ratio = num_heads / num_kv_heads;
-    device const float *q_ptr = q + n * L * E + i * Br * E;
-    device const float *k_ptr_base = k + (n / q_kv_ratio) * S * E;
-    device const float *v_ptr_base = v + (n / q_kv_ratio) * S * E;
-    threadgroup float o_i[128 * 32]; // assume max(E) = 128, max(Br) = 32, only lane 0 writes to it
+    device const float* q_block = q + n * L * E + query_block * BR * E;
+    device const float* k_head = k + (n / q_kv_ratio) * S * E;
+    device const float* v_head = v + (n / q_kv_ratio) * S * E;
 
-    if (simd_lid == 0) {
-        for (int c = 0; c < E; c++) {
-            o_i[a * E + c] = 0.0;
-        }
+    // Q remains resident for the whole K/V traversal. K and V reuse the same
+    // storage because P is materialized before the K tile is replaced by V.
+    threadgroup float q_tile[BR * MAX_E];
+    threadgroup float kv_tile[BC * MAX_E];
+    threadgroup float p_tile[BR * BC];
+
+    for (int idx = thread_idx; idx < BR * MAX_E; idx += THREADS_PER_GROUP) {
+        const int row = idx / MAX_E;
+        const int dim = idx - row * MAX_E;
+        const bool valid = query_block * BR + row < L && dim < E;
+        q_tile[idx] = valid ? q_block[row * E + dim] : 0.0f;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float output_frag[OUTPUTS_PER_LANE] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float row_max = -INFINITY;
+    float row_sum = 0.0f;
+
+    const int total_kv_tiles = (S + BC - 1) / BC;
+    int kv_tile_limit = total_kv_tiles;
+    if (mask_mode == 1) {
+        const int last_query = min((query_block + 1) * BR, L) - 1;
+        const int last_visible_key = last_query + (S - L);
+        kv_tile_limit = clamp((last_visible_key + 1 + BC - 1) / BC, 0, total_kv_tiles);
     }
 
-    threadgroup float q_local[32][128]; // assume max(E) = 128, max(Br) = 32, access by a, c
-    // q_ptr: L * E
-    // k_ptr: S * E
-    // v_ptr: S * E
-    // To access q[a, c]: use a * E + c
-    // To access k/v[b, c]: use b * E + c
-
-    float m_i = -1e9; // per thread; sync to threadgroup memory later
-    float l_i = 0.0; // per thread; sync to threadgroup memory later
-
-    // load q_local
-    if (simd_lid == 0) {
-        for (int c = 0; c < E; c++) {
-            q_local[a][c] = q_ptr[a * E + c];
+    for (int tile_idx = 0; tile_idx < kv_tile_limit; tile_idx++) {
+        for (int idx = thread_idx; idx < BC * MAX_E; idx += THREADS_PER_GROUP) {
+            const int row = idx / MAX_E;
+            const int dim = idx - row * MAX_E;
+            const int key_row = tile_idx * BC + row;
+            kv_tile[idx] = key_row < S && dim < E ? k_head[key_row * E + dim] : 0.0f;
         }
     }
     
@@ -124,29 +143,82 @@ using namespace metal;
         // compute o_i, where O is Br x E; note that this does not align
         // with the threadgroup we dispatch, so we have to do threadgroup sync
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (int c = 0; c < E; c++) {
-            float v;
-            if (is_i_in_range && is_j_in_range) {
-                v = p_a_b * v_ptr[b * E + c];
-            } else {
-                v = 0.0;
+
+        const int key_row = tile_idx * BC + lane;
+        bool score_is_valid = query_in_range && key_row < S;
+        if (mask_mode == 1) {
+            score_is_valid = score_is_valid && key_row <= query_row + (S - L);
+        }
+
+        float score = -INFINITY;
+        if (score_is_valid) {
+            score = 0.0f;
+            int dim = 0;
+            for (; dim + 3 < E; dim += 4) {
+                const int q_idx = query_row_in_block * MAX_E + dim;
+                const int k_idx = lane * MAX_E + dim;
+                const float4 qv = float4(q_tile[q_idx], q_tile[q_idx + 1], q_tile[q_idx + 2], q_tile[q_idx + 3]);
+                const float4 kv =
+                    float4(kv_tile[k_idx], kv_tile[k_idx + 1], kv_tile[k_idx + 2], kv_tile[k_idx + 3]);
+                score += dot(qv, kv);
             }
-            float res = simd_sum(v); // res = sum(p_a_b * v_j) on each cell
-            // only lane 0 will write to threadgroup memory
-            if (simd_lid == 0 && is_i_in_range && is_j_in_range) {
-                o_i[a * E + c] = m_i_diff_exp * o_i[a * E + c] + res;
+            for (; dim < E; dim++) {
+                score += q_tile[query_row_in_block * MAX_E + dim] * kv_tile[lane * MAX_E + dim];
+            }
+            score *= scale;
+
+            if (mask_mode == 2) {
+                const int64_t mask_idx =
+                    elem_to_loc(n * L * S + query_row * S + key_row, mask_shape, mask_strides, 3);
+                score += mask[mask_idx];
             }
         }
+
+        const float tile_row_max = simd_max(score);
+        const float new_row_max = max(row_max, tile_row_max);
+        const bool has_finite_score = new_row_max != -INFINITY;
+        const float previous_scale = row_max == -INFINITY ? 0.0f : fast::exp(row_max - new_row_max);
+        const float probability = score == -INFINITY || !has_finite_score ? 0.0f : fast::exp(score - new_row_max);
+        const float tile_row_sum = simd_sum(probability);
+
+        row_max = new_row_max;
+        row_sum = previous_scale * row_sum + tile_row_sum;
+        p_tile[query_row_in_block * BC + lane] = probability;
+
+        // All score reads from K and all writes to P must complete before the
+        // shared K buffer is reused for V.
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (int idx = thread_idx; idx < BC * MAX_E; idx += THREADS_PER_GROUP) {
+            const int row = idx / MAX_E;
+            const int dim = idx - row * MAX_E;
+            const int value_row = tile_idx * BC + row;
+            kv_tile[idx] = value_row < S && dim < E ? v_head[value_row * E + dim] : 0.0f;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        if (query_in_range) {
+            for (int frag = 0; frag < OUTPUTS_PER_LANE; frag++) {
+                const int dim = lane + frag * BC;
+                if (dim < E) {
+                    float partial = 0.0f;
+                    for (int key = 0; key < BC; key++) {
+                        partial += p_tile[query_row_in_block * BC + key] * kv_tile[key * MAX_E + dim];
+                    }
+                    output_frag[frag] = previous_scale * output_frag[frag] + partial;
+                }
+            }
+        }
+
+        // No thread may replace V with the next K tile while another SIMD
+        // group is still consuming it.
+        threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
-    // write to output
-    if (simd_lid == 0) {
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (int c = 0; c < E; c++) {
-            if (is_i_in_range && n < N) {
-                float o_i_c = o_i[a * E + c];
-                o_i_c /= l_i;
-                out[n * L * E + (i * Br + a) * E + c] = o_i_c;
+    if (query_in_range) {
+        for (int frag = 0; frag < OUTPUTS_PER_LANE; frag++) {
+            const int dim = lane + frag * BC;
+            if (dim < E) {
+                out[n * L * E + query_row * E + dim] = output_frag[frag] / row_sum;
             }
         }
     }
