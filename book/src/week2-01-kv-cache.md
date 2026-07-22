@@ -1,12 +1,14 @@
 # Week 2 Day 1: Key-Value Cache
 
-In this chapter, we will implement the **key-value cache** for the Qwen3 model. The key-value cache is an essential component of the attention mechanism, as it allows the model to reuse previously computed results instead of recomputing them for every new token.
+In this chapter, we will add a **key-value cache** to the Qwen3 model. During
+generation, the cache lets each attention layer reuse the keys and values from
+previous tokens instead of recomputing the entire prefix at every step.
 
 **📚 Readings**
 
 - [KV Caching Explained: Optimizing Transformer Inference Efficiency](https://huggingface.co/blog/not-lain/kv-caching)
 
-Recall from last week how we supplied data to the model:
+Recall how Week 1 repeatedly supplied the full sequence to the model:
 
 ```plain
 tokenized_prompt: [1, 2, 3, 4, 5, 6]
@@ -38,7 +40,8 @@ $$
 $$
 
 
-Consider two consecutive decoding steps with `L = S = 3` and `L = S = 4`, where each head in each layer has an embedding dim of `D = 4`:
+Consider two consecutive decoding steps with `L = S = 3` and `L = S = 4`.
+Assume that each attention head has dimension `D = 4`:
 
 ```
 L = 3
@@ -56,9 +59,13 @@ Q        x  K^T       =
 4 4 4 4     1 2 3 4      4x1  4x2  4x3  4x4
 ```
 
-Notice that the first three rows/cols of `Q × K^T` are identical in both steps. Also given that we are using the causal masks, we do not need to care about the upper triangle of the matrix. The same applies to the softmax function and the multiplication with the V matrix. This means we are unnecessarily recomputing results for tokens we’ve already processed, and the new information only comes from the last row of `Q * K^T`.
+The leading `3 x 3` block of `QK^T` is identical in both steps. A causal mask
+also prevents earlier queries from attending to the new token, so their outputs
+do not change. Recomputing those rows, their softmax values, and their products
+with `V` is wasted work. Only the new query row contributes a new output.
 
-The solution is to cache the K and V matrices and only compute new values for incoming tokens:
+Instead, cache the previous keys and values and compute only the projections for
+incoming tokens:
 
 ```
 K in cache:
@@ -89,32 +96,39 @@ Q        x  K^T       =
 src/tiny_llm/kv_cache.py
 ```
 
-Each layer in the model maintains its own key-value cache. The cache has a single API, `update_and_fetch`, which:
+Each Transformer layer maintains its own key-value cache. The cache exposes one
+method, `update_and_fetch`, which:
 
-1. Takes the newly computed `K` and `V` for incoming tokens.
-2. Concatenates them with the existing cached matrices.
-3. Returns the full cached `K` and `V`.
+1. Accepts the newly computed `K` and `V` for the incoming tokens.
+2. Appends them along the sequence dimension.
+3. Returns the complete cached `K` and `V`, the updated offset, and the mask.
 
-For week 2 day 1, you only need to handle `key` and `value`. The `mask` and `mask_length` parameters will remain unused.
+On Day 1, the cache passes `mask` through unchanged and does not use
+`mask_length`. Those parameters become important later for batching.
 
 You may implement this in `kv_cache.py` as `TinyKvFullCache`:
 
 ```plain
-L' = new tokens length
-L  = total tokens length
+L_new = number of incoming tokens
 
-update_and_fetch(key, value) -> key, value
+update_and_fetch(key, value, mask_length, mask) -> key, value, offset, mask
 
-key:   B, L', H, D
-value: B, L', H, D
+key:   B, H, L_new, D
+value: B, H, L_new, D
 
-self.key   = concat_or_initialize(self.key, key, on the L' dimension)
-self.value = concat_or_initialize(self.value, value, on the L' dimension)
+if self.key_values is None:
+    self.key_values = (key, value)
+else:
+    cached_key, cached_value = self.key_values
+    self.key_values = (
+        concat(cached_key, key, axis=2),
+        concat(cached_value, value, axis=2),
+    )
 
-self.key:   B, L, H, D
-self.value: B, L, H, D
+self.offset += L_new
+key, value = self.key_values  # B, H, offset, D
 
-return self.key, self.value
+return key, value, self.offset, mask
 ```
 
 ## Task 2: Use the Key-Value Cache
@@ -123,39 +137,43 @@ return self.key, self.value
 src/tiny_llm/qwen3_week2.py
 ```
 
-With the cache in place, update your week 1 Qwen3 implementation to support it. Implement the `Qwen3MultiHeadAttention` class in `qwen3_week2.py`.
+With the cache in place, update the Week 1 Qwen3 implementation to use it.
+Implement `Qwen3MultiHeadAttention` in `qwen3_week2.py`.
 
-* Each layer should use its own cache.
-* The model must now accept an `offset` argument, which represents the position of the last token processed.
-* This value should match the current sequence length in the cache (you can add assertions to check consistency).
-* Both the argument and the cache maintain the offset for debugging purposes.
+- Give each layer its own cache.
+- Add an `offset` argument to the model. It is the number of tokens already in
+  the cache, and therefore the position of the first incoming token.
+- The argument should match the cache's current sequence length. Assertions can
+  make this invariant explicit.
+- The caller and cache both track the offset to make consistency checks easier.
 
 Example computation flow:
 
 ```plain
-x: B, L', E
-q = linear(x, wq) -> B, L', H_q, D
-k = linear(x, wk) -> B, L', H, D
-v = linear(x, wv) -> B, L', H, D
+x: B, L, E
+q = linear(x, wq) -> B, L, H_q, D
+k = linear(x, wk) -> B, L, H, D
+v = linear(x, wv) -> B, L, H, D
 q = rms_norm(q, q_norm)
 k = rms_norm(k, k_norm)
-q = rope(q, offset=slice(offset, offset + L'))
-k = rope(k, offset=slice(offset, offset + L'))
-(transpose as needed)
-k, v = cache.update_and_fetch(k, v) ; k/v: B, L, H, D, q: B, L', H, D
-x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L', H_q, D  # at float32 precision
-(transpose as needed)
-x = linear(x, wo) -> B, L', E
+q = rope(q, offset=slice(offset, offset + L))
+k = rope(k, offset=slice(offset, offset + L))
+transpose q, k, v to B, H, L, D
+k, v = cache.update_and_fetch(k, v)  # k/v: B, H, S, D; q: B, H_q, L, D
+x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, H_q, L, D  # float32
+transpose and reshape x to B, L, H_q * D
+x = linear(x, wo) -> B, L, E
 ```
 
-We use two different variables for the `L'` because they have different meanings in the context of this chapter
-and the context of week 1 day 3: in the GQA implementation, k/v's sequence length is `S` (source length), while
-q's sequence length is `L`. In the Qwen3 multihead attention implementation, `L'` is the "new token" and `L` is
-the total sequence length, which corresponds to `L` and `S` in week 1 respectively.
+Here, `L` is the number of incoming query tokens and `S` is the total cached
+sequence length after the update. This matches the Week 1 GQA convention: `L`
+is the query length, while `S` is the key/value source length. During
+single-token decoding, `L = 1` and `S` grows by one on each call.
 
-Note that another refactor of this week's code is that all modules now take `QuantizedWeights` instead of `mx.array`
-for some weights. You will need to move the dequantize code from loading the model to each module first, and we
-will replace it with our own quantized matmul implementation for the rest of the week.
+Week 2 also changes linear-layer weights from `mx.array` to `QuantizedWeights`.
+For this task, move dequantization from the model loader into the modules that
+use those weights. Later in the week, you will replace that temporary step with
+your own quantized matrix multiplication.
 
 ## Task 3: Implement the Model
 
@@ -163,9 +181,11 @@ will replace it with our own quantized matmul implementation for the rest of the
 src/tiny_llm/qwen3_week2.py
 ```
 
-Complete the rest of the model using your week 1 implementation as a base, but modify all relevant components to use the key-value cache.
+Complete the rest of the model using the Week 1 implementation as a base, and
+pass the appropriate layer cache through every Transformer block.
 
-To verify correctness, run the following test (almost identical to week 1’s test):
+To verify correctness, run the following test, which is similar to the Week 1
+model test:
 
 ```bash
 pdm run test --week 2 --day 1
@@ -177,15 +197,18 @@ pdm run test --week 2 --day 1
 src/tiny_llm/generate.py
 ```
 
-Next, implement the decoding logic in `generate.py` by completing the `simple_generate_with_kv_cache` function. This function should call your Week 2 Qwen3 model with both the `offset` and the newly decoded token.
+Complete `simple_generate_with_kv_cache` in `generate.py`. The first model call
+prefills the cache with the complete prompt. Each later call passes only the
+token produced by the preceding step, together with the number of tokens already
+cached.
 
 For example:
 
 ```plain
 tokenized_prompt: [1, 2, 3, 4, 5, 6]
 prefill: _step(model, [1, 2, 3, 4, 5, 6], 0)  # returns 7
-decode:  _step(model, [7], 7)  # returns 8
-decode:  _step(model, [8], 8)  # returns 9
+decode:  _step(model, [7], 6)  # returns 8
+decode:  _step(model, [8], 7)  # returns 9
 ...
 ```
 
@@ -199,8 +222,8 @@ pdm run main --solution tiny_llm --loader week2 --model qwen3-4b
 You can also benchmark throughput and compare your implementation with the reference solution:
 
 ```bash
-pdm bench --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
+pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 ```
 
 {{#include copyright.md}}
