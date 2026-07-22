@@ -1,8 +1,8 @@
-# Week 3 Day 5: Paged Attention, Part 1
+# Week 3 Day 4: Paged Attention, Part 1
 
 In this chapter, we will design the **paged KV cache**. This is the storage abstraction behind paged attention.
 
-By the end of Week 3 Day 4, our serving stack already supports:
+By the end of Week 3 Day 3, our serving stack already supports:
 
 - per-request KV cache
 - chunked prefill
@@ -73,7 +73,7 @@ page  3 -> tokens 8..9
 
 The logical sequence is still length 10. The difference is that the runtime is no longer forced to represent it as one contiguous tensor.
 
-In our Day 1 teaching implementation, those fixed-size pages live in one shared **page pool** owned by the model. Every layer cache receives that same pool, but each layer cache keeps its own `page_ids`, `page_lens`, and `offset`.
+In our Part 1 teaching implementation, those fixed-size pages live in one shared **page pool** owned by the model. Every layer cache receives that same pool, but each layer cache keeps its own `page_ids`, `page_lens`, and `offset`.
 
 In the reference solution, `page_size` is the physical page capacity. Unused tail slots are not part of the logical sequence; `page_lens` decides which prefix of each page is valid.
 
@@ -206,13 +206,13 @@ Add:
 Keep `TinyKvFullCache` in `src/tiny_llm/kv_cache.py` as a baseline and test
 oracle.
 
-The key Day 1 behavior is:
+The key Part 1 behavior is:
 
 1. write new K/V into the layer cache's tail page or newly allocated pages,
 2. gather the layer cache's pages back into dense K/V,
 3. feed that dense K/V into the old attention path.
 
-So Day 1 changes the storage model first, not the attention kernel yet.
+So Part 1 changes the storage model first, not the attention kernel yet.
 
 ## `src/tiny_llm/batch.py`
 
@@ -226,9 +226,9 @@ The scheduler should still:
 
 The difference is that freeing a request now means releasing all pages owned by its layer caches back to the pool.
 
-Day 1 also keeps a small `rewind(n)` lifecycle hook. Rewind is useful for speculative decoding: if some drafted tokens are rejected, the cache must forget their K/V. In the paged cache, rewind frees whole pages that are no longer needed and shortens the valid length of the final remaining page.
+Part 1 also keeps a small `rewind(n)` lifecycle hook. Rewind is useful for speculative decoding: if some drafted tokens are rejected, the cache must forget their K/V. In the paged cache, rewind frees whole pages that are no longer needed and shortens the valid length of the final remaining page.
 
-## Design Questions for Day 1
+## Design Questions for Part 1
 
 Before implementing, make sure the following are clear:
 
@@ -280,7 +280,7 @@ This gives us a correctness check before we change the attention path itself.
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
 
 ```bash
-pdm run test --week 3 --day 5
+pdm run test --week 3 --day 4
 ```
 
 {{#include copyright.md}}

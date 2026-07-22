@@ -86,7 +86,7 @@ class BatchingKvCache(TinyKvCache):
             assert self.HD == (H, D), f"expect {self.HD} but got {H, D}"
         assert B == self.max_active_requests
         # Step 1: append each active row into its request cache. This method
-        # preserves the legacy dense batch interface for Week 2/Day 1 callers.
+        # preserves the legacy dense batch interface for Week 3 Day 1 callers.
         data = []
         for b in range(B):
             if self.kv_caches[b] is None:

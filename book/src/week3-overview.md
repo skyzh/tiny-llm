@@ -1,16 +1,15 @@
 # Week 3: Build a Mini vLLM
 
-> **Course status:** KV cache, continuous batching, FlashAttention, chunked
-> prefill, paged attention, and MoE come from the original course. Speculative
-> decoding remains a work in progress.
+> **Course status:** Continuous batching, FlashAttention, chunked prefill,
+> paged attention, and MoE come from the original course. Speculative decoding
+> remains a work in progress.
 
 Week 3 takes the optimized single-request model from Week 2 and builds a serving
 engine around it. The optimized operator layer remains unchanged; this week is
-about cache ownership, scheduling, prefill, and runtime metadata.
+about multi-request cache ownership, scheduling, prefill, and runtime metadata.
 
 ## What We’ll Cover
 
-- A dense key-value cache and its lifecycle
 - Continuous batching and request-slot reuse
 - FlashAttention for prefill
 - Chunked prefill and scheduler fairness

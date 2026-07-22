@@ -1,8 +1,8 @@
 # Week 2: A Step Closer to vLLM
 
 > **Course status:** The new benchmarking, fused-operator, decode-attention,
-> and end-to-end optimization chapters are works in progress. The quantized
-> matmul chapter comes from the original course.
+> and end-to-end optimization chapters are works in progress. The dense KV
+> cache and quantized-matmul chapters come from the original course.
 
 Week 2 keeps the readable Week 1 model intact and builds a separate optimized
 Qwen3 path for single-request decoding. We begin with measurements, replace the
@@ -12,6 +12,7 @@ performance target against MLX on the same machine.
 ## What We Will Cover
 
 - Synchronized benchmarking and a matched MLX baseline
+- A dense per-request key-value cache for incremental decoding
 - Quantized matrix-vector and matrix-matrix multiplication
 - Fast RMSNorm, RoPE, and SwiGLU operations
 - The optimized decode-attention primitive
@@ -31,10 +32,11 @@ extension API registers our C++ primitive and dispatches our Metal kernels.
 Those facilities are the platform on which the course implementation runs;
 they are not substitutes for the operator implementations themselves.
 
-Unlike Week 1, the Week 2 model keeps its linear and embedding weights
-quantized and imports optimized operations from `week2_kernels.py`. Week 1
-continues to use its readable Python RMSNorm, RoPE, attention, and MLP
-implementations.
+Unlike Week 1, the Week 2 model prefills a dense KV cache once, passes only the
+new token during decode, keeps its linear and embedding weights quantized, and
+imports optimized operations from `week2_kernels.py`. Week 1 continues to use
+its readable full-prefix generation loop and Python RMSNorm, RoPE, attention,
+and MLP implementations.
 
 Week 3 imports these Week 2 interfaces rather than copying or replacing them.
 That boundary lets each week's model remain understandable and runnable on its

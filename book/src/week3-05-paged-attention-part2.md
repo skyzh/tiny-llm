@@ -1,4 +1,4 @@
-# Week 3 Day 6: Paged Attention, Part 2
+# Week 3 Day 5: Paged Attention, Part 2
 
 In this chapter, we move from **paged KV storage** to the runtime metadata and execution path needed for **real paged attention**.
 
@@ -118,7 +118,7 @@ The runtime should be able to:
 3. update the current layer cache's `context_len`,
 4. run attention over the full logical context using `block_table`
 
-This is the point where decode stops paying the repeated dense-repack cost from Day 2.
+This is the point where decode stops paying the repeated dense-repack cost from Day 1.
 
 ## How This Maps to `tiny-llm`
 
@@ -147,7 +147,7 @@ logical key position through `block_table` first:
 logical key position -> logical page -> physical page id -> slot in page
 ```
 
-After that lookup, the online-softmax update is the same idea as Day 3
+After that lookup, the online-softmax update is the same idea as Day 2
 FlashAttention. We still avoid a dense K/V gather before attention.
 
 The page pool should therefore expose contiguous physical storage:
@@ -181,7 +181,7 @@ The scheduler now needs to prepare runtime metadata instead of only dense K/V:
 - padded batch `block_table`
 - `context_lens`
 
-This is where continuous batching and paged attention finally connect. On Day 2, batching worked by repacking tensors. Here, batching should work by reusing page tables and updating only the new slots.
+This is where continuous batching and paged attention finally connect. On Day 1, batching worked by repacking tensors. Here, batching should work by reusing page tables and updating only the new slots.
 
 ## Recommended Incremental Rollout
 
@@ -266,7 +266,7 @@ Update request admission, slot reuse, and request removal so that:
 After this chapter, the serving stack has the right structure for a real high-throughput runtime: paging is no longer just a storage trick, but part of the execution model itself.
 
 ```bash
-pdm run test --week 3 --day 6
+pdm run test --week 3 --day 5
 ```
 
 {{#include copyright.md}}

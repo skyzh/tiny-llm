@@ -1,8 +1,12 @@
-# Week 3 Day 1: Key-Value Cache
+# Week 2 Day 2: Key-Value Cache
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
 previous tokens instead of recomputing the entire prefix at every step.
+
+This is the foundation of Week 2 decode optimization, not a serving-only Week 3
+feature. Without it, every generated token reruns all model layers over an
+ever-growing prefix, overwhelming the gains from faster individual kernels.
 
 **📚 Readings**
 
@@ -103,8 +107,8 @@ method, `update_and_fetch`, which:
 2. Appends them along the sequence dimension.
 3. Returns the complete cached `K` and `V`, the updated offset, and the mask.
 
-On Day 1, the cache passes `mask` through unchanged and does not use
-`mask_length`. Those parameters become important later for batching.
+On Day 2, the cache passes `mask` through unchanged and does not use
+`mask_length`. Those parameters become important in Week 3 for batching.
 
 You may implement this in `kv_cache.py` as `TinyKvFullCache`:
 
@@ -131,15 +135,15 @@ key, value = self.key_values  # B, H, offset, D
 return key, value, self.offset, mask
 ```
 
-## Task 2: Preserve the Optimized Model Boundary
+## Task 2: Preserve the Week 1 Boundary
 
 ```
-src/tiny_llm/qwen3_week3.py
+src/tiny_llm/qwen3_week2.py
 ```
 
-Week 2 already defined the optimized attention and MLP interfaces. Import those
-components into `qwen3_week3.py`; do not copy them or replace the Week 2 file.
-The Week 3 model adds cache ownership around the same optimized computation.
+Keep the readable Week 1 model and its full-prefix generation loop unchanged.
+Add cache-aware model calls to the separate `qwen3_week2.py` model, which the
+remaining Week 2 chapters will optimize behind explicit operator interfaces.
 
 - Give each layer its own cache.
 - Add an `offset` argument to the model. It is the number of tokens already in
@@ -171,14 +175,15 @@ sequence length after the update. This matches the Week 1 GQA convention: `L`
 is the query length, while `S` is the key/value source length. During
 single-token decoding, `L = 1` and `S` grows by one on each call.
 
-The linear-layer weights remain `QuantizedWeights`, and RMSNorm, RoPE, SwiGLU,
-and decode attention still come from `week2_kernels.py`. This is the incremental
-course boundary: Week 3 adds serving state without regressing Week 2 operators.
+As Week 2 progresses, the linear layers remain `QuantizedWeights`, while
+RMSNorm, RoPE, SwiGLU, and decode attention move behind
+`week2_kernels.py`. The dense cache remains the common incremental-decode
+foundation throughout those changes.
 
 ## Task 3: Create Request-Scoped Caches
 
 ```
-src/tiny_llm/qwen3_week3.py
+src/tiny_llm/qwen3_week2.py
 ```
 
 Implement `create_kv_cache` so every request gets one cache handle per
@@ -189,7 +194,7 @@ To verify correctness, run the following test, which is similar to the Week 1
 model test:
 
 ```bash
-pdm run test --week 3 --day 1
+pdm run test --week 2 --day 2
 ```
 
 ## Task 4: Connect the Serving Loop
@@ -201,7 +206,7 @@ src/tiny_llm/generate.py
 The first model call prefills the cache with the complete prompt. Each later
 call passes only the token produced by the preceding step, together with the
 number of tokens already cached. The same lifecycle will be owned by the
-continuous-batching scheduler on Day 2.
+continuous-batching scheduler in Week 3.
 
 For example:
 
@@ -216,15 +221,23 @@ decode:  _step(model, [8], 7)  # returns 9
 You can test your implementation with:
 
 ```bash
-pdm run main --solution tiny_llm --loader week3 --model qwen3-0.6b
-pdm run main --solution tiny_llm --loader week3 --model qwen3-4b
+pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm run main --solution tiny_llm --loader week2 --model qwen3-4b
 ```
 
-You can also run the serving loop with your implementation and the reference solution:
+You can also run the same loop with the reference solution:
 
 ```bash
-pdm run batch-main --solution tiny_llm --model qwen3-0.6b
-pdm run batch-main --solution tiny_llm_ref --model qwen3-0.6b
+pdm run main --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 ```
+
+## Expected Performance Contribution
+
+**Estimated improvement: several-fold over uncached decoding, commonly 3-10x
+for the course benchmark and increasingly important as the prompt grows.** The
+exact ratio depends strongly on context length. Unlike a constant-factor kernel
+optimization, KV caching changes each decode step from recomputing the full
+prefix to processing one new query token, so the advantage grows throughout a
+generation.
 
 {{#include copyright.md}}

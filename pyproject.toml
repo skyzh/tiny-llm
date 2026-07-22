@@ -53,4 +53,4 @@ book.cmd = "mdbook serve book/"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
-pythonpath = "src"
+pythonpath = ["src", "."]

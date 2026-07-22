@@ -24,8 +24,8 @@ class TinyKvCache(ABC):
 
         Returns:
             The updated keys, updated values, sequence length, and mask. On
-            Week 2 Day 1, the mask is passed through unchanged. Days 6-7 use
-            the sequence length and mask to construct a dense batch.
+            On Week 2 Day 2, the mask is passed through unchanged. Week 3 Day 1
+            uses the sequence length and mask to construct a dense batch.
         """
 
     def release(self):

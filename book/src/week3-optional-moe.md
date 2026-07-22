@@ -1,4 +1,4 @@
-# Week 3 Optional: Mixture of Experts
+# Week 3 Day 6 (Optional): Mixture of Experts
 
 In this chapter, we will implement the feed-forward shape of **Mixture of
 Experts**, or **MoE**, for the Qwen3 family.
@@ -300,7 +300,7 @@ No scheduler API change in `src/tiny_llm/batch.py` is required for correctness.
 Run the focused tests with:
 
 ```bash
-pdm run test --week 3 --day 7
+pdm run test --week 3 --day 6
 ```
 
 Run this task through the normal generation entrypoints instead of adding a

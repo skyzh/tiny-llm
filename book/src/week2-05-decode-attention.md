@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 5: Decode Attention
+# 🚧 Week 2 Day 6: Decode Attention
 
 > 🚧 This newly introduced chapter is a work in progress.
 
@@ -89,7 +89,7 @@ different workload where both query and context lengths are large.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 6
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit

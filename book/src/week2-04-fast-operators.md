@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 4: Fast Operators
+# 🚧 Week 2 Day 5: Fast Operators
 
 > 🚧 This newly introduced chapter is a work in progress.
 
@@ -110,7 +110,7 @@ serving model does not regress.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 5
 ```
 
 Compare against the readable equations with tolerances rather than bit-for-bit

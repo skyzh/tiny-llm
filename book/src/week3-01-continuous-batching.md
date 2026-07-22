@@ -1,4 +1,4 @@
-# Week 3 Day 2: Continuous Batching
+# Week 3 Day 1: Continuous Batching
 
 In this chapter, we will implement **continuous batching**, which keeps a batch
 of active requests on the device and replaces each request as soon as it
@@ -34,7 +34,7 @@ while requests_in_queue_or_in_progress:
             request.append(token)
 ```
 
-Day 4 will refine this scheduler with **chunked prefill**. A long prompt can make one prefill
+Day 3 will refine this scheduler with **chunked prefill**. A long prompt can make one prefill
 step much slower than a decode step, delaying every active request's next token.
 Splitting the prompt into smaller chunks bounds the amount of prefill work in
 each scheduler iteration.
@@ -77,7 +77,7 @@ do not modify the readable Week 1 `RoPE`. Also update `causal_mask` to handle
 Verify multi-offset RoPE and both attention paths with:
 
 ```bash
-pdm run test --week 3 --day 2 -- -k task_1
+pdm run test --week 3 --day 1 -- -k task_1
 ```
 
 ## Task 2: Batch KV Cache
@@ -113,7 +113,7 @@ mask[i, :, 0:L, (S - S_i):S] = causal_mask(L, S_i)
 You can verify your implementation by running:
 
 ```bash
-pdm run test --week 3 --day 2 -- -k task_2
+pdm run test --week 3 --day 1 -- -k task_2
 ```
 
 ## Task 3: Handle Batches in the Model
@@ -129,7 +129,7 @@ it.
 You should pass all of the tests by running:
 
 ```bash
-pdm run test --week 3 --day 2 -- -k task_3
+pdm run test --week 3 --day 1 -- -k task_3
 ```
 
 ## Task 4: Batch Generate
@@ -143,13 +143,13 @@ call. Then complete the scheduler in `batch_generate`: move finished prefills
 into idle decode slots, collect the next token and offset for each slot, and
 remove requests that reach EOS or `max_seq_len`.
 
-## Day 4 Preview: Chunked Prefill
+## Day 3 Preview: Chunked Prefill
 
 ```
 src/tiny_llm/batch.py
 ```
 
-On Day 4, modify `Request.try_prefill` to process at most `prefill_max_step`
+On Day 3, modify `Request.try_prefill` to process at most `prefill_max_step`
 prompt tokens per call.
 
 Materialize the KV cache between chunks. MLX evaluates lazily, so repeatedly

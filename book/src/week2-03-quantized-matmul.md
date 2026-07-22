@@ -1,4 +1,4 @@
-# Week 2 Days 2-3: Quantized Matmul
+# Week 2 Days 3-4: Quantized Matmul
 
 In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and
@@ -311,7 +311,7 @@ Build and test the extension:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k task_2
+pdm run test --week 2 --day 3 -- -k task_2
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -372,7 +372,7 @@ You can test your implementation by running:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k gpu
+pdm run test --week 2 --day 3 -- -k gpu
 ```
 
 The direct tests cover `M = 1` and `M = 8`. The result should agree with an MLX
