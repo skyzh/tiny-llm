@@ -1,4 +1,4 @@
-# Week 2 Days 6-7: End-to-End Decode Optimization (WIP)
+# Week 2 Days 6-7: End-to-End Optimization (WIP)
 
 > This newly introduced chapter is a work in progress.
 

@@ -1,4 +1,4 @@
-# Week 2: From Python to Metal
+# Week 2: Forging the Fast Path
 
 > **Course status:** The new benchmarking, fused-operator, decode-attention,
 > and end-to-end optimization chapters are works in progress. The quantized

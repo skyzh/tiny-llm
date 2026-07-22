@@ -1,4 +1,4 @@
-# Week 2 Days 2-3: Quantized Matvec and Matmul
+# Week 2 Days 2-3: Quantized Matmul
 
 In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and

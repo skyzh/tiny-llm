@@ -1,4 +1,4 @@
-# Week 2 Day 4: Fast RMSNorm, RoPE, and SwiGLU (WIP)
+# Week 2 Day 4: Fast Model Operators (WIP)
 
 > This newly introduced chapter is a work in progress.
 
