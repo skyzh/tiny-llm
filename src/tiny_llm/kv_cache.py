@@ -23,10 +23,9 @@ class TinyKvCache(ABC):
             mask: The mask to use (only used in batching mode)
 
         Returns:
-            A tuple of the updated key-value cache, the updated value, the sequence length, and the mask.
-            In week 2 day 1, we only need to return the updated key-value cache, the updated value.
-            In week 2 day 6/7, we need to return the updated key-value cache, the updated value, the sequence length, and the mask.
-            so that the batching kv cache can use this information to generate the mask.
+            The updated keys, updated values, sequence length, and mask. On
+            Week 2 Day 1, the mask is passed through unchanged. Days 6-7 use
+            the sequence length and mask to construct a dense batch.
         """
 
 

@@ -1,19 +1,26 @@
 # Week 2: Tiny vLLM
 
-In Week 2 of the course, we will focus on building serving infrastructure for the Qwen3 model. Essentially, this means creating a minimal version of the vLLM project from scratch. By the end of the week, you’ll be able to serve the Qwen3 model efficiently on your Apple Silicon device using the infrastructure we’ve built together.
+Week 2 moves from model implementation to serving infrastructure. We will build
+a small inference engine for Qwen3, inspired by vLLM, and run it on Apple
+Silicon.
 
-## What We’ll Cover
+## What We Will Cover
 
-* Key-value cache implementation
-* C++/Metal kernels
-    * Implementing a quantized matmul kernel
-    * Implementing a flash attention kernel
-    * Note: This week, we won’t focus on performance optimization. The kernels you build will likely be around 10x slower than MLX implementations. Optimizing them will be left as an exercise.
-* Model serving infrastructure
-    * Implementing chunked prefill
-    * Implementing continuous batching
+- Implementing a key-value cache
+- Writing custom C++ and Metal kernels
+  - Quantized matrix multiplication
+  - FlashAttention
+- Building the serving loop
+  - Chunked prefill
+  - Continuous batching
 
-This week continues with Qwen3 as the main model. The serving code uses the official Qwen3 MLX 4-bit model files, preserves their bfloat16 tensors, and builds the KV cache, custom kernels, and batching path around that model family.
+The custom kernels prioritize clarity over performance. They will likely be
+slower than MLX's optimized implementations; optimizing them is left as an
+exercise.
+
+We will continue using the official Qwen3 MLX 4-bit checkpoints. Unlike Week 1,
+the Week 2 model keeps its linear and embedding weights quantized, then builds
+the KV cache, custom kernels, and batching path around them.
 
 {{#include copyright.md}}
 

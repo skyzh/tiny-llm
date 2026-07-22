@@ -1,47 +1,67 @@
-# Week 2 Day 6 and 7: Chunked Prefill and Continuous Batching
+# Week 2 Days 6-7: Chunked Prefill and Continuous Batching
 
-In this chapter, we will implement **continuous batching**. The idea is to batch multiple requests together so we can make full use of the compute resources.
+In this chapter, we will implement **continuous batching**, which keeps a batch
+of active requests on the device and replaces each request as soon as it
+finishes.
 
-So far, we have assumed that the model only processes a single batch each time it is called. However, a single batch is usually not enough to saturate the compute resources. To address this, we can process multiple requests at the same time.
+So far, each generation loop has processed only one request. That may not provide
+enough work to use the device efficiently, so we will decode several requests
+in each model call.
 
-The first question is how to batch requests. A naive approach would be to select a fixed number of prompts (for example, 5) from the request queue and perform decoding as before. The problem is that different prompts produce sequences of different lengths. It is possible that 4 out of 5 requests finish decoding quickly, while the remaining one takes much longer. This leads to wasted compute resources and stalls all other requests.
+A static batch could select five prompts and run them together until every
+request finishes. However, generated sequences have different lengths. If four
+requests finish quickly while the fifth continues, most of the batch remains
+idle and queued requests cannot start.
 
-A smarter approach is **continuous batching**. That is, we set the maximum number of requests we can process at once. When one request finishes, we replace its slot (i.e., its KV cache) with another request. In this way, the pipeline remains fully utilized.
+Continuous batching instead sets a maximum number of active decode requests.
+When one finishes, the scheduler assigns its batch slot and KV-cache entry to a
+waiting request. This keeps the decode batch populated whenever work is queued.
 
-Another challenge is how to handle decoding and prefilling at the same time. In this chapter, we adopt a simplified approach: we prefill one request, then decode one token for each request in progress. The general idea can be described with the following pseudocode:
+The scheduler must also interleave prefill and decode work. We will use a simple
+policy: advance one pending prefill, then decode one token for every active
+request.
 
 ```python
 while requests_in_queue_or_in_progress:
-    if prefill_request exists:
+    if prefill_request is not None:
         prefill_request.try_prefill()  # perform a chunk of chunked prefill
         if prefill_request.ready:
             if kv_cache.try_add(prefill_request):
                 prefill_request = next(requests)
-    tokens = decode(model, kv_cache)
-    requests.append(tokens)
+    if active_requests:
+        tokens = decode(model, kv_cache)
+        for request, token in zip(active_requests, tokens):
+            request.append(token)
 ```
 
-We will also implement **chunked prefill** in this chapter. Prefilling a long prompt can take a significant amount of time. Since we are interleaving prefills and decodes, we want to reduce the latency of producing the next token. Ideally, the time slots for prefill and decode should be roughly equal. To achieve this, we can prefill a portion of the request at a time, using multiple slots to finish the entire prefill.
+We will also implement **chunked prefill**. A long prompt can make one prefill
+step much slower than a decode step, delaying every active request's next token.
+Splitting the prompt into smaller chunks bounds the amount of prefill work in
+each scheduler iteration.
 
-For prefilling, this essentially means providing a chunk of tokens to the model to populate the KV cache. For example:
+Each chunk adds another range of prompt tokens to the request's KV cache:
 
 ```python
-# assume prompt_tokens is a list of 400 tokens and prefill chunk size is 128
+# prompt_tokens contains 400 tokens; the chunk size is 128
 _step(model, prompt_tokens[0:128], offset=0, kv_cache)
 _step(model, prompt_tokens[128:256], offset=128, kv_cache)
 _step(model, prompt_tokens[256:384], offset=256, kv_cache)
 _step(model, prompt_tokens[384:400], offset=384, kv_cache)
 ```
 
-Note that the causal mask generated during prefilling has the shape `LxS`. For example, assume we already have 5 tokens in the KV cache and want to prefill 3 tokens. The mask should look like this:
+The causal mask for each chunk has shape `L x S`, where `L` is the chunk length
+and `S` is the total sequence length after appending the chunk. For example, if
+the cache already contains five tokens and the next chunk contains three, the
+mask has shape `3 x 8`:
 
 ```
-0    0    0   -inf  -inf
-0    0    0    0    -inf
-0    0    0    0     0
+0  0  0  0  0  0  -inf  -inf
+0  0  0  0  0  0     0  -inf
+0  0  0  0  0  0     0     0
 ```
 
-This is the same masking logic you implemented in Week 1.
+Each row can attend to all five cached tokens, itself, and any earlier token in
+the same chunk.
 
 ## Task 1: Batch RoPE and Causal Mask for Prefill
 
@@ -50,9 +70,11 @@ src/tiny_llm/positional_encoding.py
 src/tiny_llm/attention.py::causal_mask
 ```
 
-Ensure your RoPE implementation accepts a `list[slice]` of offsets (one slice for sequence in the batch). Also, make sure your mask implementation correctly handles the case where `L != S`.
+Extend RoPE to accept a `list[slice]` containing one position range per batch
+element. Also update `causal_mask` to handle `L != S`, as required by chunked
+prefill.
 
-You can verify multi-offset RoPE, and that masking works for attention and flash attention with:
+Verify multi-offset RoPE and both attention paths with:
 
 ```bash
 pdm run test --week 2 --day 6 -- -k task_1
@@ -64,24 +86,28 @@ pdm run test --week 2 --day 6 -- -k task_1
 src/tiny_llm/kv_cache.py::BatchingKvCache
 ```
 
-The batch KV cache is a collection of KV caches, one for each request. A challenge here is generating a `BxHxLxS` mask for the batch, since requests can have different lengths.
+`BatchingKvCache` holds one request cache per decode slot. Because requests may
+have different sequence lengths, it must combine their keys and values into
+dense tensors and construct a matching `B x 1 x L x S` mask.
 
 ```
-S = max(S_i of the batch)
+S = max(S_i across active requests)
 L = mask_length (input parameter)
-keys: 1, H, S_i, D
-values: 1, H, S_i, D
+request_keys: H, S_i, D
+request_values: H, S_i, D
 batched_keys: B, H, S, D
 batched_values: B, H, S, D
 mask: B, 1, L, S
 ```
 
-You should fill the `batched_keys` and `batched_values` arrays so that each request’s data is aligned at the end:
+Right-align each active request in the common `S` dimension. The leading
+positions remain zero and masked out. Inactive slots remain fully masked.
 
 ```python
-batched_keys[i, :, (S-S_i):S, :] = keys[i, :, :, :]
-batched_values[i, :, (S-S_i):S, :] = values[i, :, :, :]
-mask[i, :, 0:L, (S-S_i):S] = causal_mask(L, S_i)
+keys_i, values_i = request_cache[i]
+batched_keys[i, :, (S - S_i):S, :] = keys_i
+batched_values[i, :, (S - S_i):S, :] = values_i
+mask[i, :, 0:L, (S - S_i):S] = causal_mask(L, S_i)
 ```
 
 You can verify your implementation by running:
@@ -96,7 +122,9 @@ pdm run test --week 2 --day 6 -- -k task_2
 src/tiny_llm/qwen3_week2.py
 ```
 
-Ensure your model can handle multiple requests simultaneously. You should also use the masks returned by the batch KV cache.
+Update the model to accept multiple requests and a separate offset for each
+batch element. Use the mask returned by `BatchingKvCache` instead of discarding
+it.
 
 You should pass all of the tests by running:
 
@@ -110,7 +138,10 @@ pdm run test --week 2 --day 6 -- -k task_3
 src/tiny_llm/batch.py
 ```
 
-Implement `try_prefill` so that it prefills an entire request at once. Then implement the rest of the code as described in the starter code.
+First implement `Request.try_prefill` by prefilling the complete prompt in one
+call. Then complete the scheduler in `batch_generate`: move finished prefills
+into idle decode slots, collect the next token and offset for each slot, and
+remove requests that reach EOS or `max_seq_len`.
 
 ## Task 5: Chunked Prefill
 
@@ -118,9 +149,14 @@ Implement `try_prefill` so that it prefills an entire request at once. Then impl
 src/tiny_llm/batch.py
 ```
 
-Modify `try_prefill` so that it performs prefilling in chunks, rather than all at once.
+Modify `Request.try_prefill` to process at most `prefill_max_step` prompt tokens
+per call.
 
-Note that you should materialize KV cache between chunks. Because MLX uses lazy evaluation, and chunked prefill keeps extending the KV cache across multiple model calls. If you never call `mx.eval`, the cache becomes a longer and longer lazy expression, so memory usage keeps growing. Calling `mx.eval` on the key and value tensors after each chunk materializes the current KV cache and truncates the graph.
+Materialize the KV cache between chunks. MLX evaluates lazily, so repeatedly
+extending an unevaluated cache creates an increasingly long computation graph
+and allows memory usage to grow. Calling `mx.eval` on every layer's key and
+value tensors after each chunk stores the current cache and truncates that
+graph.
 
 You can test your implementation by running:
 
@@ -128,6 +164,7 @@ You can test your implementation by running:
 pdm run batch-main
 ```
 
-This will use the `qwen3-0.6b` model with a batch size of 5 to process a fixed set of prompts.
+By default, this command uses Qwen3-0.6B with a batch size of five and a fixed
+set of prompts.
 
 {{#include copyright.md}}
