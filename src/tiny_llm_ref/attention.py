@@ -121,7 +121,7 @@ def flash_attention(
     mask: mx.array | str | None = None,
 ) -> mx.array:
     factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
-    factor = factor.astype(query.dtype)
+    factor = factor.astype(mx.float32)
 
     *B, H_q, L, E = query.shape
     _, H, S, _ = key.shape

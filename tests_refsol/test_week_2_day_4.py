@@ -49,6 +49,7 @@ def attention_helper(
                 mask=mask,
             )
             mx.eval(user_output)  # so that any error will be caught here
+            assert user_output.dtype == precision
             comparison_precision = (
                 mx.bfloat16 if precision == mx.bfloat16 else mx.float16
             )
@@ -88,8 +89,8 @@ def assert_causal_mask_faster_than_all_zero_mask(
     s: int,
     e: int,
     scale: float = 0.9,
+    precision=mx.float32,
 ):
-    precision = mx.float32
     q_shape = (batch, h_q, l, e)
     kv_shape = (batch, h, s, e)
     mask_shape = (batch, h_q, l, s)
@@ -98,7 +99,7 @@ def assert_causal_mask_faster_than_all_zero_mask(
         query = mx.random.uniform(shape=q_shape, dtype=precision)
         key = mx.random.uniform(shape=kv_shape, dtype=precision)
         value = mx.random.uniform(shape=kv_shape, dtype=precision)
-        zero_mask = mx.zeros(shape=mask_shape, dtype=precision)
+        zero_mask = mx.zeros(shape=mask_shape, dtype=mx.float32)
 
         for _ in range(3):
             mx.eval(flash_attention(query, key, value, scale=scale, mask="causal"))
@@ -182,16 +183,11 @@ def test_task_3_flash_attention_gpu(mask_mode: str):
 
 @pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
 def test_task_3_flash_attention_gpu_large(mask_mode: str):
-    attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, mask_mode)
+    attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, mask_mode, precision=mx.bfloat16)
 
 
 @pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
 def test_task_3_flash_attention_gpu_d128_partial_tiles(mask_mode: str):
-    attention_helper(mx.gpu, 8, 2, 35, 128, 47, 1, mask_mode)
-
-
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
-def test_task_3_flash_attention_gpu_bf16_d128(mask_mode: str):
     attention_helper(mx.gpu, 8, 2, 35, 128, 47, 1, mask_mode, precision=mx.bfloat16)
 
 
@@ -204,4 +200,5 @@ def test_task_3_flash_attention_gpu_causal_mask_faster_than_all_zero_mask():
         l=512,
         s=512,
         e=128,
+        precision=mx.bfloat16,
     )

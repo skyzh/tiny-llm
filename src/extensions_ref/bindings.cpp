@@ -40,8 +40,11 @@ NB_MODULE(_ext, m) {
             key (array): Key array.
             value (array): Value array.
             mask (array): Mask array.
-            scale (float): Scaling factor.
+            scale (float): Float32 scaling factor.
             mask_mode (int): 0 for no mask, 1 for causal, 2 for an additive mask.
+
+        Q, K, V, and output preserve bfloat16 on the D=128 GPU path. The
+        additive mask and online-softmax accumulation use float32.
 
         Returns:
             array: ``softmax(query @ key.T * scale) @ value``

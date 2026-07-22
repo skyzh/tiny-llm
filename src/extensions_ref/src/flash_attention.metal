@@ -93,6 +93,8 @@ inline void matrix_multiply_accumulate(
     uint3 group_id [[threadgroup_position_in_grid]],
     ushort simd_gid [[simdgroup_index_in_threadgroup]],
     ushort lane [[thread_index_in_simdgroup]]) {
+    // Week 2 Qwen keeps Q/K/V and output in BF16. Scores, online-softmax
+    // statistics, and output accumulators remain FP32 for numerical stability.
     constexpr int BQ = 64;
     constexpr int BK = 32;
     constexpr int SIMD_GROUPS = 8;

@@ -83,6 +83,30 @@ including Qwen3-4B. Do not derive this value as `hidden_size / num_heads`:
 Qwen3 stores `head_dim` explicitly and its attention projection width can
 differ from `hidden_size`.
 
+### Week 2 Dtype Contract
+
+Yes: Week 2 uses BF16 by default. `Qwen3ModelWeek2` sets its model precision to
+`mx.bfloat16`, and the quantized projections produce BF16 Q, K, and V. The
+FlashAttention path must not upcast those complete tensors to FP32.
+
+Use mixed precision at these boundaries:
+
+| Value | Dtype | Reason |
+| --- | --- | --- |
+| Q, K, V in device memory | BF16 | matches the Week 2 model and halves traffic versus FP32 |
+| Q/K/V threadgroup tiles | BF16 | preserves the bandwidth and capacity benefit |
+| attention scale | FP32 | avoids rounding the scalar before repeated use |
+| score and output accumulators | FP32 | protects dot products and online softmax |
+| running max and sum | FP32 | numerical stability |
+| additive mask inside the extension | FP32 | preserves `-inf` and additive bias behavior |
+| final attention output | BF16 | feeds the next Week 2 layer without a full-tensor cast |
+
+“Use BF16” therefore does not mean performing the softmax recurrence in BF16.
+It means keeping model-sized tensors BF16 and promoting only register-resident
+arithmetic that benefits from FP32. A caller may supply a BF16 additive mask;
+the wrapper converts its contiguous broadcasted representation to FP32 at the
+extension boundary.
+
 ## Task 1: Implement the Python Wrapper
 
 ```plain
@@ -100,7 +124,8 @@ out:   B..., H_q, L, E
 ```
 
 Flatten batch and head dimensions before calling C++, then restore the original
-layout. Make Q, K, and V contiguous, but preserve their BF16 dtype.
+layout. Make Q, K, and V contiguous, but preserve their BF16 dtype. Keep the
+scalar `factor` in FP32 rather than casting it to the query dtype.
 
 Pass a small integer mask mode to the extension:
 
@@ -124,7 +149,8 @@ src/extensions/CMakeLists.txt
 
 Add the MLX primitive, binding, and CPU evaluator. The readable CPU path uses
 FP32 and tiled online softmax with `Br = 32` and `Bc = 32`. It is a correctness
-reference, not the performance path.
+reference, not the Week 2 model path. The intentional CPU exception keeps the
+algorithm easy to inspect; the required model-facing GPU path is BF16.
 
 Map grouped-query heads with:
 
@@ -171,14 +197,14 @@ cannot compensate for slow scalar arithmetic.
 
 ### Keep a General Fallback
 
-Use a small scalar kernel for FP32 head dimensions below 128. A useful mapping
-is a `16 × 32` query/key tile with 512 threads: one SIMD group owns one query
-row, and one lane owns one key. This path keeps the implementation general and
-testable.
+Use a small scalar kernel for FP32 correctness tests and head dimensions below
+128. A useful mapping is a `16 × 32` query/key tile with 512 threads: one SIMD
+group owns one query row, and one lane owns one key. This path keeps the
+implementation general and testable, but Qwen3 does not use it.
 
-The performance path is a separate BF16, `E = 128` specialization. Specialize
-the common model shape instead of adding branches and dynamic loops to its hot
-path.
+The required Week 2 GPU path is a separate BF16, `E = 128` specialization that
+returns BF16. Specialize the common model shape instead of adding branches and
+dynamic loops to its hot path.
 
 ### BF16 SIMD-Matrix Tile
 
@@ -270,10 +296,13 @@ softmax recurrence, storage layout, and synchronization directly.
 Test more than aligned self-attention:
 
 - no mask, additive mask, and causal mask;
-- BF16 D=128 and the FP32 fallback;
+- BF16 D=128 as the default GPU path and the FP32 fallback separately;
 - partial query and key tiles, such as `L=35, S=47`;
 - grouped-query attention;
 - `L != S` causal offsets.
+
+Assert that the BF16 GPU result is still BF16. A numerically close FP32 result
+would hide a model-sized upcast and fail the Week 2 dtype contract.
 
 Evaluate the lazy result before comparing it. A kernel can compile and appear
 to run while a lane-coordinate or partial-tile error remains hidden.
@@ -534,7 +563,9 @@ src/tiny_llm/qwen3_week2.py
 Connect the kernel to `Qwen3MultiHeadAttention` and propagate
 `enable_flash_attn` through the model. Preserve Q, K, V, and the result as BF16;
 do not cast the full tensors to FP32. Pass causal mode directly so the wrapper
-does not allocate an `L × S` mask.
+does not allocate an `L × S` mask. FP32 is limited to the scalar scale,
+additive-mask values, matrix accumulators, and online-softmax state inside the
+fused operation.
 
 Run generation with FlashAttention enabled:
 
