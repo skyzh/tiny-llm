@@ -1,4 +1,8 @@
-# Week 2: Optimize Decode
+# Week 2: From Python to Metal
+
+> **Course status:** The new benchmarking, fused-operator, decode-attention,
+> and end-to-end optimization chapters are works in progress. The quantized
+> matmul chapter comes from the original course.
 
 Week 2 keeps the readable Week 1 model intact and builds a separate optimized
 Qwen3 path for single-request decoding. We begin with measurements, replace the

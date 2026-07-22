@@ -1,4 +1,6 @@
-# Week 4: Retrieval-Augmented Generation
+# Week 4: Retrieval-Augmented Generation (WIP)
+
+> This chapter is a work in progress.
 
 RAG adds external context before generation. Build a small local pipeline:
 

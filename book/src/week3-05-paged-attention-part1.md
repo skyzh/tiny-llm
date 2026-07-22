@@ -1,4 +1,6 @@
-# Week 3 Day 5: Paged Attention, Part 1
+# Week 3 Day 5: Paged Attention, Part 1 (WIP)
+
+> This chapter remains a work in progress.
 
 In this chapter, we will design the **paged KV cache**. This is the storage abstraction behind paged attention.
 

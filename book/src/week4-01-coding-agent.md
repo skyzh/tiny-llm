@@ -1,4 +1,6 @@
-# Week 4: Build the Coding Agent
+# Week 4: Build the Coding Agent (WIP)
+
+> This chapter is a work in progress.
 
 The repository's `agent.py` demonstrates the smallest useful coding-agent loop:
 render tools, generate one structured action, validate it, execute it inside a

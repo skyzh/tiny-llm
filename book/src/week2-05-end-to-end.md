@@ -1,4 +1,6 @@
-# Week 2 Days 6-7: End-to-End Decode Optimization
+# Week 2 Days 6-7: End-to-End Decode Optimization (WIP)
+
+> This newly introduced chapter is a work in progress.
 
 The final step is to connect the optimized operations and remove graph work
 that does not contribute to the next token.

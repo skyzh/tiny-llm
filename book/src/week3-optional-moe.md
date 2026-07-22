@@ -1,4 +1,6 @@
-# Week 3 Optional: Mixture of Experts
+# Week 3 Optional: Mixture of Experts (WIP)
+
+> This optional chapter remains a work in progress.
 
 In this chapter, we will implement the feed-forward shape of **Mixture of
 Experts**, or **MoE**, for the Qwen3 family.

@@ -1,4 +1,6 @@
-# Week 3 Optional: Speculative Decoding
+# Week 3 Optional: Speculative Decoding (WIP)
+
+> This optional chapter remains a work in progress.
 
 Speculative decoding uses a smaller draft model to propose several tokens, then
 asks the target model to verify them in one call. Accepted draft tokens reduce

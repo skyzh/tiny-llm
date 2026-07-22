@@ -1,4 +1,6 @@
-# Week 2 Day 4: Fast RMSNorm, RoPE, and SwiGLU
+# Week 2 Day 4: Fast RMSNorm, RoPE, and SwiGLU (WIP)
+
+> This newly introduced chapter is a work in progress.
 
 The Week 1 operators favor readable equations. Week 2 adds optimized versions
 behind a dedicated module instead of rewriting those implementations.
