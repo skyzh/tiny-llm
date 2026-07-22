@@ -312,6 +312,200 @@ implementation remains about 3.4× faster at 2048 tokens because it adds deeper
 specialization and scheduling work beyond merely using matrix instructions.
 Do not report memory efficiency as a latency speedup.
 
+### Why MLX Steel Is Much Faster
+
+The MLX 0.29.1 result in the table uses its classic Steel attention kernel. It
+uses the same public 8×8 `simdgroup_matrix` operation available to this course,
+so the difference is not a different attention algorithm or a larger matrix
+instruction. It is the accumulation of many smaller implementation choices.
+
+For D=128, MLX 0.29.1 dispatches a compile-time `BQ=32`, `BK=16`, `BD=128`
+specialization with four SIMD groups, or 128 threads. Compare its hot path with
+the course kernel:
+
+| Detail | Course kernel | MLX 0.29.1 Steel |
+| --- | --- | --- |
+| Q/K/V storage | BF16 | BF16 |
+| Matrix fragments | BF16 operands, FP32 result | BF16 loads converted to FP32 fragments |
+| Probability for PV | converted back to BF16 | remains in FP32 fragments |
+| Prefill tile | `64 × 32`, 256 threads | `32 × 16`, 128 threads |
+| Scale and exponent | scale every score tile, `fast::exp` | pre-scale Q once, `fast::exp2` |
+| Mask selection | runtime `mask_mode` branches | Metal function constants |
+| Aligned loads | bounds logic remains in the kernel | unrolled unchecked interior path |
+| Loop structure | compiler sees constant bounds | explicit compile-time unrolling |
+| V scheduling | load V after softmax | issue the V load before softmax, consume it after |
+
+#### Specialize Away Work That Is Not Needed
+
+Steel uses function constants for aligned Q, aligned K, mask presence, causal
+mode, and attention sinks. Metal compiles and caches a different pipeline for
+each relevant combination. A causal, aligned, no-additive-mask launch therefore
+does not execute runtime branches for the unused modes.
+
+It also distinguishes an aligned interior tile from a partial tail. Interior
+tiles use unchecked loads and stores; only the final tile pays bounds checks.
+The course kernel checks key and query validity inside every score fragment.
+
+#### Keep the Hot Fragments in FP32
+
+Steel stores BF16 Q/K/V in device and threadgroup memory, but converts values to
+FP32 when loading matrix fragments. Scores, probabilities, V fragments, and
+output accumulators then stay FP32 through both matrix multiplications.
+
+The course kernel converts FP32 probabilities back to BF16 fragments before
+PV. That saves registers, but adds conversions and loses precision. The Steel
+choice uses more registers, so it must be paired with its smaller tile and
+128-thread threadgroup to preserve occupancy.
+
+#### Move Repeated Arithmetic Out of the K/V Loop
+
+Softmax can be evaluated in base 2:
+
+```plain
+exp(x) = exp2(x × log2(e))
+```
+
+Steel multiplies Q by `scale × log2(e)` once when loading the Q tile. Every QK
+result is already in the units required by `fast::exp2`. The course kernel
+multiplies every score in every K/V tile by `scale`, then uses `fast::exp`.
+
+Pre-scaling Q is particularly valuable because Q remains resident while many
+K/V tiles stream past it.
+
+#### Use Compile-Time Cooperative Loaders
+
+Steel assigns each thread a compile-time rectangular slice and fully unrolls
+the aligned load loops. K is transposed cooperatively while entering threadgroup
+memory. Its Q, K, and V loaders advance their source pointers rather than
+recomputing full indices in the hot loop. Only the tail path executes validity
+checks and zero filling.
+
+Padding is chosen together with the vector width and fragment access pattern.
+A padding value is not independently “correct”; it must be evaluated with the
+loader, element type, bank mapping, and tile shape.
+
+#### Schedule Loads Around Independent Math
+
+In the Steel loop, the V load is issued after QK but before the softmax
+reductions and exponentials. V is not consumed until PV, so the GPU and compiler
+have independent work that can overlap the memory operation. The course kernel
+finishes softmax before beginning its V load.
+
+Steel also uses SIMD-group barriers where only one SIMD group needs ordering,
+and threadgroup barriers only when shared K/V storage is being reused. Barrier
+scope and placement matter as much as the raw barrier count.
+
+#### Production Dispatch Uses More Than One Kernel
+
+MLX 0.29.1 selects full tiled attention only when the query length is greater
+than eight. Short-query decode uses a separate vector kernel, with a two-pass
+variant for long K/V sequences. One prefill tile cannot also be the best decode
+mapping.
+
+Later MLX revisions add an optional NAX path using 16×16 cooperative tensors
+from MetalPerformancePrimitives. That is not the path measured in this chapter,
+and it is outside the course rule that only public `simdgroup_matrix` may be
+used for this optimization.
+
+The relevant MLX 0.29.1 sources are useful for comparison after implementing
+the exercise independently:
+
+- [host dispatch and tile selection](https://github.com/ml-explore/mlx/blob/v0.29.1/mlx/backend/metal/scaled_dot_product_attention.cpp)
+- [Steel attention loop](https://github.com/ml-explore/mlx/blob/v0.29.1/mlx/backend/metal/kernels/steel/attn/kernels/steel_attention.h)
+- [cooperative block loaders](https://github.com/ml-explore/mlx/blob/v0.29.1/mlx/backend/metal/kernels/steel/attn/loader.h)
+- [8×8 fragment and MMA helpers](https://github.com/ml-explore/mlx/blob/v0.29.1/mlx/backend/metal/kernels/steel/attn/mma.h)
+
+### Follow-Up Performance Exercises
+
+Treat each item as an experiment: change one mechanism, rerun correctness on
+partial tiles and masks, and record the synchronized Qwen3-4B benchmark. Do not
+copy or include the Steel headers.
+
+#### 1. Compile-Time Mask Variants
+
+Create separate no-mask, causal, and additive-mask pipelines, either as kernel
+entry points or Metal function-constant specializations. For causal mode,
+compute the first tile that intersects the diagonal and apply element-level
+masking only from that tile onward. Earlier tiles are entirely valid.
+
+This is the smallest follow-up because it changes control flow without changing
+the fragment layout.
+
+#### 2. Pre-Scale Q and Use Base-2 Exponentials
+
+Multiply Q by `scale × log2(e)` during the one-time Q load and replace the
+online-softmax exponentials with `fast::exp2`. Verify both ordinary and cached
+causal attention, because additive masks must be converted to the same base-2
+units.
+
+Measure this separately from mask specialization so its effect is visible.
+
+#### 3. Keep Probabilities and V Fragments in FP32
+
+Keep BF16 in device/threadgroup memory, but load Q, K, and V into FP32 matrix
+fragments. Feed the FP32 score fragments directly into PV instead of converting
+probabilities back to BF16.
+
+Then retune BQ/BK: the additional registers may make a smaller threadgroup
+faster. Record numerical error as well as latency.
+
+#### 4. Add Aligned Vector Loaders
+
+Split cooperative loading into:
+
+- an aligned interior path using packed, unchecked reads; and
+- a safe tail path that zero-fills out-of-range elements.
+
+Precompute per-thread source and destination offsets and increment pointers
+between K/V tiles. Start with fully unrolled scalar loads, then test aligned
+packed reads where the source and destination layout permits them. Check
+generated memory transactions or Metal GPU counters; source-level vector syntax
+alone does not guarantee coalesced loads.
+
+#### 5. Pipeline V Loading with Softmax
+
+Issue the V load before row reductions and exponentials, then place the barrier
+immediately before PV consumes V. As a harder variant, double-buffer K/V tiles
+so tile `j+1` can be loaded while tile `j` is computed.
+
+Double buffering increases threadgroup memory and can lower occupancy, so it is
+an optimization only if the measured overlap exceeds that cost.
+
+#### 6. Autotune Tile and Threadgroup Shapes
+
+Benchmark at least these compile-time variants:
+
+```plain
+(BQ, BK, SIMD groups) =
+    (32, 16, 4)
+    (32, 32, 4)
+    (64, 16, 8)
+    (64, 32, 8)
+```
+
+Run every shape at 128, 512, 1024, 2048, and 4096 tokens. Track threadgroup
+memory and estimated register pressure alongside time. A tile may win at long
+prefill and regress badly at 128 tokens, so dispatching by sequence length can
+be better than choosing one global winner.
+
+#### 7. Reuse K/V Across GQA Query Heads
+
+Qwen3-4B has four query heads per KV head. Explore assigning multiple related
+query heads to one threadgroup so a staged K/V tile serves more than one Q head.
+This reduces K/V traffic but increases Q storage, output registers, and
+threadgroup size. It is a difficult exercise because those resource costs can
+erase the reuse benefit.
+
+#### 8. Add a Separate Decode Kernel
+
+Dispatch `L <= 8` to a vector-oriented kernel and consider a two-pass reduction
+for very long K/V caches. Do not judge a prefill kernel by one-token decode, or
+inflate the prefill kernel with decode-specific branches.
+
+The first four exercises stay close to the current code and are the best next
+steps for narrowing the Steel gap. Exercises 5–8 introduce scheduling or
+dispatch complexity closer to a production implementation.
+
 ### Does FlashAttention Make Sense on Metal?
 
 Yes for memory-bounded prefill, but not for exactly the same reasons or with
