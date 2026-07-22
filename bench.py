@@ -5,6 +5,7 @@ from time import perf_counter
 
 import mlx.core as mx
 from mlx_lm import load
+from model_names import shortcut_name_to_full_name
 from tqdm.auto import tqdm
 
 
@@ -104,16 +105,6 @@ def load_solution_modules(solution: str):
 
         return "tiny_llm_ref", models, TinyKvFullCache, BatchingKvCache
     raise ValueError(f"Solution {solution} not supported for bench")
-
-
-def shortcut_name_to_full_name(shortcut_name: str) -> str:
-    shortcuts = {
-        "qwen3-0.6b": "Qwen/Qwen3-0.6B-MLX-4bit",
-        "qwen3-1.7b": "Qwen/Qwen3-1.7B-MLX-4bit",
-        "qwen3-4b": "Qwen/Qwen3-4B-MLX-4bit",
-        "qwen3-8b": "Qwen/Qwen3-8B-MLX-4bit",
-    }
-    return shortcuts.get(shortcut_name.lower(), shortcut_name)
 
 
 def random_token_id(rng: Random, low: int, high: int, eos_token_id: int) -> int:
@@ -394,11 +385,7 @@ def main() -> None:
     solution_name, models, kv_cache_cls, batching_kv_cache_cls = load_solution_modules(
         args.solution
     )
-    model_name = (
-        shortcut_name_to_full_name(args.model)
-        if models is None
-        else models.shortcut_name_to_full_name(args.model)
-    )
+    model_name = shortcut_name_to_full_name(args.model)
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
         f"Model={model_name} FlashAttn={args.enable_flash_attn}"

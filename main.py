@@ -4,6 +4,7 @@ import mlx.core as mx
 import argparse
 
 import mlx_lm.sample_utils
+from model_names import shortcut_name_to_full_name
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="qwen3-0.6b")
@@ -53,11 +54,11 @@ elif args.solution == "mlx":
 else:
     raise ValueError(f"Solution {args.solution} not supported")
 
-args.model = models.shortcut_name_to_full_name(args.model)
+args.model = shortcut_name_to_full_name(args.model)
 mlx_model, tokenizer = load(args.model)
 
 if args.draft_model:
-    args.draft_model = models.shortcut_name_to_full_name(args.draft_model)
+    args.draft_model = shortcut_name_to_full_name(args.draft_model)
     draft_mlx_model, draft_tokenizer = load(args.draft_model)
     if args.loader == "week1":
         raise ValueError("Draft model not supported for week1")

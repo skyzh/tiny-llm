@@ -3,6 +3,8 @@ import mlx.core as mx
 import argparse
 import random
 
+from model_names import shortcut_name_to_full_name
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="qwen3-0.6b")
 
@@ -55,7 +57,7 @@ elif args.solution == "tiny_llm_ref" or args.solution == "ref":
 else:
     raise ValueError(f"Solution {args.solution} not supported")
 
-args.model = models.shortcut_name_to_full_name(args.model)
+args.model = shortcut_name_to_full_name(args.model)
 mlx_model, tokenizer = load(args.model)
 
 with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
