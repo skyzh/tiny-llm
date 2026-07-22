@@ -60,7 +60,9 @@ def generate(model, tokenizer, messages, cache_type, args):
     output, offset = [], 0
     try:
         for _ in range(args.max_tokens):
-            logits = model(tokens[None], offset, caches)[:, -1, :]
+            logits = model(
+                tokens[None], offset, caches, logits_to_keep=1
+            )[:, -1, :]
             token = int(mx.argmax(logits, axis=-1).item())
             if token == tokenizer.eos_token_id:
                 break

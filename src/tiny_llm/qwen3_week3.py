@@ -25,5 +25,6 @@ class Qwen3ModelWeek3:
         inputs: mx.array,
         offset: int | list[int] | mx.array,
         cache: list[TinyKvCache],
+        logits_to_keep: int | None = None,
     ) -> mx.array:
         pass

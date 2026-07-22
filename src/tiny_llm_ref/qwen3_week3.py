@@ -1,15 +1,13 @@
 import mlx.core as mx
 
-from .basics import silu
 from .attention import paged_attention
-from .layer_norm import RMSNorm
-from .positional_encoding import RoPE
 from typing import Any
 from .embedding import QuantizedEmbedding
 from .quantize import QuantizedWeights, quantized_linear
 from .kv_cache import TinyKvCache
 from .moe import Moe
 from .paged_kv_cache import TinyKvPagedCache, TinyKvPagedPool
+from .week2_kernels import FastRMSNorm, FastRoPE, swiglu
 
 
 class Qwen3MultiHeadAttention:
@@ -36,14 +34,14 @@ class Qwen3MultiHeadAttention:
             f"num_heads {num_heads} must be divisible by num_kv_heads {num_kv_heads}"
         )
         self.head_dim = head_dim
-        self.scale = mx.rsqrt(self.head_dim)
+        self.scale = self.head_dim**-0.5
         self.wq = wq
         self.wk = wk
         self.wv = wv
         self.wo = wo
-        self.rope = RoPE(self.head_dim, max_seq_len, theta)
-        self.q_norm = RMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
-        self.k_norm = RMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
+        self.rope = FastRoPE(self.head_dim, max_seq_len, theta)
+        self.q_norm = FastRMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
+        self.k_norm = FastRMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
 
     def __call__(
         self,
@@ -64,12 +62,8 @@ class Qwen3MultiHeadAttention:
         projection_v = quantized_linear(x, self.wv).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        if isinstance(offsets, int):
-            offset_slice = [slice(int(offsets), int(offsets + L))]
-        else:
-            offset_slice = [slice(int(i), int(i + L)) for i in offsets]
-        projection_q = self.rope(projection_q, offset=offset_slice)
-        projection_k = self.rope(projection_k, offset=offset_slice)
+        projection_q = self.rope(projection_q, offset=offsets)
+        projection_k = self.rope(projection_k, offset=offsets)
         projection_q = projection_q.transpose(0, 2, 1, 3)
         projection_k = projection_k.transpose(0, 2, 1, 3)
         projection_v = projection_v.transpose(0, 2, 1, 3)
@@ -111,7 +105,10 @@ class Qwen3MLP:
 
     def __call__(self, x: mx.array) -> mx.array:
         return quantized_linear(
-            silu(quantized_linear(x, self.w_gate)) * quantized_linear(x, self.w_up),
+            swiglu(
+                quantized_linear(x, self.w_gate),
+                quantized_linear(x, self.w_up),
+            ),
             self.w_down,
         )
 
@@ -139,8 +136,10 @@ class Qwen3TransformerBlock:
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
         self.mlp = mlp
-        self.input_layernorm = RMSNorm(hidden_size, w_input_layernorm, eps=rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(
+        self.input_layernorm = FastRMSNorm(
+            hidden_size, w_input_layernorm, eps=rms_norm_eps
+        )
+        self.post_attention_layernorm = FastRMSNorm(
             hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
         )
         self.self_attn = Qwen3MultiHeadAttention(
@@ -270,7 +269,7 @@ class Qwen3ModelWeek3:
                 theta=mlx_model.args.rope_theta,
             )
             self.layers_inner.append(layer)
-        self.norm = RMSNorm(
+        self.norm = FastRMSNorm(
             mlx_model.args.hidden_size,
             weight=mlx_model.model.norm.weight,
             eps=mlx_model.args.rms_norm_eps,
@@ -293,10 +292,15 @@ class Qwen3ModelWeek3:
         inputs: mx.array,
         offset: int | list[int] | mx.array,
         cache: list[TinyKvCache],
+        logits_to_keep: int | None = None,
     ) -> mx.array:
         h = self.embedding(inputs)
         for layer in range(self.num_hidden_layers):
             h = self.layers_inner[layer](h, offset, cache[layer], mask="causal")
+        if logits_to_keep is not None:
+            if logits_to_keep <= 0:
+                raise ValueError("logits_to_keep must be positive")
+            h = h[:, -logits_to_keep:, :]
         h = self.norm(h)
         if self.w_lm_head is not None:
             return quantized_linear(h, self.w_lm_head)

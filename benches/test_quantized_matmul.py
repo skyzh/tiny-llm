@@ -5,6 +5,12 @@ from .utils import assert_allclose
 import numpy as np
 
 
+def evaluate(function):
+    result = function()
+    mx.eval(result)
+    return result
+
+
 def get_test_matmul_data():
     # Representative large-model matrix size
     init = nn.init.he_uniform(mx.bfloat16)
@@ -20,9 +26,12 @@ def get_test_matmul_data():
 def test_mlx_quantized_matmul(benchmark):
     with mx.stream(mx.gpu):
         w_q, scales, biases, x, res = get_test_matmul_data()
+        mx.eval(w_q, scales, biases, x, res)
         result = benchmark(
-            lambda: mx.quantized_matmul(
-                x, w_q, scales=scales, biases=biases, group_size=128, bits=4
+            lambda: evaluate(
+                lambda: mx.quantized_matmul(
+                    x, w_q, scales=scales, biases=biases, group_size=128, bits=4
+                )
             )
         )
         assert_allclose(result, res, precision=mx.bfloat16, rtol=1e-2)
@@ -31,9 +40,12 @@ def test_mlx_quantized_matmul(benchmark):
 def test_refsol_quantized_matmul(benchmark):
     with mx.stream(mx.gpu):
         w_q, scales, biases, x, res = get_test_matmul_data()
+        mx.eval(w_q, scales, biases, x, res)
         result = benchmark(
-            lambda: tiny_llm_ref.quantized_matmul(
-                scales, biases, 128, 4, x, w_q, transpose_b=True
+            lambda: evaluate(
+                lambda: tiny_llm_ref.quantized_matmul(
+                    scales, biases, 128, 4, x, w_q, transpose_b=True
+                )
             )
         )
         assert_allclose(result, res, precision=mx.bfloat16, rtol=1e-2)

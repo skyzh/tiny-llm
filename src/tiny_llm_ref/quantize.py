@@ -69,10 +69,22 @@ def quantized_matmul(
 ) -> mx.array:
     *N, D = a.shape
     a = a.reshape(-1, D)
-    scales = mx.contiguous(scales)
-    biases = mx.contiguous(biases)
-    a = mx.contiguous(a)
-    b = mx.contiguous(b)
-    return tiny_llm_ext_ref.quantized_matmul(
-        scales, biases, group_size, bits, a, b, transpose_b
-    ).reshape(*N, -1)
+    if a.shape[0] <= 8:
+        scales = mx.contiguous(scales)
+        biases = mx.contiguous(biases)
+        a = mx.contiguous(a)
+        b = mx.contiguous(b)
+        result = tiny_llm_ext_ref.quantized_matmul(
+            scales, biases, group_size, bits, a, b, transpose_b
+        )
+    else:
+        result = mx.quantized_matmul(
+            a,
+            b,
+            scales,
+            biases,
+            transpose=transpose_b,
+            group_size=group_size,
+            bits=bits,
+        )
+    return result.reshape(*N, -1)

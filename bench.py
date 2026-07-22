@@ -91,6 +91,8 @@ def validate_args(args: argparse.Namespace) -> None:
 
 
 def load_solution_modules(solution: str):
+    if solution == "mlx":
+        return "mlx", None, None, None
     if solution == "tiny_llm":
         from tiny_llm import models
         from tiny_llm.kv_cache import BatchingKvCache, TinyKvFullCache
@@ -102,6 +104,16 @@ def load_solution_modules(solution: str):
 
         return "tiny_llm_ref", models, TinyKvFullCache, BatchingKvCache
     raise ValueError(f"Solution {solution} not supported for bench")
+
+
+def shortcut_name_to_full_name(shortcut_name: str) -> str:
+    shortcuts = {
+        "qwen3-0.6b": "Qwen/Qwen3-0.6B-MLX-4bit",
+        "qwen3-1.7b": "Qwen/Qwen3-1.7B-MLX-4bit",
+        "qwen3-4b": "Qwen/Qwen3-4B-MLX-4bit",
+        "qwen3-8b": "Qwen/Qwen3-8B-MLX-4bit",
+    }
+    return shortcuts.get(shortcut_name.lower(), shortcut_name)
 
 
 def random_token_id(rng: Random, low: int, high: int, eos_token_id: int) -> int:
@@ -149,7 +161,7 @@ def sample_next_week1(model, y: mx.array) -> mx.array:
 
 
 def sample_next_week2(model, y: mx.array, offset: int, kv_cache: list) -> mx.array:
-    output_logits = model(y[None, :], offset, kv_cache)
+    output_logits = model(y[None, :], offset, kv_cache, logits_to_keep=1)
     logits = output_logits[:, -1, :]
     return mx.argmax(logits, axis=-1)
 
@@ -157,7 +169,7 @@ def sample_next_week2(model, y: mx.array, offset: int, kv_cache: list) -> mx.arr
 def sample_next_week2_batched(
     model, y: mx.array, offsets: list[int], kv_cache: list
 ) -> mx.array:
-    output_logits = model(y, offsets, kv_cache)
+    output_logits = model(y, offsets, kv_cache, logits_to_keep=1)
     logits = output_logits[:, -1, :]
     return mx.argmax(logits, axis=-1)
 
@@ -209,6 +221,33 @@ def run_one_request_week2(
         mx.eval(token)
         decode_time += perf_counter() - t1
         offset += 1
+        generated_tokens += 1
+    return generated_tokens, prefill_time, decode_time
+
+
+def run_one_request_mlx(
+    model,
+    request: BenchRequest,
+) -> tuple[int, float, float]:
+    from mlx_lm.models.cache import make_prompt_cache
+
+    cache = make_prompt_cache(model)
+    context = mx.array(request.prompt_token_ids, dtype=mx.int32)
+
+    t0 = perf_counter()
+    logits = model(context[None, :], cache=cache)
+    token = mx.argmax(logits[:, -1, :], axis=-1)
+    mx.eval(token)
+    prefill_time = perf_counter() - t0
+
+    generated_tokens = 1
+    decode_time = 0.0
+    for _ in range(request.max_new_tokens - 1):
+        t1 = perf_counter()
+        logits = model(token[None, :], cache=cache)
+        token = mx.argmax(logits[:, -1, :], axis=-1)
+        mx.eval(token)
+        decode_time += perf_counter() - t1
         generated_tokens += 1
     return generated_tokens, prefill_time, decode_time
 
@@ -355,7 +394,11 @@ def main() -> None:
     solution_name, models, kv_cache_cls, batching_kv_cache_cls = load_solution_modules(
         args.solution
     )
-    model_name = models.shortcut_name_to_full_name(args.model)
+    model_name = (
+        shortcut_name_to_full_name(args.model)
+        if models is None
+        else models.shortcut_name_to_full_name(args.model)
+    )
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
         f"Model={model_name} FlashAttn={args.enable_flash_attn}"
@@ -363,7 +406,15 @@ def main() -> None:
     mlx_model, tokenizer = load(model_name)
 
     with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-        if args.loader == "week1":
+        if solution_name == "mlx":
+            if args.batch_decode:
+                raise ValueError("--batch-decode is not supported with --solution mlx")
+            model = mlx_model
+
+            def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
+                return run_one_request_mlx(model, request)
+
+        elif args.loader == "week1":
             model = models.dispatch_model(model_name, mlx_model, week=1)
 
             def run_one_request(request: BenchRequest) -> tuple[int, float, float]:

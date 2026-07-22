@@ -5,6 +5,12 @@ from .utils import assert_allclose
 import pytest
 
 
+def evaluate(function):
+    result = function()
+    mx.eval(result)
+    return result
+
+
 def get_test_attention_data():
     # Representative large-model attention size
     init = nn.init.he_uniform(mx.float32)
@@ -18,8 +24,13 @@ def get_test_attention_data():
 def test_mlx_attention(benchmark):
     with mx.stream(mx.gpu):
         q, k, v, res = get_test_attention_data()
+        mx.eval(q, k, v, res)
         result = benchmark(
-            lambda: mx.fast.scaled_dot_product_attention(q, k, v, scale=1.0)
+            lambda: evaluate(
+                lambda: mx.fast.scaled_dot_product_attention(
+                    q, k, v, scale=1.0
+                )
+            )
         )
         assert_allclose(result, res, precision=mx.float32, rtol=1e-2)
 
@@ -27,9 +38,12 @@ def test_mlx_attention(benchmark):
 def test_refsol_attention(benchmark):
     with mx.stream(mx.gpu):
         q, k, v, res = get_test_attention_data()
+        mx.eval(q, k, v, res)
         result = benchmark(
-            lambda: tiny_llm_ref.scaled_dot_product_attention_grouped(
-                q, k, v, scale=1.0
+            lambda: evaluate(
+                lambda: tiny_llm_ref.scaled_dot_product_attention_grouped(
+                    q, k, v, scale=1.0
+                )
             )
         )
         assert_allclose(result, res, precision=mx.float32, rtol=1e-2)
@@ -38,5 +52,10 @@ def test_refsol_attention(benchmark):
 def test_refsol_flash_attention(benchmark):
     with mx.stream(mx.gpu):
         q, k, v, res = get_test_attention_data()
-        result = benchmark(lambda: tiny_llm_ref.flash_attention(q, k, v, scale=1.0))
+        mx.eval(q, k, v, res)
+        result = benchmark(
+            lambda: evaluate(
+                lambda: tiny_llm_ref.flash_attention(q, k, v, scale=1.0)
+            )
+        )
         assert_allclose(result, res, precision=mx.float32, rtol=1e-2)

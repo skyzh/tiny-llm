@@ -1,15 +1,15 @@
 import mlx.core as mx
-from .basics import silu
-from .attention import (
-    scaled_dot_product_attention_grouped,
-    flash_attention,
-)
-from .layer_norm import RMSNorm
-from .positional_encoding import RoPE
+from .attention import flash_attention
 from typing import Any
 from .embedding import QuantizedEmbedding
 from .quantize import QuantizedWeights, quantized_linear
 from .kv_cache import TinyKvCache
+from .week2_kernels import (
+    FastRMSNorm,
+    FastRoPE,
+    scaled_dot_product_attention,
+    swiglu,
+)
 
 
 class Qwen3MultiHeadAttention:
@@ -40,22 +40,20 @@ class Qwen3MultiHeadAttention:
             f"num_heads {num_heads} must be divisible by num_kv_heads {num_kv_heads}"
         )
         self.head_dim = head_dim
-        self.scale = mx.rsqrt(self.head_dim)
+        self.scale = self.head_dim**-0.5
         self.wq = wq
         self.wk = wk
         self.wv = wv
         self.wo = wo
-        self.q_norm = q_norm
-        self.k_norm = k_norm
-        self.rope = RoPE(self.head_dim, max_seq_len, theta)
-        self.q_norm = RMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
-        self.k_norm = RMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
+        self.rope = FastRoPE(self.head_dim, max_seq_len, theta)
+        self.q_norm = FastRMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
+        self.k_norm = FastRMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
         self.use_flash_attention = use_flash_attention
 
     def __call__(
         self,
         x: mx.array,
-        offsets: list[int],
+        offsets: int | list[int] | mx.array,
         cache: TinyKvCache,
         mask: mx.array | str | None = None,
     ) -> mx.array:
@@ -71,20 +69,19 @@ class Qwen3MultiHeadAttention:
         projection_v = quantized_linear(x, self.wv).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        # todo: move offsets to kv cache
         if isinstance(offsets, int):
-            offset_slice = [slice(int(offsets), int(offsets + L))]
+            rope_offsets = offsets
         else:
-            offset_slice = [slice(int(i), int(i + L)) for i in offsets]
-        projection_q = self.rope(projection_q, offset=offset_slice)
-        projection_k = self.rope(projection_k, offset=offset_slice)
+            rope_offsets = offsets
+        projection_q = self.rope(projection_q, offset=rope_offsets)
+        projection_k = self.rope(projection_k, offset=rope_offsets)
         projection_q = projection_q.transpose(0, 2, 1, 3)
         projection_k = projection_k.transpose(0, 2, 1, 3)
         projection_v = projection_v.transpose(0, 2, 1, 3)
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        if self.use_flash_attention:
+        if self.use_flash_attention and L > 8:
             x = flash_attention(
                 projection_q.astype(mx.float32),
                 projection_k.astype(mx.float32),
@@ -93,13 +90,13 @@ class Qwen3MultiHeadAttention:
                 mask=mask,
             ).astype(x.dtype)
         else:
-            x = scaled_dot_product_attention_grouped(
-                projection_q.astype(mx.float32),
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
+            x = scaled_dot_product_attention(
+                projection_q,
+                projection_k,
+                projection_v,
                 scale=self.scale,
                 mask=mask,
-            ).astype(x.dtype)
+            )
         x = x.transpose(0, 2, 1, 3).reshape(B, L, self.num_heads * self.head_dim)
         return quantized_linear(x, self.wo)
 
@@ -121,7 +118,10 @@ class Qwen3MLP:
 
     def __call__(self, x: mx.array) -> mx.array:
         return quantized_linear(
-            silu(quantized_linear(x, self.w_gate)) * quantized_linear(x, self.w_up),
+            swiglu(
+                quantized_linear(x, self.w_gate),
+                quantized_linear(x, self.w_up),
+            ),
             self.w_down,
         )
 
@@ -153,8 +153,10 @@ class Qwen3TransformerBlock:
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
         self.mlp = Qwen3MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
-        self.input_layernorm = RMSNorm(hidden_size, w_input_layernorm, eps=rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(
+        self.input_layernorm = FastRMSNorm(
+            hidden_size, w_input_layernorm, eps=rms_norm_eps
+        )
+        self.post_attention_layernorm = FastRMSNorm(
             hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
         )
         self.self_attn = Qwen3MultiHeadAttention(
@@ -255,7 +257,7 @@ class Qwen3ModelWeek2:
                 use_flash_attention=enable_flash_attn,
             )
             self.layers_inner.append(layer)
-        self.norm = RMSNorm(
+        self.norm = FastRMSNorm(
             mlx_model.args.hidden_size,
             weight=mlx_model.model.norm.weight,
             eps=mlx_model.args.rms_norm_eps,
@@ -276,10 +278,15 @@ class Qwen3ModelWeek2:
         inputs: mx.array,
         offset: int,
         cache: list[TinyKvCache],
+        logits_to_keep: int | None = None,
     ) -> mx.array:
         h = self.embedding(inputs)
         for layer in range(self.num_hidden_layers):
             h = self.layers_inner[layer](h, offset, cache[layer], mask="causal")
+        if logits_to_keep is not None:
+            if logits_to_keep <= 0:
+                raise ValueError("logits_to_keep must be positive")
+            h = h[:, -logits_to_keep:, :]
         h = self.norm(h)
         if self.w_lm_head is not None:
             return quantized_linear(h, self.w_lm_head)

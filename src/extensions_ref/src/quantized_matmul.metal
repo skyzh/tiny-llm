@@ -51,5 +51,79 @@ template <typename T>
     }
 }
 
+// Decode is a matrix-vector workload: M is usually one and every output row
+// reduces over the same activation vector. A full SIMD group cooperates on one
+// output instead of assigning the entire reduction to one thread.
+template <typename T>
+[[kernel]] void quantized_matvec_w4a16_g128(
+    device const T* scales [[buffer(0)]],
+    device const T* biases [[buffer(1)]],
+    device const T* a [[buffer(2)]],
+    device const uint32_t* b [[buffer(3)]],
+    device T* out [[buffer(4)]],
+    device const int &M [[buffer(5)]],
+    device const int &N [[buffer(6)]],
+    device const int &K [[buffer(7)]],
+    uint output_tile [[threadgroup_position_in_grid]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    constexpr int bits = 4;
+    constexpr int group_size = 128;
+    constexpr int packs_per_item = 32 / bits;
+    constexpr uint32_t mask = (1 << bits) - 1;
+
+    constexpr int outputs_per_simdgroup = 8;
+    const int column_tiles = (K + outputs_per_simdgroup - 1) / outputs_per_simdgroup;
+    const int row = output_tile / column_tiles;
+    const int column_base = (output_tile - row * column_tiles) * outputs_per_simdgroup;
+    if (row >= M) {
+        return;
+    }
+
+    const int packed_cols = N / packs_per_item;
+    const int groups_per_row = N / group_size;
+    const int a_base = row * N;
+    float sums[outputs_per_simdgroup] = {0.0f};
+
+    for (int packed_col = lane; packed_col < packed_cols; packed_col += 32) {
+        const int group = packed_col / (group_size / packs_per_item);
+        const int a_idx = a_base + packed_col * packs_per_item;
+        float activations[packs_per_item];
+
+        #pragma clang loop unroll(full)
+        for (int pack = 0; pack < packs_per_item; ++pack) {
+            activations[pack] = static_cast<float>(a[a_idx + pack]);
+        }
+
+        #pragma clang loop unroll(full)
+        for (int output = 0; output < outputs_per_simdgroup; ++output) {
+            const int column = column_base + output;
+            if (column >= K) {
+                continue;
+            }
+            const int params_base = column * groups_per_row;
+            const float scale = static_cast<float>(scales[params_base + group]);
+            const float bias = static_cast<float>(biases[params_base + group]);
+            const uint32_t packed = b[column * packed_cols + packed_col];
+
+            #pragma clang loop unroll(full)
+            for (int pack = 0; pack < packs_per_item; ++pack) {
+                const float weight = static_cast<float>((packed >> (pack * bits)) & mask) * scale + bias;
+                sums[output] += activations[pack] * weight;
+            }
+        }
+    }
+
+    #pragma clang loop unroll(full)
+    for (int output = 0; output < outputs_per_simdgroup; ++output) {
+        const float sum = simd_sum(sums[output]);
+        const int column = column_base + output;
+        if (lane == 0 && column < K) {
+            out[row * K + column] = static_cast<T>(sum);
+        }
+    }
+}
+
 instantiate_kernel("quantized_matmul_w4a16_g128_f16", quantized_matmul_w4a16_g128, half);
 instantiate_kernel("quantized_matmul_w4a16_g128_bf16", quantized_matmul_w4a16_g128, bfloat16_t);
+instantiate_kernel("quantized_matvec_w4a16_g128_f16", quantized_matvec_w4a16_g128, half);
+instantiate_kernel("quantized_matvec_w4a16_g128_bf16", quantized_matvec_w4a16_g128, bfloat16_t);
