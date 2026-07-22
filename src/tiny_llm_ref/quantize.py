@@ -69,22 +69,38 @@ def quantized_matmul(
 ) -> mx.array:
     *N, D = a.shape
     a = a.reshape(-1, D)
-    if a.shape[0] <= 8:
-        scales = mx.contiguous(scales)
-        biases = mx.contiguous(biases)
-        a = mx.contiguous(a)
-        b = mx.contiguous(b)
-        result = tiny_llm_ext_ref.quantized_matmul(
-            scales, biases, group_size, bits, a, b, transpose_b
-        )
-    else:
-        result = mx.quantized_matmul(
-            a,
-            b,
-            scales,
-            biases,
-            transpose=transpose_b,
-            group_size=group_size,
-            bits=bits,
-        )
+    result = mx.quantized_matmul(
+        a,
+        b,
+        scales,
+        biases,
+        transpose=transpose_b,
+        group_size=group_size,
+        bits=bits,
+    )
+    return result.reshape(*N, -1)
+
+
+def quantized_matvec_custom(
+    scales: mx.array,
+    biases: mx.array,
+    group_size: int,
+    bits: int,
+    a: mx.array,
+    b: mx.array,
+    transpose_b: bool = False,
+) -> mx.array:
+    *N, D = a.shape
+    a = a.reshape(-1, D)
+    if a.shape[0] > 8:
+        raise ValueError("quantized_matvec_custom supports at most 8 input rows")
+    result = tiny_llm_ext_ref.quantized_matmul(
+        mx.contiguous(scales),
+        mx.contiguous(biases),
+        group_size,
+        bits,
+        mx.contiguous(a),
+        mx.contiguous(b),
+        transpose_b,
+    )
     return result.reshape(*N, -1)

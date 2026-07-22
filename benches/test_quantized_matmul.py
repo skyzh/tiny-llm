@@ -23,6 +23,17 @@ def get_test_matmul_data():
     return w_q, scales, biases, x, res
 
 
+def get_test_matvec_data():
+    init = nn.init.he_uniform(mx.bfloat16)
+    w = init(mx.zeros((512, 3584)))
+    x = init(mx.zeros((1, 3584)))
+    w_q, scales, biases = mx.quantize(w, group_size=128, bits=4)
+    res = mx.quantized_matmul(
+        x, w_q, scales=scales, biases=biases, group_size=128, bits=4
+    )
+    return w_q, scales, biases, x, res
+
+
 def test_mlx_quantized_matmul(benchmark):
     with mx.stream(mx.gpu):
         w_q, scales, biases, x, res = get_test_matmul_data()
@@ -44,6 +55,20 @@ def test_refsol_quantized_matmul(benchmark):
         result = benchmark(
             lambda: evaluate(
                 lambda: tiny_llm_ref.quantized_matmul(
+                    scales, biases, 128, 4, x, w_q, transpose_b=True
+                )
+            )
+        )
+        assert_allclose(result, res, precision=mx.bfloat16, rtol=1e-2)
+
+
+def test_refsol_quantized_matvec_custom(benchmark):
+    with mx.stream(mx.gpu):
+        w_q, scales, biases, x, res = get_test_matvec_data()
+        mx.eval(w_q, scales, biases, x, res)
+        result = benchmark(
+            lambda: evaluate(
+                lambda: tiny_llm_ref.quantized_matvec_custom(
                     scales, biases, 128, 4, x, w_q, transpose_b=True
                 )
             )

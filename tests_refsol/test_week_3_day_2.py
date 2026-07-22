@@ -1,211 +1,343 @@
-from types import SimpleNamespace
+"""Week 3 continuous-batching tests."""
 
 import mlx.core as mx
+import numpy as np
+import pytest
+from mlx_lm import load
 
-from .tiny_llm_base import (
-    BatchingKvCache,
-    Qwen3ModelWeek2,
-    Qwen3ModelWeek3,
-    TinyKvPagedCache,
-    TinyKvPagedPool,
-    flash_attention,
-    paged_attention,
-    scaled_dot_product_attention_grouped,
-)
-from .utils import assert_allclose
+from .tiny_llm_base import *
+from .utils import *
 
 
-def _random_chunk(
-    length: int, num_heads: int = 2, head_dim: int = 4
-) -> tuple[mx.array, mx.array]:
-    key = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
-    value = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
-    return key, value
-
-
-def _quantized_layer(
-    out_dim: int, in_dim: int, group_size: int = 128
-) -> SimpleNamespace:
-    weight = mx.random.normal(shape=(out_dim, in_dim), dtype=mx.bfloat16)
-    quantized_weight, scales, biases = mx.quantize(
-        weight, group_size=group_size, bits=4
-    )
-    return SimpleNamespace(
-        weight=quantized_weight,
-        scales=scales,
-        biases=biases,
-        group_size=group_size,
-        bits=4,
-    )
-
-
-def _fake_qwen3_mlx_model() -> SimpleNamespace:
-    mx.random.seed(0)
-    args = SimpleNamespace(
-        num_hidden_layers=2,
-        hidden_size=128,
-        vocab_size=128,
-        num_attention_heads=4,
-        num_key_value_heads=2,
-        head_dim=32,
-        intermediate_size=256,
-        rms_norm_eps=1e-5,
-        max_position_embeddings=128,
-        rope_theta=10000,
-        tie_word_embeddings=True,
-    )
-    embed_tokens = _quantized_layer(args.vocab_size, args.hidden_size)
-    kv_hidden_size = args.num_key_value_heads * args.head_dim
-    attn_hidden_size = args.num_attention_heads * args.head_dim
-    layers = []
-    for _ in range(args.num_hidden_layers):
-        layers.append(
-            SimpleNamespace(
-                self_attn=SimpleNamespace(
-                    q_proj=_quantized_layer(attn_hidden_size, args.hidden_size),
-                    k_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
-                    v_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
-                    o_proj=_quantized_layer(args.hidden_size, attn_hidden_size),
-                    q_norm=SimpleNamespace(
-                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
-                    ),
-                    k_norm=SimpleNamespace(
-                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
-                    ),
-                ),
-                mlp=SimpleNamespace(
-                    gate_proj=_quantized_layer(
-                        args.intermediate_size, args.hidden_size
-                    ),
-                    up_proj=_quantized_layer(args.intermediate_size, args.hidden_size),
-                    down_proj=_quantized_layer(
-                        args.hidden_size, args.intermediate_size
-                    ),
-                ),
-                input_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-                ),
-                post_attention_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-                ),
+def rope_helper(stream: mx.Stream, traditional: bool, precision: mx.Dtype):
+    BATCH_SIZE = 16
+    NUM_HEADS = 8
+    HEAD_DIM = 4
+    MAX_SEQ_LEN = 14
+    SEQ_LEN = 9
+    BASE = 10000
+    with mx.stream(stream):
+        for _ in range(100):
+            user_layer = RoPE(HEAD_DIM, MAX_SEQ_LEN, BASE, traditional=traditional)
+            x = mx.random.uniform(
+                shape=(BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM), dtype=precision
             )
-        )
-    return SimpleNamespace(
-        args=args,
-        model=SimpleNamespace(
-            embed_tokens=embed_tokens,
-            layers=layers,
-            norm=SimpleNamespace(
-                weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-            ),
-        ),
+
+            input_pos = np.random.randint(0, MAX_SEQ_LEN - SEQ_LEN, size=BATCH_SIZE)
+            input_pos_mx = mx.array(input_pos, dtype=mx.int32)
+            input_pos_user = [slice(i, i + SEQ_LEN) for i in input_pos]
+
+            reference_output = mx.fast.rope(
+                x.transpose(0, 2, 1, 3),
+                dims=HEAD_DIM,
+                traditional=traditional,
+                base=BASE,
+                scale=1.0,
+                offset=input_pos_mx,
+            ).transpose(0, 2, 1, 3)
+            user_output = user_layer(x, input_pos_user)
+            assert_allclose(
+                user_output,
+                reference_output,
+                precision,
+                atol=5e-6 if precision == mx.float32 else 1e-3,
+            )
+
+
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize("traditional", [False, True], ids=["default", "traditional"])
+@pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
+def test_task_1_rope_multiple_offsets(
+    stream: mx.Stream, traditional: bool, precision: mx.Dtype
+):
+    rope_helper(stream, traditional, precision)
+
+
+def attention_helper(
+    stream: mx.Stream, H_q, H, L, E, S, BATCH, use_flash_attention: bool = False
+):
+    precision = mx.float32
+    with mx.stream(stream):
+        q_shape = (BATCH, H_q, L, E)
+        kv_shape = (BATCH, H, S, E)
+        scale = 0.8
+        for _ in range(100):
+            query = mx.random.uniform(shape=q_shape, dtype=precision)
+            key = mx.random.uniform(shape=kv_shape, dtype=precision)
+            value = mx.random.uniform(shape=kv_shape, dtype=precision)
+            mask = mx.random.uniform(shape=(BATCH, 1, L, S), dtype=precision)
+
+            reference_output_1 = mx.fast.scaled_dot_product_attention(
+                q=query,
+                k=key,
+                v=value,
+                scale=scale,
+                mask=mask,
+            )
+            reference_output_2 = mx.fast.scaled_dot_product_attention(
+                q=query,
+                k=key,
+                v=value,
+                scale=scale,
+            )
+            if use_flash_attention:
+                user_output_1 = flash_attention(
+                    query,
+                    key,
+                    value,
+                    scale=scale,
+                    mask=mask,
+                )
+                user_output_2 = flash_attention(
+                    query,
+                    key,
+                    value,
+                    scale=scale,
+                )
+            else:
+                user_output_1 = scaled_dot_product_attention_grouped(
+                    query,
+                    key,
+                    value,
+                    scale=scale,
+                    mask=mask,
+                )
+                user_output_2 = scaled_dot_product_attention_grouped(
+                    query,
+                    key,
+                    value,
+                    scale=scale,
+                )
+            mx.eval(user_output_1)
+            mx.eval(user_output_2)
+            assert_allclose(
+                user_output_2,
+                reference_output_2,
+                precision=mx.bfloat16,
+                message="no mask",
+            )
+            assert_allclose(
+                user_output_1,
+                reference_output_1,
+                precision=mx.bfloat16,
+                message="with mask",
+            )
+
+
+def test_task_1_flash_attention_with_mask_cpu_small():
+    attention_helper(mx.cpu, 6, 3, 2, 5, 3, 1, use_flash_attention=True)
+
+
+def test_task_1_flash_attention_with_mask_cpu():
+    attention_helper(mx.cpu, 18, 6, 7, 5, 3, 10, use_flash_attention=True)
+
+
+def test_task_1_flash_attention_with_mask_cpu_large():
+    attention_helper(mx.cpu, 28, 4, 16, 128, 16, 3, use_flash_attention=True)
+
+
+def test_task_1_flash_attention_with_mask_gpu_extra_small():
+    attention_helper(mx.gpu, 1, 1, 5, 7, 4, 1, use_flash_attention=True)
+
+
+def test_task_1_flash_attention_with_mask_gpu_small():
+    attention_helper(mx.gpu, 6, 3, 2, 5, 3, 1, use_flash_attention=True)
+
+
+def test_task_1_flash_attention_with_mask_gpu():
+    attention_helper(mx.gpu, 18, 6, 7, 5, 3, 10, use_flash_attention=True)
+
+
+def test_task_1_flash_attention_with_mask_gpu_large():
+    attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, use_flash_attention=True)
+
+
+def test_task_1_attention_with_mask_cpu_small():
+    attention_helper(mx.cpu, 6, 3, 2, 5, 3, 1, use_flash_attention=False)
+
+
+def test_task_1_attention_with_mask_cpu():
+    attention_helper(mx.cpu, 18, 6, 7, 5, 3, 10, use_flash_attention=False)
+
+
+def test_task_1_attention_with_mask_cpu_large():
+    attention_helper(mx.cpu, 28, 4, 16, 128, 16, 3, use_flash_attention=False)
+
+
+def test_task_1_attention_with_mask_gpu_extra_small():
+    attention_helper(mx.gpu, 1, 1, 5, 7, 4, 1, use_flash_attention=False)
+
+
+def test_task_1_attention_with_mask_gpu_small():
+    attention_helper(mx.gpu, 6, 3, 2, 5, 3, 1, use_flash_attention=False)
+
+
+def test_task_1_attention_with_mask_gpu():
+    attention_helper(mx.gpu, 18, 6, 7, 5, 3, 10, use_flash_attention=False)
+
+
+def test_task_1_attention_with_mask_gpu_large():
+    attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, use_flash_attention=False)
+
+
+def test_task_2_batching_kv_cache():
+    cache = BatchingKvCache(max_active_requests=3, max_seq_len=8)
+
+    slot0 = TinyKvFullCache()
+    slot0.update_and_fetch(
+        mx.array([[[[10.0]]]], dtype=mx.float32),
+        mx.array([[[[110.0]]]], dtype=mx.float32),
+    )
+
+    slot2 = TinyKvFullCache()
+    slot2.update_and_fetch(
+        mx.array([[[[20.0], [21.0]]]], dtype=mx.float32),
+        mx.array([[[[120.0], [121.0]]]], dtype=mx.float32),
+    )
+
+    cache.add_request(slot0, 0)
+    cache.add_request(slot2, 2)
+
+    keys = mx.array(
+        [
+            [[[12.0], [13.0]]],
+            [[[0.0], [0.0]]],
+            [[[22.0], [23.0]]],
+        ],
+        dtype=mx.float32,
+    )
+    values = mx.array(
+        [
+            [[[112.0], [113.0]]],
+            [[[0.0], [0.0]]],
+            [[[122.0], [123.0]]],
+        ],
+        dtype=mx.float32,
+    )
+
+    batched_keys, batched_values, seq_len, mask = cache.update_and_fetch(
+        keys, values, mask_length=2
+    )
+
+    expected_keys = mx.array(
+        [
+            [[[0.0], [10.0], [12.0], [13.0]]],
+            [[[0.0], [0.0], [0.0], [0.0]]],
+            [[[20.0], [21.0], [22.0], [23.0]]],
+        ],
+        dtype=mx.float32,
+    )
+    expected_values = mx.array(
+        [
+            [[[0.0], [110.0], [112.0], [113.0]]],
+            [[[0.0], [0.0], [0.0], [0.0]]],
+            [[[120.0], [121.0], [122.0], [123.0]]],
+        ],
+        dtype=mx.float32,
+    )
+    expected_mask = mx.array(
+        [
+            [[[-mx.inf, 0.0, 0.0, -mx.inf], [-mx.inf, 0.0, 0.0, 0.0]]],
+            [
+                [
+                    [-mx.inf, -mx.inf, -mx.inf, -mx.inf],
+                    [-mx.inf, -mx.inf, -mx.inf, -mx.inf],
+                ]
+            ],
+            [[[0.0, 0.0, 0.0, -mx.inf], [0.0, 0.0, 0.0, 0.0]]],
+        ],
+        dtype=mx.float32,
+    ).reshape(3, 1, 2, 4)
+
+    assert seq_len is None
+    assert_allclose(batched_keys, expected_keys, mx.float32)
+    assert_allclose(batched_values, expected_values, mx.float32)
+    assert_allclose(mask, expected_mask, mx.float32)
+
+
+def helper_test_task_3(
+    model_name: str,
+    seq_len: int,
+    iters: int = 1,
+):
+    """Tests for continuous batching of decode requests."""
+    requests = 4
+    max_seq_len = seq_len
+
+    mlx_model, tokenizer = load(model_name)
+    model = Qwen3ModelWeek2(mlx_model)
+    for _ in range(iters):
+        cache = [
+            BatchingKvCache(requests, max_seq_len)
+            for _ in range(model.num_hidden_layers)
+        ]
+        # Start each request at a staggered token index.
+        staggered_start = [seq_len * i // requests for i in range(requests)]
+        inputs = mx.random.randint(0, tokenizer.vocab_size, (requests, seq_len))
+        ref_outputs = mlx_model(inputs)
+        for offset in range(seq_len + staggered_start[-1]):
+            seq_idx = [offset - start for start in staggered_start]
+
+            # Requests join at the staggered start, and leave when they reach seq_len.
+            for request_id, sidx in enumerate(seq_idx):
+                if sidx == 0:
+                    for c in cache:
+                        c.add_request(TinyKvFullCache(), request_id)
+                elif sidx == seq_len:
+                    for c in cache:
+                        c.remove_request(request_id)
+
+            next_tokens = []
+            next_offsets = []
+            for request_id, sidx in enumerate(seq_idx):
+                if 0 <= sidx < seq_len:
+                    next_tokens.append(inputs[request_id, sidx].item())
+                    next_offsets.append(sidx)
+                else:
+                    next_tokens.append(0)
+                    next_offsets.append(0)
+
+            user_out = model(
+                inputs=mx.array(next_tokens, dtype=mx.int32).reshape(-1, 1),
+                offset=mx.array(next_offsets, dtype=mx.int32),
+                cache=cache,
+            )
+
+            for request_id, sidx in enumerate(seq_idx):
+                if 0 <= sidx < seq_len:
+                    user_out_r = user_out[request_id, 0, :]
+                    ref_out_r = ref_outputs[request_id, sidx, :]
+                    user_out_r = user_out_r - mx.logsumexp(user_out_r, keepdims=True)
+                    ref_out_r = ref_out_r - mx.logsumexp(ref_out_r, keepdims=True)
+                    assert_allclose(
+                        user_out_r,
+                        ref_out_r,
+                        precision=mx.bfloat16,
+                        rtol=0.1,
+                        atol=1.0,
+                    )
+
+
+@pytest.mark.skipif(
+    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
+)
+def test_task_3_qwen3_0_6b():
+    helper_test_task_3("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
+
+
+@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
+def test_task_3_qwen3_4b():
+    helper_test_task_3(
+        "Qwen/Qwen3-4B-MLX-4bit",
+        seq_len=3,
     )
 
 
-def test_task_1_paged_attention_matches_dense_flash_attention():
-    page_size = 4
-    pool = TinyKvPagedPool(page_size=page_size)
-    cache = TinyKvPagedCache(pool=pool)
-    first_key, first_value = _random_chunk(3)
-    second_key, second_value = _random_chunk(3)
-
-    cache.update_and_fetch(first_key, first_value)
-    metadata = cache.update_and_fetch_paged(second_key, second_value, mask="causal")
-
-    query = mx.random.normal(shape=(1, 4, second_key.shape[2], 4)).astype(mx.float32)
-    dense_key, dense_value = cache.gather_dense()
-    dense_output = flash_attention(
-        query,
-        dense_key,
-        dense_value,
-        mask="causal",
+@pytest.mark.skipif(
+    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
+)
+def test_task_3_qwen3_1_7b():
+    helper_test_task_3(
+        "Qwen/Qwen3-1.7B-MLX-4bit",
+        seq_len=3,
     )
-    paged_output = paged_attention(
-        query,
-        metadata.key_pages,
-        metadata.value_pages,
-        metadata.block_table,
-        metadata.context_lens,
-        metadata.page_size,
-        mask=metadata.mask,
-    )
-
-    assert metadata.block_table.tolist() == [[0, 1]]
-    assert metadata.context_lens.tolist() == [6]
-    assert metadata.key_pages.shape == (2, 2, page_size, 4)
-    assert metadata.value_pages.shape == (2, 2, page_size, 4)
-    assert_allclose(paged_output, dense_output, precision=mx.float32)
-
-
-def test_task_2_batched_paged_attention_matches_dense_attention():
-    page_size = 4
-    pool = TinyKvPagedPool(page_size=page_size)
-    first = TinyKvPagedCache(pool=pool)
-    second = TinyKvPagedCache(pool=pool)
-    first.update_and_fetch(*_random_chunk(3))
-    second.update_and_fetch(*_random_chunk(6))
-
-    batch = BatchingKvCache(max_active_requests=3, max_seq_len=16)
-    batch.add_request(first, 0)
-    batch.add_request(second, 2)
-
-    keys = mx.zeros((3, 2, 1, 4), dtype=mx.float32)
-    values = mx.zeros((3, 2, 1, 4), dtype=mx.float32)
-    keys[0:1], values[0:1] = _random_chunk(1)
-    keys[2:3], values[2:3] = _random_chunk(1)
-
-    metadata = batch.update_and_fetch_paged(
-        keys,
-        values,
-        mask_length=1,
-        mask="causal",
-    )
-    query = mx.random.normal(shape=(3, 4, 1, 4)).astype(mx.float32)
-    paged_output = paged_attention(
-        query,
-        metadata.key_pages,
-        metadata.value_pages,
-        metadata.block_table,
-        metadata.context_lens,
-        metadata.page_size,
-        mask=metadata.mask,
-    )
-
-    first_key, first_value = first.gather_dense()
-    first_output = scaled_dot_product_attention_grouped(
-        query[0:1], first_key, first_value, mask="causal"
-    )
-    second_key, second_value = second.gather_dense()
-    second_output = scaled_dot_product_attention_grouped(
-        query[2:3], second_key, second_value, mask="causal"
-    )
-
-    assert metadata.context_lens.tolist() == [4, 0, 7]
-    assert metadata.block_table.shape == (3, 2)
-    assert metadata.block_table.tolist()[1] == [-1, -1]
-    assert metadata.key_pages.shape == (3, 2, page_size, 4)
-    assert_allclose(paged_output[0:1], first_output, precision=mx.float32)
-    assert_allclose(paged_output[2:3], second_output, precision=mx.float32)
-
-
-def test_task_3_incremental_decode_matches_week2_with_paged_attention():
-    mlx_model = _fake_qwen3_mlx_model()
-    week2_model = Qwen3ModelWeek2(mlx_model)
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
-    inputs = mx.array([[1, 5, 7, 3, 9, 11]], dtype=mx.int32)
-    week2_cache = week2_model.create_kv_cache()
-    week3_cache = week3_model.create_kv_cache()
-
-    for offset in range(inputs.shape[1]):
-        token = inputs[:, offset : offset + 1]
-        week2_out = week2_model(token, offset, week2_cache)
-        week3_out = week3_model(token, offset, week3_cache)
-        week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
-        week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
-        assert_allclose(
-            week3_out,
-            week2_out,
-            precision=mx.bfloat16,
-            rtol=1e-3,
-            atol=1e-3,
-        )

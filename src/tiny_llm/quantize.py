@@ -51,6 +51,18 @@ def quantized_matmul(
     pass
 
 
+def quantized_matvec_custom(
+    scales: mx.array,
+    biases: mx.array,
+    group_size: int,
+    bits: int,
+    a: mx.array,
+    b: mx.array,
+    transpose_b: bool = False,
+) -> mx.array:
+    pass
+
+
 def quantized_linear(
     x: mx.array,
     w: QuantizedWeights,

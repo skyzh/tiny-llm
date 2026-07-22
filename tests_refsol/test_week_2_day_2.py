@@ -1,5 +1,5 @@
 import mlx.core as mx
-from .tiny_llm_base import quantized_matmul
+from .tiny_llm_base import quantized_matmul, quantized_matvec_custom
 from .utils import assert_allclose
 
 
@@ -76,3 +76,38 @@ def test_task_3_quantized_matmul_simple_f16_gpu():
 
 def test_task_3_quantized_matmul_complex_f16_gpu():
     quantized_matmul_helper(mx.gpu, mx.float16, False)
+
+
+def quantized_matvec_custom_helper(num_rows: int):
+    with mx.stream(mx.gpu):
+        group_size = 128
+        input = mx.random.normal(shape=(num_rows, group_size), dtype=mx.bfloat16)
+        weight = mx.random.normal(shape=(64, group_size), dtype=mx.bfloat16)
+        w_q, scales, biases = mx.quantize(weight, group_size=group_size, bits=4)
+        user_out = quantized_matvec_custom(
+            scales=scales,
+            biases=biases,
+            group_size=group_size,
+            bits=4,
+            a=input,
+            b=w_q,
+            transpose_b=True,
+        )
+        ref_out = mx.quantized_matmul(
+            input,
+            w_q,
+            scales,
+            biases,
+            group_size=group_size,
+            bits=4,
+            transpose=True,
+        )
+        assert_allclose(user_out, ref_out, mx.bfloat16, atol=5.0e-1)
+
+
+def test_task_4_quantized_matvec_custom_m1_gpu():
+    quantized_matvec_custom_helper(1)
+
+
+def test_task_4_quantized_matvec_custom_m8_gpu():
+    quantized_matvec_custom_helper(8)

@@ -1,204 +1,109 @@
-import pytest
-import time
 import mlx.core as mx
-from .tiny_llm_base import *
-from .utils import *
+import pytest
+
+from tiny_llm_ref.basics import silu
+from tiny_llm_ref.layer_norm import RMSNorm
+from tiny_llm_ref.positional_encoding import RoPE
+from tiny_llm_ref.qwen3_week1 import (
+    Qwen3MLP as Qwen3MLPWeek1,
+    Qwen3MultiHeadAttention as Qwen3MultiHeadAttentionWeek1,
+)
+from tiny_llm_ref.qwen3_week3 import (
+    Qwen3MultiHeadAttention as Qwen3MultiHeadAttentionWeek3,
+)
+from tiny_llm_ref.quantize import QuantizedWeights
+from tiny_llm_ref.week2_kernels import FastRMSNorm, FastRoPE, swiglu
+
+from .utils import assert_allclose
 
 
-def attention_helper(
-    stream: mx.Stream,
-    H_q,
-    H,
-    L,
-    E,
-    S,
-    BATCH,
-    mask_mode: str,
-    precision=mx.float32,
-):
-    with mx.stream(stream):
-        q_shape = (BATCH, H_q, L, E)
-        kv_shape = (BATCH, H, S, E)
-        mask_shape = (BATCH, H_q, L, S)
-        scale = 0.9
-        for _ in range(100):
-            query = mx.random.uniform(shape=q_shape, dtype=precision)
-            key = mx.random.uniform(shape=kv_shape, dtype=precision)
-            value = mx.random.uniform(shape=kv_shape, dtype=precision)
-            if mask_mode == "no_mask":
-                mask = None
-            elif mask_mode == "mask":
-                mask = mx.random.uniform(shape=mask_shape, dtype=precision)
-            elif mask_mode == "causal":
-                mask = "causal"
-            else:
-                raise ValueError(f"Unknown mask_mode: {mask_mode}")
-
-            reference_output = mx.fast.scaled_dot_product_attention(
-                q=query,
-                k=key,
-                v=value,
-                scale=scale,
-                mask=mask,
-            )
-            user_output = flash_attention(
-                query,
-                key,
-                value,
-                scale=scale,
-                mask=mask,
-            )
-            mx.eval(user_output)  # so that any error will be caught here
-            assert user_output.dtype == precision
-            comparison_precision = (
-                mx.bfloat16 if precision == mx.bfloat16 else mx.float16
-            )
-            assert_allclose(
-                user_output, reference_output, precision=comparison_precision
-            )
+def test_fast_rms_norm_matches_week1_implementation():
+    x = mx.random.normal((2, 3, 16)).astype(mx.bfloat16)
+    weight = mx.random.normal((16,)).astype(mx.bfloat16)
+    expected = RMSNorm(16, weight, eps=1e-5)(x)
+    result = FastRMSNorm(16, weight, eps=1e-5)(x)
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def time_flash_attention(
-    stream: mx.Stream,
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
-    scale: float,
-    mask: mx.array | str,
-    num_iters: int = 4,
-) -> float:
-    with mx.stream(stream):
-        start = time.perf_counter()
-        for _ in range(num_iters):
-            output = flash_attention(query, key, value, scale=scale, mask=mask)
-            mx.eval(output)
-    return (time.perf_counter() - start) / num_iters
-
-
-def median(values: list[float]) -> float:
-    values = sorted(values)
-    return values[len(values) // 2]
-
-
-def assert_causal_mask_faster_than_all_zero_mask(
-    stream: mx.Stream,
-    batch: int,
-    h_q: int,
-    h: int,
-    l: int,
-    s: int,
-    e: int,
-    scale: float = 0.9,
-    precision=mx.float32,
-):
-    q_shape = (batch, h_q, l, e)
-    kv_shape = (batch, h, s, e)
-    mask_shape = (batch, h_q, l, s)
-
-    with mx.stream(stream):
-        query = mx.random.uniform(shape=q_shape, dtype=precision)
-        key = mx.random.uniform(shape=kv_shape, dtype=precision)
-        value = mx.random.uniform(shape=kv_shape, dtype=precision)
-        zero_mask = mx.zeros(shape=mask_shape, dtype=mx.float32)
-
-        for _ in range(3):
-            mx.eval(flash_attention(query, key, value, scale=scale, mask="causal"))
-            mx.eval(flash_attention(query, key, value, scale=scale, mask=zero_mask))
-
-    causal_samples = []
-    zero_mask_samples = []
-    for round_idx in range(6):
-        if round_idx % 2 == 0:
-            causal_samples.append(
-                time_flash_attention(
-                    stream, query, key, value, scale=scale, mask="causal"
-                )
-            )
-            zero_mask_samples.append(
-                time_flash_attention(
-                    stream, query, key, value, scale=scale, mask=zero_mask
-                )
-            )
-        else:
-            zero_mask_samples.append(
-                time_flash_attention(
-                    stream, query, key, value, scale=scale, mask=zero_mask
-                )
-            )
-            causal_samples.append(
-                time_flash_attention(
-                    stream, query, key, value, scale=scale, mask="causal"
-                )
-            )
-
-    causal_time = median(causal_samples)
-    zero_mask_time = median(zero_mask_samples)
-    assert causal_time < zero_mask_time, (
-        "Expected causal mask to be faster than an all-zero mask, got "
-        f"causal={causal_time:.6f}s and zero_mask={zero_mask_time:.6f}s."
+@pytest.mark.parametrize("offsets", [3, [3, 7]])
+def test_fast_rope_matches_week1_implementation(offsets):
+    batch_size = 1 if isinstance(offsets, int) else len(offsets)
+    seq_len = 4
+    x = mx.random.normal((batch_size, seq_len, 2, 16)).astype(mx.float32)
+    fast = FastRoPE(16, 32, base=10000)
+    readable = RoPE(16, 32, base=10000)
+    readable_offsets = (
+        slice(offsets, offsets + seq_len)
+        if isinstance(offsets, int)
+        else [slice(offset, offset + seq_len) for offset in offsets]
     )
+    result = fast(x, offsets)
+    expected = readable(x, readable_offsets)
+    assert_allclose(result, expected, mx.float32, atol=1e-5, rtol=1e-5)
 
 
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
-def test_task_2_flash_attention_cpu_small(mask_mode: str):
-    attention_helper(mx.cpu, 6, 3, 2, 5, 3, 1, mask_mode)
+def test_swiglu_matches_readable_expression():
+    gate = mx.random.normal((2, 4, 16)).astype(mx.float32)
+    up = mx.random.normal((2, 4, 16)).astype(mx.float32)
+    assert_allclose(swiglu(gate, up), silu(gate) * up, mx.float32)
 
 
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
-def test_task_2_flash_attention_cpu(mask_mode: str):
-    attention_helper(mx.cpu, 18, 6, 7, 5, 3, 10, mask_mode)
-
-
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
-def test_task_2_flash_attention_cpu_large(mask_mode: str):
-    attention_helper(mx.cpu, 28, 4, 16, 128, 16, 3, mask_mode)
-
-
-def test_task_2_flash_attention_cpu_causal_mask_faster_than_all_zero_mask():
-    assert_causal_mask_faster_than_all_zero_mask(
-        stream=mx.cpu,
-        batch=1,
-        h_q=8,
-        h=8,
-        l=128,
-        s=128,
-        e=128,
+def test_week1_keeps_readable_kernels():
+    hidden_size = 16
+    num_heads = 2
+    num_kv_heads = 1
+    head_dim = 8
+    attention = Qwen3MultiHeadAttentionWeek1(
+        hidden_size,
+        num_heads,
+        num_kv_heads,
+        head_dim,
+        mx.zeros((num_heads * head_dim, hidden_size)),
+        mx.zeros((num_kv_heads * head_dim, hidden_size)),
+        mx.zeros((num_kv_heads * head_dim, hidden_size)),
+        mx.zeros((hidden_size, num_heads * head_dim)),
+        mx.ones((head_dim,)),
+        mx.ones((head_dim,)),
     )
+    assert type(attention.rope) is RoPE
+    assert type(attention.q_norm) is RMSNorm
 
-
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
-def test_task_3_flash_attention_gpu_extra_small(mask_mode: str):
-    attention_helper(mx.gpu, 1, 1, 5, 7, 4, 1, mask_mode)
-
-
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
-def test_task_3_flash_attention_gpu_small(mask_mode: str):
-    attention_helper(mx.gpu, 6, 3, 2, 5, 3, 1, mask_mode)
-
-
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
-def test_task_3_flash_attention_gpu(mask_mode: str):
-    attention_helper(mx.gpu, 18, 6, 7, 5, 3, 10, mask_mode)
-
-
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
-def test_task_3_flash_attention_gpu_large(mask_mode: str):
-    attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, mask_mode, precision=mx.bfloat16)
-
-
-@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
-def test_task_3_flash_attention_gpu_d128_partial_tiles(mask_mode: str):
-    attention_helper(mx.gpu, 8, 2, 35, 128, 47, 1, mask_mode, precision=mx.bfloat16)
-
-
-def test_task_3_flash_attention_gpu_causal_mask_faster_than_all_zero_mask():
-    assert_causal_mask_faster_than_all_zero_mask(
-        stream=mx.gpu,
-        batch=2,
-        h_q=8,
-        h=8,
-        l=512,
-        s=512,
-        e=128,
-        precision=mx.bfloat16,
+    mlp = Qwen3MLPWeek1(
+        hidden_size,
+        hidden_size * 2,
+        mx.zeros((hidden_size * 2, hidden_size)),
+        mx.zeros((hidden_size * 2, hidden_size)),
+        mx.zeros((hidden_size, hidden_size * 2)),
     )
+    assert mlp(mx.ones((1, 1, hidden_size))).shape == (1, 1, hidden_size)
+
+
+def test_week3_retains_week2_optimized_kernels():
+    hidden_size = 16
+    num_heads = 2
+    num_kv_heads = 1
+    head_dim = 8
+
+    def weights(output_dims, input_dims):
+        return QuantizedWeights(
+            mx.ones((output_dims, input_dims // 32)),
+            mx.zeros((output_dims, input_dims // 32)),
+            32,
+            4,
+            mx.zeros((output_dims, input_dims // 8), dtype=mx.uint32),
+        )
+
+    attention = Qwen3MultiHeadAttentionWeek3(
+        hidden_size,
+        num_heads,
+        num_kv_heads,
+        head_dim,
+        weights(num_heads * head_dim, hidden_size),
+        weights(num_kv_heads * head_dim, hidden_size),
+        weights(num_kv_heads * head_dim, hidden_size),
+        weights(hidden_size, num_heads * head_dim),
+        mx.ones((head_dim,)),
+        mx.ones((head_dim,)),
+    )
+    assert type(attention.rope) is FastRoPE
+    assert type(attention.q_norm) is FastRMSNorm

@@ -1,131 +1,185 @@
-from types import SimpleNamespace
+"""Week 3 FlashAttention tests."""
 
+import pytest
+import time
 import mlx.core as mx
-import mlx.nn as nn
-from mlx_lm.models.qwen3_moe import (
-    Qwen3MoeSparseMoeBlock as MlxQwen3MoeSparseMoeBlock,
-)
-from mlx_lm.models.switch_layers import SwitchLinear
-
-from .tiny_llm_base import (
-    Moe,
-    QuantizedWeights,
-    grouped_expert_linear,
-    route_topk,
-)
-from .utils import assert_allclose
+from .tiny_llm_base import *
+from .utils import *
 
 
-def test_task_1_grouped_expert_linear():
-    mx.random.seed(1)
-    scale = 0.25
-    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.float16) * scale
-    w_experts = mx.random.normal(shape=(3, 64, 128), dtype=mx.float16) * scale
-    expert_ids = mx.array(
-        [
-            [2, 0, 1],
-            [1, 2, 0],
-        ],
-        dtype=mx.uint32,
+def attention_helper(stream: mx.Stream, H_q, H, L, E, S, BATCH, mask_mode: str):
+    precision = mx.float32
+    with mx.stream(stream):
+        q_shape = (BATCH, H_q, L, E)
+        kv_shape = (BATCH, H, S, E)
+        mask_shape = (BATCH, H_q, L, S)
+        scale = 0.9
+        for _ in range(100):
+            query = mx.random.uniform(shape=q_shape, dtype=precision)
+            key = mx.random.uniform(shape=kv_shape, dtype=precision)
+            value = mx.random.uniform(shape=kv_shape, dtype=precision)
+            if mask_mode == "no_mask":
+                mask = None
+            elif mask_mode == "mask":
+                mask = mx.random.uniform(shape=mask_shape, dtype=precision)
+            elif mask_mode == "causal":
+                mask = "causal"
+            else:
+                raise ValueError(f"Unknown mask_mode: {mask_mode}")
+
+            reference_output = mx.fast.scaled_dot_product_attention(
+                q=query,
+                k=key,
+                v=value,
+                scale=scale,
+                mask=mask,
+            )
+            user_output = flash_attention(
+                query,
+                key,
+                value,
+                scale=scale,
+                mask=mask,
+            )
+            mx.eval(user_output)  # so that any error will be caught here
+            assert_allclose(user_output, reference_output, precision=mx.float16)
+
+
+def time_flash_attention(
+    stream: mx.Stream,
+    query: mx.array,
+    key: mx.array,
+    value: mx.array,
+    scale: float,
+    mask: mx.array | str,
+    num_iters: int = 4,
+) -> float:
+    with mx.stream(stream):
+        start = time.perf_counter()
+        for _ in range(num_iters):
+            output = flash_attention(query, key, value, scale=scale, mask=mask)
+            mx.eval(output)
+    return (time.perf_counter() - start) / num_iters
+
+
+def median(values: list[float]) -> float:
+    values = sorted(values)
+    return values[len(values) // 2]
+
+
+def assert_causal_mask_faster_than_all_zero_mask(
+    stream: mx.Stream,
+    batch: int,
+    h_q: int,
+    h: int,
+    l: int,
+    s: int,
+    e: int,
+    scale: float = 0.9,
+):
+    precision = mx.float32
+    q_shape = (batch, h_q, l, e)
+    kv_shape = (batch, h, s, e)
+    mask_shape = (batch, h_q, l, s)
+
+    with mx.stream(stream):
+        query = mx.random.uniform(shape=q_shape, dtype=precision)
+        key = mx.random.uniform(shape=kv_shape, dtype=precision)
+        value = mx.random.uniform(shape=kv_shape, dtype=precision)
+        zero_mask = mx.zeros(shape=mask_shape, dtype=precision)
+
+        for _ in range(3):
+            mx.eval(flash_attention(query, key, value, scale=scale, mask="causal"))
+            mx.eval(flash_attention(query, key, value, scale=scale, mask=zero_mask))
+
+    causal_samples = []
+    zero_mask_samples = []
+    for round_idx in range(6):
+        if round_idx % 2 == 0:
+            causal_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask="causal"
+                )
+            )
+            zero_mask_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask=zero_mask
+                )
+            )
+        else:
+            zero_mask_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask=zero_mask
+                )
+            )
+            causal_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask="causal"
+                )
+            )
+
+    causal_time = median(causal_samples)
+    zero_mask_time = median(zero_mask_samples)
+    assert causal_time < zero_mask_time, (
+        "Expected causal mask to be faster than an all-zero mask, got "
+        f"causal={causal_time:.6f}s and zero_mask={zero_mask_time:.6f}s."
     )
 
-    ref = SwitchLinear(
-        input_dims=w_experts.shape[-1],
-        output_dims=w_experts.shape[-2],
-        num_experts=w_experts.shape[0],
-        bias=False,
-    )
-    ref.weight = w_experts
-    ref = ref.to_quantized(group_size=128, bits=4)
 
-    out = grouped_expert_linear(
-        x,
-        QuantizedWeights.from_mlx_layer(ref),
-        expert_ids,
-    )
-    expected = ref(mx.expand_dims(x, -2), expert_ids).squeeze(-2)
-
-    assert out.shape == (2, 3, 64)
-    assert_allclose(out, expected, precision=mx.float16)
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_2_flash_attention_cpu_small(mask_mode: str):
+    attention_helper(mx.cpu, 6, 3, 2, 5, 3, 1, mask_mode)
 
 
-def test_task_2_router_topk():
-    mx.random.seed(2)
-    scale = 0.25
-    x = mx.random.normal(shape=(2, 2, 128), dtype=mx.float16) * scale
-    ref = nn.Linear(128, 4, bias=False)
-    ref.weight = mx.random.normal(shape=(4, 128), dtype=mx.float16) * scale
-    ref = ref.to_quantized(group_size=128, bits=4)
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
+def test_task_2_flash_attention_cpu(mask_mode: str):
+    attention_helper(mx.cpu, 18, 6, 7, 5, 3, 10, mask_mode)
 
-    router_probs, expert_ids, expert_scores = route_topk(
-        x,
-        QuantizedWeights.from_mlx_layer(ref),
-        top_k=2,
-    )
-    _, _, normalized_scores = route_topk(
-        x,
-        QuantizedWeights.from_mlx_layer(ref),
-        top_k=2,
-        norm_topk_prob=True,
-    )
 
-    expected_probs = mx.softmax(ref(x), axis=-1, precise=True)
-    expected_ids = mx.argpartition(-expected_probs, kth=1, axis=-1)[..., :2]
-    expected_scores = mx.take_along_axis(expected_probs, expected_ids, axis=-1)
-    expected_normalized_scores = expected_scores / expected_scores.sum(
-        axis=-1,
-        keepdims=True,
-    )
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_2_flash_attention_cpu_large(mask_mode: str):
+    attention_helper(mx.cpu, 28, 4, 16, 128, 16, 3, mask_mode)
 
-    assert router_probs.shape == (2, 2, 4)
-    assert expert_ids.shape == (2, 2, 2)
-    assert expert_scores.shape == (2, 2, 2)
-    assert expert_ids.tolist() == expected_ids.tolist()
-    assert_allclose(router_probs, expected_probs, precision=mx.float16)
-    assert_allclose(expert_scores, expected_scores, precision=mx.float16)
-    assert_allclose(
-        normalized_scores,
-        expected_normalized_scores,
-        precision=mx.float16,
+
+def test_task_2_flash_attention_cpu_causal_mask_faster_than_all_zero_mask():
+    assert_causal_mask_faster_than_all_zero_mask(
+        stream=mx.cpu,
+        batch=1,
+        h_q=8,
+        h=8,
+        l=128,
+        s=128,
+        e=128,
     )
 
 
-def test_task_3_moe():
-    mx.random.seed(3)
-    scale = 0.25
-    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.float16) * scale
-    ref = MlxQwen3MoeSparseMoeBlock(
-        SimpleNamespace(
-            hidden_size=128,
-            moe_intermediate_size=128,
-            num_experts=3,
-            num_experts_per_tok=2,
-            norm_topk_prob=True,
-        )
-    )
-    ref.gate.weight = mx.random.normal(shape=(3, 128), dtype=mx.float16) * scale
-    ref.switch_mlp.gate_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
-    )
-    ref.switch_mlp.up_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
-    )
-    ref.switch_mlp.down_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
-    )
-    nn.quantize(ref, group_size=128, bits=4)
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
+def test_task_3_flash_attention_gpu_extra_small(mask_mode: str):
+    attention_helper(mx.gpu, 1, 1, 5, 7, 4, 1, mask_mode)
 
-    moe = Moe(
-        w_router=QuantizedWeights.from_mlx_layer(ref.gate),
-        w_gate=QuantizedWeights.from_mlx_layer(ref.switch_mlp.gate_proj),
-        w_up=QuantizedWeights.from_mlx_layer(ref.switch_mlp.up_proj),
-        w_down=QuantizedWeights.from_mlx_layer(ref.switch_mlp.down_proj),
-        num_experts_per_tok=2,
-        norm_topk_prob=True,
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_3_flash_attention_gpu_small(mask_mode: str):
+    attention_helper(mx.gpu, 6, 3, 2, 5, 3, 1, mask_mode)
+
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
+def test_task_3_flash_attention_gpu(mask_mode: str):
+    attention_helper(mx.gpu, 18, 6, 7, 5, 3, 10, mask_mode)
+
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_3_flash_attention_gpu_large(mask_mode: str):
+    attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, mask_mode)
+
+
+def test_task_3_flash_attention_gpu_causal_mask_faster_than_all_zero_mask():
+    assert_causal_mask_faster_than_all_zero_mask(
+        stream=mx.gpu,
+        batch=2,
+        h_q=8,
+        h=8,
+        l=512,
+        s=512,
+        e=128,
     )
-
-    out = moe(x)
-    expected = ref(x)
-
-    assert out.shape == x.shape
-    assert_allclose(out, expected, precision=mx.float16)

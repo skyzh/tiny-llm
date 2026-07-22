@@ -1,12 +1,14 @@
 import mlx.core as mx
-from .basics import silu
-from .attention import scaled_dot_product_attention_grouped
-from .layer_norm import RMSNorm
-from .positional_encoding import RoPE
 from typing import Any
 from .embedding import Embedding
 from .quantize import dequantize_linear, QuantizedWeights
 from .kv_cache import TinyKvCache
+from .week2_kernels import (
+    FastRMSNorm,
+    FastRoPE,
+    scaled_dot_product_attention,
+    swiglu,
+)
 
 
 class Qwen3MultiHeadAttention:
