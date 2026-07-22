@@ -1,8 +1,9 @@
 import pytest
 import time
 import mlx.core as mx
-from .tiny_llm_base import *
-from .utils import *
+from tiny_llm_ref import flash_attention
+
+from .utils import AVAILABLE_STREAMS, AVAILABLE_STREAMS_IDS, assert_allclose
 
 
 def attention_helper(stream: mx.Stream, H_q, H, L, E, S, BATCH, mask_mode: str):

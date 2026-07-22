@@ -1,5 +1,7 @@
 #include <metal_stdlib>
 #include "mlx/backend/metal/kernels/utils.h"
+#include "mlx/backend/metal/kernels/steel/attn/attn.h"
+#include "mlx/backend/metal/kernels/steel/attn/kernels/steel_attention.h"
 
 using namespace metal;
 
@@ -223,3 +225,18 @@ using namespace metal;
         }
     }
 }
+
+// The scalar kernel above is intentionally kept as a readable, general
+// fallback. The production head dimension uses Metal SIMD-matrix operations
+// through MLX's Steel attention building block.
+instantiate_kernel(
+    "flash_attention_steel_f32_bq32_bk16_bd128_wm4_wn1_maskfloat32",
+    attention,
+    float,
+    32,
+    16,
+    128,
+    4,
+    1,
+    float,
+    float)

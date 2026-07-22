@@ -9,6 +9,7 @@
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
+#include "mlx/backend/metal/kernels/steel/attn/params.h"
 #include "mlx/backend/metal/utils.h"
 #endif
 
@@ -16,7 +17,8 @@ namespace tiny_llm_ext_ref {
 mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
                           const float scale, const bool is_causal, const int num_kv_heads, const int num_heads,
                           mx::StreamOrDevice s) {
-    if (q.dtype() != mx::float32 || k.dtype() != mx::float32 || v.dtype() != mx::float32 || mask.dtype() != mx::float32) {
+    if (q.dtype() != mx::float32 || k.dtype() != mx::float32 || v.dtype() != mx::float32 ||
+        mask.dtype() != mx::float32) {
         throw std::runtime_error("flash_attention: all input arrays must be float32");
     }
     if (q.shape().size() != 3 || k.shape().size() != 3 || v.shape().size() != 3) {
@@ -196,8 +198,8 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                         }
                         float max = std::max(m_i[a], rowmax);
                         m_i_diff[a] = m_i[a] == -std::numeric_limits<float>::infinity()
-                            ? -std::numeric_limits<float>::infinity()
-                            : m_i[a] - max;
+                                          ? -std::numeric_limits<float>::infinity()
+                                          : m_i[a] - max;
                         m_i[a] = max;
                     }
 
@@ -206,8 +208,8 @@ void FlashAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                     for (int64_t a = 0; a < br_upper_bound; a++) {
                         for (int64_t b = 0; b < bc_upper_bound; b++) {
                             p[a * Bc + b] = s_i[a * Bc + b] == -std::numeric_limits<float>::infinity()
-                                ? 0.0f
-                                : std::exp(s_i[a * Bc + b] - m_i[a]);
+                                                ? 0.0f
+                                                : std::exp(s_i[a * Bc + b] - m_i[a]);
                         }
                     }
 
@@ -274,23 +276,6 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     auto &s = stream();
     auto &d = mx::metal::device(s.device);
 
-    // Make a kernel from this metal library
-    auto library = d.get_library("tiny_llm_ext_ref");
-    auto kernel = d.get_kernel("flash_attention_f32_e128", library);
-
-    // Prepare to encode kernel
-    auto &compute_encoder = d.get_command_encoder(s.index);
-    compute_encoder.set_compute_pipeline_state(kernel);
-
-    // Encode input arrays to kernel
-    compute_encoder.set_input_array(q, 0);
-    compute_encoder.set_input_array(k, 1);
-    compute_encoder.set_input_array(v, 2);
-    compute_encoder.set_input_array(mask, 3);
-    compute_encoder.set_output_array(out, 4);
-    compute_encoder.set_vector_bytes(mask.shape(), 5);
-    compute_encoder.set_vector_bytes(mask.strides(), 6);
-
     if (!q.flags().row_contiguous) {
         throw std::runtime_error("flash_attention: q must be contiguous");
     }
@@ -330,10 +315,6 @@ void FlashAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     }
     if (Bc != simd_width) {
         throw std::runtime_error("flash_attention: the K/V tile width must match the SIMD width");
-    }
-
-    if (E <= 0 || E > 128) {
-        throw std::runtime_error("flash_attention: E must be in the range [1, 128]");
     }
 
     const int Tr = (L + Br - 1) / Br;

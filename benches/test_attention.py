@@ -17,6 +17,17 @@ def get_test_attention_data():
     return q, k, v, res
 
 
+def get_prefill_attention_data(sequence_length):
+    # A single Qwen2 7B request with grouped-query attention.
+    init = nn.init.he_uniform(mx.float32)
+    q = init(mx.zeros((1, 28, sequence_length, 128)))
+    k = init(mx.zeros((1, 4, sequence_length, 128)))
+    v = init(mx.zeros((1, 4, sequence_length, 128)))
+    mx.eval(q, k, v)
+    mx.synchronize()
+    return q, k, v
+
+
 def evaluate_attention(fn):
     result = fn()
     mx.eval(result)
@@ -67,9 +78,44 @@ def test_refsol_flash_attention_causal(benchmark):
         mx.synchronize()
         result = benchmark(
             lambda: evaluate_attention(
-                lambda: tiny_llm_ref.flash_attention(
+                lambda: tiny_llm_ref.flash_attention(q, k, v, scale=1.0, mask="causal")
+            )
+        )
+        assert_allclose(result, res, precision=mx.float32, rtol=1e-2)
+
+
+@pytest.mark.parametrize("sequence_length", [128, 512, 1024, 2048])
+def test_mlx_attention_causal_prefill(benchmark, sequence_length):
+    with mx.stream(mx.gpu):
+        q, k, v = get_prefill_attention_data(sequence_length)
+        benchmark(
+            lambda: evaluate_attention(
+                lambda: mx.fast.scaled_dot_product_attention(
                     q, k, v, scale=1.0, mask="causal"
                 )
             )
         )
-        assert_allclose(result, res, precision=mx.float32, rtol=1e-2)
+
+
+@pytest.mark.parametrize("sequence_length", [128, 512, 1024, 2048])
+def test_refsol_attention_causal_prefill(benchmark, sequence_length):
+    with mx.stream(mx.gpu):
+        q, k, v = get_prefill_attention_data(sequence_length)
+        benchmark(
+            lambda: evaluate_attention(
+                lambda: tiny_llm_ref.scaled_dot_product_attention_grouped(
+                    q, k, v, scale=1.0, mask="causal"
+                )
+            )
+        )
+
+
+@pytest.mark.parametrize("sequence_length", [128, 512, 1024, 2048])
+def test_refsol_flash_attention_causal_prefill(benchmark, sequence_length):
+    with mx.stream(mx.gpu):
+        q, k, v = get_prefill_attention_data(sequence_length)
+        benchmark(
+            lambda: evaluate_attention(
+                lambda: tiny_llm_ref.flash_attention(q, k, v, scale=1.0, mask="causal")
+            )
+        )
