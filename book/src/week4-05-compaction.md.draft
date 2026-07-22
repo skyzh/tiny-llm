@@ -105,4 +105,4 @@ and one successful test. Then:
 The compacted agent should know what it changed and which test passed without
 receiving every source excerpt again.
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}

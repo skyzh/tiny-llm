@@ -111,4 +111,4 @@ Then give the agent a fixture repository containing a one-line bug. A successful
 trajectory should inspect the implementation and test, make one exact edit, run
 the focused test, and return a final answer.
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}

@@ -102,4 +102,4 @@ session's KV cache while the durable event log remains resumable.
 At the end of the day, a model should be able to resume the bug-fixing task from
 Day 3 without restarting the reasoning process from the original prompt.
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}

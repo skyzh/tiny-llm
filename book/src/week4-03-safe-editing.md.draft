@@ -103,4 +103,4 @@ inspect code, make a precise edit, and validate the result in a disposable
 workspace. The remaining days make that agent persistent, efficient,
 controllable, and measurable.
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}

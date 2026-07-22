@@ -106,4 +106,4 @@ assistant {"final":"This repository teaches LLM inference and serving."}
 
 The tool can still be a stub. Tomorrow it will become a real workspace API.
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}

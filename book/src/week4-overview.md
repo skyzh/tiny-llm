@@ -120,4 +120,4 @@ time on malformed-action recovery.
 - [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 - [Benchmarking Coding Agents on Databricks' Multi-Million Line Codebase](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}

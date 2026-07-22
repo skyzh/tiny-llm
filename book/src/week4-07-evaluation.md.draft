@@ -122,4 +122,4 @@ After the capstone, good optional projects include:
 The core lesson remains small: a coding agent is a model inside a measured,
 persistent, and carefully controlled feedback loop.
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}

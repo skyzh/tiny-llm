@@ -22,7 +22,7 @@
     - [Paged Attention, Part 1](./week3-01-paged-attention-part1.md)
     - [Paged Attention, Part 2](./week3-02-paged-attention-part2.md)
     - [Mixture of Experts](./week3-03-moe.md)
-- [🚧 Week 4: Build a Coding Agent](./week4/overview.md)
+- [🚧 Week 4: Build a Coding Agent](./week4-overview.md)
 
 ---
 

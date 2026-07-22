@@ -96,4 +96,4 @@ Finally, branch the session before the first edit and pursue an alternative
 solution. Inspect both branches in the durable trace while keeping workspace
 mutations explicit.
 
-{{#include ../copyright.md}}
+{{#include copyright.md}}
