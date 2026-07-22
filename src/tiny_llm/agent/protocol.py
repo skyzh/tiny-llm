@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .workspace import Workspace
+
+
+class AgentError(ValueError):
+    """A recoverable error that can be returned to the model."""
+
+
+@dataclass(frozen=True)
+class FinalAction:
+    """Week 4, Day 2: a model response that finishes the task."""
+
+    final: str
+
+
+@dataclass(frozen=True)
+class ToolAction:
+    """Week 4, Day 2: one validated tool request from the model."""
+
+    tool: str
+    arguments: dict[str, Any]
+
+
+AgentAction = FinalAction | ToolAction
+
+
+def parse_action(
+    response: str,
+    available_tools: frozenset[str] | None = None,
+) -> AgentAction:
+    """Week 4, Day 2: strictly parse and validate exactly one JSON action."""
+
+    pass
+
+
+def build_system_prompt(workspace: Workspace) -> str:
+    """Week 4, Day 2: describe only the tools authorized for this run."""
+
+    pass

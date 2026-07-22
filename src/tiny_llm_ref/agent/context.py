@@ -1,0 +1,38 @@
+from .generation import Message
+
+
+def compact_messages(messages: list[Message], max_chars: int) -> list[Message]:
+    """Week 4, Day 4: retain task anchors and the newest complete tool turns."""
+
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+    total_chars = sum(len(item["content"]) for item in messages)
+    if len(messages) <= 2 or total_chars <= max_chars:
+        return list(messages)
+
+    anchors = list(messages[:2])
+    anchor_chars = sum(len(item["content"]) for item in anchors)
+    if anchor_chars >= max_chars:
+        return anchors
+
+    turns = [messages[index : index + 2] for index in range(2, len(messages), 2)]
+    kept: list[list[Message]] = []
+    used = anchor_chars
+    for turn in reversed(turns):
+        turn_chars = sum(len(item["content"]) for item in turn)
+        if used + turn_chars > max_chars:
+            break
+        kept.append(turn)
+        used += turn_chars
+    return anchors + [item for turn in reversed(kept) for item in turn]
+
+
+def append_tool_result(
+    messages: list[Message], response: str, result: str
+) -> list[Message]:
+    """Week 4, Day 4: record an action and its observation as one complete turn."""
+
+    return messages + [
+        {"role": "assistant", "content": response},
+        {"role": "user", "content": f"Tool result:\n{result}"},
+    ]
