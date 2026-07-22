@@ -1,0 +1,99 @@
+# Day 6: Control and Recovery
+
+Long-running agents need a way for users to change direction and recover from
+bad mutations. Today you will add checkpoints, undo, steering, and cooperative
+cancellation without hiding any of them from the session trace.
+
+## Checkpoints and Undo
+
+The mutation journal from Day 3 already records before-images and hashes. A
+checkpoint groups those mutations under a named boundary:
+
+```text
+/checkpoint before-parser-change
+/diff
+/undo
+```
+
+Undo restores only changes made after the selected checkpoint. Before restoring
+a file, compare its current hash with the after-image recorded by the agent. If
+another process or the user changed it, stop and report the conflict instead of
+overwriting new work.
+
+Creating or deleting a file also needs a reversible journal entry. Empty
+directories do not need to be reconstructed unless the application assigns them
+meaning.
+
+## Session Branching Is Different
+
+Keep these operations distinct:
+
+- **Compaction** changes the history visible to the model.
+- **Session branching** chooses a previous conversational point and continues a
+  new line of reasoning.
+- **Workspace undo** restores files changed by tools.
+
+Branching a session does not automatically undo files. Undoing files does not
+erase the record that an earlier approach was attempted.
+
+## Interrupt
+
+Use one cancellation signal across decoding and tool execution:
+
+- the decode loop checks it between generated tokens;
+- subprocess execution forwards it by terminating the process tree;
+- file mutation code checks it before the atomic replace; and
+- the agent loop records an `interrupted` event.
+
+An interrupt during an atomic write may arrive too late to prevent the completed
+replace. The mutation remains in the journal and can be undone normally.
+
+Do not catch `KeyboardInterrupt` only at the outermost loop. That leaves a long
+test or token generation running until it happens to return.
+
+## Steer
+
+A steering message changes the active task while the agent is working:
+
+```text
+Do not modify the configuration schema. Fix the parser instead.
+```
+
+Queue the message and deliver it at a safe boundary: after the current tool
+finishes and before the next model request. Record the user message in the
+session, then rebuild context so the next action sees it.
+
+For the first implementation, steering does not need to cancel the active tool.
+The user can interrupt first when immediate cancellation is required.
+
+## Loop Detection and Recovery
+
+Hash normalized tool names and arguments. If the same failing call repeats, add
+a concise warning to the next observation. Stop after a configured threshold.
+
+Other useful terminal conditions include:
+
+- too many malformed actions;
+- exhausted token or step budget;
+- repeated edits that alternate the same text;
+- a final answer immediately after a failing validation command; and
+- a user interrupt with no request to continue.
+
+The agent may report an incomplete result. Honest termination is preferable to
+silently claiming success.
+
+## Exercise
+
+Use the Day 3 fixture repository for four scenarios:
+
+1. Checkpoint, apply an edit, display its diff, and undo it.
+2. Modify the edited file externally and verify that undo reports a conflict.
+3. Start a deliberately slow command and interrupt it before its timeout.
+4. While the agent pursues the wrong file, queue a steering message that directs
+   it to the parser and verify that the next model turn sees it.
+
+Finally, branch the session before the first edit and pursue an alternative
+solution. Inspect both branches in the durable trace while keeping workspace
+mutations explicit.
+
+{{#include copyright.md}}

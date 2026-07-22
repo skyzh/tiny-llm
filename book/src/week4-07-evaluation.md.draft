@@ -1,0 +1,125 @@
+# Day 7: Evaluation and Capstone
+
+Anecdotes are useful while building an agent, but they cannot tell whether a
+prompt, tool schema, or compaction policy actually improved it. Today you will
+turn small repository tasks into a repeatable evaluation suite and run the final
+capstone.
+
+## What Makes a Good Task
+
+Use recent, human-written changes as inspiration, but keep each course task:
+
+- self-contained in a few files;
+- specified by its desired behavior and constraints, not its solution;
+- validated by focused tests;
+- small enough to run repeatedly on a laptop; and
+- protected from solution leakage.
+
+A task package contains:
+
+```text
+task.json          prompt, budgets, allowed validation commands
+workspace/         repository snapshot before the change
+held_out_tests/    tests installed only after the agent finishes
+grade.py           deterministic grader
+```
+
+Do not expose a later Git commit containing the solution. A shell-capable agent
+can inspect Git history just like a human can. Use a sealed snapshot with no
+reachable solution history.
+
+## Grade Behavior, Not Style
+
+When the agent declares completion or reaches its budget:
+
+1. freeze or checkpoint the workspace;
+2. install the held-out tests;
+3. run the deterministic grader;
+4. inspect forbidden side effects; and
+5. retain the session trace and metrics.
+
+Prefer executable tests over an LLM judge. Tests can accept multiple correct
+implementations and reject fluent explanations paired with broken code. Rewrite
+overly specific tests that compare incidental formatting or exact strings when
+the requirement is behavioral.
+
+## Metrics
+
+Report at least:
+
+- task pass rate;
+- held-out test results;
+- forbidden file modifications;
+- malformed-action and tool-error rates;
+- model turns and tool calls;
+- total input and output tokens;
+- compaction count;
+- wall-clock time; and
+- terminal reason such as completed, budget exhausted, interrupted, or loop
+  detected.
+
+Compare trajectories as well as final scores. A tool change may preserve pass
+rate while sharply reducing repeated reads or context tokens.
+
+## A Small Course Suite
+
+Begin with three difficulty levels:
+
+1. **Localized fix:** correct an off-by-one error in one implementation file.
+2. **Repository convention:** add a configuration option while following
+   instructions from `AGENTS.md` and changing two files.
+3. **Failure recovery:** diagnose a failing test whose first apparent fix breaks
+   a second held-out case.
+
+Run each task more than once if generation is sampled. For greedy decoding, one
+run is reproducible only when the surrounding kernels and tool environment are
+also deterministic.
+
+## Capstone
+
+Give the agent a fresh fixture repository and the following kind of task:
+
+> Empty configuration values are incorrectly treated as missing values. Fix the
+> parser without changing the public schema, and run the relevant tests.
+
+The agent must:
+
+1. discover and read the relevant implementation and tests;
+2. make a precise edit rather than rewriting unrelated code;
+3. run focused validation and react to failures;
+4. remain inside the workspace and budgets;
+5. survive one process restart or context compaction; and
+6. produce a concise final summary naming changed files and validation.
+
+Only the held-out grader decides whether the task passes.
+
+## Experiments
+
+Once the suite runs end to end, change one variable at a time:
+
+- three file tools versus the four-tool interface;
+- whole-file writes versus exact edits;
+- full session replay versus compaction;
+- Qwen3 0.6B versus Qwen3 4B;
+- the Week 2 implementation versus MLX-LM; or
+- direct action versus an explicit plan in the working summary.
+
+Report both task success and resource use. This makes Week 4 a continuation of
+the measurement discipline from the inference and serving weeks: the agent
+harness is another system whose behavior can be tested and optimized.
+
+## Where to Go Next
+
+After the capstone, good optional projects include:
+
+- a lexical repository map or vector retrieval for large documentation sets;
+- multiple concurrent agent sessions on the Week 3 scheduler;
+- stronger container or virtual-machine isolation;
+- native model tool-call templates and constrained decoding;
+- extension-defined tools and project skills; and
+- a terminal UI for browsing session branches and tool diffs.
+
+The core lesson remains small: a coding agent is a model inside a measured,
+persistent, and carefully controlled feedback loop.
+
+{{#include copyright.md}}
