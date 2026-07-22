@@ -8,7 +8,7 @@
 - [Week 1: From Matmul to Text](./week1-overview.md)
     - [Attention and Multi-Head Attention](./week1-01-attention.md)
     - [Positional Encodings and RoPE](./week1-02-positional-encodings.md)
-    - [Grouped/Multi Query Attention](./week1-03-gqa.md)
+    - [Grouped-Query and Multi-Query Attention](./week1-03-gqa.md)
     - [RMSNorm and MLP](./week1-04-rmsnorm-and-mlp.md)
     - [The Qwen3 Model](./week1-05-qwen3-model.md)
     - [Generating the Response](./week1-06-generate-response.md)

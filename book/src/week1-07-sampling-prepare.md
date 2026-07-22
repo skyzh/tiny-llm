@@ -1,11 +1,10 @@
 # Week 1 Day 7: Sampling and Preparing for Week 2
 
-In day 7, we will implement various sampling strategies. And we will get you prepared for week 2.
+On Day 7, we will implement several sampling strategies and prepare the development environment for Week 2.
 
 ## Task 1: Sampling
 
-We implemented the default greedy sampling strategy in the previous day. In this task, we will implement the temperature,
-top-k, and top-p (nucleus) sampling strategies.
+On Day 6, we implemented greedy decoding. In this task, we will add temperature, top-k, and top-p (nucleus) sampling.
 
 ```
 src/tiny_llm/sampler.py
@@ -13,40 +12,38 @@ src/tiny_llm/sampler.py
 
 - 📚 [mlx-lm sampler implementation](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/sample_utils.py)
 
-**Temperature Sampling**
+### Temperature Sampling
 
-The first sampling strategy is the temperature sampling. When `temp=0`, we use the default greedy strategy. When it is
-larger than 0, we will randomly select the next token based on the logprobs. The temperature parameter scales the distribution.
-When the value is larger, the distribution will be more uniform, making the lower probability token more likely to be
-selected, and therefore making the model more creative.
+When `temp=0`, use greedy decoding. When `temp` is greater than 0, sample the next token from the log-probability distribution.
+A higher temperature flattens the distribution, making lower-probability tokens more likely and increasing output variety.
 
-To implement temperature sampling, simply divide the logprobs by the temperature and use `mx.random.categorical` to
-randomly select the next token.
+To implement temperature sampling, divide the log probabilities by the temperature and pass them to
+`mx.random.categorical`.
 
 ```bash
 pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b --sampler-temp 0.5
 ```
 
-**Top-k Sampling**
+### Top-k Sampling
 
-In top-k sampling, we will only keep the top-k tokens with the highest probabilities before sampling the probabilities.
-This is done before the final temperature scaling.
+Top-k sampling keeps only the `k` tokens with the highest log probabilities. Apply this filter before temperature scaling.
 
-You can use `mx.argpartition` to partition the output so that you can know the indices of the top-k elements, and then,
-mask those logprobs outside the top-k with `-mx.inf`. After that, do temperature sampling.
+Use `mx.argpartition` to find the indices outside the top `k`, mask their log probabilities with `-mx.inf`, then apply
+temperature sampling.
 
 ```bash
 pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b --sampler-temp 0.5 --sampler-top-k 10
 ```
 
-**Top-p (Nucleus) Sampling**
+### Top-p (Nucleus) Sampling
 
-In top-p (nucleus) sampling, we will only keep the top-p tokens with the highest cumulative probabilities before sampling
-the probabilities. This is done before the final temperature scaling.
+Top-p sampling keeps the smallest high-probability set of tokens whose cumulative probability reaches or exceeds `p`.
+Apply this filter before temperature scaling.
 
-There are multiple ways of implementing it. One way is to first use `mx.argsort` to sort the logprobs (from highest
-probability to lowest), and then, do a `cumsum` over the sorted logprobs to get the cumulative probabilities. Then, mask
-those logprobs outside the top-p with `-mx.inf`. After that, do temperature sampling.
+One implementation uses `mx.argsort` to order the log probabilities from highest to lowest, applies `exp` to recover
+probabilities, and applies `cumsum` to compute cumulative probability. Keep a token when the cumulative probability before
+it is less than `p`; this includes the token that crosses the threshold. Mask the remaining log probabilities with
+`-mx.inf`, then apply temperature sampling.
 
 ```bash
 pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b --sampler-temp 0.5 --sampler-top-p 0.9
@@ -54,39 +51,53 @@ pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b --sampler-tem
 
 ## Task 2: Prepare for Week 2
 
-In week 2, we will optimize the serving infrastructure of the Qwen3 model. We will write some C++ code and Metal kernel
-to make some operations run faster. You will need Xcode and its command-line tools, which include the Metal compiler,
-to compile the C++ code and Metal kernels.
+In Week 2, we will optimize the Qwen3 serving infrastructure with C++ and Metal kernels. You will need Xcode and its
+command-line tools, including the Metal compiler, to build them.
 
-1.  **Install Xcode:**
+1. **Install Xcode:**
+
     Install Xcode from the Mac App Store or from the [Apple Developer website](https://developer.apple.com/xcode/) (this may require an Apple Developer account).
-2.  **Launch Xcode and Install Components:**
+
+2. **Launch Xcode and Install Components:**
+
     After installation, launch Xcode at least once. It may prompt you to install additional macOS components; please do so (this is usually the default option).
-3.  **Install Xcode Command Line Tools:**
+
+3. **Install Xcode Command Line Tools:**
+
     Open your Terminal and run:
+
     ```bash
     xcode-select --install
     ```
-4.  **Set Default Xcode Path (if needed):**
+
+4. **Set the Default Xcode Path (if needed):**
+
     Ensure that your command-line tools are pointing to your newly installed Xcode. You can do this by running:
+
     ```bash
     sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
     ```
-    *(Adjust the path if your Xcode is installed in a different location).*
-5.  **Accept Xcode License:**
+
+    Adjust the path if Xcode is installed elsewhere.
+
+5. **Accept the Xcode License:**
+
     You may also need to accept the Xcode license:
+
     ```bash
     sudo xcodebuild -license accept
     ```
-6.  **Install CMake:**
+
+6. **Install CMake:**
+
     ```bash
     brew install cmake
     ```
 
 (This instruction is graciously provided by [Liu Jinyi](https://github.com/KKKZOZ).)
 
-You can test your installation by compiling the code in `src/extensions` with a `axpby` function as part of the official
-mlx extension tutorial:
+Test the installation by compiling the code in `src/extensions`, which contains an `axpby` function adapted from the
+official MLX extension tutorial:
 
 ```bash
 pdm run build-ext
@@ -95,11 +106,11 @@ pdm run build-ext-test
 
 It should print `correct: True`.
 
-If you are not familiar with C++ or Metal programming, we also suggest doing some small exercises to get familiar with
-them. You can implement some element-wise operations like `exp`, `sin`, `cos` and replace the MLX ones in your model
+If you are new to C++ or Metal, try a few small exercises before continuing. For example, implement element-wise operations
+such as `exp`, `sin`, and `cos`, then use them in place of the corresponding MLX operations in your model
 implementation.
 
-That's all for week 1! We have implemented all the components to serve the Qwen3 model. Now we are ready to start week 2,
-where we will optimize the serving infrastructure and make it run blazing fast on your Apple Silicon device.
+That completes Week 1. We have implemented all the components required to serve Qwen3. In Week 2, we will optimize the
+serving infrastructure for Apple silicon.
 
 {{#include copyright.md}}
