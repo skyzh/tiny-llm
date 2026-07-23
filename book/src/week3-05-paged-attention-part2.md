@@ -1,6 +1,6 @@
 # 🚧 Week 3 Day 5: Paged Attention, Part 2
 
-> 🚧 This chapter was substantially revised and is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 In this chapter, we move from **paged KV storage** to the runtime metadata and execution path needed for **real paged attention**.
 
@@ -130,22 +130,23 @@ The runtime should be able to:
 
 This is the point where decode stops paying the repeated dense-repack cost from Day 1.
 
-## Why the First Paged Kernel Was Slow
+## Choose a Schedule for Each Query Shape
 
-The first correct implementation used one scalar FP32 prefill schedule for
-every query length. That combined three expensive choices during decode:
+Before implementing the GPU path, separate decode from prefill. A single tile
+shape cannot keep the GPU busy for both a one-token query and a long prompt.
+Use these design rules:
 
-1. It promoted complete BF16 Q/K/V tensors to FP32 and converted the result
-   back, doubling their storage traffic and adding conversion work.
-2. Its threadgroup reserved work for 32 query rows even when decode supplied
-   one row, so almost all of the query-row parallelism was idle.
-3. It walked K/V serially inside that under-filled tile instead of splitting a
-   long context across independent SIMD groups.
+1. Preserve BF16 Q/K/V and output storage. Accumulate dot products,
+   online-softmax statistics, and output fragments in FP32.
+2. For short queries, expose parallelism across the cached context. Do not
+   reserve most of a threadgroup for query rows that do not exist.
+3. For prefill, expose parallelism across query rows and use SIMD-matrix
+   fragments for the dense work inside each page tile.
+4. Keep scalar FP32 kernels as correctness oracles, not as the default GPU
+   schedule.
 
-Paged addressing was therefore not the main explanation for the end-to-end
-gap. The schedule was mismatched to the decode shape. The optimized design
-preserves BF16 storage, keeps only dot products and online-softmax state in
-FP32, and chooses a different kernel according to query shape.
+Start with this dispatch plan and treat its thresholds as values to verify on
+your hardware:
 
 | Shape | Course-owned dispatch | Work decomposition |
 |---|---|---|
@@ -154,9 +155,10 @@ FP32, and chooses a different kernel according to query shape.
 | `L > 8`, FP32 | Scalar paged prefill | A small correctness/reference path with 16 query rows and 32 K/V rows per tile. |
 | CPU FP32 | Scalar reference | A readable oracle used for correctness rather than the performance target. |
 
-The threshold is deliberately part of the extension dispatch rather than a
-Python conversion or dense fallback. Students can benchmark each shape while
-the model-facing `paged_attention` API remains unchanged.
+Put the shape decision at the extension boundary rather than converting inputs
+or falling back to dense attention in Python. Benchmark values immediately
+below and above each threshold while keeping the model-facing
+`paged_attention` API unchanged.
 
 ## How This Maps to `tiny-llm`
 
@@ -365,11 +367,22 @@ Update request admission, slot reuse, and request removal so that:
 
 After this chapter, the serving stack has the right structure for a real high-throughput runtime: paging is no longer just a storage trick, but part of the execution model itself.
 
-## Performance Reality on Apple Silicon
+## Performance Lab: Make Paging Earn Its Cost
 
-The optimized course kernel shows that page walking itself can be close to the
-dense decode path when both use the same BF16/vector decomposition. On an M4
-Pro operator benchmark, representative synchronized decode timings were:
+The goal of this lab is to decide when direct page traversal is useful. Paged
+attention is not automatically a faster attention operator: it trades regular,
+contiguous K/V access for flexible allocation and removes the dense repack that
+would otherwise happen before attention. Your measurements must include both
+sides of that trade.
+
+Start by recording three operator baselines on the same machine:
+
+1. the dense course attention path, including any required K/V gather,
+2. your direct paged-attention path,
+3. the MLX attention path as a production-library reference.
+
+These M4 Pro measurements are reference points, not target values to copy into
+your report:
 
 | Batch / context | Dense course attention | Course paged attention | MLX attention |
 |---|---:|---:|---:|
@@ -379,11 +392,53 @@ Pro operator benchmark, representative synchronized decode timings were:
 | 8 / 512 | 800 µs | 626 µs | 225 µs |
 | 8 / 2048 | 1,347 µs | 1,322 µs | 460 µs |
 
-The page-table loads and irregular access are still real costs. Paged attention
-earns its place by avoiding repeated dense repacks, admitting more concurrent
-requests, and reusing pages over many scheduling steps—not by making every
-isolated kernel faster than MLX. Measure aggregate request throughput and
-memory use as well as kernel latency.
+### Checkpoint 1: Establish a Correct Direct Path
+
+Implement the simplest page-walking kernel first. Verify that it:
+
+- reads K/V through `block_table` without constructing a dense K/V tensor,
+- ignores unused slots in the final page,
+- matches dense attention for several page boundaries and context lengths,
+- supports grouped-query attention when `H_q != H_kv`.
+
+A correct first version may be slower than dense attention. At this checkpoint,
+the useful result is a trustworthy baseline and a working runtime interface.
+
+### Checkpoint 2: Design the Decode Schedule
+
+Optimize for the one-token decode shape instead of treating page traversal as a
+serial loop. Work through these changes one at a time and benchmark after each
+one:
+
+1. assign the lanes of a SIMD group to adjacent elements of a head so K/V loads
+   can be coalesced,
+2. load a page-table entry once and reuse it for all positions in that page,
+3. keep the query and online-softmax state in registers across page tiles,
+4. combine partial dot products with SIMD reductions instead of threadgroup
+   scratch memory and repeated barriers,
+5. specialize the `L = 1` decode case so it does not carry prefill control flow,
+6. prepare the batch's page metadata once per scheduler step rather than once
+   per layer or attention head.
+
+For each change, explain which cost it targets: memory traffic, synchronization,
+address calculation, or dispatch overhead. Keep a change only when the measured
+result supports the explanation.
+
+### Checkpoint 3: Evaluate the Serving System
+
+Operator latency alone does not capture the purpose of paging. Run an
+end-to-end workload with requests entering and leaving the batch, then report:
+
+- time per decode step and aggregate tokens per second,
+- peak KV-cache memory and the number of live requests admitted,
+- bytes or time spent gathering and repacking K/V,
+- paged-attention latency relative to the dense course path and MLX.
+
+On Apple Silicon, retain a dense path for workloads where contiguous attention
+is faster. Use paged attention when eliminating repacks, reusing pages across
+scheduler steps, or admitting more concurrent requests improves the system-level
+result. The lesson is to make dispatch a measured policy decision, not to assume
+that paging must win every operator benchmark.
 
 ```bash
 pdm run test --week 3 --day 5

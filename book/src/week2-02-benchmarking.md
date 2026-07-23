@@ -1,6 +1,6 @@
 # 🚧 Week 2 Day 2: Benchmark Decode
 
-> 🚧 This newly introduced chapter is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 Optimization starts with a trustworthy comparison. In this chapter, we measure
 prefill and decode separately, synchronize MLX's lazy execution inside every
@@ -109,12 +109,5 @@ Reaching 70% is the acceptance threshold, not a promise that every educational
 kernel individually matches its MLX counterpart. MLX is the comparison
 baseline; the Week 2 solution must reach the target with course-owned operator
 implementations.
-
-## Expected Performance Contribution
-
-**Expected decode improvement: 0%.** Benchmarking does not make the model
-faster. It prevents us from claiming gains that came from unsynchronized work,
-different inputs, or machine noise, and gives every later percentage a common
-denominator.
 
 {{#include copyright.md}}

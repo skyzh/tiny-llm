@@ -1,11 +1,7 @@
 # 🚧 Week 3: Build a Mini vLLM
 
-> 🚧 This overview was substantially revised and is a work in progress.
-
-> **Course status:** The overview and Days 1–5 are under review after this
-> restructure. Their topics come from the original course; the performance lab
-> and speculative-decoding chapter are new works in progress. The lightly
-> adapted MoE chapter retains its completed status.
+> 🚧 This overview and chapters carrying the same marker are under review and
+> may change. The optional MoE chapter is reviewed course material.
 
 Week 3 takes the optimized single-request model from Week 2 and builds a serving
 engine around it. The Week 2 operator interfaces remain intact; this week adds

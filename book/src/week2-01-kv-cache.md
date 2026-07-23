@@ -1,6 +1,6 @@
 # 🚧 Week 2 Day 1: KV Cache
 
-> 🚧 This chapter was substantially revised and is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
@@ -252,15 +252,5 @@ pdm run bench --solution tiny_llm --loader week2 \
 Record this number in your optimization ledger. The next chapter teaches how
 to compare it fairly with Week 1 and MLX; every later command changes exactly
 one cumulative checkpoint.
-
-## Expected Performance Contribution
-
-**Measured cumulative improvement: 19.51 to 101.80 tok/s, or 5.22x over Week 1,
-after a 128-token prompt on Qwen3-0.6B on an M4 Pro.** This three-process median
-compares the readable full-prefix Week 1 model with the dense cached checkpoint;
-no operator kernel has changed yet. The exact ratio depends strongly on context
-and output length. Unlike a constant-factor kernel optimization, KV caching
-changes each decode step from recomputing the full prefix to processing one new
-query token, so the advantage grows throughout a generation.
 
 {{#include copyright.md}}

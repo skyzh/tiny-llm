@@ -1,6 +1,6 @@
 # 🚧 Week 2 Day 4: Decode Attention
 
-> 🚧 This newly introduced chapter is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 This chapter starts from the quantized-matvec checkpoint. During
 single-request decode, query length is normally one while the cached
@@ -44,7 +44,7 @@ softmax, and the weighted-value product explicitly. Use this form as a
 correctness oracle and ablation, not as the completed optimized path: its
 matmuls are MLX-provided operator implementations.
 
-## Task 2: Try Online Softmax in Metal
+## Task 2: Implement Online Softmax in Metal
 
 Expose `decode_attention_custom` for the Metal implementation. Cache the
 scaled query fragment in registers before walking the cache; loading it again
@@ -86,22 +86,20 @@ softmax state, and weighted values in float32. Casting whole Q, K, and V tensors
 outside the kernel creates extra dispatches and memory traffic; doing the
 conversion in registers avoids that cost.
 
-The implementation uses `fast::exp` for the rescale factors and computes each
+Use `fast::exp` for the rescale factors and compute each
 factor once before applying it to the denominator and all value dimensions.
 These ideas also appear in production vector-attention kernels, including MLX's
 SDPA sources. The course kernel reimplements the algorithm and scheduling in
 its own Metal code; it does not include or instantiate the MLX kernel.
 
-### Scheduling Ablation
+### Scheduling Experiment
 
-The number of SIMD groups is a workload parameter, not a universal constant.
-On the M1 Pro benchmark, eight groups reduced scratch memory but serialized too
-many cache positions and achieved only about 215 decode tok/s. Sixteen groups
-reached roughly 232 tok/s. Thirty-two groups plus the parallel final reduction
-reached roughly 238-239 tok/s in the historical completed-model ablation. More
-groups increase parallel score work but also consume more threads and
-threadgroup memory; measure again when context length or head dimension
-changes.
+Compare eight, sixteen, and thirty-two SIMD groups while holding the model and
+context fixed. The number of groups is a workload parameter, not a universal
+constant: more groups expose parallel score work but consume more threads and
+threadgroup memory. On the reference M1 Pro run, the three schedules reached
+about 215, 232, and 238-239 decode tok/s respectively. Record your own result
+and repeat the experiment when context length or head dimension changes.
 
 ## Task 3: Integrate and Measure
 
@@ -112,11 +110,11 @@ should not be forced onto 2,048 tokens. Retain the readable composition for
 tests and ablations, and retain tiled prefill FlashAttention in Week 3; prefill
 is a different workload where both query and context lengths are large.
 
-The retained reference guard is deliberately concrete: use the course kernel
-only when query length is at most eight and cached context length is at most
-256. Otherwise use the readable grouped-attention path. Keeping this condition
-at the model call site makes the benchmarked operating range reviewable instead
-of burying a performance policy inside the Metal kernel.
+Set a concrete dispatch guard: use the course kernel only when query length is
+at most eight and cached context length is at most 256. Otherwise use the
+readable grouped-attention path. Keep this condition at the model call site so
+the benchmarked operating range remains reviewable instead of becoming a
+hidden performance policy inside the Metal kernel.
 
 Keep arbitrary dense, per-request masks on the readable compatibility path.
 They appear in the first continuous-batching exercise, while the normal Week 2
@@ -151,17 +149,5 @@ The model dispatches short-query contexts through the course kernel and falls
 back to the exact readable Week 1 composition outside the measured range. This
 is the same evidence-driven decision used for tile sizes, barriers, and
 threadgroup layouts elsewhere in the course.
-
-## Expected Performance Contribution
-
-**Measured cumulative improvement: 134.24 to 143.42 tok/s (+6.8%) on an M4
-Pro at context 128.** The resulting checkpoint is 7.35x Week 1 and 56.3% below
-matched MLX. Against an alternative readable bfloat16 composition, the same
-operator was about 7% faster at context 128 but slower at longer contexts;
-that comparison is not the course ladder because the preceding checkpoint
-deliberately preserves Week 1's float32 equation. Quantized weight reads still
-dominate short-context decode, and the fixed 32-group schedule does not scale
-monotonically. Do not claim the theoretical memory saving as a speedup: report
-dtype, context length, schedule, and measured end-to-end throughput.
 
 {{#include copyright.md}}

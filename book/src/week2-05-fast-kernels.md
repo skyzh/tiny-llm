@@ -1,6 +1,6 @@
 # 🚧 Week 2 Day 5: Fast Kernels
 
-> 🚧 This newly introduced chapter is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 Week 1 expresses RMSNorm, RoPE, and SiLU as readable `mlx.core` equations.
 Week 2 keeps those implementations intact and writes three course-owned Metal
@@ -161,15 +161,5 @@ expects `B, H, L, D`, so transpose into that layout before the MLX call and
 transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
 timing no longer measures an equivalent operation.
-
-## Expected Performance Contribution
-
-**Measured operator improvement: about 34-39% over the readable Week 1
-equations at decode shapes.** In repeated Qwen3-0.6B M4 Pro runs, RMSNorm was
-about 1.36x faster, RoPE about 1.34x, and SwiGLU about 1.39x. The cumulative
-course ladder integrates them after decode attention: RMSNorm increased 143.42
-to 193.18 tok/s (+34.7%), RoPE increased 193.18 to 222.51 (+15.2%), and SwiGLU
-increased 222.51 to 242.67 (+9.1%). These sequential deltas already include all
-earlier changes; do not add them to isolated or reverse-ablation percentages.
 
 {{#include copyright.md}}

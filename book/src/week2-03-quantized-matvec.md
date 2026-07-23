@@ -1,6 +1,6 @@
 # 🚧 Week 2 Day 3: Quantized Matvec
 
-> 🚧 This chapter was substantially revised and is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and
@@ -371,24 +371,35 @@ $$
 \sum_j a_j(sq_j+b) = s\sum_j a_jq_j + b\sum_j a_j
 $$
 
-to avoid applying the bias separately to every unpacked value. Do not apply a
-micro-optimization blindly to every shape: applying this rearrangement to the
-two-output projection kernel reduced the measured full-model result from about
-249 to 244.5 tok/s, while the extra live accumulators that help the vocabulary
-projection also make smaller projections more difficult to schedule.
+to avoid applying the bias separately to every unpacked value. This adds an
+activation-sum accumulator, so test it separately for ordinary and wide output
+tiles in the scheduling experiment below.
 
-The scheduling numbers in this section are historical one-factor ablations run
-against a completed model while developing the kernel. They explain why the
-retained schedule looks this way; they are not Day 3's cumulative course
-result. The end of this chapter reports the matched Day 2 to Day 3 checkpoint
-change.
+### Tune the SIMD Schedule
 
-The final host dispatcher makes that schedule explicit. Flatten all leading
-activation dimensions into `M`, then use the custom matvec when `M <= 8`.
-Within that path, use two output columns per SIMD group for ordinary
-projections and switch to eight when `K >= 8192`, which selects the wide
-vocabulary head. These are measured dispatch thresholds, not mathematical
-requirements; keep them visible so a later profile can replace them.
+Treat output width, threadgroup size, and shared-memory reuse as benchmark
+variables. Start with this host dispatch plan:
+
+- flatten all leading activation dimensions into `M`,
+- use the custom matvec when `M <= 8`,
+- compute two output columns per SIMD group for ordinary projections,
+- switch to eight output columns when `K >= 8192` for the wide vocabulary head,
+- launch eight SIMD groups per threadgroup.
+
+These thresholds are measured starting points, not mathematical requirements.
+Keep them visible in the dispatcher, then vary one choice at a time. The
+reference measurements below are one-factor scheduling checks from an M1 Pro;
+use them to form hypotheses, but report the results from your own hardware.
+
+For output tiling, four columns in an ordinary projection reduced full-model
+decode from about 249 to 232 tok/s because the extra accumulators increased
+register pressure. Eight columns helped the unusually wide vocabulary
+projection because each activation load was reused across more weights.
+
+Apply the affine rearrangement selectively as well. It helps the wide path,
+but applying it to the two-output projection reduced the measured full-model
+result from about 249 to 244.5 tok/s. Fewer arithmetic operations do not imply
+a faster kernel when they extend register lifetimes or complicate scheduling.
 
 At the Python-to-extension boundary, make scales, biases, activations, and
 packed weights row-contiguous once with `mx.contiguous`. The C++ primitive
@@ -397,28 +408,17 @@ raw buffers and strides are not implicit, so silently accepting a noncontiguous
 view would produce either wrong addressing or a slower hidden copy in a less
 explicit layer.
 
-Likewise, raising the ordinary projection tile from two to four output columns
-increased register pressure enough to reduce decode to about 232 tok/s. The
-best measured split is two columns for normal projections and eight only for
-the unusually wide vocabulary projection.
+Do not copy the 2 KB activation vector into threadgroup memory by default. On
+the reference machine, rereading this cache-hot vector avoided a barrier and
+raised decode from roughly 238.6 to 246-249 tok/s. Verify this result by adding
+the shared-memory variant as an ablation; it is a useful demonstration that
+reuse helps only when it costs less than synchronization.
 
-The first matvec copied the 2 KB activation vector into threadgroup memory and
-waited at a barrier. Removing that copy was faster: the vector is cache-hot,
-while every projection paid the synchronization cost. The measured decode
-rate rose from roughly 238.6 to 246-249 tok/s. This is GPU scheduling in
-practice: dispatch shape, occupancy, cache behavior, and barriers are part of
-the algorithm.
-
-After removing the barrier, grouping four SIMD groups per threadgroup instead
-of eight was effectively neutral to slightly slower (about 248.5 tok/s in two
-runs). Independent work does not guarantee a win from smaller threadgroups;
-the extra threadgroups also add scheduling overhead. Keep eight for this M1
-Pro workload and remeasure on different hardware.
-
-Doubling only the wide vocabulary kernel to sixteen SIMD groups also regressed
-the final run from 250.6 to 247.2 tok/s. Fewer threadgroups did not compensate
-for the larger 512-thread scheduling unit, so the retained kernel uses eight
-groups for both projection shapes.
+Finally, compare four, eight, and sixteen SIMD groups per threadgroup. Four
+groups measured about 248.5 tok/s and did not improve on eight. Using sixteen
+groups only for the vocabulary path reduced 250.6 to 247.2 tok/s. Start with
+eight groups for both shapes, then retune on a different GPU rather than
+assuming that either smaller scheduling units or fewer threadgroups must win.
 
 ### Direct Quantized Embedding Moves to Week 3
 
@@ -525,22 +525,5 @@ attention chapter until the complete model uses packed weights and the
 end-to-end number has been recorded. The vanilla matrix product remains
 callable as a correctness oracle, but only the SIMD matvec is integrated into
 decode.
-
-## Expected Performance Contribution
-
-**Measured decode-kernel improvement: about 1.4-1.9x for ordinary projections
-and about 10.5x for the vocabulary head over the scalar quantized kernel.** In
-a Qwen3-0.6B M4 Pro run, the Q/K/V/O projection speedups ranged from 1.39-1.65x,
-the gate/up/down projections from 1.86-1.89x, and the 151,936-row tied output
-head reached about 10.5x. In the cumulative M4 Pro course ladder, integrating
-packed weights and the retained SIMD matvec increased decode from 101.80 to
-134.24 tok/s (+31.9%): 6.88x Week 1 and 59.1% below MLX. On the earlier M1 Pro
-reference, the first two-column SIMD matvec improved the then-current path by
-about 5.7%; removing its activation barrier later added roughly another 3-4%.
-
-Prefill tiling and direct quantized embedding are measured in the optional
-Week 3 performance lab. They are intentionally excluded from the minimal Week
-2 acceptance path. Percentages from later chapters overlap with this one and
-must not be added together.
 
 {{#include copyright.md}}
