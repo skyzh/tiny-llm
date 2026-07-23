@@ -38,7 +38,10 @@ assuming an algorithm with a production name is already production-fast. The
 [performance appendix](./appendix-performance.md) keeps kernel throughput and
 serving usability as separate measurements.
 
-Week 4 owns application concerns such as RAG and tool calling. This separation
-keeps Week 3 focused on the reusable serving substrate.
+Week 4 uses a tool-calling coding agent as a demanding multi-turn workload for
+this serving substrate. The agent repeatedly changes a long prompt by a small
+suffix, pauses while a tool runs, branches after checkpoints, and resumes after
+process exit. Supporting that workload will require new session and cache
+contracts without changing the attention math built this week.
 
 {{#include copyright.md}}

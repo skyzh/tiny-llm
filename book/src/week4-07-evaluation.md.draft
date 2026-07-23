@@ -1,125 +1,103 @@
-# Day 7: Evaluation and Capstone
+# Day 7: Agent-Serving Capstone
 
-Anecdotes are useful while building an agent, but they cannot tell whether a
-prompt, tool schema, or compaction policy actually improved it. Today you will
-turn small repository tasks into a repeatable evaluation suite and run the final
-capstone.
+The final system should improve a real multi-turn workload without changing its
+answers. Today you will evaluate the coding agent and the stateful serving engine
+together, then explain when each cache policy is worth its complexity.
 
-## What Makes a Good Task
+## Two Layers of Correctness
 
-Use recent, human-written changes as inspiration, but keep each course task:
+The engine suite verifies:
 
-- self-contained in a few files;
-- specified by its desired behavior and constraints, not its solution;
-- validated by focused tests;
-- small enough to run repeatedly on a laptop; and
-- protected from solution leakage.
+- warm and cold logits match at every reconciliation boundary;
+- dense and paged caches agree after truncate, fork, save, and restore;
+- branches cannot mutate one another;
+- invalid snapshots always fall back to correct replay;
+- page references reach zero exactly once; and
+- scheduling changes timing, not per-session greedy output.
 
-A task package contains:
+The agent suite verifies:
 
-```text
-task.json          prompt, budgets, allowed validation commands
-workspace/         repository snapshot before the change
-held_out_tests/    tests installed only after the agent finishes
-grade.py           deterministic grader
-```
+- the task passes held-out behavioral tests;
+- no forbidden file is modified;
+- the trace contains inspection before mutation and validation after it;
+- steering affects the next safe turn;
+- workspace undo detects external conflicts; and
+- termination reasons and budgets are honest.
 
-Do not expose a later Git commit containing the solution. A shell-capable agent
-can inspect Git history just like a human can. Use a sealed snapshot with no
-reachable solution history.
+Passing agent tests does not prove cache correctness, and matching logits does
+not prove the agent changed the right file. Report both layers.
 
-## Grade Behavior, Not Style
+## A Fixed Multi-Turn Workload
 
-When the agent declares completion or reaches its budget:
+Use a sealed fixture repository and a scripted or greedy trajectory that:
 
-1. freeze or checkpoint the workspace;
-2. install the held-out tests;
-3. run the deterministic grader;
-4. inspect forbidden side effects; and
-5. retain the session trace and metrics.
+1. reads project instructions;
+2. inspects a failing test and implementation;
+3. receives one steering message;
+4. checkpoints before an edit;
+5. explores and abandons one branch;
+6. applies the correct edit and runs focused validation;
+7. pauses and resumes after a simulated process restart; and
+8. returns a final summary.
 
-Prefer executable tests over an LLM judge. Tests can accept multiple correct
-implementations and reject fluent explanations paired with broken code. Rewrite
-overly specific tests that compare incidental formatting or exact strings when
-the requirement is behavioral.
+The held-out grader decides task success. Keep the event sequence and desired
+prompt tokens so every inference policy receives the same workload.
+
+## Compare Policies
+
+Run at least:
+
+1. fresh cache for every model turn;
+2. resident linear prefix reuse;
+3. resident copy-on-write checkpoints;
+4. evict and cold replay;
+5. evict and restore from disk; and
+6. multiple sessions under a fixed page budget.
+
+Change one policy at a time. Use the same model, tokenizer, prompt template,
+sampling settings, workspace snapshot, and device conditions.
 
 ## Metrics
 
-Report at least:
+Report:
 
-- task pass rate;
-- held-out test results;
-- forbidden file modifications;
-- malformed-action and tool-error rates;
-- model turns and tool calls;
-- total input and output tokens;
-- compaction count;
-- wall-clock time; and
-- terminal reason such as completed, budget exhausted, interrupted, or loop
-  detected.
+- agent task pass rate and terminal reason;
+- prompt tokens, reused tokens, rewound tokens, and prefill tokens;
+- time to first token per turn and total wall time;
+- decode throughput while other sessions resume;
+- physical, logical, shared, and peak resident pages;
+- snapshot bytes, save time, restore time, and validation failures;
+- cache hit, eviction, warm-resume, and cold-replay counts; and
+- tool time separately from inference time.
 
-Compare trajectories as well as final scores. A tool change may preserve pass
-rate while sharply reducing repeated reads or context tokens.
+Use medians over repeated runs and include the cold baseline from Day 1. MLX is
+lazy, laptop thermals vary, and filesystem cache state can distort a single
+measurement.
 
-## A Small Course Suite
+## Capstone Questions
 
-Begin with three difficulty levels:
+Your report should answer:
 
-1. **Localized fix:** correct an off-by-one error in one implementation file.
-2. **Repository convention:** add a configuration option while following
-   instructions from `AGENTS.md` and changing two files.
-3. **Failure recovery:** diagnose a failing test whose first apparent fix breaks
-   a second held-out case.
+1. At what conversation length does disk restore beat cold replay?
+2. How much prefill work does a typical tool turn avoid?
+3. How many pages does copy-on-write save for two realistic branches?
+4. How does the resident-page budget affect active decode throughput and warm
+   turn latency?
+5. Which failure causes a snapshot to be rejected, and how is correctness
+   preserved?
+6. Which added mechanism would you keep in a small production service?
 
-Run each task more than once if generation is sampled. For greedy decoding, one
-run is reproducible only when the surrounding kernels and tool environment are
-also deterministic.
+## Optional Extensions
 
-## Capstone
+- cache-aware routing across several model workers;
+- prefix lookup shared by unrelated sessions;
+- asynchronous snapshot I/O;
+- compressed or lower-precision cache persistence;
+- snapshot encryption and retention controls; or
+- a terminal view of branch, page, and eviction state.
 
-Give the agent a fresh fixture repository and the following kind of task:
-
-> Empty configuration values are incorrectly treated as missing values. Fix the
-> parser without changing the public schema, and run the relevant tests.
-
-The agent must:
-
-1. discover and read the relevant implementation and tests;
-2. make a precise edit rather than rewriting unrelated code;
-3. run focused validation and react to failures;
-4. remain inside the workspace and budgets;
-5. survive one process restart or context compaction; and
-6. produce a concise final summary naming changed files and validation.
-
-Only the held-out grader decides whether the task passes.
-
-## Experiments
-
-Once the suite runs end to end, change one variable at a time:
-
-- three file tools versus the four-tool interface;
-- whole-file writes versus exact edits;
-- full session replay versus compaction;
-- Qwen3 0.6B versus Qwen3 4B;
-- the Week 2 implementation versus MLX-LM; or
-- direct action versus an explicit plan in the working summary.
-
-Report both task success and resource use. This makes Week 4 a continuation of
-the measurement discipline from the inference and serving weeks: the agent
-harness is another system whose behavior can be tested and optimized.
-
-## Where to Go Next
-
-After the capstone, good optional projects include:
-
-- a lexical repository map or vector retrieval for large documentation sets;
-- multiple concurrent agent sessions on the Week 3 scheduler;
-- stronger container or virtual-machine isolation;
-- native model tool-call templates and constrained decoding;
-- extension-defined tools and project skills; and
-- a terminal UI for browsing session branches and tool diffs.
-
-The core lesson remains small: a coding agent is a model inside a measured,
-persistent, and carefully controlled feedback loop.
+The core lesson is broader than agents: an interactive workload turns KV cache
+from a tensor optimization into a lifecycle spanning APIs, allocators, storage,
+and scheduling.
 
 {{#include copyright.md}}

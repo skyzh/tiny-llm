@@ -1,0 +1,86 @@
+# Day 5: Durable KV Snapshots
+
+An in-memory checkpoint disappears with the process. The durable conversation
+can always rebuild it, but replaying a long agent history delays the first token
+after resume. Today you will persist K/V as a validated acceleration artifact.
+
+## The Event Log Remains Canonical
+
+A session directory contains two different products:
+
+```text
+session.jsonl              semantic user, assistant, and tool events
+cache/metadata.json        snapshot identity and logical layout
+cache/tensors.npz          compact live K/V pages
+```
+
+The event log is portable and authoritative. The cache snapshot is optional,
+large, and coupled to implementation details. Deleting or rejecting it must
+only turn a warm resume into a cold replay.
+
+## Versioned Snapshot Metadata
+
+Validate at least:
+
+- snapshot format version;
+- model identifier and configuration hash;
+- weight or revision fingerprint when available;
+- tokenizer and chat-template hash;
+- layer count, KV head count, head dimension, dtype, and page size;
+- token IDs represented by the cache;
+- per-layer logical length and block table; and
+- a checksum for metadata and tensor data.
+
+Reject unknown versions and mismatches with a useful cache-miss reason. Never
+reshape incompatible tensors merely because their element count happens to fit.
+
+## Compact Live Pages
+
+The model-level pool may contain holes and pages owned by other sessions. A
+snapshot must include only pages reachable from the saved session or checkpoint:
+
+1. collect reachable page IDs per layer;
+2. assign dense snapshot-local IDs;
+3. gather each live key and value page once;
+4. rewrite the saved block table to local IDs; and
+5. retain logical tail lengths separately from physical page capacity.
+
+On restore, allocate fresh pages from the current pool, copy tensor data, and
+remap local IDs to the new physical IDs. On any failure, release all pages
+allocated by the partial restore before falling back to replay.
+
+## Crash Safety and Trust
+
+Write into a temporary sibling directory, flush complete metadata and tensors,
+and atomically replace the previous snapshot only after validation. An
+interrupted save must leave either the old complete snapshot or no snapshot.
+
+Treat snapshots as untrusted local input. Bound dimensions and file sizes before
+allocation, reject path traversal, and use data-only formats rather than Python
+object deserialization. K/V may also encode sensitive prompt content, so use the
+same permissions and retention policy as the conversation log.
+
+## Restore Policy
+
+Disk restore is not always faster. A short transcript may prefill faster than it
+can read a large K/V file. Implement a policy that can choose:
+
+```text
+cold replay | restore snapshot | keep resident
+```
+
+Start with an explicit CLI choice. Later, use measured snapshot bytes, prompt
+tokens, storage throughput, and recent restore timing to make the decision.
+
+## Exercise
+
+1. Save and load a versioned snapshot for dense and paged caches.
+2. Compact sparse physical page IDs and remap them on restore.
+3. Reject a changed model, tokenizer, template, dtype, shape, or checksum.
+4. Simulate interruption during save and partial failure during restore.
+5. Prove that rejected snapshots fall back to transcript replay with identical
+   greedy output.
+6. Benchmark snapshot bytes, save time, restore time, and cold replay time over
+   several context lengths.
+
+{{#include copyright.md}}

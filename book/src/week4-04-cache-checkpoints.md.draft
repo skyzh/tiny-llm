@@ -1,0 +1,91 @@
+# Day 4: Cache Checkpoints and Copy-on-Write Branches
+
+Linear rewind is enough to retry the newest turn, but an interactive agent may
+checkpoint before an experiment and later explore two alternatives. Copying all
+K/V at every checkpoint wastes both time and memory. Today you will extend the
+paged allocator so branches share an immutable prefix.
+
+## Checkpoints Are Not Workspace Undo
+
+Keep these operations distinct:
+
+- an **inference checkpoint** identifies token and K/V state;
+- a **conversation branch** selects an earlier event prefix; and
+- a **workspace checkpoint** records file before-images.
+
+Restoring inference state does not change files. Restoring files does not erase
+events or K/V. The CLI may offer one command that coordinates them, but the
+underlying transactions and conflict policies remain separate.
+
+## From Page Ownership to References
+
+The Week 3 pool considers each allocated page owned by one live cache handle.
+Branching requires explicit shared ownership:
+
+```python
+class TinyKvPagedPool:
+    def retain_page(self, page_id: int) -> None: ...
+    def release_page(self, page_id: int) -> None: ...
+    def refcount(self, page_id: int) -> int: ...
+```
+
+A page returns to the free list only when its reference count reaches zero.
+Reject underflow, double release, and access to a free page. Page IDs remain
+layer-local, so each transformer layer checkpoints its own block table.
+
+## Fork a Cache Handle
+
+`TinyKvPagedCache.fork()` creates a new logical handle with the same page IDs,
+page lengths, and offset, retaining each referenced page. The operation copies
+small host metadata but not K/V tensors.
+
+Full pages are immutable after they leave the tail. A partially filled tail page
+may receive more tokens, so it needs copy-on-write:
+
+1. before writing the tail, inspect its reference count;
+2. if the page is shared, allocate a private page;
+3. copy only the valid prefix into the new page;
+4. replace the writer's tail page ID; and
+5. release the writer's reference to the old page.
+
+The other branch must observe unchanged K/V. A branch that never writes keeps
+sharing every page.
+
+## Session Checkpoints
+
+```python
+@dataclass
+class CacheCheckpoint:
+    token_ids: tuple[int, ...]
+    layer_caches: tuple[TinyKvPagedCache, ...]
+
+class InferenceSession:
+    def checkpoint(self) -> CacheCheckpoint: ...
+    def restore(self, checkpoint: CacheCheckpoint) -> None: ...
+    def fork(self, checkpoint: CacheCheckpoint) -> InferenceSession: ...
+```
+
+A checkpoint owns references and must be explicitly closed or consumed. A
+session restore first retains the checkpoint state, then releases the current
+state. This ordering makes restoring the session's own ancestor safe.
+
+Do not expose raw mutable page lists from the public checkpoint. Host metadata
+should be immutable after construction.
+
+## Exercise
+
+1. Replace single-owner page bookkeeping with checked reference counts.
+2. Fork a cache without copying full K/V pages.
+3. Copy a shared partial tail on its first write.
+4. Restore an ancestor checkpoint after extending the active branch.
+5. Close branches and checkpoints in every order without leaks or double frees.
+6. Verify that dense gathers and model logits from one branch cannot be changed
+   by writes to another.
+7. Report physical pages, logical pages, shared pages, and bytes avoided.
+
+## Checkpoint
+
+Two agent branches can now share a long prompt prefix while evolving
+independently. The mechanism lives in the serving cache, not in agent code.
+
+{{#include copyright.md}}

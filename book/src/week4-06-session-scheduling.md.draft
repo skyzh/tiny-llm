@@ -1,0 +1,84 @@
+# Day 6: Scheduling Interactive Sessions
+
+The Week 3 scheduler moves requests from prefill to decode and releases them at
+completion. An agent request instead pauses while a tool runs and is likely to
+return with the same prefix. Today you will make paused sessions a first-class
+serving state and manage them under a fixed page budget.
+
+## Extend the Request Lifecycle
+
+Use explicit states:
+
+```text
+QUEUED -> PREFILLING -> DECODING -> WAITING_FOR_TOOL
+   ^                                  |       |
+   +----------- next turn ------------+       |
+   +----------- EVICTED <--- memory pressure -+
+
+Any state -> DONE
+```
+
+`WAITING_FOR_TOOL` retains semantic session ownership but may or may not retain
+physical K/V pages. `EVICTED` has a durable transcript and perhaps a disk
+snapshot, but no resident device cache.
+
+The scheduler does not execute tools or write event logs. The agent runtime
+notifies it when a session has a new prompt, pauses for a tool, is cancelled, or
+closes.
+
+## Admission Under a Page Budget
+
+Week 3 bounds active decode slots; Week 4 also bounds resident pages. Before
+admitting a prefill or restoring a snapshot, estimate its additional page need.
+If the pool lacks capacity, choose among:
+
+- reject or queue the new turn;
+- evict a paused session and replay it later;
+- snapshot then evict a paused session; or
+- evict an unshared branch while retaining popular shared-prefix pages.
+
+Begin with least-recently-used eviction among paused sessions. Never evict a
+cache while a model call is writing it. Refcounts prevent shared pages from
+returning to the free list until every resident branch releases them.
+
+## Rejoin Continuous Batching
+
+A warm next turn still needs to reconcile and prefill a suffix before decode.
+Feed that suffix through the existing chunked-prefill scheduler so one long tool
+result cannot starve active decode requests. Once ready, attach the session's
+request caches to a batch slot exactly as Week 3 attaches a new request.
+
+This is the cross-component integration point:
+
+```text
+agent events -> render/tokenize -> reconcile/fault in -> chunked prefill
+     -> continuous decode batch -> action -> paused resident session
+```
+
+## Cancellation and Steering
+
+Use one cancellation signal across queued work, prefill chunks, decode tokens,
+snapshot I/O, and tool execution. Cancellation releases scheduler ownership but
+does not delete the durable transcript.
+
+A steering message creates a new desired token sequence. The session reconciler,
+not the scheduler, decides the common prefix and required rewind. The scheduler
+only accounts for the resulting work and pages.
+
+## Exercise
+
+1. Add waiting and evicted states to the Week 3 request lifecycle.
+2. Pause after an action without automatically releasing the session cache.
+3. Resume through reconciliation and chunked suffix prefill.
+4. Enforce a resident-page budget with deterministic LRU eviction.
+5. Fault in a valid disk snapshot and cold-replay an invalid one.
+6. Schedule several agent sessions alongside a long ordinary generation.
+7. Verify fairness, no leaked pages, and identical per-session greedy output.
+
+## Measurements
+
+Report time to first token after tool completion, active decode tokens per
+second, page-budget utilization, eviction count, snapshot hit rate, cold replay
+count, and time spent waiting in each state.
+
+{{#include copyright.md}}

@@ -1,128 +1,127 @@
-# 🚧 Week 4: Build a Coding Agent
+# 🚧 Week 4: Stateful Inference for an Interactive Agent
 
-> 🚧 **Course status:** The daily chapters are drafts and are not included in
-> the rendered book yet.
+> 🚧 **Course status:** The daily chapters are design drafts and are not
+> included in the rendered book yet.
 
-Weeks 1 through 3 turned tokens into text, made decoding efficient, and
-introduced serving techniques. Week 4 adds the next layer: an agent loop that
-lets the model observe a workspace, choose a tool, see the result, and continue
-until a coding task is complete.
+Weeks 1 through 3 built a model, optimized its operators, and put requests into
+a paged continuous-batching engine. Week 4 asks what happens after a request
+finishes. An interactive application sends another turn whose prompt is mostly
+the conversation the engine just computed. Throwing that KV state away is
+correct, but unnecessarily expensive.
 
-The goal is not to reproduce a production coding agent. It is to understand the
-small mechanism underneath one and identify where reliability, efficiency, and
-safety come from. By the end of the week, you will have a local CLI agent powered
-by the inference stack you already built.
+A small coding agent supplies the workload. It alternates between model turns
+and slow tools, accepts steering, creates checkpoints, and resumes after process
+exit. Those behaviors force coordinated changes across prompt rendering,
+generation, cache ownership, the page allocator, persistence, and scheduling.
+The agent is not a separate application week; it is the integration test for the
+inference framework built so far.
 
-## What You Will Build
+## The Baseline and the New Boundary
 
-The finished agent can:
+The starting API intentionally hides inference state:
 
-- inspect a repository without loading every file into the prompt;
-- read files in bounded chunks and make exact, reviewable edits;
-- run a narrowly scoped test command and use its output as feedback;
-- save and resume a session;
-- compact an overlong context while retaining task state;
-- checkpoint and undo its own file mutations;
-- accept steering messages and interrupt long-running work; and
-- solve a small repository task graded by held-out tests.
+```python
+Generate = Callable[[list[Message]], str]
 
-This is a deliberately small target. Features such as multi-agent delegation,
-remote execution, MCP integrations, and long-term user memory remain extensions
-rather than prerequisites.
-
-## The Core Loop
-
-Every chapter builds on the same loop:
-
-1. Render the task, project instructions, recent events, and tool descriptions.
-2. Decode one structured action using the model and KV cache.
-3. Parse and validate the action before it reaches the operating system.
-4. Run one workspace tool and append its observation to the session.
-5. Repeat until the model returns a final answer or reaches a budget.
-
-The model does not edit files directly. It proposes an action; ordinary code
-decides whether that action is valid and performs it. This boundary makes agent
-behavior easy to inspect and test.
-
-```text
-task + session events
-        |
-        v
-  context builder ---> model ---> action validator
-        ^                            |
-        |                            v
-   tool result <--- tool runner <--- validated action
-                         |
-                         v
-                      workspace
+def run_agent(task: str, generate: Generate, workspace: Workspace) -> AgentRun:
+    ...
 ```
 
-## A Small Tool Surface
+`generate_response()` renders all messages, allocates one fresh cache per model
+layer, prefills the complete prompt, decodes one action, and releases every
+cache. The agent owns conversation events while the model adapter owns a single
+stateless call. There is no token history, checkpoint, or resume contract.
 
-The target agent uses four tools inspired by small coding-agent harnesses:
+During Week 4, replace that callback with an explicit session:
 
-```text
-read(path, offset?, limit?)
-edit(path, old_text, new_text)
-write(path, content)
-bash(command, timeout?)
+```python
+class InferenceSession:
+    def generate(self, messages: list[Message], max_tokens: int) -> Generation: ...
+    def checkpoint(self) -> CacheCheckpoint: ...
+    def restore(self, checkpoint: CacheCheckpoint) -> None: ...
+    def save(self, path: Path) -> None: ...
+    def close(self) -> None: ...
 ```
 
-`read` and `edit` are preferable to shell equivalents because they can enforce
-consistent bounds and return structured errors. `bash` supplies repository
-search, file discovery, and test execution without requiring a separate tool for
-every command-line program.
+The agent still passes semantic messages rather than K/V tensors. The session
+renders and tokenizes them, reconciles the new token sequence with its cached
+sequence, and exposes lifecycle operations. Cache implementations remain below
+that boundary.
 
-A shell working directory is not a security sandbox. During this course, run the
-agent only in a disposable exercise workspace. A production agent would need a
-container, virtual machine, or similarly strong isolation boundary.
+## Three Kinds of State
 
-The week then extends that loop with retrieval-augmented generation and a
-serving-oriented tool API. The WIP milestone is to move these application
-layers onto the Week 3 engine without changing the model kernels; the initial
-demo still calls the model directly.
+Keep three similar-looking operations separate:
+
+1. **Conversation state** is the durable event log and remains the source of
+   truth after a cache miss or incompatible snapshot.
+2. **Inference state** contains rendered token IDs and per-layer K/V. It is a
+   disposable acceleration artifact tied to one model and cache layout.
+3. **Workspace state** contains file mutations. Rewinding the conversation must
+   not silently overwrite files, and undoing a file must not erase the trace.
+
+A disk cache snapshot is therefore never the only copy of a session. Restore
+must validate a model/configuration fingerprint, tokenizer and chat-template
+fingerprint, dtype, page size, tensor shapes, logical lengths, and format
+version. On any mismatch, discard it and replay the durable conversation.
+
+## Cache Reconciliation
+
+The next rendered prompt is often close to, but not byte-for-byte appended to,
+the prior prompt. Adding an assistant message can replace a generation marker;
+steering and compaction can change an earlier suffix. The session compares token
+IDs, finds their longest common prefix, rewinds each layer to that boundary, and
+prefills only the new suffix:
+
+```text
+cached:  [system | task | action A | generation marker]
+next:    [system | task | action A | tool result | generation marker]
+                         ^ keep ^     ^ prefill this suffix
+```
+
+Correctness is tested against a cold full prefill. Prefix reuse is an
+optimization, so every warm path must produce the same logits and generated
+tokens as the stateless baseline.
 
 ## Seven-Day Plan
 
-| Day | Topic | Working milestone |
+| Day | Topic | Inference-framework milestone |
 | --- | --- | --- |
-| 1 | Agent loop | The model alternates between actions and observations. |
-| 2 | Tools | The agent can read, edit, write, and run a bounded command. |
-| 3 | Safety and validation | Mutations are confined, reviewable, and followed by validation. |
-| 4 | Sessions | Work survives process exit and can be resumed. |
-| 5 | Compaction | Long sessions retain a small, useful working context. |
-| 6 | Control and recovery | The user can steer, interrupt, checkpoint, and undo. |
-| 7 | Evaluation | The agent fixes a small bug and passes held-out tests. |
+| 1 | Interactive baseline | Trace prompt tokens, prefill work, latency, and page use across agent turns. |
+| 2 | Stateful generation | Reuse an exact prompt prefix through a session-owned cache. |
+| 3 | Reconciliation and rewind | Find token-level divergence and transactionally truncate dense and paged caches. |
+| 4 | Checkpoint, fork, and restore | Share full prefix pages and copy a partial tail page only when a branch writes. |
+| 5 | Durable warm state | Save a compact, versioned snapshot and safely fall back to transcript replay. |
+| 6 | Session scheduling | Pause, resume, batch, evict, and restore interactive sessions under a page budget. |
+| 7 | Agent-serving capstone | Preserve agent correctness while measuring warm-turn latency and cache efficiency. |
 
-## Run the Starting Demo
+The supplied agent harness retains a deliberately small bounded tool surface:
+list/read files, make exact edits, and run explicitly allowed commands. Its
+safety policy remains important, but the learner-owned work this week is the
+stateful inference path underneath it.
 
-The repository contains a minimal demonstration that uses the reference model
-implementation:
+## Performance Questions
+
+Every optimization has a regime where it loses. The capstone should answer:
+
+- How many prompt tokens does a warm turn avoid prefilling?
+- When is loading K/V from disk slower than replaying the transcript?
+- How much memory does copy-on-write save across two branches?
+- Does keeping paused sessions resident hurt active decode throughput?
+- Which eviction policy improves time to first token under a fixed page budget?
+- Do warm and cold execution remain token-for-token equivalent?
+
+This continues the measurement discipline from Weeks 2 and 3 while requiring
+students to optimize across components rather than inside one kernel.
+
+## Run the Starting Baseline
 
 ```bash
 pdm run agent "inspect this project and summarize its files"
 ```
 
-Pass `--solution tiny_llm` to use your implementation, or `--solution mlx` to
-use MLX-LM's optimized executor. The starting program is intentionally smaller
-than the final agent: each day replaces one shortcut with an explicit component
-that can be inspected and tested.
-
-The default Qwen3 4B model follows the structured action protocol more reliably.
-Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more
-time on malformed-action recovery.
-
-## Milestones
-
-- **Minimal:** the model can inspect a workspace and produce one valid action.
-- **Useful:** the agent can make a precise change and run its test.
-- **Recoverable:** the session can resume, compact, and undo its own changes.
-- **Controllable:** budgets bind and the user can steer or interrupt work.
-- **Measurable:** a repeatable task suite distinguishes progress from anecdotes.
-
-## Further Reading
-
-- [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-- [Benchmarking Coding Agents on Databricks' Multi-Million Line Codebase](https://www.databricks.com/blog/benchmarking-coding-agents-databricks-multi-million-line-codebase)
+The first run uses the current stateless adapter. Day 1 adds an interactive mode
+and metrics without changing its behavior. Later checkpoints select the
+stateful engine, cache policy, and persistence directory explicitly so cold and
+warm runs remain easy to compare.
 
 {{#include copyright.md}}
