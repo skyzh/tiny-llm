@@ -167,6 +167,22 @@ def test_task_1_paged_pool_grows_storage_geometrically():
     assert pool.value_pages.shape[0] == pool.num_pages
 
 
+def test_task_1_reuses_block_table_until_page_ids_change():
+    cache = TinyKvPagedCache(pool=TinyKvPagedPool(page_size=4))
+    cache.update_and_fetch_paged(*_random_chunk(3))
+
+    first = cache.block_table()
+    assert cache.block_table() is first
+
+    # Filling the same tail page changes only context_lens.
+    cache.update_and_fetch_paged(*_random_chunk(1))
+    assert cache.block_table() is first
+
+    # Allocating a new physical page changes the table and invalidates it.
+    cache.update_and_fetch_paged(*_random_chunk(1))
+    assert cache.block_table() is not first
+
+
 def test_task_1_materializes_page_storage_without_dense_gather(monkeypatch):
     pool = TinyKvPagedPool(page_size=4)
     cache = TinyKvPagedCache(pool=pool)

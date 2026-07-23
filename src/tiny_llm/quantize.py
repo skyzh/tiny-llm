@@ -24,6 +24,7 @@ class QuantizedWeights:
         weight: mx.array,
         use_simdgroup_matmul: bool = False,
         use_simdgroup_matvec: bool = True,
+        use_split_k_matmul: bool = False,
     ):
         self.scales = scales
         self.biases = biases
@@ -32,12 +33,14 @@ class QuantizedWeights:
         self.weight = weight
         self.use_simdgroup_matmul = use_simdgroup_matmul
         self.use_simdgroup_matvec = use_simdgroup_matvec
+        self.use_split_k_matmul = use_split_k_matmul
 
     @staticmethod
     def from_mlx_layer(
         mlx_layer: Any,
         use_simdgroup_matmul: bool = False,
         use_simdgroup_matvec: bool = True,
+        use_split_k_matmul: bool = False,
     ) -> "QuantizedWeights":
         biases = mlx_layer.biases
         return QuantizedWeights(
@@ -48,6 +51,7 @@ class QuantizedWeights:
             weight=mlx_layer.weight,
             use_simdgroup_matmul=use_simdgroup_matmul,
             use_simdgroup_matvec=use_simdgroup_matvec,
+            use_split_k_matmul=use_split_k_matmul,
         )
 
 
@@ -60,6 +64,7 @@ def quantized_matmul(
     b: mx.array,
     transpose_b: bool = False,
     use_simdgroup: bool = False,
+    use_split_k: bool = False,
 ) -> mx.array:
     pass
 

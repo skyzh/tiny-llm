@@ -3,8 +3,8 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/variant.h>
 
-#include "tiny_llm_ext.h"
 #include "axpby.h"
+#include "tiny_llm_ext.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -12,7 +12,7 @@ using namespace nb::literals;
 NB_MODULE(_ext, m) {
     m.doc() = "tiny-llm extensions for MLX";
 
-    m.def("load_library", &tiny_llm_ext::load_library, "device"_a, "path"_a);
+    m.def("load_library", &tiny_llm_ext::load_library, "path"_a);
 
     m.def("axpby", &tiny_llm_ext::axpby, "x"_a, "y"_a, "alpha"_a, "beta"_a, nb::kw_only(), "stream"_a = nb::none(),
           R"(

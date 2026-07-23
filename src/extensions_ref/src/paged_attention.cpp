@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -9,6 +10,69 @@
 #endif
 
 namespace tiny_llm_ext_ref {
+
+mx::array paged_cache_update(const mx::array &pages, const mx::array &values, int page_id, int start,
+                             mx::StreamOrDevice s) {
+    if ((pages.dtype() != mx::float32 && pages.dtype() != mx::bfloat16) || values.dtype() != pages.dtype()) {
+        throw std::runtime_error("paged_cache_update: pages and values must have the same float32 or bfloat16 dtype");
+    }
+    if (pages.shape().size() != 4 || values.shape().size() != 4 || values.shape()[0] != 1) {
+        throw std::runtime_error(
+            "paged_cache_update: expected pages [P, H, page_size, D] and values [1, H, length, D]");
+    }
+    if (values.shape()[1] != pages.shape()[1] || values.shape()[3] != pages.shape()[3]) {
+        throw std::runtime_error("paged_cache_update: values must match the page head count and head dimension");
+    }
+    if (page_id < 0 || page_id >= pages.shape()[0] || start < 0 || start + values.shape()[2] > pages.shape()[2]) {
+        throw std::runtime_error("paged_cache_update: destination slice is outside page storage");
+    }
+    return mx::array(pages.shape(), pages.dtype(), std::make_shared<PagedCacheUpdate>(to_stream(s), page_id, start),
+                     {pages, values});
+}
+
+void PagedCacheUpdate::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("paged_cache_update: the course extension is GPU-only");
+}
+
+#ifdef _METAL_
+void PagedCacheUpdate::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
+    const auto &pages = inputs[0];
+    const auto &values = inputs[1];
+    auto &out = outputs[0];
+    if (!pages.flags().row_contiguous || !values.flags().row_contiguous) {
+        throw std::runtime_error("paged_cache_update: pages and values must be contiguous");
+    }
+
+    // Page storage is request state, so the output intentionally aliases the
+    // input buffer. The kernel touches only the appended slice instead of
+    // building a functional copy of the entire cache tensor.
+    out.copy_shared_buffer(pages);
+    auto &d = mx::metal::device(stream().device);
+    auto library = d.get_library("tiny_llm_ext_ref");
+    const char *kernel_name = pages.dtype() == mx::bfloat16 ? "paged_cache_update_bf16" : "paged_cache_update_f32";
+    auto kernel = d.get_kernel(kernel_name, library);
+    auto &compute_encoder = mx::metal::get_command_encoder(stream());
+    compute_encoder.set_compute_pipeline_state(kernel);
+    compute_encoder.set_input_array(values, 0);
+    compute_encoder.set_output_array(out, 1);
+    const int heads = pages.shape()[1];
+    const int length = values.shape()[2];
+    const int head_dim = pages.shape()[3];
+    const int page_size = pages.shape()[2];
+    compute_encoder.set_bytes(heads, 2);
+    compute_encoder.set_bytes(length, 3);
+    compute_encoder.set_bytes(head_dim, 4);
+    compute_encoder.set_bytes(page_size, 5);
+    compute_encoder.set_bytes(page_id_, 6);
+    compute_encoder.set_bytes(start_, 7);
+    const int threads = std::min<int>(kernel->maxTotalThreadsPerThreadgroup(), 256);
+    compute_encoder.dispatch_threads(MTL::Size(values.size(), 1, 1), MTL::Size(threads, 1, 1));
+}
+#else
+void PagedCacheUpdate::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("PagedCacheUpdate has no GPU implementation.");
+}
+#endif
 
 mx::array paged_attention(const mx::array &q, const mx::array &key_pages, const mx::array &value_pages,
                           const mx::array &block_table, const mx::array &context_lens, const float scale,
@@ -80,7 +144,7 @@ void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     auto &s = stream();
     auto &d = mx::metal::device(s.device);
     auto library = d.get_library("tiny_llm_ext_ref");
-    auto &compute_encoder = d.get_command_encoder(s.index);
+    auto &compute_encoder = mx::metal::get_command_encoder(s);
 
     const int N = q.shape()[0];
     const int L = q.shape()[1];
@@ -102,7 +166,31 @@ void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     };
 
     if (L <= 8) {
-        const char *suffix = q.dtype() == mx::bfloat16 ? "bf16" : "f32";
+        if (q.dtype() == mx::bfloat16 && D == 128 && num_heads_ / num_kv_heads_ == 4) {
+            auto kernel = d.get_kernel("paged_attention_decode_bf16_d128_gqa4", library);
+            compute_encoder.set_compute_pipeline_state(kernel);
+            bind_arrays();
+            compute_encoder.set_bytes(N, 6);
+            compute_encoder.set_bytes(L, 7);
+            compute_encoder.set_bytes(page_size, 8);
+            compute_encoder.set_bytes(max_pages, 9);
+            compute_encoder.set_bytes(is_causal, 10);
+            compute_encoder.set_bytes(num_kv_heads_, 11);
+            compute_encoder.set_bytes(num_heads_, 12);
+            compute_encoder.set_bytes(scale_, 13);
+            constexpr int query_heads_per_kv = 4;
+            constexpr int simdgroups = 32;
+            compute_encoder.set_threadgroup_memory_length(
+                (query_heads_per_kv * simdgroups * 32 +
+                 2 * query_heads_per_kv * simdgroups) * sizeof(float),
+                0);
+            compute_encoder.dispatch_threadgroups(
+                MTL::Size(N * L / query_heads_per_kv, 1, 1),
+                MTL::Size(simdgroups * 32, 1, 1));
+            return;
+        }
+        const char *suffix =
+            q.dtype() == mx::bfloat16 && D == 128 ? "bf16_d128" : (q.dtype() == mx::bfloat16 ? "bf16" : "f32");
         auto kernel = d.get_kernel(std::string("paged_attention_decode_") + suffix, library);
         compute_encoder.set_compute_pipeline_state(kernel);
         bind_arrays();
@@ -116,7 +204,8 @@ void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
         compute_encoder.set_bytes(num_heads_, 13);
         compute_encoder.set_bytes(scale_, 14);
         constexpr int simdgroups_per_query = 32;
-        compute_encoder.set_threadgroup_memory_length(simdgroups_per_query * (D + 3) * sizeof(float), 0);
+        compute_encoder.set_threadgroup_memory_length(
+            (simdgroups_per_query * 32 + 2 * simdgroups_per_query) * sizeof(float), 0);
         compute_encoder.dispatch_threadgroups(MTL::Size(N * L, 1, 1), MTL::Size(simdgroups_per_query * 32, 1, 1));
         return;
     }

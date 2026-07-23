@@ -20,6 +20,7 @@ WEEK2_CHECKPOINTS = (
     "rope",
     "swiglu",
     "simd-matmul",
+    "split-k",
 )
 
 
@@ -111,7 +112,7 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
-    def __init__(self, mlx_model: Any, checkpoint: str = "simd-matmul"):
+    def __init__(self, mlx_model: Any, checkpoint: str = "split-k"):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
 

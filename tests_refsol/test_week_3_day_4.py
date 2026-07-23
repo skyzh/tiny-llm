@@ -220,7 +220,7 @@ def test_paged_attention_preserves_bfloat16_for_decode():
         next_value.astype(mx.bfloat16),
         mask="causal",
     )
-    query = mx.random.normal(shape=(1, 4, query_length, 128)).astype(mx.bfloat16)
+    query = mx.random.normal(shape=(1, 8, query_length, 128)).astype(mx.bfloat16)
 
     dense_key, dense_value = cache.gather_dense()
     expected = scaled_dot_product_attention_grouped(

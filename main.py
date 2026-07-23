@@ -36,6 +36,7 @@ parser.add_argument(
         "rope",
         "swiglu",
         "simd-matmul",
+        "split-k",
     ),
     help="run one cumulative Week 2 model checkpoint",
 )

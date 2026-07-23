@@ -174,3 +174,23 @@ def test_task_4_quantized_matvec_custom_m1_gpu():
 
 def test_task_4_quantized_matvec_custom_m8_gpu():
     quantized_matvec_custom_helper(8)
+
+
+def test_task_4_quantized_matvec_streaming_qwen_shape_gpu():
+    with mx.stream(mx.gpu):
+        input = mx.random.normal((1, 2560)).astype(mx.bfloat16)
+        weight = mx.random.normal((1024, 2560)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        result = quantized_matvec_custom(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        expected = mx.quantized_matmul(
+            input,
+            packed,
+            scales,
+            biases,
+            group_size=128,
+            bits=4,
+            transpose=True,
+        )
+        assert_allclose(result, expected, mx.bfloat16, atol=1.5)

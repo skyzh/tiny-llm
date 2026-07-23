@@ -8,17 +8,17 @@ version = "0.1.0"
 requires-python = ">=3.10, <3.13"
 readme = "README.md"
 dependencies = [
-    "mlx>=0.29.1",
+    "mlx>=0.32.0",
     "torch>=2.6.0",
     "torchtune>=0.6.1",
     "torchao>=0.10.0",
-    "mlx-lm>=0.27.1",
+    "mlx-lm>=0.31.3",
     "numpy>=2.2.4",
     "pytest>=8.3.5",
     "ruff>=0.11.6",
     # this should not usually appear in a project dependency list but we add it to simplify the setup process
     "setuptools>=62",
-    "nanobind==2.4.0",
+    "nanobind==2.13.0",
     "pytest-benchmark>=5.1.0",
 ]
 

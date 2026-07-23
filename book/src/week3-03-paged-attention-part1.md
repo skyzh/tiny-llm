@@ -159,6 +159,25 @@ When new K/V arrives for one layer:
 
 This replaces the dense-cache pattern of repeatedly concatenating along the sequence dimension.
 
+### A slice assignment is not automatically a small copy
+
+MLX arrays are functional and lazily evaluated. Writing
+`pages[page_id, :, start:end, :] = values` may build an update whose output is
+the entire page tensor; the source code's small slice does not prove that only
+the new K/V bytes move. In the reference profile, a synchronized one-token
+page update cost about 159 µs per layer.
+
+Implement `paged_cache_update` as a small course extension primitive. Its
+output intentionally aliases the existing page buffer, and its Metal grid
+covers only `H * new_tokens * D` elements. Page storage is request state, so
+this mutation boundary is explicit and safe as long as the cache owns its page
+and attention depends on the returned array. Full-buffer copies remain only
+when geometric capacity grows.
+
+Test this behavior through the cache interface: append across a tail-page
+boundary, grow the slab, release and reuse page ids, and compare the gathered
+logical sequence with `TinyKvFullCache`.
+
 ## Prefill with Pages
 
 Suppose `page_size = 4` and one prefill chunk contains 6 tokens:
@@ -277,6 +296,7 @@ Design layer-owned page pools that:
 - allocates and frees page ids,
 - supports writing a chunk into page storage,
 - grows backing capacity geometrically,
+- updates only the appended physical slice between growth events,
 - is shared by all request caches for that layer, but not by other layers.
 
 Test logical size and physical capacity separately. Allocating the fifth page,

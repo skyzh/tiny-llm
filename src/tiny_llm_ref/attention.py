@@ -87,7 +87,7 @@ def paged_attention(
     if mask is not None and mask != "causal":
         raise NotImplementedError
 
-    factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
+    factor = query.shape[-1] ** -0.5 if scale is None else float(scale)
     B, H_q, L, D = query.shape
     _, H, stored_page_size, _ = key_pages.shape
     assert H_q % H == 0
@@ -114,7 +114,7 @@ def paged_attention(
         value_pages,
         block_table,
         context_lens,
-        float(factor),
+        factor,
         is_causal=is_causal,
         num_kv_heads=H,
         num_heads=H_q,

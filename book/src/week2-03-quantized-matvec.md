@@ -2,9 +2,11 @@
 
 > 🚧 This chapter is under review and may change.
 
-In this chapter, we will study and implement quantized matrix multiplication. Quantizing
-weights from 16-bit floating point to 4-bit integers reduces both model size and
-the memory traffic required for each generated token.
+Day 2's decode profile should show the same scaling before you start this
+chapter: linear projections repeatedly read far more weight data than one-token
+activations. We therefore study and implement quantized matrix multiplication.
+Quantizing weights from 16-bit floating point to 4-bit integers reduces both
+model size and the memory traffic required for each generated token.
 
 **📚 Readings**
 
@@ -342,52 +344,77 @@ control flow mirrors the equation and is a useful debugging oracle.
 
 Prefill has many activation rows and benefits from a different matrix-matrix
 schedule. Keep the vanilla kernel for that shape today so Day 3 stays focused
-on decode. Day 6 replaces it with 8×8 `simdgroup_matrix` tiles after the course
-has established the packed format, dispatcher, and synchronized benchmark.
+on decode. Day 6 replaces it with a cooperative 32×32 tile built from 8×8
+`simdgroup_matrix` fragments after the course has established the packed
+format, dispatcher, and synchronized benchmark.
 
 ### Stage 2: SIMD Matvec
 
 Decode normally has `M = 1`; an 8×8 matrix tile would leave most rows empty.
 Instead, one SIMD group reduces the input dimension and uses `simd_sum` to
-combine lane-local partial sums. The regular projection kernel calculates two
-output columns per SIMD group. The much wider tied vocabulary projection uses
-eight columns so each activation load is reused across more weights.
+combine lane-local partial sums. Start with two output columns per group as an
+inspectable schedule. The current Qwen3-4B/8B profile then motivates a faster
+path: each lane loads two adjacent packed words, or 16 activations, and reuses
+them across four output columns.
 
-The wide path also uses the affine identity
+The optimized path also uses the affine identity
 
 $$
 \sum_j a_j(sq_j+b) = s\sum_j a_jq_j + b\sum_j a_j
 $$
 
-to avoid applying the bias separately to every unpacked value. This adds an
-activation-sum accumulator, so test it separately for ordinary and wide output
-tiles in the scheduling experiment below.
+to avoid applying the bias separately to every unpacked value. It also scales
+the activations once and reads four packed int4 values through a 16-bit mask,
+avoiding a shift for every weight and output row. This adds live accumulators,
+so test it as a complete schedule rather than assuming fewer integer
+instructions must be faster.
 
 ### Tune the SIMD Schedule
 
 Treat output width, threadgroup size, and shared-memory reuse as benchmark
-variables. Start with this host dispatch plan:
+variables. The retained host dispatch is:
 
 - flatten all leading activation dimensions into `M`,
 - use the custom matvec when `M <= 8`,
-- compute two output columns per SIMD group for ordinary projections,
-- switch to eight output columns when `K >= 8192` for the wide vocabulary head,
-- launch eight SIMD groups per threadgroup.
+- compute four output columns per SIMD group and load two adjacent packed words
+  per lane,
+- launch two SIMD groups, or eight output rows, per threadgroup,
+- when `N` is divisible by 512 and `K` by 8, use the Qwen streaming variant
+  that advances precomputed activation, weight, scale, and bias pointers
+  linearly through the reduction.
 
 These thresholds are measured starting points, not mathematical requirements.
-Keep them visible in the dispatcher, then vary one choice at a time. The
-reference measurements below are one-factor scheduling checks from an M1 Pro;
-use them to form hypotheses, but report the results from your own hardware.
+Keep them visible in the dispatcher, then vary one choice at a time. The older
+M1 Pro experiment below first selected the two-output schedule. A later M4 Pro
+Qwen3-4B profile showed ordinary course matvecs 9-33% behind MLX and justified
+retesting the schedule against MLX's current four-output, two-packed-word qmv
+shape. The first dispatcher incorrectly kept an eight-output/eight-SIMD-group
+special case for `K >= 8192`. End-to-end profiling showed that the wide output
+dimension did not justify its extra register and threadgroup pressure, so the
+same x4/two-group schedule is now used for the vocabulary head too.
 
-For output tiling, four columns in an ordinary projection reduced full-model
-decode from about 249 to 232 tok/s because the extra accumulators increased
-register pressure. Eight columns helped the unusually wide vocabulary
-projection because each activation load was reused across more weights.
+The final streaming-pointer change leaves the course focused on Qwen's aligned
+4-bit shapes rather than making the kernel arbitrary. On the reference M4 Pro,
+the retained Q/K/V/O projections measured 121.9/108.1/104.7/121.1 µs versus
+MLX at 115.7/101.8/99.2/117.7 µs. Gate/up/down measured
+136.0/139.4/139.4 µs versus 131.5/135.4/135.0 µs. The vocabulary projection
+was effectively tied at 1019.7 versus 1004.3 µs. Report results from your own
+hardware.
 
-Apply the affine rearrangement selectively as well. It helps the wide path,
-but applying it to the two-output projection reduced the measured full-model
-result from about 249 to 244.5 tok/s. Fewer arithmetic operations do not imply
-a faster kernel when they extend register lifetimes or complicate scheduling.
+For output tiling, an older four-column experiment reduced full-model decode
+from about 249 to 232 tok/s because the extra accumulators increased register
+pressure. That result is why the chapter asks for a new whole-model measurement
+after every schedule change. On the current M4 Pro and MLX 0.32 baseline, four
+columns plus two SIMD groups wins for both ordinary and vocabulary projections;
+the eight-column alternative was removed from dispatch after it regressed the
+model benchmark.
+
+Apply the affine rearrangement selectively as well. An older two-output
+projection experiment fell from about 249 to 244.5 tok/s after this change.
+Fewer arithmetic operations do not imply a faster kernel when they extend
+register lifetimes or complicate scheduling. The retained x4 implementation
+keeps it because the masked-weight and activation-reuse schedule wins as a
+whole.
 
 At the Python-to-extension boundary, make scales, biases, activations, and
 packed weights row-contiguous once with `mx.contiguous`. The C++ primitive
@@ -402,11 +429,10 @@ raised decode from roughly 238.6 to 246-249 tok/s. Verify this result by adding
 the shared-memory variant as an ablation; it is a useful demonstration that
 reuse helps only when it costs less than synchronization.
 
-Finally, compare four, eight, and sixteen SIMD groups per threadgroup. Four
-groups measured about 248.5 tok/s and did not improve on eight. Using sixteen
-groups only for the vocabulary path reduced 250.6 to 247.2 tok/s. Start with
-eight groups for both shapes, then retune on a different GPU rather than
-assuming that either smaller scheduling units or fewer threadgroups must win.
+Finally, compare two, four, eight, and sixteen SIMD groups per threadgroup.
+The four-output path needs only two groups to cover eight output rows. More
+groups are not automatically better when they duplicate activation loads or
+reduce threadgroup residency.
 
 ### Direct Quantized Embedding Comes on Day 6
 
@@ -448,8 +474,10 @@ pattern:
 4. Select the matrix-vector layout for `M <= 8`; otherwise select the vanilla
    matrix layout. Keep both paths explicit for direct comparisons.
    Calculate a SIMD-aligned thread-group configuration and tile output columns
-   so packed input values and activations can be reused. Use the two-column
-   kernel below `K = 8192` and the eight-column kernel at or above it.
+   so packed input values and activations can be reused. Use the four-column,
+   two-packed-word kernel with two SIMD groups. For Qwen-aligned shapes, add
+   the pointer-streaming specialization only after benchmarking the safe x4
+   fallback.
 5. Dispatch with `dispatchThreadgroups`.
 
 You can test your implementation by running:
@@ -513,6 +541,8 @@ Compare this result with the Day 1 `kv-cache` row. Do not start the decode
 attention chapter until the complete model uses packed weights and the
 end-to-end number has been recorded. The vanilla matrix product remains
 callable as a correctness oracle, but only the SIMD matvec is integrated into
-decode.
+decode. Reprofile the quantized checkpoint across increasing cached context.
+Day 4 is justified when attention's share grows with context after projection
+traffic has fallen; otherwise keep tuning the measured matvec bottleneck.
 
 {{#include copyright.md}}

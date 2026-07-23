@@ -307,6 +307,15 @@ Implement two correctness-first GPU dispatches:
 Compare small deterministic fixtures with the readable MLX equation and the
 dense Week 2 attention path before tuning the page-walking schedule.
 
+For the final Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
+four contiguous dimensions of Q, K, V, and the output. After all context
+positions are visited, transpose the 32 partial output vectors through one
+compact 32×32 threadgroup tile. Each SIMD group then reduces four dimensions
+with `simd_sum`. This replaces the first version's `D` scalar threads, each of
+which looped over all 32 partials, and reduces scratch from about 16.8 KiB to
+4.25 KiB. Keep a generic BF16 specialization for other head dimensions so the
+optimization cannot silently reinterpret `D = 32` as `D = 128`.
+
 ### Course implementation boundary
 
 MLX remains the array runtime for shapes, reshapes, transposes, contiguous
@@ -373,8 +382,9 @@ Start by recording three operator baselines on the same machine:
 2. your direct paged-attention path,
 3. the MLX attention path as a production-library reference.
 
-These M4 Pro measurements are reference points, not target values to copy into
-your report:
+These older M4 Pro measurements show the correctness-first path before the
+compact final reduction. Use the current appendix for retained end-to-end
+numbers; do not copy either table into your report without rerunning it:
 
 | Batch / context | Dense course attention | Course paged attention | MLX attention |
 |---|---:|---:|---:|
@@ -409,12 +419,30 @@ one:
 4. combine partial dot products with SIMD reductions instead of threadgroup
    scratch memory and repeated barriers,
 5. specialize the `L = 1` decode case so it does not carry prefill control flow,
-6. prepare the batch's page metadata once per scheduler step rather than once
+6. for Qwen's four-to-one GQA ratio, compute the four query heads together so
+   they reuse each K/V load,
+7. prepare the batch's page metadata once per scheduler step rather than once
    per layer or attention head.
+
+Also benchmark the write path separately. A fast page-reading kernel cannot
+recover time lost to a functional whole-cache update before every layer.
 
 For each change, explain which cost it targets: memory traffic, synchronization,
 address calculation, or dispatch overhead. Keep a change only when the measured
 result supports the explanation.
+
+On the reference Qwen3-4B run, the GQA4 specialization and current quantized
+matvec reach 58.88 decode tok/s at 2K, or 77.7% of MLX. A full-model ablation
+that replaces every course matvec with MLX reaches only 60.33 tok/s, while
+bypassing paged attention reaches 88.23 tok/s. Bypassing all cache writes
+reaches 61.14 tok/s. These are deliberately end-to-end measurements: isolated
+matvec timings had overstated their importance.
+
+The next bottleneck is therefore the page-walking attention path, not cache
+copying or one remaining projection. Confirm it with a context sweep: on the
+same machine, increasing the prompt from 2K to 8K lowers course decode from
+58.88 to 31.42 tok/s, while MLX moves from 75.74 to 55.44 tok/s. Projection
+shapes are unchanged; K/V traversal and reduction work grow with context.
 
 ### Checkpoint 3: Evaluate the Serving System
 

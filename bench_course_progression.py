@@ -88,6 +88,13 @@ WEEK2_VARIANTS = (
         "week2",
         ("--week2-checkpoint", "simd-matmul"),
     ),
+    Variant(
+        "week2-split-k",
+        "2.7 Split-K prefill",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "split-k"),
+    ),
     MLX_VARIANT,
 )
 VARIANTS_BY_KEY = {
