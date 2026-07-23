@@ -438,7 +438,7 @@ On Apple Silicon, retain a dense path for workloads where contiguous attention
 is faster. Use paged attention when eliminating repacks, reusing pages across
 scheduler steps, or admitting more concurrent requests improves the system-level
 result. The lesson is to make dispatch a measured policy decision, not to assume
-that paging must win every microbenchmark.
+that paging must win every operator benchmark.
 
 ```bash
 pdm run test --week 3 --day 5
