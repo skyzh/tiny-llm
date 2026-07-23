@@ -131,6 +131,7 @@ independently additive.
 | Eight-column vocabulary matvec | Keep | Best measured layout for the very wide tied output head; smaller projections use two columns to avoid register pressure. |
 | Remove matvec activation barrier | Keep | Roughly 238.6 → 247-252 tok/s; a cache-hot 2 KB vector was cheaper to reread than to copy and synchronize in every threadgroup. |
 | Vanilla → `simdgroup_matrix` prefill | Keep | About 1,005 → 2,052 prefill tok/s; 8×8 matrix fragments replace scalar dot products. |
+| Hoist quantization parameters per group | Keep | Scale and bias are constant across sixteen 8-wide reduction tiles. Keeping them in registers improved the 128-token Q projection from about 370 to 328 µs and the matched lab checkpoint to 2,371 prefill tok/s. |
 | Direct quantized embedding | Keep | Roughly 20% lower isolated latency in a representative run, about 1% end to end; gathers and dequantizes without intermediate arrays. |
 | 256-thread RMSNorm | Keep | Closes most of the gap left by a one-SIMD-group reduction. |
 | Four-head RoPE reuse | Keep | Avoids repeated angle/sine/cosine work; current isolated latency is within roughly 7-14% of MLX. |
@@ -143,6 +144,8 @@ independently additive.
 | Concatenate quantized weights at runtime | Reject | About 235 → 217 tok/s; constructing larger arrays added work and memory traffic. |
 | Preallocate chunked dense KV cache | Reject | About 235 → 229 tok/s; strided logical slices hurt the following operations. Paging belongs in Week 3. |
 | Share 32×16 prefill tiles in threadgroup memory | Reject | About 2,052 → 1,848 prefill tok/s; barriers outweighed reduced global loads at 128 tokens. |
+| Broadcast packed weights within a SIMD group | Reject | About 370 → 699 µs for the 128-token Q projection; coalesced cached loads were cheaper than repeated SIMD shuffles. |
+| Four SIMD groups per prefill threadgroup | Reject | About 370 → 385 µs for the same projection; the smaller scheduling unit added launches without improving occupancy. |
 | Broadcast scale/bias within the wide matvec | Reject | Increased vocabulary-head latency; extra loop structure and broadcasts outweighed parameter-load savings. |
 | Four-output ordinary matvec | Reject | About 249 → 232 tok/s; extra register pressure outweighed activation reuse. |
 | Affine identity in the ordinary matvec | Reject | About 249 → 244.5 tok/s; fewer arithmetic instructions did not improve the executed schedule. |
@@ -168,11 +171,12 @@ measured about 2,042 tok/s versus about 3,318 for the dense Week 1 model. That
 number isolates the lab kernels from Week 3 paging; it is not the output of the
 integrated `--loader week3` command above.
 
-On the completed paged stack, the matched three-process median measured about
-1,118 prefill tok/s and 37.8 decode tok/s without FlashAttention on an M4 Pro.
-The paged-attention teaching kernel dominates decode there. Use the
-performance appendix's progression runner to compare both configurations with
-Week 1 and MLX on the same machine instead of combining their numbers.
+On the completed paged stack after hoisting quantization parameters, a matched
+three-process run measured about 2,371 prefill tok/s and 210 decode tok/s with
+the performance lab, versus 4,416 prefill tok/s and 329 decode tok/s for MLX.
+The lab changes prefill matrix products and should not materially move decode.
+Use the performance appendix's progression runner to compare configurations on
+the same machine instead of combining numbers from separate runs.
 
 One-factor cached-decode ablations give the following attribution. Each row
 uses two models with the same loaded weights, alternates optimized and vanilla

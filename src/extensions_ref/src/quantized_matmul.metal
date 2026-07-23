@@ -137,44 +137,67 @@ template <typename T>
 
     const int packed_cols = N / packs_per_item;
     const int groups_per_row = N / group_size;
-    for (int reduction_base = 0; reduction_base < N; reduction_base += tile_size) {
-        simdgroup_matrix<T, tile_size, tile_size> activation_fragment;
-        simdgroup_matrix<T, tile_size, tile_size> weight_fragment;
-        simdgroup_matrix<float, tile_size, tile_size> next_accumulator;
-
+    for (int group_base = 0; group_base < N; group_base += group_size) {
+        float weight_scales[2];
+        float weight_biases[2];
         #pragma clang loop unroll(full)
         for (int element = 0; element < 2; ++element) {
-            const int activation_row = row_base + fragment_row;
-            const int reduction_column = reduction_base + fragment_column + element;
-            activation_fragment.thread_elements()[element] =
-                activation_row < M ? a[activation_row * N + reduction_column] : T(0);
-
-            // The matrix fragment is N x K, while the packed weights are
-            // stored as K x N. Transpose while unpacking and dequantizing.
-            const int reduction_row = reduction_base + fragment_row;
             const int output_column = column_base + fragment_column + element;
             if (output_column < K) {
-                const int quant_group = reduction_row / group_size;
-                const int packed_column = reduction_row / packs_per_item;
-                const int shift = (reduction_row % packs_per_item) * bits;
-                const uint32_t packed = b[output_column * packed_cols + packed_column];
-                const float quantized = static_cast<float>((packed >> shift) & mask);
-                const float scale = static_cast<float>(
-                    scales[output_column * groups_per_row + quant_group]);
-                const float bias = static_cast<float>(
-                    biases[output_column * groups_per_row + quant_group]);
-                weight_fragment.thread_elements()[element] =
-                    static_cast<T>(quantized * scale + bias);
+                const int parameter =
+                    output_column * groups_per_row + group_base / group_size;
+                weight_scales[element] = static_cast<float>(scales[parameter]);
+                weight_biases[element] = static_cast<float>(biases[parameter]);
             } else {
-                weight_fragment.thread_elements()[element] = T(0);
+                weight_scales[element] = 0.0f;
+                weight_biases[element] = 0.0f;
             }
         }
-        simdgroup_multiply_accumulate(
-            next_accumulator,
-            activation_fragment,
-            weight_fragment,
-            accumulator);
-        accumulator = next_accumulator;
+
+        for (int reduction_base = group_base;
+             reduction_base < group_base + group_size;
+             reduction_base += tile_size) {
+            simdgroup_matrix<T, tile_size, tile_size> activation_fragment;
+            simdgroup_matrix<T, tile_size, tile_size> weight_fragment;
+            simdgroup_matrix<float, tile_size, tile_size> next_accumulator;
+
+            #pragma clang loop unroll(full)
+            for (int element = 0; element < 2; ++element) {
+                const int activation_row = row_base + fragment_row;
+                const int reduction_column =
+                    reduction_base + fragment_column + element;
+                activation_fragment.thread_elements()[element] =
+                    activation_row < M
+                        ? a[activation_row * N + reduction_column]
+                        : T(0);
+
+                // The matrix fragment is N x K, while the packed weights are
+                // stored as K x N. Transpose while unpacking and dequantizing.
+                const int reduction_row = reduction_base + fragment_row;
+                const int output_column =
+                    column_base + fragment_column + element;
+                if (output_column < K) {
+                    const int packed_column = reduction_row / packs_per_item;
+                    const int shift =
+                        (reduction_row % packs_per_item) * bits;
+                    const uint32_t packed =
+                        b[output_column * packed_cols + packed_column];
+                    const float quantized =
+                        static_cast<float>((packed >> shift) & mask);
+                    weight_fragment.thread_elements()[element] = static_cast<T>(
+                        quantized * weight_scales[element] +
+                        weight_biases[element]);
+                } else {
+                    weight_fragment.thread_elements()[element] = T(0);
+                }
+            }
+            simdgroup_multiply_accumulate(
+                next_accumulator,
+                activation_fragment,
+                weight_fragment,
+                accumulator);
+            accumulator = next_accumulator;
+        }
     }
 
     #pragma clang loop unroll(full)
