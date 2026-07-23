@@ -40,15 +40,6 @@ def parse_args() -> argparse.Namespace:
         default="week2",
         choices=["week1", "week2", "week3"],
     )
-    flash_group = parser.add_mutually_exclusive_group()
-    flash_group.add_argument(
-        "--enable-flash-attn", dest="enable_flash_attn", action="store_true"
-    )
-    flash_group.add_argument(
-        "--disable-flash-attn", dest="enable_flash_attn", action="store_false"
-    )
-    parser.set_defaults(enable_flash_attn=None)
-    parser.add_argument("--enable-performance-lab", action="store_true")
     parser.add_argument(
         "--disable-paged-attention",
         action="store_true",
@@ -63,6 +54,7 @@ def parse_args() -> argparse.Namespace:
             "rmsnorm",
             "rope",
             "swiglu",
+            "simd-matmul",
         ),
         help="run one cumulative Week 2 end-to-end checkpoint",
     )
@@ -110,13 +102,6 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--warmup must be >= 0")
     if args.batch_decode and args.loader == "week1":
         raise ValueError("--batch-decode requires --loader week2 or week3")
-    if (
-        args.solution != "mlx"
-        and args.loader == "week3"
-        and args.enable_flash_attn is not False
-        and args.device != "gpu"
-    ):
-        raise ValueError("Week 3 FlashAttention requires --device gpu")
     if args.batch_decode and args.batch_size <= 0:
         raise ValueError("--batch-size must be > 0")
     if args.batch_decode and args.prefill_step <= 0:
@@ -127,6 +112,18 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--batch-decode requires --num-seqs >= --batch-size")
     if args.week2_checkpoint is not None and args.loader != "week2":
         raise ValueError("--week2-checkpoint requires --loader week2")
+    if (
+        args.solution != "mlx"
+        and args.device != "gpu"
+        and (
+            args.loader == "week3"
+            or (args.loader == "week2" and args.week2_checkpoint != "kv-cache")
+        )
+    ):
+        raise ValueError(
+            "The completed Week 2 and Week 3 custom-kernel models are GPU-only; "
+            "use the Week 2 kv-cache checkpoint for the readable pre-kernel path"
+        )
     if args.disable_paged_attention and args.loader != "week3":
         raise ValueError("--disable-paged-attention requires --loader week3")
 
@@ -439,8 +436,7 @@ def main() -> None:
     model_name = shortcut_name_to_full_name(args.model)
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
-        f"Model={model_name} FlashAttn={args.enable_flash_attn} "
-        f"PerformanceLab={args.enable_performance_lab} "
+        f"Model={model_name} "
         f"PagedAttention={not args.disable_paged_attention} "
         f"Week2Checkpoint={args.week2_checkpoint}"
     )
@@ -474,17 +470,11 @@ def main() -> None:
         else:
             dispatch_kwargs = {}
             if args.loader == "week3":
-                dispatch_kwargs["enable_flash_attn"] = args.enable_flash_attn
-                dispatch_kwargs["enable_performance_lab"] = args.enable_performance_lab
                 dispatch_kwargs[
                     "enable_paged_attention"
                 ] = not args.disable_paged_attention
             elif args.loader == "week2" and args.week2_checkpoint is not None:
                 dispatch_kwargs["checkpoint"] = args.week2_checkpoint
-            elif args.enable_flash_attn:
-                print("--enable-flash-attn belongs to Week 3; ignoring it")
-            if args.loader != "week3" and args.enable_performance_lab:
-                print("--enable-performance-lab belongs to Week 3; ignoring it")
             model = models.dispatch_model(
                 model_name,
                 mlx_model,

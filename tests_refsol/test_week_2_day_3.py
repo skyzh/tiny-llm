@@ -61,45 +61,6 @@ def test_week2_quantization_path_uses_course_owned_operators():
     assert "mx.dequantize" not in source
 
 
-def quantized_matmul_cpu_helper(precision: mx.Dtype, identity_matrix: bool):
-    with mx.stream(mx.cpu):
-        if identity_matrix:
-            input = mx.eye(128, dtype=precision)
-        else:
-            input = mx.random.normal((3, 128), dtype=precision)
-        weight = mx.random.normal((5, 128), dtype=precision)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        result = quantized_matmul(
-            scales, biases, 128, 4, input, packed, transpose_b=True
-        )
-        expected = mx.quantized_matmul(
-            input,
-            packed,
-            scales,
-            biases,
-            group_size=128,
-            bits=4,
-            transpose=True,
-        )
-        assert_allclose(result, expected, precision, atol=5e-1)
-
-
-def test_task_2_vanilla_bf16_identity_cpu():
-    quantized_matmul_cpu_helper(mx.bfloat16, True)
-
-
-def test_task_2_vanilla_bf16_random_cpu():
-    quantized_matmul_cpu_helper(mx.bfloat16, False)
-
-
-def test_task_2_vanilla_f16_identity_cpu():
-    quantized_matmul_cpu_helper(mx.float16, True)
-
-
-def test_task_2_vanilla_f16_random_cpu():
-    quantized_matmul_cpu_helper(mx.float16, False)
-
-
 def test_task_4_model_integrates_packed_weights_before_fast_kernels():
     model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="quantized-matvec")
     layer = model.layers_inner[0]
@@ -144,6 +105,7 @@ def quantized_matmul_helper(
             bits=4,
             transpose=True,
         )
+        assert user_out.dtype == mx.bfloat16
         if identity_matrix:
             assert_allclose(user_out, ref_out, precision)
         else:
@@ -162,14 +124,6 @@ def test_task_3_quantized_matmul_simple_bf16_gpu():
 
 def test_task_3_quantized_matmul_complex_bf16_gpu():
     quantized_matmul_helper(mx.gpu, mx.bfloat16, False)
-
-
-def test_task_3_quantized_matmul_simple_f16_gpu():
-    quantized_matmul_helper(mx.gpu, mx.float16, True)
-
-
-def test_task_3_quantized_matmul_complex_f16_gpu():
-    quantized_matmul_helper(mx.gpu, mx.float16, False)
 
 
 def test_task_3_optimized_matvec_matches_vanilla_gpu():

@@ -10,7 +10,6 @@ the memory traffic required for each generated token.
 
 - [Model Compression and Quantization](https://huggingface.co/blog/hf-bitsandbytes-integration)
 - [MLX Extensions Development Guide](https://ml-explore.github.io/mlx/build/html/dev/extensions.html)
-- [Quantized Matmul on CPU (Video)](https://www.youtube.com/watch?v=es6s6T1bTtI)
 - [Quantized Matmul on GPU (Video)](https://www.youtube.com/watch?v=jYCxVirq4d0)
 
 ## Why Quantization?
@@ -50,7 +49,7 @@ memory bandwidth.
 
 ### The Solution: Quantization
 
-Compressing weights from 16-bit floating point (`float16` or `bfloat16`) to
+Compressing BF16 weights to
 4-bit integers (int4) can:
 
 - **Reduce memory traffic by 4×**: 880 MB → ~220 MB per token
@@ -71,7 +70,7 @@ $G$. The Qwen3 MLX 4-bit checkpoints used in this course have a fixed group size
 of 128:
 
 ```plain
-Original weight matrix W: K × N (float16 or bfloat16)
+Original weight matrix W: K × N (bfloat16)
 
 Group size: G = 128
 Number of groups per row = N / G
@@ -82,9 +81,9 @@ For each group of G consecutive values in a row:
   3. Quantize each value using: quantized = round((value - bias) / scale)
 ```
 
-All quantized-matmul tests use `group_size = 128`. They cover both `float16` and
-`bfloat16` because MLX checkpoints may store their scales, biases, and
-activations in either 16-bit data type.
+All required quantized-matmul tests use `group_size = 128` and BF16 scales,
+biases, activations, and outputs. Normalize those tensors to BF16 when loading
+the course model so every later kernel receives one model dtype.
 
 ### Affine Quantization
 
@@ -135,15 +134,15 @@ Quantized: [0, 2, 7, 10, 15] (4 bits each)
 The quantized values are packed for compact storage and efficient access:
 
 ```plain
-Original: K × N float16/bfloat16 (2 bytes each) = 2KN bytes
+Original: K × N bfloat16 (2 bytes each) = 2KN bytes
 Quantized: K × N int4 (0.5 bytes each) = 0.5KN bytes
 
 Packing: 8 × 4-bit values fit in one uint32 (32 bits)
 
 Weight matrix shape: K × N
 Quantized storage shape: K × (N / 8) uint32
-Scales shape: K × (N / G) float16/bfloat16
-Biases shape: K × (N / G) float16/bfloat16
+Scales shape: K × (N / G) bfloat16
+Biases shape: K × (N / G) bfloat16
 ```
 
 Example packing for 8 consecutive 4-bit values `[a, b, c, d, e, f, g, h]`:
@@ -166,7 +165,7 @@ Unpacking:
 
 For standard matrix multiplication $C = AB^T$ where:
 
-- $A$: shape $(M, N)$, float16 or bfloat16 (activations)
+- $A$: shape $(M, N)$, bfloat16 (activations)
 - $B$: shape $(K, N)$, **quantized** to int4 (weights)
 - $C$: shape $(M, K)$, same 16-bit dtype as $A$ (output)
 
@@ -203,13 +202,13 @@ them across all values in that group.
 
 ```plain
 Input:
-  A: M × N (float16 or bfloat16, activations)
+  A: M × N (bfloat16 activations)
   B_quantized: K × (N/8) (uint32, packed weights)
-  scales: K × (N/G) (float16/bfloat16)
-  biases: K × (N/G) (float16/bfloat16)
+  scales: K × (N/G) (bfloat16)
+  biases: K × (N/G) (bfloat16)
 
 Output:
-  C: M × K (float16/bfloat16)
+  C: M × K (bfloat16)
 
 For each output element C[i, k]:
   sum = 0  # float accumulator
@@ -228,7 +227,7 @@ For each output element C[i, k]:
         a_value = A[i, g*G + p*8 + bit_offset/4]
         sum = sum + a_value * b_value
   
-  C[i, k] = float16/bfloat16(sum)
+  C[i, k] = bfloat16(sum)
 ```
 
 ## Task 1: Implement Quantized Linear and Embedding
@@ -244,8 +243,8 @@ matrix and its dequantization parameters:
 | Field | Shape | Description |
 |-------|-------|-------------|
 | `weight` | $(K, N/8)$ uint32 | Packed quantized weights. Each uint32 stores eight consecutive 4-bit values. |
-| `scales` | $(K, N/G)$ float16/bfloat16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
-| `biases` | $(K, N/G)$ float16/bfloat16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
+| `scales` | $(K, N/G)$ bfloat16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
+| `biases` | $(K, N/G)$ bfloat16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
 | `group_size` | int | Number of consecutive values that share the same scale/bias. For the Qwen3 MLX 4-bit weights used here, this is `128`. |
 | `bits` | int | Quantization bit width (typically 4, meaning values are in range $[0, 15]$) |
 
@@ -272,11 +271,12 @@ wrapper with two call patterns:
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
-## Task 2: Implement a CPU Primitive
+## Task 2: Register a GPU-Only Primitive
 
-Implement quantized matrix multiplication as an MLX C++ extension. Follow the
-existing `axpby` example: read `axpby.h`, `axpby.cpp`, and its binding in
-`bindings.cpp` before starting.
+Register quantized matrix multiplication as an MLX C++ extension. Follow the
+existing `axpby` example for array validation, lazy primitive construction,
+bindings, and Metal dispatch. The course implementation is GPU-only; its
+`eval_cpu` method should raise a clear unsupported-device error.
 
 ```
 src/extensions/src/tiny_llm_ext.h
@@ -291,31 +291,19 @@ You will update four files. Keep the C++ declarations and definitions in the
 - **`tiny_llm_ext.h`** — Declare the `quantized_matmul(...)` function signature and define a `QuantizedMatmul` primitive class (inheriting `mx::Primitive`). Store `group_size` and `bits` as private members.
 - **`bindings.cpp`** — Add an `m.def(...)` call to expose the function to Python.
 - **`quantized_matmul.cpp`** — Implement `quantized_matmul(...)` to validate
-  inputs, determine the output shape, and return a lazy `mx::array`. Implement
-  `eval_cpu` to allocate the output, register arrays with the CPU encoder, and
-  dispatch the compute kernel.
+  inputs, determine the output shape, return a lazy `mx::array`, and reject CPU
+  evaluation explicitly.
 - **`CMakeLists.txt`** — Add the new C++ source to the extension target.
 
-Follow `axpby`'s CPU encoder pattern in `eval_cpu`: allocate memory with
-`out.set_data(mx::allocator::malloc(out.nbytes()))`, register the input and
-output arrays, then dispatch a lambda for the computation. Inside the lambda,
-implement the nested loop from the computation flow above. For each output
-element `(i, k)`, unpack and dequantize the weights, accumulate products in
-`float`, and write a result whose dtype matches the activation input.
-
-Write the CPU implementation as a template, following `axpby`'s dtype-dispatch
-pattern. Dispatch with `mx::float16_t` or `mx::bfloat16_t` according to the
-output dtype.
-
 The extension API is infrastructure: it lets an `mx.array` graph node schedule
-the C++ loop you wrote. MLX owns the array lifetime and command encoder, but it
-does not supply the quantized multiplication.
+the Metal loop you write in the next task. MLX owns the array lifetime and
+command encoder, but it does not supply the quantized multiplication.
 
 Build and test the extension:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_2
+pdm run test --week 2 --day 3 -- -k task_1
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -333,7 +321,8 @@ Do this in two measured stages. They expose the same math but schedule
 different shapes differently:
 
 1. **Vanilla matmul:** one Metal thread computes one output element. This is
-   the direct GPU translation of the CPU loop and the correctness baseline.
+   the direct GPU translation of the computation flow above and the correctness
+   baseline.
 2. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
    activation row and calculate several output columns together.
 
@@ -349,13 +338,12 @@ Each thread walks all `N` input values, unpacks eight int4 weights from each
 float32. This kernel repeats activation loads and does not share work, but its
 control flow mirrors the equation and is a useful debugging oracle.
 
-### Prefill Tiling Moves to Week 3
+### Prefill Tiling Comes on Day 6
 
 Prefill has many activation rows and benefits from a different matrix-matrix
-schedule. Week 2 keeps the vanilla kernel for that shape so its required path
-stays focused on decode. The optional Week 3 performance lab adds 8×8
-`simdgroup_matrix` tiles and studies reuse, barriers, register pressure, and
-threadgroup scheduling.
+schedule. Keep the vanilla kernel for that shape today so Day 3 stays focused
+on decode. Day 6 replaces it with 8×8 `simdgroup_matrix` tiles after the course
+has established the packed format, dispatcher, and synchronized benchmark.
 
 ### Stage 2: SIMD Matvec
 
@@ -420,10 +408,10 @@ groups only for the vocabulary path reduced 250.6 to 247.2 tok/s. Start with
 eight groups for both shapes, then retune on a different GPU rather than
 assuming that either smaller scheduling units or fewer threadgroups must win.
 
-### Direct Quantized Embedding Moves to Week 3
+### Direct Quantized Embedding Comes on Day 6
 
 Week 2 performs row lookup and dequantization with basic `mlx.core` array
-operations. The optional Week 3 performance lab fuses row gather, int4
+operations at this checkpoint. Day 6 optionally fuses row gather, int4
 unpacking, and affine dequantization into one Metal dispatch.
 
 ### Kernel Requirements
@@ -433,8 +421,9 @@ Implement both required kernel layouts in `quantized_matmul.metal`:
 - First, implement the vanilla one-thread-per-output matrix grid.
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
-- The kernel should support both `half` and `bfloat16_t` inputs and outputs.
-- Apply the same group-wise dequantization loop as the CPU version:
+- The required kernel supports `bfloat16_t` inputs and outputs. The course
+  checkpoint does not add a second model-storage dtype.
+- Apply the group-wise dequantization loop defined earlier in this chapter:
   - Iterate over groups of 128 values.
   - Unpack int4 values from each `uint32`.
   - Dequantize each value with `q * scale + bias`.
@@ -443,8 +432,9 @@ Implement both required kernel layouts in `quantized_matmul.metal`:
 
 The custom kernel only needs to support `bits = 4` and `group_size = 128`. Use
 the group size to compute `groups_per_row` and the packed-weight offsets.
-Instantiate the templated Metal kernel once for `half` and once for
-`bfloat16_t`; select the matching kernel name in `eval_gpu`.
+Instantiate the required Metal kernel for `bfloat16_t` and select it in
+`eval_gpu`. If you retain an optional `half` specialization, keep it out of the
+course-model dispatch.
 
 ### GPU Dispatch
 
@@ -495,10 +485,9 @@ load `embed_tokens` with `QuantizedWeights.from_mlx_layer(...)` and pass it to
 `QuantizedWeights` too and apply it with `quantized_linear`; `lm_head` is a
 projection, not an embedding lookup.
 
-Qwen3 MLX quantized layers may use either **float16** or **bfloat16** for the
-tensors involved in dequantization. Accept either dtype, require `scales`,
-`biases`, and activations to match, and return that same dtype. If the output is
-`nan` or otherwise invalid, check for a dtype mismatch first.
+Normalize each loaded layer's scales and biases to BF16. Require scales,
+biases, and activations to match and return BF16. If the output is `nan` or
+otherwise invalid, check for a dtype mismatch first.
 
 Preserve the quantized layer's parameters as well. The model should pass
 `w.group_size` and `w.bits` to the extension, which should validate the course

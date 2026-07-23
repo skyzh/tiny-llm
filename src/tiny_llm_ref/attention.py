@@ -122,52 +122,6 @@ def paged_attention(
     return mx.contiguous(result.reshape(B, H_q, L, D))
 
 
-def flash_attention(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
-    scale: float | None = None,
-    mask: mx.array | str | None = None,
-) -> mx.array:
-    factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
-    factor = factor.astype(mx.float32)
-
-    *B, H_q, L, E = query.shape
-    _, H, S, _ = key.shape
-    assert H_q % H == 0
-    query = query.reshape(-1, L, E)
-    key = key.reshape(-1, S, E)
-    value = value.reshape(-1, S, E)
-    query = mx.contiguous(query)
-    key = mx.contiguous(key)
-    value = mx.contiguous(value)
-    N = query.shape[0]
-    if mask is None:
-        mask_mode = 0
-        mask = mx.zeros((1,), dtype=mx.float32)
-    elif isinstance(mask, str):
-        if mask != "causal":
-            raise ValueError(f"unsupported attention mask mode: {mask}")
-        mask_mode = 1
-        mask = mx.zeros((1,), dtype=mx.float32)
-    else:
-        mask_mode = 2
-        mask = mx.contiguous(
-            mx.broadcast_to(mask, (*B, H_q, L, S)).reshape(N, L, S)
-        ).astype(mx.float32)
-    result = tiny_llm_ext_ref.flash_attention(
-        query,
-        key,
-        value,
-        mask,
-        factor,
-        mask_mode=mask_mode,
-        num_heads=H_q,
-        num_kv_heads=H,
-    )
-    return mx.contiguous(result.reshape(*B, H_q, L, E))
-
-
 class SimpleMultiHeadAttention:
     def __init__(
         self,

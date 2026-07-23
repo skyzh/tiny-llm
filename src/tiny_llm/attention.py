@@ -59,13 +59,3 @@ def paged_attention(
     mask: mx.array | str | None = None,
 ) -> mx.array:
     pass
-
-
-def flash_attention(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
-    scale: float | None = None,
-    mask: mx.array | str | None = None,
-) -> mx.array:
-    pass

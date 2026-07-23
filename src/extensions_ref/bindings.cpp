@@ -39,25 +39,6 @@ NB_MODULE(_ext, m) {
     m.def("decode_attention", &tiny_llm_ext_ref::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
           "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
 
-    m.def("flash_attention", &tiny_llm_ext_ref::flash_attention, "query"_a, "key"_a, "value"_a, "mask"_a,
-          "scale"_a = 1.0, "mask_mode"_a = 0, "num_kv_heads"_a, "num_heads"_a, "stream"_a = nb::none(), R"(
-        Flash attention layer
-
-        Args:
-            query (array): Query array.
-            key (array): Key array.
-            value (array): Value array.
-            mask (array): Mask array.
-            scale (float): Float32 scaling factor.
-            mask_mode (int): 0 for no mask, 1 for causal, 2 for an additive mask.
-
-        Q, K, V, and output preserve bfloat16 on the D=128 GPU path. The
-        additive mask and online-softmax accumulation use float32.
-
-        Returns:
-            array: ``softmax(query @ key.T * scale) @ value``
-      )");
-
     m.def("paged_attention", &tiny_llm_ext_ref::paged_attention, "query"_a, "key_pages"_a, "value_pages"_a,
           "block_table"_a, "context_lens"_a, "scale"_a = 1.0, "is_causal"_a = false, "num_kv_heads"_a, "num_heads"_a,
           "stream"_a = nb::none(), R"(

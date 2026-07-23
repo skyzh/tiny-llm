@@ -1,4 +1,4 @@
-# 🚧 Week 3 Day 3: Chunked Prefill
+# 🚧 Week 3 Day 2: Chunked Prefill
 
 > 🚧 This chapter is under review and may change.
 
@@ -31,6 +31,7 @@ Update `Request.try_prefill` in `src/tiny_llm/batch.py` to process at most
 the request ready only when the full prompt is complete.
 
 ```bash
+pdm run test --week 3 --day 2
 pdm run batch-main
 ```
 

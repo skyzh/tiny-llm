@@ -11,7 +11,7 @@ def dequantize_linear(mx_layer: Any) -> mx.array:
         mx_layer.group_size,
         mx_layer.bits,
     )
-    return w
+    return w.astype(mx.bfloat16)
 
 
 class QuantizedWeights:
@@ -39,9 +39,10 @@ class QuantizedWeights:
         use_simdgroup_matmul: bool = False,
         use_simdgroup_matvec: bool = True,
     ) -> "QuantizedWeights":
+        biases = mlx_layer.biases
         return QuantizedWeights(
-            scales=mlx_layer.scales,
-            biases=mlx_layer.biases,
+            scales=mlx_layer.scales.astype(mx.bfloat16),
+            biases=None if biases is None else biases.astype(mx.bfloat16),
             group_size=mlx_layer.group_size,
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,

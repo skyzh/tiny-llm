@@ -1,4 +1,4 @@
-# 🚧 Week 3 Day 8 (Optional): Speculative Decoding
+# 🚧 Week 3 Optional Extension: Speculative Decoding
 
 > 🚧 This optional chapter is under review and may change.
 
@@ -39,7 +39,7 @@ Verify zero-length rewind, a rewind within one page, a rewind across page
 boundaries, and a full rewind:
 
 ```bash
-pdm run test --week 3 --day 4 -- -k rewind
+pdm run test --week 3 --day 3 -- -k rewind
 ```
 
 ## Task 2: Produce a Bounded Draft

@@ -1,10 +1,6 @@
 #include <algorithm>
-#include <cmath>
-#include <limits>
 #include <string>
-#include <vector>
 
-#include "mlx/backend/cpu/encoder.h"
 #include "mlx/utils.h"
 #include "tiny_llm_ext.h"
 
@@ -33,168 +29,6 @@ const char *dtype_suffix(const mx::array &x) {
         return "bf16";
     }
     throw std::runtime_error("unsupported dtype");
-}
-
-template <typename T>
-void rms_norm_cpu(const mx::array &x, const mx::array &weight, mx::array &out, float eps, mx::Stream stream) {
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    encoder.set_input_array(x);
-    encoder.set_input_array(weight);
-    encoder.set_output_array(out);
-    encoder.dispatch([x = mx::array::unsafe_weak_copy(x), weight = mx::array::unsafe_weak_copy(weight),
-                      out_ptr = out.data<T>(), eps]() {
-        const T *x_ptr = x.data<T>();
-        const T *weight_ptr = weight.data<T>();
-        const int dim = x.shape().back();
-        const int rows = x.size() / dim;
-        for (int row = 0; row < rows; ++row) {
-            float sum = 0.0f;
-            for (int col = 0; col < dim; ++col) {
-                const float value = static_cast<float>(x_ptr[row * dim + col]);
-                sum += value * value;
-            }
-            const float inv = 1.0f / std::sqrt(sum / dim + eps);
-            for (int col = 0; col < dim; ++col) {
-                const T normalized = static_cast<T>(static_cast<float>(x_ptr[row * dim + col]) * inv);
-                out_ptr[row * dim + col] =
-                    static_cast<T>(static_cast<float>(normalized) * static_cast<float>(weight_ptr[col]));
-            }
-        }
-    });
-}
-
-template <typename T>
-void rope_cpu(const mx::array &x, const mx::array &offsets, mx::array &out, int dims, float base, bool traditional,
-              mx::Stream stream) {
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    encoder.set_input_array(x);
-    encoder.set_input_array(offsets);
-    encoder.set_output_array(out);
-    encoder.dispatch([x = mx::array::unsafe_weak_copy(x), offsets = mx::array::unsafe_weak_copy(offsets),
-                      out_ptr = out.data<T>(), dims, base, traditional]() {
-        const T *x_ptr = x.data<T>();
-        const int32_t *offsets_ptr = offsets.data<int32_t>();
-        const int batch = x.shape()[0];
-        const int length = x.shape()[1];
-        const int heads = x.shape()[2];
-        const int head_dim = x.shape()[3];
-        const int half = dims / 2;
-        for (int b = 0; b < batch; ++b) {
-            for (int l = 0; l < length; ++l) {
-                const float position = static_cast<float>(offsets_ptr[b] + l);
-                for (int h = 0; h < heads; ++h) {
-                    const int base_idx = ((b * length + l) * heads + h) * head_dim;
-                    for (int d = 0; d < head_dim; ++d) {
-                        if (d >= dims) {
-                            out_ptr[base_idx + d] = x_ptr[base_idx + d];
-                            continue;
-                        }
-                        const int pair = traditional ? d / 2 : d % half;
-                        const float angle = position * std::pow(base, -static_cast<float>(pair) / half);
-                        const float c = std::cos(angle);
-                        const float s = std::sin(angle);
-                        int real_idx;
-                        int imag_idx;
-                        bool output_real;
-                        if (traditional) {
-                            real_idx = base_idx + pair * 2;
-                            imag_idx = real_idx + 1;
-                            output_real = (d % 2) == 0;
-                        } else {
-                            real_idx = base_idx + pair;
-                            imag_idx = real_idx + half;
-                            output_real = d < half;
-                        }
-                        const float real = static_cast<float>(x_ptr[real_idx]);
-                        const float imag = static_cast<float>(x_ptr[imag_idx]);
-                        out_ptr[base_idx + d] = static_cast<T>(output_real ? real * c - imag * s : imag * c + real * s);
-                    }
-                }
-            }
-        }
-    });
-}
-
-template <typename T>
-void swiglu_cpu(const mx::array &gate, const mx::array &up, mx::array &out, mx::Stream stream) {
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    encoder.set_input_array(gate);
-    encoder.set_input_array(up);
-    encoder.set_output_array(out);
-    encoder.dispatch(
-        [gate = mx::array::unsafe_weak_copy(gate), up = mx::array::unsafe_weak_copy(up), out_ptr = out.data<T>()]() {
-            const T *gate_ptr = gate.data<T>();
-            const T *up_ptr = up.data<T>();
-            for (size_t i = 0; i < gate.size(); ++i) {
-                const float g = static_cast<float>(gate_ptr[i]);
-                out_ptr[i] = static_cast<T>((g / (1.0f + std::exp(-g))) * static_cast<float>(up_ptr[i]));
-            }
-        });
-}
-
-template <typename T>
-void decode_attention_cpu(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
-                          mx::array &out, float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads,
-                          mx::Stream stream) {
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    encoder.set_input_array(q);
-    encoder.set_input_array(k);
-    encoder.set_input_array(v);
-    encoder.set_input_array(mask);
-    encoder.set_output_array(out);
-    encoder.dispatch([q = mx::array::unsafe_weak_copy(q), k = mx::array::unsafe_weak_copy(k),
-                      v = mx::array::unsafe_weak_copy(v), mask = mx::array::unsafe_weak_copy(mask),
-                      out_ptr = out.data<T>(), scale, is_causal, has_mask, num_heads, num_kv_heads]() {
-        const T *q_ptr = q.data<T>();
-        const T *k_ptr = k.data<T>();
-        const T *v_ptr = v.data<T>();
-        const float *mask_ptr = mask.data<float>();
-        const int q_rows = q.shape()[0];
-        const int length = q.shape()[1];
-        const int context = k.shape()[1];
-        const int dim = q.shape()[2];
-        const int ratio = num_heads / num_kv_heads;
-        for (int row = 0; row < q_rows; ++row) {
-            const int batch = row / num_heads;
-            const int q_head = row % num_heads;
-            const int kv_row = batch * num_kv_heads + q_head / ratio;
-            for (int l = 0; l < length; ++l) {
-                float max_score = -std::numeric_limits<float>::infinity();
-                float sum = 0.0f;
-                std::vector<float> accum(dim, 0.0f);
-                for (int s = 0; s < context; ++s) {
-                    if (is_causal && s > context - length + l) {
-                        continue;
-                    }
-                    float score = 0.0f;
-                    for (int d = 0; d < dim; ++d) {
-                        score += static_cast<float>(q_ptr[(row * length + l) * dim + d]) *
-                                 static_cast<float>(k_ptr[(kv_row * context + s) * dim + d]);
-                    }
-                    score *= scale;
-                    if (has_mask) {
-                        score += mask_ptr[(row * length + l) * context + s];
-                    }
-                    const float new_max = std::max(max_score, score);
-                    const float old_factor = std::exp(max_score - new_max);
-                    const float score_factor = std::exp(score - new_max);
-                    sum = sum * old_factor + score_factor;
-                    for (int d = 0; d < dim; ++d) {
-                        accum[d] = accum[d] * old_factor +
-                                   score_factor * static_cast<float>(v_ptr[(kv_row * context + s) * dim + d]);
-                    }
-                    max_score = new_max;
-                }
-                for (int d = 0; d < dim; ++d) {
-                    out_ptr[(row * length + l) * dim + d] = static_cast<T>(accum[d] / sum);
-                }
-            }
-        }
-    });
 }
 
 }  // namespace
@@ -250,35 +84,19 @@ mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::arr
 }
 
 void Week2RMSNorm::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    if (outputs[0].dtype() == mx::float32) return rms_norm_cpu<float>(inputs[0], inputs[1], outputs[0], eps_, stream());
-    if (outputs[0].dtype() == mx::float16)
-        return rms_norm_cpu<mx::float16_t>(inputs[0], inputs[1], outputs[0], eps_, stream());
-    return rms_norm_cpu<mx::bfloat16_t>(inputs[0], inputs[1], outputs[0], eps_, stream());
+    throw std::runtime_error("rms_norm: the course extension is GPU-only");
 }
 
 void Week2RoPE::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    if (outputs[0].dtype() == mx::float32)
-        return rope_cpu<float>(inputs[0], inputs[1], outputs[0], dims_, base_, traditional_, stream());
-    if (outputs[0].dtype() == mx::float16)
-        return rope_cpu<mx::float16_t>(inputs[0], inputs[1], outputs[0], dims_, base_, traditional_, stream());
-    return rope_cpu<mx::bfloat16_t>(inputs[0], inputs[1], outputs[0], dims_, base_, traditional_, stream());
+    throw std::runtime_error("rope: the course extension is GPU-only");
 }
 
 void Week2SwiGLU::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    if (outputs[0].dtype() == mx::float32) return swiglu_cpu<float>(inputs[0], inputs[1], outputs[0], stream());
-    if (outputs[0].dtype() == mx::float16) return swiglu_cpu<mx::float16_t>(inputs[0], inputs[1], outputs[0], stream());
-    return swiglu_cpu<mx::bfloat16_t>(inputs[0], inputs[1], outputs[0], stream());
+    throw std::runtime_error("swiglu: the course extension is GPU-only");
 }
 
 void Week2DecodeAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    if (outputs[0].dtype() == mx::float32)
-        return decode_attention_cpu<float>(inputs[0], inputs[1], inputs[2], inputs[3], outputs[0], scale_, is_causal_,
-                                           has_mask_, num_heads_, num_kv_heads_, stream());
-    if (outputs[0].dtype() == mx::float16)
-        return decode_attention_cpu<mx::float16_t>(inputs[0], inputs[1], inputs[2], inputs[3], outputs[0], scale_,
-                                                   is_causal_, has_mask_, num_heads_, num_kv_heads_, stream());
-    return decode_attention_cpu<mx::bfloat16_t>(inputs[0], inputs[1], inputs[2], inputs[3], outputs[0], scale_,
-                                                is_causal_, has_mask_, num_heads_, num_kv_heads_, stream());
+    throw std::runtime_error("decode_attention: the course extension is GPU-only");
 }
 
 #ifdef _METAL_

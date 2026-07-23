@@ -19,6 +19,7 @@ WEEK2_CHECKPOINTS = (
     "rmsnorm",
     "rope",
     "swiglu",
+    "simd-matmul",
 )
 
 
@@ -110,7 +111,7 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
-    def __init__(self, mlx_model: Any, checkpoint: str = "swiglu"):
+    def __init__(self, mlx_model: Any, checkpoint: str = "simd-matmul"):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
 

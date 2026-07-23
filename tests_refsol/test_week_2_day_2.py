@@ -32,11 +32,10 @@ def test_single_request_benchmark_releases_cache(monkeypatch):
         ),
     )
 
-    with mx.stream(mx.cpu):
-        generated, _, _ = bench.run_one_request_week2(
-            model,
-            bench.BenchRequest(prompt_token_ids=[1, 2, 3], max_new_tokens=3),
-        )
+    generated, _, _ = bench.run_one_request_week2(
+        model,
+        bench.BenchRequest(prompt_token_ids=[1, 2, 3], max_new_tokens=3),
+    )
 
     assert generated == 3
     assert all(cache.released for cache in model.caches)

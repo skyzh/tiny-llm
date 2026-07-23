@@ -1,11 +1,6 @@
-#include <cstdint>
-
 #include "mlx/array.h"
-#include "mlx/backend/common/utils.h"
-#include "mlx/backend/cpu/encoder.h"
 #include "mlx/device.h"
 #include "mlx/dtype.h"
-#include "mlx/utils.h"
 #include "tiny_llm_ext.h"
 
 #ifdef _METAL_
@@ -103,135 +98,12 @@ mx::array quantized_embedding(const mx::array &indices, const mx::array &scales,
                      {indices, scales, biases, weight});
 }
 
-template <typename T>
-void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, const mx::array &a, const mx::array &b,
-                           mx::array &out, mx::Stream stream) {
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    encoder.set_input_array(scales);
-    encoder.set_input_array(biases);
-    encoder.set_input_array(a);
-    encoder.set_input_array(b);
-    encoder.set_output_array(out);
-
-    if (!a.flags().row_contiguous) {
-        throw std::runtime_error("quantized_matmul: a must be contiguous");
-    }
-    if (!b.flags().row_contiguous) {
-        throw std::runtime_error("quantized_matmul: b must be contiguous");
-    }
-
-    encoder.dispatch([out_ptr = out.data<T>(), out_shape = out.shape(), out_strides = out.strides(),
-                      a = mx::array::unsafe_weak_copy(a), b = mx::array::unsafe_weak_copy(b),
-                      scales = mx::array::unsafe_weak_copy(scales), biases = mx::array::unsafe_weak_copy(biases)]() {
-        int M = a.shape()[0];
-        int N = a.shape()[1];
-        int K = b.shape()[0];
-        const int group_size = 128;
-        const int bits = 4;
-        const int group_per_row = N / group_size;
-        const T *a_ptr = a.data<T>();
-        const uint32_t *b_ptr = b.data<uint32_t>();
-        const T *scales_ptr = scales.data<T>();
-        const T *biases_ptr = biases.data<T>();
-        uint32_t item_mask = (1 << bits) - 1;
-        for (int i = 0; i < M; i++) {
-            for (int k = 0; k < K; k++) {
-                float sum = 0;
-                for (int group_idx = 0; group_idx < group_per_row; group_idx++) {
-                    int64_t scales_loc =
-                        mx::elem_to_loc(k * group_per_row + group_idx, scales.shape(), scales.strides());
-                    int64_t biases_loc =
-                        mx::elem_to_loc(k * group_per_row + group_idx, biases.shape(), biases.strides());
-                    T scale = scales_ptr[scales_loc];
-                    T bias = biases_ptr[biases_loc];
-                    int64_t b_loc = mx::elem_to_loc((k * N + group_idx * group_size) / 8, b.shape(), b.strides());
-                    int64_t a_loc = mx::elem_to_loc(i * N + group_idx * group_size, a.shape(), a.strides());
-                    const int packs_per_item = 32 / bits;
-                    for (int item_idx = 0; item_idx < group_size; item_idx += packs_per_item) {
-                        uint32_t b_val = b_ptr[b_loc];
-                        uint8_t *b_bytes = reinterpret_cast<uint8_t *>(&b_val);
-                        for (int pack_idx = 0; pack_idx < packs_per_item; pack_idx++) {
-                            uint8_t item_val = (b_bytes[pack_idx / 2] >> ((pack_idx % 2) * bits)) & item_mask;
-                            float b =
-                                static_cast<float>(item_val) * static_cast<float>(scale) + static_cast<float>(bias);
-                            float a = static_cast<float>(a_ptr[a_loc]);
-                            sum += a * b;
-                            a_loc += 1;
-                        }
-                        b_loc += 1;
-                    }
-                }
-                int64_t out_loc = mx::elem_to_loc(i * K + k, out_shape, out_strides);
-                out_ptr[out_loc] = static_cast<T>(sum);
-            }
-        }
-    });
-}
-
 void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    auto &scales = inputs[0];
-    auto &biases = inputs[1];
-    auto &a = inputs[2];
-    auto &b = inputs[3];
-    auto &out = outputs[0];
-
-    if (out.dtype() == mx::float16) {
-        return quantized_matmul_impl<mx::float16_t>(scales, biases, a, b, out, stream());
-    } else if (out.dtype() == mx::bfloat16) {
-        return quantized_matmul_impl<mx::bfloat16_t>(scales, biases, a, b, out, stream());
-    } else {
-        throw std::runtime_error("quantized_matmul: output must be float16 or bfloat16");
-    }
-}
-
-template <typename T, typename IndexT>
-void quantized_embedding_cpu_impl(const std::vector<mx::array> &inputs, mx::array &out, mx::Stream stream) {
-    const auto &indices = inputs[0];
-    const auto &scales = inputs[1];
-    const auto &biases = inputs[2];
-    const auto &weight = inputs[3];
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    for (const auto &input : inputs) {
-        encoder.set_input_array(input);
-    }
-    encoder.set_output_array(out);
-    encoder.dispatch([indices = mx::array::unsafe_weak_copy(indices), scales = mx::array::unsafe_weak_copy(scales),
-                      biases = mx::array::unsafe_weak_copy(biases), weight = mx::array::unsafe_weak_copy(weight),
-                      out_ptr = out.data<T>(), size = out.size()]() {
-        constexpr int group_size = 128;
-        constexpr int values_per_word = 8;
-        const int dim = weight.shape()[1] * values_per_word;
-        const int groups_per_row = dim / group_size;
-        const IndexT *indices_ptr = indices.data<IndexT>();
-        const uint32_t *weight_ptr = weight.data<uint32_t>();
-        const T *scales_ptr = scales.data<T>();
-        const T *biases_ptr = biases.data<T>();
-        for (size_t index = 0; index < size; ++index) {
-            const int token = index / dim;
-            const int column = index % dim;
-            const int row = indices_ptr[token];
-            const uint32_t packed = weight_ptr[row * weight.shape()[1] + column / values_per_word];
-            const float quantized = static_cast<float>((packed >> ((column % values_per_word) * 4)) & 15);
-            const int parameter = row * groups_per_row + column / group_size;
-            out_ptr[index] = static_cast<T>(quantized * static_cast<float>(scales_ptr[parameter]) +
-                                            static_cast<float>(biases_ptr[parameter]));
-        }
-    });
+    throw std::runtime_error("quantized_matmul: the course extension is GPU-only");
 }
 
 void QuantizedEmbedding::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    if (outputs[0].dtype() == mx::float16 && inputs[0].dtype() == mx::int32) {
-        quantized_embedding_cpu_impl<mx::float16_t, int32_t>(inputs, outputs[0], stream());
-    } else if (outputs[0].dtype() == mx::float16) {
-        quantized_embedding_cpu_impl<mx::float16_t, uint32_t>(inputs, outputs[0], stream());
-    } else if (inputs[0].dtype() == mx::int32) {
-        quantized_embedding_cpu_impl<mx::bfloat16_t, int32_t>(inputs, outputs[0], stream());
-    } else {
-        quantized_embedding_cpu_impl<mx::bfloat16_t, uint32_t>(inputs, outputs[0], stream());
-    }
+    throw std::runtime_error("quantized_embedding: the course extension is GPU-only");
 }
 
 void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {

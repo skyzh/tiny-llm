@@ -26,7 +26,7 @@ request.
 ```python
 while requests_in_queue_or_in_progress:
     if prefill_request is not None:
-        prefill_request.try_prefill()  # perform a chunk of chunked prefill
+        prefill_request.try_prefill()  # Day 1 processes the complete prompt
         if prefill_request.ready:
             if kv_cache.try_add(prefill_request):
                 prefill_request = next(requests)
@@ -36,7 +36,7 @@ while requests_in_queue_or_in_progress:
             request.append(token)
 ```
 
-Day 3 will refine this scheduler with **chunked prefill**. A long prompt can make one prefill
+Day 2 will refine this scheduler with **chunked prefill**. A long prompt can make one prefill
 step much slower than a decode step, delaying every active request's next token.
 Splitting the prompt into smaller chunks bounds the amount of prefill work in
 each scheduler iteration.
@@ -150,13 +150,13 @@ call. Then complete the scheduler in `batch_generate`: move finished prefills
 into idle decode slots, collect the next token and offset for each slot, and
 remove requests that reach EOS or `max_seq_len`.
 
-## Day 3 Preview: Chunked Prefill
+## Day 2 Preview: Chunked Prefill
 
 ```
 src/tiny_llm/batch.py
 ```
 
-On Day 3, modify `Request.try_prefill` to process at most `prefill_max_step`
+On Day 2, modify `Request.try_prefill` to process at most `prefill_max_step`
 prompt tokens per call.
 
 Materialize the KV cache between chunks. MLX evaluates lazily, so repeatedly

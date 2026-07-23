@@ -51,6 +51,67 @@ runs so a later sample does not inherit allocator state:
 pdm run test --week 2 --day 2
 ```
 
+## Debug Metal Without a CPU Twin
+
+From Day 3 onward, the course extensions are GPU-only. A second C++ CPU
+implementation would duplicate the equation without exercising the dispatch,
+memory, or synchronization behavior that makes a Metal kernel fail. Use this
+three-level validation ladder instead:
+
+1. Write the equation in readable Python/MLX. This is the semantic oracle.
+2. Translate it into a deliberately simple Metal kernel, usually with one
+   thread responsible for one output element.
+3. Optimize the validated Metal kernel with SIMD groups, vectorized loads, or
+   SIMD-group matrix operations.
+
+Compare each level with the one immediately above it. Do not debug an optimized
+kernel by comparing only full-model text output.
+
+### Make Failures Small and Synchronous
+
+Start with deterministic fixtures whose expected values are easy to inspect:
+zeros, ones, ramps, identity-like weights, and a fixed random seed. Exercise a
+small aligned shape and then a tail shape. For example, test 8 and 10 rows for
+an 8-row tile, or sequence lengths 32 and 35 for a 32-token block.
+
+MLX execution is lazy, so force evaluation directly after the operator under
+test. This turns a delayed compile or GPU execution failure into a failure at
+the responsible call site:
+
+```python
+expected = readable_operator(*inputs)
+actual = metal_operator(*inputs)
+mx.eval(expected, actual)
+
+assert actual.shape == expected.shape
+assert actual.dtype == mx.bfloat16
+assert mx.allclose(actual, expected, rtol=2e-2, atol=2e-2).item()
+```
+
+Check the wrapper boundary before inspecting the arithmetic. Assert the tensor
+rank, shape, dtype, and contiguity assumptions in Python or C++, and verify that
+the encoded buffer indices match the Metal function signature. Then classify
+the failure:
+
+- a pipeline creation error usually means the kernel name, specialization, or
+  Metal compilation is wrong;
+- an execution or address error usually means a grid, bounds check, stride, or
+  buffer binding is wrong;
+- a finite but inaccurate result usually means the indexing, reduction, mask,
+  dequantization, or accumulator update is wrong.
+
+For a numerical mismatch, temporarily simplify the schedule. Assign one output
+to one thread, remove cooperative loads, and compare an intermediate such as a
+dequantized weight group, a partial dot product, or an online-softmax row. A
+small debug-only output buffer is often more useful than printing from every
+GPU thread. Restore one optimization at a time and rerun both the aligned and
+tail-shape tests after each change.
+
+Metal API Validation and an Xcode GPU capture can help diagnose dispatch and
+resource problems, but they supplement this ladder rather than replace its
+small deterministic comparisons. Only profile after the vanilla and optimized
+kernels agree with the readable oracle.
+
 The isolated benchmarks in `benches/` use the same rule. Evaluate input setup
 before invoking the benchmark fixture so setup does not leak into the result.
 The Week 2 operator ladder compares the readable implementation, the optimized

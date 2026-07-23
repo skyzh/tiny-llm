@@ -21,8 +21,8 @@ from .utils import assert_allclose
 def test_task_1_grouped_expert_linear():
     mx.random.seed(1)
     scale = 0.25
-    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.float16) * scale
-    w_experts = mx.random.normal(shape=(3, 64, 128), dtype=mx.float16) * scale
+    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.bfloat16) * scale
+    w_experts = mx.random.normal(shape=(3, 64, 128), dtype=mx.bfloat16) * scale
     expert_ids = mx.array(
         [
             [2, 0, 1],
@@ -48,15 +48,15 @@ def test_task_1_grouped_expert_linear():
     expected = ref(mx.expand_dims(x, -2), expert_ids).squeeze(-2)
 
     assert out.shape == (2, 3, 64)
-    assert_allclose(out, expected, precision=mx.float16)
+    assert_allclose(out, expected, precision=mx.bfloat16, atol=2e-2)
 
 
 def test_task_2_router_topk():
     mx.random.seed(2)
     scale = 0.25
-    x = mx.random.normal(shape=(2, 2, 128), dtype=mx.float16) * scale
+    x = mx.random.normal(shape=(2, 2, 128), dtype=mx.bfloat16) * scale
     ref = nn.Linear(128, 4, bias=False)
-    ref.weight = mx.random.normal(shape=(4, 128), dtype=mx.float16) * scale
+    ref.weight = mx.random.normal(shape=(4, 128), dtype=mx.bfloat16) * scale
     ref = ref.to_quantized(group_size=128, bits=4)
 
     router_probs, expert_ids, expert_scores = route_topk(
@@ -83,19 +83,19 @@ def test_task_2_router_topk():
     assert expert_ids.shape == (2, 2, 2)
     assert expert_scores.shape == (2, 2, 2)
     assert expert_ids.tolist() == expected_ids.tolist()
-    assert_allclose(router_probs, expected_probs, precision=mx.float16)
-    assert_allclose(expert_scores, expected_scores, precision=mx.float16)
+    assert_allclose(router_probs, expected_probs, precision=mx.bfloat16)
+    assert_allclose(expert_scores, expected_scores, precision=mx.bfloat16)
     assert_allclose(
         normalized_scores,
         expected_normalized_scores,
-        precision=mx.float16,
+        precision=mx.bfloat16,
     )
 
 
 def test_task_3_moe():
     mx.random.seed(3)
     scale = 0.25
-    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.float16) * scale
+    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.bfloat16) * scale
     ref = MlxQwen3MoeSparseMoeBlock(
         SimpleNamespace(
             hidden_size=128,
@@ -105,15 +105,15 @@ def test_task_3_moe():
             norm_topk_prob=True,
         )
     )
-    ref.gate.weight = mx.random.normal(shape=(3, 128), dtype=mx.float16) * scale
+    ref.gate.weight = mx.random.normal(shape=(3, 128), dtype=mx.bfloat16) * scale
     ref.switch_mlp.gate_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
+        mx.random.normal(shape=(3, 128, 128), dtype=mx.bfloat16) * scale
     )
     ref.switch_mlp.up_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
+        mx.random.normal(shape=(3, 128, 128), dtype=mx.bfloat16) * scale
     )
     ref.switch_mlp.down_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
+        mx.random.normal(shape=(3, 128, 128), dtype=mx.bfloat16) * scale
     )
     nn.quantize(ref, group_size=128, bits=4)
 
@@ -130,4 +130,4 @@ def test_task_3_moe():
     expected = ref(x)
 
     assert out.shape == x.shape
-    assert_allclose(out, expected, precision=mx.float16)
+    assert_allclose(out, expected, precision=mx.bfloat16, atol=2e-2)

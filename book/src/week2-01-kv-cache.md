@@ -34,7 +34,8 @@ k = rms_norm(k, k_norm)
 q = rope(q, offset=slice(offset, offset + L))
 k = rope(k, offset=slice(offset, offset + L))
 (transpose as needed)
-x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L, H_q, D  # at float32 precision
+x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L, H_q, D
+# q/k/v and the returned model tensor are BF16; the readable expression may use FP32 intermediates
 (transpose as needed)
 x = linear(x, wo) -> B, L, E
 ```
@@ -170,7 +171,8 @@ q = rope(q, offset=slice(offset, offset + L))
 k = rope(k, offset=slice(offset, offset + L))
 transpose q, k, v to B, H, L, D
 k, v = cache.update_and_fetch(k, v)  # k/v: B, H, S, D; q: B, H_q, L, D
-x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, H_q, L, D  # float32
+x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, H_q, L, D
+# q/k/v and the returned model tensor are BF16; attention arithmetic is still the readable Week 1 path
 transpose and reshape x to B, L, H_q * D
 x = linear(x, wo) -> B, L, E
 ```
@@ -183,6 +185,8 @@ single-token decoding, `L = 1` and `S` grows by one on each call.
 The linear layers, RMSNorm, RoPE, SwiGLU, and attention remain the readable
 implementations at this checkpoint. Do not introduce packed weights or fast
 kernels yet: measuring one algorithmic change makes the gain attributable.
+The model still uses BF16 storage; "readable" describes the implementation, not
+a return to an FP32 model.
 
 ## Task 3: Create Request-Scoped Caches
 

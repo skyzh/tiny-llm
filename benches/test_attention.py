@@ -59,30 +59,23 @@ def test_refsol_attention(benchmark):
         assert_allclose(result, res, precision=mx.float32, rtol=1e-2)
 
 
-def test_refsol_flash_attention(benchmark):
-    with mx.stream(mx.gpu):
-        q, k, v, res = get_test_attention_data()
-        result = benchmark(
-            lambda: evaluate_attention(
-                lambda: tiny_llm_ref.flash_attention(q, k, v, scale=1.0)
-            )
-        )
-        assert_allclose(result, res, precision=mx.float32, rtol=1e-2)
-
-
 @pytest.mark.parametrize("sequence_length", [128, 512, 1024, 2048, 4096])
-@pytest.mark.parametrize("implementation", ["mlx", "explicit", "simdgroup_matrix"])
+@pytest.mark.parametrize("implementation", ["mlx", "explicit"])
 def test_qwen3_4b_causal_prefill(benchmark, sequence_length, implementation):
     with mx.stream(mx.gpu):
         q, k, v = get_qwen3_4b_prefill_data(sequence_length)
         if implementation == "mlx":
-            fn = lambda: mx.fast.scaled_dot_product_attention(
-                q, k, v, scale=1.0, mask="causal"
-            )
+
+            def fn():
+                return mx.fast.scaled_dot_product_attention(
+                    q, k, v, scale=1.0, mask="causal"
+                )
+
         elif implementation == "explicit":
-            fn = lambda: tiny_llm_ref.scaled_dot_product_attention_grouped(
-                q, k, v, scale=1.0, mask="causal"
-            )
-        else:
-            fn = lambda: tiny_llm_ref.flash_attention(q, k, v, scale=1.0, mask="causal")
+
+            def fn():
+                return tiny_llm_ref.scaled_dot_product_attention_grouped(
+                    q, k, v, scale=1.0, mask="causal"
+                )
+
         benchmark(lambda: evaluate_attention(fn))

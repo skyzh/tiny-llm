@@ -34,34 +34,7 @@ MLX_VARIANT = Variant("mlx", "MLX", "mlx", "week2")
 COURSE_VARIANTS = (
     WEEK1_VARIANT,
     Variant("week2", "Week 2 decode", "ref", "week2"),
-    Variant(
-        "week3-paged",
-        "Week 3 paged (Flash off)",
-        "ref",
-        "week3",
-        ("--disable-flash-attn",),
-    ),
-    Variant(
-        "week3-flash",
-        "Week 3 paged + FlashAttention",
-        "ref",
-        "week3",
-        ("--enable-flash-attn",),
-    ),
-    Variant(
-        "week3-lab",
-        "Week 3 paged + lab",
-        "ref",
-        "week3",
-        ("--disable-flash-attn", "--enable-performance-lab"),
-    ),
-    Variant(
-        "week3-flash-lab",
-        "Week 3 paged + Flash + lab",
-        "ref",
-        "week3",
-        ("--enable-flash-attn", "--enable-performance-lab"),
-    ),
+    Variant("week3", "Week 3 paged FlashAttention", "ref", "week3"),
     MLX_VARIANT,
 )
 WEEK2_VARIANTS = (
@@ -107,6 +80,13 @@ WEEK2_VARIANTS = (
         "ref",
         "week2",
         ("--week2-checkpoint", "swiglu"),
+    ),
+    Variant(
+        "week2-simd-matmul",
+        "2.6 SIMD matrix prefill",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "simd-matmul"),
     ),
     MLX_VARIANT,
 )
