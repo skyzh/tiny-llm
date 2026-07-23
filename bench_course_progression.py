@@ -130,6 +130,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--prefill-logits",
+        choices=("all", "last"),
+        default="all",
+        help=(
+            "compute all prompt logits for the course progression or only "
+            "the final row for a serving comparison"
+        ),
+    )
+    parser.add_argument(
         "--variant",
         action="append",
         choices=tuple(VARIANTS_BY_KEY),
@@ -170,6 +179,15 @@ def parse_args() -> argparse.Namespace:
             parser.error(
                 f"variants {invalid} do not belong to the {args.suite!r} suite"
             )
+    selected_variants = (
+        [VARIANTS_BY_KEY[key] for key in args.variant]
+        if args.variant
+        else list(WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS)
+    )
+    if args.prefill_logits == "last" and any(
+        variant.loader == "week1" for variant in selected_variants
+    ):
+        parser.error("--prefill-logits last requires variants that exclude Week 1")
     return args
 
 
@@ -215,6 +233,8 @@ def run_variant(
         str(args.output_len),
         "--warmup",
         str(args.warmup),
+        "--prefill-logits",
+        args.prefill_logits,
         "--seed",
         str(args.seed),
         *variant.extra_args,
@@ -348,7 +368,8 @@ def main() -> None:
     print(f"Host: {host['platform']} ({host['machine']}); MLX {host['mlx_version']}")
     print(
         f"Model={args.model} input={args.input_len} output={args.output_len} "
-        f"warmup={args.warmup} repeats={args.repeats} device={args.device}"
+        f"warmup={args.warmup} repeats={args.repeats} device={args.device} "
+        f"prefill_logits={args.prefill_logits}"
     )
     print(
         "Run on an otherwise idle machine. Checkpoints execute sequentially in "
@@ -389,6 +410,7 @@ def main() -> None:
                 "warmup": args.warmup,
                 "repeats": args.repeats,
                 "seed": args.seed,
+                "prefill_logits": args.prefill_logits,
                 "offline": args.offline,
                 "cooldown_seconds": args.cooldown_seconds,
                 "variants": [variant.key for variant in variants],

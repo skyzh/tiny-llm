@@ -124,35 +124,49 @@ template <typename T>
         }
     }
 
-    for (int position = simdgroup; position < context; position += SIMD_GROUPS_PER_QUERY) {
-        if (is_causal && position > context - L + query_position) continue;
-        const int logical_page = position / page_size;
-        if (logical_page >= max_pages) continue;
+    const int visible_context = is_causal
+        ? clamp(context - L + query_position + 1, 0, context)
+        : context;
+    const int visible_pages = min(
+        max_pages,
+        (visible_context + page_size - 1) / page_size);
+    for (int logical_page = 0; logical_page < visible_pages; logical_page++) {
         const int page_id = block_table[batch * max_pages + logical_page];
         if (page_id < 0) continue;
-        const int slot = position - logical_page * page_size;
-        const int page_offset = ((page_id * num_kv_heads + kv_head) * page_size + slot) * D;
+        const int page_start = logical_page * page_size;
+        const int live_slots = min(page_size, visible_context - page_start);
+        for (
+            int slot = simdgroup;
+            slot < live_slots;
+            slot += SIMD_GROUPS_PER_QUERY) {
+            const int page_offset =
+                ((page_id * num_kv_heads + kv_head) * page_size + slot) * D;
 
-        float partial = 0.0f;
-        for (int item = 0; item < values_per_lane; item++) {
-            const int dim = lane + item * 32;
-            if (dim < D && item < MAX_VALUES_PER_LANE) {
-                partial += query_values[item] * static_cast<float>(key_pages[page_offset + dim]);
+            float partial = 0.0f;
+            for (int item = 0; item < values_per_lane; item++) {
+                const int dim = lane + item * 32;
+                if (dim < D && item < MAX_VALUES_PER_LANE) {
+                    partial += query_values[item] *
+                        static_cast<float>(key_pages[page_offset + dim]);
+                }
             }
-        }
-        const float score = simd_sum(partial);
-        const float new_max = max(max_score, score);
-        const float old_factor = max_score == -INFINITY ? 0.0f : fast::exp(max_score - new_max);
-        const float score_factor = fast::exp(score - new_max);
-        sum = sum * old_factor + score_factor;
-        for (int item = 0; item < values_per_lane; item++) {
-            const int dim = lane + item * 32;
-            if (dim < D && item < MAX_VALUES_PER_LANE) {
-                accumulator[item] = accumulator[item] * old_factor +
-                    score_factor * static_cast<float>(value_pages[page_offset + dim]);
+            const float score = simd_sum(partial);
+            const float new_max = max(max_score, score);
+            const float old_factor = max_score == -INFINITY
+                ? 0.0f
+                : fast::exp(max_score - new_max);
+            const float score_factor = fast::exp(score - new_max);
+            sum = sum * old_factor + score_factor;
+            for (int item = 0; item < values_per_lane; item++) {
+                const int dim = lane + item * 32;
+                if (dim < D && item < MAX_VALUES_PER_LANE) {
+                    accumulator[item] = accumulator[item] * old_factor +
+                        score_factor *
+                        static_cast<float>(value_pages[page_offset + dim]);
+                }
             }
+            max_score = new_max;
         }
-        max_score = new_max;
     }
 
     threadgroup float* partial_accumulators = scratch;
@@ -273,24 +287,39 @@ instantiate_kernel("paged_attention_decode_bf16", paged_attention_decode, bfloat
         const int last_visible_key = last_query + (context - L);
         kv_tile_limit = clamp((last_visible_key + 1 + BK - 1) / BK, 0, total_kv_tiles);
     }
+    const bool single_page_tile = page_size >= BK && page_size % BK == 0;
 
     for (int tile_idx = 0; tile_idx < kv_tile_limit; tile_idx++) {
-        if (thread_idx < BK) {
-            const int key = tile_idx * BK + thread_idx;
+        const int tile_start = tile_idx * BK;
+        const int tile_logical_page = tile_start / page_size;
+        const int tile_page_slot = tile_start - tile_logical_page * page_size;
+        if (single_page_tile) {
+            if (thread_idx == 0) {
+                physical_pages[0] = tile_start < context && tile_logical_page < max_pages
+                    ? block_table[batch * max_pages + tile_logical_page]
+                    : -1;
+            }
+        } else if (thread_idx < BK) {
+            const int key = tile_start + thread_idx;
             const int logical_page = key / page_size;
-            physical_pages[thread_idx] = key < context && logical_page < max_pages
-                ? block_table[batch * max_pages + logical_page]
-                : -1;
+            physical_pages[thread_idx] =
+                key < context && logical_page < max_pages
+                    ? block_table[batch * max_pages + logical_page]
+                    : -1;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         for (int idx = thread_idx; idx < BK * HEAD_DIM; idx += THREADS) {
             const int key = idx / HEAD_DIM;
             const int dim = idx - key * HEAD_DIM;
-            const int global_key = tile_idx * BK + key;
+            const int global_key = tile_start + key;
             const int logical_page = global_key / page_size;
-            const int slot = global_key - logical_page * page_size;
-            const int page_id = physical_pages[key];
+            const int slot = single_page_tile
+                ? tile_page_slot + key
+                : global_key - logical_page * page_size;
+            const int page_id = single_page_tile
+                ? physical_pages[0]
+                : physical_pages[key];
             const int page_offset = ((page_id * num_kv_heads + kv_head) * page_size + slot) * HEAD_DIM;
             kv_tile[dim * LDK + key] = page_id >= 0
                 ? key_pages[page_offset + dim]
@@ -316,8 +345,11 @@ instantiate_kernel("paged_attention_decode_bf16", paged_attention_decode, bfloat
             thread auto& score_values = scores[key_fragment].thread_elements();
             for (int element = 0; element < 2; element++) {
                 const int tile_key = key_fragment * MMA_SIZE + coord.x + element;
-                const int key = tile_idx * BK + tile_key;
-                bool valid = query_valid && key < context && physical_pages[tile_key] >= 0;
+                const int key = tile_start + tile_key;
+                const int page_id = single_page_tile
+                    ? physical_pages[0]
+                    : physical_pages[tile_key];
+                bool valid = query_valid && key < context && page_id >= 0;
                 if (is_causal) valid = valid && key <= query_row + (context - L);
                 score_values[element] = valid ? score_values[element] * scale : -INFINITY;
             }
@@ -355,10 +387,14 @@ instantiate_kernel("paged_attention_decode_bf16", paged_attention_decode, bfloat
         for (int idx = thread_idx; idx < BK * HEAD_DIM; idx += THREADS) {
             const int key = idx / HEAD_DIM;
             const int dim = idx - key * HEAD_DIM;
-            const int global_key = tile_idx * BK + key;
+            const int global_key = tile_start + key;
             const int logical_page = global_key / page_size;
-            const int slot = global_key - logical_page * page_size;
-            const int page_id = physical_pages[key];
+            const int slot = single_page_tile
+                ? tile_page_slot + key
+                : global_key - logical_page * page_size;
+            const int page_id = single_page_tile
+                ? physical_pages[0]
+                : physical_pages[key];
             const int page_offset = ((page_id * num_kv_heads + kv_head) * page_size + slot) * HEAD_DIM;
             kv_tile[key * LDV + dim] = page_id >= 0
                 ? value_pages[page_offset + dim]
@@ -452,31 +488,49 @@ instantiate_kernel("paged_attention_decode_bf16", paged_attention_decode, bfloat
         const int last_visible_key = last_query + (context - L);
         kv_tile_limit = clamp((last_visible_key + 1 + BK - 1) / BK, 0, total_kv_tiles);
     }
+    const bool single_page_tile = page_size >= BK && page_size % BK == 0;
 
     for (int tile_idx = 0; tile_idx < kv_tile_limit; tile_idx++) {
-        if (thread_idx < BK) {
-            const int key = tile_idx * BK + thread_idx;
+        const int tile_start = tile_idx * BK;
+        const int tile_logical_page = tile_start / page_size;
+        const int tile_page_slot = tile_start - tile_logical_page * page_size;
+        if (single_page_tile) {
+            if (thread_idx == 0) {
+                physical_pages[0] = tile_start < context && tile_logical_page < max_pages
+                    ? block_table[batch * max_pages + tile_logical_page]
+                    : -1;
+            }
+        } else if (thread_idx < BK) {
+            const int key = tile_start + thread_idx;
             const int logical_page = key / page_size;
-            physical_pages[thread_idx] = key < context && logical_page < max_pages
-                ? block_table[batch * max_pages + logical_page]
-                : -1;
+            physical_pages[thread_idx] =
+                key < context && logical_page < max_pages
+                    ? block_table[batch * max_pages + logical_page]
+                    : -1;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
         for (int idx = thread_idx; idx < BK * MAX_D; idx += THREADS) {
             const int key = idx / MAX_D;
             const int dim = idx - key * MAX_D;
-            const int global_key = tile_idx * BK + key;
+            const int global_key = tile_start + key;
             const int logical_page = global_key / page_size;
-            const int slot = global_key - logical_page * page_size;
-            const int page_id = physical_pages[key];
+            const int slot = single_page_tile
+                ? tile_page_slot + key
+                : global_key - logical_page * page_size;
+            const int page_id = single_page_tile
+                ? physical_pages[0]
+                : physical_pages[key];
             const int page_offset = ((page_id * num_kv_heads + kv_head) * page_size + slot) * D;
             kv_tile[idx] = page_id >= 0 && dim < D ? key_pages[page_offset + dim] : 0.0f;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         const int tile_key = lane;
-        const int key = tile_idx * BK + tile_key;
-        bool valid = query_valid && key < context && physical_pages[tile_key] >= 0;
+        const int key = tile_start + tile_key;
+        const int page_id = single_page_tile
+            ? physical_pages[0]
+            : physical_pages[tile_key];
+        bool valid = query_valid && key < context && page_id >= 0;
         if (is_causal) valid = valid && key <= query_row + (context - L);
         float score = -INFINITY;
         if (valid) {
@@ -502,10 +556,14 @@ instantiate_kernel("paged_attention_decode_bf16", paged_attention_decode, bfloat
         for (int idx = thread_idx; idx < BK * MAX_D; idx += THREADS) {
             const int value_key = idx / MAX_D;
             const int dim = idx - value_key * MAX_D;
-            const int global_key = tile_idx * BK + value_key;
+            const int global_key = tile_start + value_key;
             const int logical_page = global_key / page_size;
-            const int slot = global_key - logical_page * page_size;
-            const int page_id = physical_pages[value_key];
+            const int slot = single_page_tile
+                ? tile_page_slot + value_key
+                : global_key - logical_page * page_size;
+            const int page_id = single_page_tile
+                ? physical_pages[0]
+                : physical_pages[value_key];
             const int page_offset = ((page_id * num_kv_heads + kv_head) * page_size + slot) * D;
             kv_tile[idx] = page_id >= 0 && dim < D ? value_pages[page_offset + dim] : 0.0f;
         }

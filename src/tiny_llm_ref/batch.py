@@ -58,9 +58,8 @@ class Request:
 
         # Materialize KV cache after each prefill chunk to truncate the lazy
         # computation graph and prevent memory from growing unboundedly.
-        for i in self.kv_cache:
-            mx.eval(i.key_values[0])
-            mx.eval(i.key_values[1])
+        for layer_cache in self.kv_cache:
+            layer_cache.materialize()
         if self.offset == self.prefill_tokens.size:
             self.is_prefill_done = True
             mx.eval(token)

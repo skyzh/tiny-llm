@@ -67,6 +67,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument(
+        "--prefill-logits",
+        choices=("all", "last"),
+        default="all",
+        help=(
+            "compute logits for every prompt position for prompt-scoring "
+            "comparisons, or only the final row for serving"
+        ),
+    )
+    parser.add_argument(
         "--batch-decode",
         action="store_true",
         help="Run the Week 3 continuous-batching serving benchmark.",
@@ -102,6 +111,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--warmup must be >= 0")
     if args.batch_decode and args.loader == "week1":
         raise ValueError("--batch-decode requires --loader week2 or week3")
+    if args.prefill_logits == "last" and args.loader == "week1":
+        raise ValueError("--prefill-logits last requires --loader week2 or week3")
     if args.batch_decode and args.batch_size <= 0:
         raise ValueError("--batch-size must be > 0")
     if args.batch_decode and args.prefill_step <= 0:
@@ -234,6 +245,7 @@ def run_one_request_week1(
 def run_one_request_week2(
     model,
     request: BenchRequest,
+    prefill_logits_to_keep: int | None = None,
 ) -> tuple[int, float, float]:
     kv_cache = model.create_kv_cache()
     try:
@@ -241,9 +253,13 @@ def run_one_request_week2(
         offset = 0
 
         t0 = perf_counter()
-        # Match Week 1 and MLX prefill by computing logits for every prompt
-        # position. Decode has L=1, so keeping one row changes no decode work.
-        token = sample_next_week2(model, context, offset, kv_cache, logits_to_keep=None)
+        token = sample_next_week2(
+            model,
+            context,
+            offset,
+            kv_cache,
+            logits_to_keep=prefill_logits_to_keep,
+        )
         mx.eval(token)
         prefill_time = perf_counter() - t0
         offset += context.size
@@ -267,6 +283,7 @@ def run_one_request_week2(
 def run_one_request_mlx(
     model,
     request: BenchRequest,
+    prefill_logits_to_keep: int | None = None,
 ) -> tuple[int, float, float]:
     from mlx_lm.models.cache import make_prompt_cache
 
@@ -274,7 +291,15 @@ def run_one_request_mlx(
     context = mx.array(request.prompt_token_ids, dtype=mx.int32)
 
     t0 = perf_counter()
-    logits = model(context[None, :], cache=cache)
+    if prefill_logits_to_keep is None:
+        logits = model(context[None, :], cache=cache)
+    else:
+        hidden = model.model(context[None, :], cache=cache)
+        hidden = hidden[:, -prefill_logits_to_keep:, :]
+        if model.args.tie_word_embeddings:
+            logits = model.model.embed_tokens.as_linear(hidden)
+        else:
+            logits = model.lm_head(hidden)
     token = mx.argmax(logits[:, -1, :], axis=-1)
     mx.eval(token)
     prefill_time = perf_counter() - t0
@@ -351,7 +376,7 @@ def run_batch_requests_serving(
             pending_prefill.offset += chunk_len
 
             for layer_cache in pending_prefill.kv_cache:
-                mx.eval(layer_cache.key_values[0], layer_cache.key_values[1])
+                layer_cache.materialize()
 
             if pending_prefill.offset == len(pending_prefill.request.prompt_token_ids):
                 pending_prefill.is_prefill_done = True
@@ -434,10 +459,12 @@ def main() -> None:
         args.solution
     )
     model_name = shortcut_name_to_full_name(args.model)
+    effective_prefill_logits = "last" if args.batch_decode else args.prefill_logits
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
         f"Model={model_name} "
         f"PagedAttention={not args.disable_paged_attention} "
+        f"PrefillLogits={effective_prefill_logits} "
         f"Week2Checkpoint={args.week2_checkpoint}"
     )
     mlx_model, tokenizer = load(model_name)
@@ -455,9 +482,14 @@ def main() -> None:
                     "--disable-paged-attention is not supported with --solution mlx"
                 )
             model = mlx_model
+            prefill_logits_to_keep = 1 if args.prefill_logits == "last" else None
 
             def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
-                return run_one_request_mlx(model, request)
+                return run_one_request_mlx(
+                    model,
+                    request,
+                    prefill_logits_to_keep=prefill_logits_to_keep,
+                )
 
         elif args.loader == "week1":
             model = models.dispatch_model(model_name, mlx_model, week=1)
@@ -505,11 +537,13 @@ def main() -> None:
                     )
 
             else:
+                prefill_logits_to_keep = 1 if args.prefill_logits == "last" else None
 
                 def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
                     return run_one_request_week2(
                         model,
                         request,
+                        prefill_logits_to_keep=prefill_logits_to_keep,
                     )
 
         requests = build_requests(
@@ -535,7 +569,7 @@ def main() -> None:
             )
             for i in warmup_iter:
                 if args.batch_decode:
-                    run_benchmark([requests[i % len(requests)]])
+                    run_benchmark(requests)
                 else:
                     run_one_request(requests[i % len(requests)])
 

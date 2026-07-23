@@ -167,6 +167,26 @@ def test_task_1_paged_pool_grows_storage_geometrically():
     assert pool.value_pages.shape[0] == pool.num_pages
 
 
+def test_task_1_materializes_page_storage_without_dense_gather(monkeypatch):
+    pool = TinyKvPagedPool(page_size=4)
+    cache = TinyKvPagedCache(pool=pool)
+    cache.update_and_fetch_paged(*_random_chunk(5))
+
+    def fail_dense_gather():
+        raise AssertionError("materializing paged storage must not gather dense K/V")
+
+    eval_calls = []
+    cache.gather_dense = fail_dense_gather
+    monkeypatch.setattr(mx, "eval", lambda *arrays: eval_calls.append(arrays))
+
+    cache.materialize()
+
+    assert len(eval_calls) == 1
+    key_pages, value_pages = eval_calls[0]
+    assert key_pages.shape == pool.key_pages.shape
+    assert value_pages.shape == pool.value_pages.shape
+
+
 def test_task_1_paged_cache_rewind():
     page_size = 4
     pool = TinyKvPagedPool(page_size=page_size)

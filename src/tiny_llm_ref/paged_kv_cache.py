@@ -271,6 +271,12 @@ class TinyKvPagedCache(TinyKvCache):
         self._append_chunk(key, value)
         return self.paged_metadata(mask=mask)
 
+    def materialize(self):
+        key_pages = self.pool.key_pages
+        value_pages = self.pool.value_pages
+        if key_pages is not None and value_pages is not None:
+            mx.eval(key_pages, value_pages)
+
     def rewind(self, n: int):
         assert 0 <= n <= self.offset
         new_offset = self.offset - n

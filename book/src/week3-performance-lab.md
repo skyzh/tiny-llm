@@ -38,6 +38,20 @@ One number cannot describe a serving engine. Record at least:
 Keep the workload fixed while varying one scheduling choice. Record model,
 MLX version, hardware, prompt/output distribution, warmup, and repeat count.
 
+For a single-request serving baseline against MLX, request only the final
+prompt logit row and exclude Week 1, whose readable interface always computes
+all rows:
+
+```bash
+pdm run bench-course-progression --offline --repeats 3 \
+  --variant week2 --variant week3 --variant mlx \
+  --prefill-logits last --input-len 512 --output-len 65
+```
+
+Use the default `--prefill-logits all` only when the workload really consumes
+the score at every prompt position. It is a matched prompt-scoring benchmark,
+not the generation-serving prefill path.
+
 ## Experiment 1: Prefill Chunk Size
 
 Run the same mixture of long prompts and active decoders with several

@@ -295,11 +295,14 @@ Implement two correctness-first GPU dispatches:
 
 1. For `L <= 8`, partition logical context positions across SIMD groups and
    merge their partial `(max, sum, output)` states in threadgroup memory. The
-   reference schedule uses 32 SIMD groups per query so group `g` visits
-   positions `g`, `g + 32`, `g + 64`, and so on.
+   reference schedule uses 32 SIMD groups per query. Resolve the physical page
+   once, then let group `g` visit slots `g`, `g + 32`, `g + 64`, and so on
+   within that page; do not divide and reload `block_table` for every token.
 2. For longer queries, assign query rows to a direct page-walking schedule and
-   resolve every K/V tile through `block_table`. Favor inspectable ownership
-   over the final tiled performance schedule.
+   resolve every K/V tile through `block_table`. When a tile is aligned and
+   cannot cross a page boundary, share its one physical page id across the
+   whole tile. Favor inspectable ownership over the final tiled performance
+   schedule.
 
 Compare small deterministic fixtures with the readable MLX equation and the
 dense Week 2 attention path before tuning the page-walking schedule.

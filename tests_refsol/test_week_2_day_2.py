@@ -55,3 +55,22 @@ def test_single_request_benchmark_releases_cache_after_failure(monkeypatch):
         )
 
     assert all(cache.released for cache in model.caches)
+
+
+def test_single_request_benchmark_selects_serving_prefill_logits(monkeypatch):
+    model = FakeModel()
+    observed = []
+
+    def sample(model, tokens, offset, cache, logits_to_keep=1):
+        observed.append(logits_to_keep)
+        return mx.array([7], dtype=mx.uint32)
+
+    monkeypatch.setattr(bench, "sample_next_week2", sample)
+
+    bench.run_one_request_week2(
+        model,
+        bench.BenchRequest(prompt_token_ids=[1, 2, 3], max_new_tokens=1),
+        prefill_logits_to_keep=1,
+    )
+
+    assert observed == [1]

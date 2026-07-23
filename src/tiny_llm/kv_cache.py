@@ -31,6 +31,10 @@ class TinyKvCache(ABC):
     def release(self):
         pass
 
+    def materialize(self):
+        """Evaluate owned K/V storage without changing its logical layout."""
+        pass
+
     def update_and_fetch_paged(
         self,
         key: mx.array,
@@ -86,6 +90,9 @@ class TinyKvFullCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        pass
+
+    def materialize(self):
         pass
 
     def rewind(self, n: int):

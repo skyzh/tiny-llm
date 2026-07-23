@@ -41,6 +41,20 @@ The prefill timer computes logits for every prompt position on Week 1, Week 2,
 Week 3, and MLX. Decode requests only the final row, but its input already has
 one token, so that shortcut does not change the compared decode work.
 
+Generation serving needs only the final prompt logit row. Measure that workload
+separately (Week 1 is excluded because its readable interface always computes
+all rows):
+
+```bash
+pdm run bench-course-progression --offline --repeats 3 \
+  --variant week2 --variant week3 --variant mlx \
+  --prefill-logits last --input-len 512 --output-len 65 --warmup 2
+```
+
+Do not compare a final-row tiny-llm run with an all-row MLX run. The progression
+runner passes the same prefill mode to every selected checkpoint and records it
+in JSON output.
+
 The default uses the reference solution. Add `--solution tiny_llm` to run the
 same checkpoint sequence against your implementation.
 
