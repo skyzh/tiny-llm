@@ -150,7 +150,7 @@ pdm run build-ext
 pdm run test --week 2 --day 5
 ```
 
-Day 6 changes workload shape rather than replacing another elementwise or
+Day 6 changes workload shape rather than replacing another element-wise or
 reduction operator: it introduces SIMD-matrix fragments for quantized prefill.
 Keep today's `swiglu` checkpoint intact so that prefill tiling has a clean
 before-and-after comparison.

@@ -98,7 +98,7 @@ unnormalized output accumulator per row. For each K/V tile:
 2. apply scale and causal bounds;
 3. merge the tile maximum into the running maximum;
 4. rescale the previous sum and output accumulator;
-5. exponentiate the current scores and update the running sum;
+5. compute exponentials for the current scores and update the running sum;
 6. multiply the tile probabilities by V and update the output accumulator.
 
 After the final visible tile, divide each output row by its running sum and
