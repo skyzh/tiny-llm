@@ -1,131 +1,68 @@
-from types import SimpleNamespace
+"""Week 3 Day 3 chunked-prefill tests."""
 
 import mlx.core as mx
-import mlx.nn as nn
-from mlx_lm.models.qwen3_moe import (
-    Qwen3MoeSparseMoeBlock as MlxQwen3MoeSparseMoeBlock,
-)
-from mlx_lm.models.switch_layers import SwitchLinear
+import pytest
 
-from .tiny_llm_base import (
-    Moe,
-    QuantizedWeights,
-    grouped_expert_linear,
-    route_topk,
-)
-from .utils import assert_allclose
+from .tiny_llm_base import Request, TinyKvFullCache
 
 
-def test_task_1_grouped_expert_linear():
-    mx.random.seed(1)
-    scale = 0.25
-    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.float16) * scale
-    w_experts = mx.random.normal(shape=(3, 64, 128), dtype=mx.float16) * scale
-    expert_ids = mx.array(
-        [
-            [2, 0, 1],
-            [1, 2, 0],
-        ],
-        dtype=mx.uint32,
-    )
+class FakeDetokenizer:
+    def __init__(self, _):
+        self.text = ""
 
-    ref = SwitchLinear(
-        input_dims=w_experts.shape[-1],
-        output_dims=w_experts.shape[-2],
-        num_experts=w_experts.shape[0],
-        bias=False,
-    )
-    ref.weight = w_experts
-    ref = ref.to_quantized(group_size=128, bits=4)
-
-    out = grouped_expert_linear(
-        x,
-        QuantizedWeights.from_mlx_layer(ref),
-        expert_ids,
-    )
-    expected = ref(mx.expand_dims(x, -2), expert_ids).squeeze(-2)
-
-    assert out.shape == (2, 3, 64)
-    assert_allclose(out, expected, precision=mx.float16)
+    def add_token(self, token):
+        self.text += str(token)
 
 
-def test_task_2_router_topk():
-    mx.random.seed(2)
-    scale = 0.25
-    x = mx.random.normal(shape=(2, 2, 128), dtype=mx.float16) * scale
-    ref = nn.Linear(128, 4, bias=False)
-    ref.weight = mx.random.normal(shape=(4, 128), dtype=mx.float16) * scale
-    ref = ref.to_quantized(group_size=128, bits=4)
+class FakeTokenizer:
+    eos_token_id = 99
+    _tokenizer = object()
+    detokenizer = FakeDetokenizer(_tokenizer)
 
-    router_probs, expert_ids, expert_scores = route_topk(
-        x,
-        QuantizedWeights.from_mlx_layer(ref),
-        top_k=2,
-    )
-    _, _, normalized_scores = route_topk(
-        x,
-        QuantizedWeights.from_mlx_layer(ref),
-        top_k=2,
-        norm_topk_prob=True,
-    )
-
-    expected_probs = mx.softmax(ref(x), axis=-1, precise=True)
-    expected_ids = mx.argpartition(-expected_probs, kth=1, axis=-1)[..., :2]
-    expected_scores = mx.take_along_axis(expected_probs, expected_ids, axis=-1)
-    expected_normalized_scores = expected_scores / expected_scores.sum(
-        axis=-1,
-        keepdims=True,
-    )
-
-    assert router_probs.shape == (2, 2, 4)
-    assert expert_ids.shape == (2, 2, 2)
-    assert expert_scores.shape == (2, 2, 2)
-    assert expert_ids.tolist() == expected_ids.tolist()
-    assert_allclose(router_probs, expected_probs, precision=mx.float16)
-    assert_allclose(expert_scores, expected_scores, precision=mx.float16)
-    assert_allclose(
-        normalized_scores,
-        expected_normalized_scores,
-        precision=mx.float16,
-    )
+    def encode(self, prompt, add_special_tokens=False):
+        assert not add_special_tokens
+        return list(range(1, len(prompt) + 1))
 
 
-def test_task_3_moe():
-    mx.random.seed(3)
-    scale = 0.25
-    x = mx.random.normal(shape=(2, 3, 128), dtype=mx.float16) * scale
-    ref = MlxQwen3MoeSparseMoeBlock(
-        SimpleNamespace(
-            hidden_size=128,
-            moe_intermediate_size=128,
-            num_experts=3,
-            num_experts_per_tok=2,
-            norm_topk_prob=True,
-        )
-    )
-    ref.gate.weight = mx.random.normal(shape=(3, 128), dtype=mx.float16) * scale
-    ref.switch_mlp.gate_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
-    )
-    ref.switch_mlp.up_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
-    )
-    ref.switch_mlp.down_proj.weight = (
-        mx.random.normal(shape=(3, 128, 128), dtype=mx.float16) * scale
-    )
-    nn.quantize(ref, group_size=128, bits=4)
+class FakeModel:
+    num_hidden_layers = 1
 
-    moe = Moe(
-        w_router=QuantizedWeights.from_mlx_layer(ref.gate),
-        w_gate=QuantizedWeights.from_mlx_layer(ref.switch_mlp.gate_proj),
-        w_up=QuantizedWeights.from_mlx_layer(ref.switch_mlp.up_proj),
-        w_down=QuantizedWeights.from_mlx_layer(ref.switch_mlp.down_proj),
-        num_experts_per_tok=2,
-        norm_topk_prob=True,
-    )
+    def __init__(self):
+        self.calls = []
 
-    out = moe(x)
-    expected = ref(x)
+    def create_kv_cache(self):
+        return [TinyKvFullCache()]
 
-    assert out.shape == x.shape
-    assert_allclose(out, expected, precision=mx.float16)
+    def __call__(self, inputs, offsets, cache, logits_to_keep=1):
+        offset = offsets[0] if isinstance(offsets, list) else int(offsets)
+        self.calls.append((offset, inputs.shape[1]))
+        length = inputs.shape[1]
+        key = mx.zeros((1, 1, length, 1), dtype=mx.float32)
+        cache[0].update_and_fetch(key, key)
+        logits = mx.zeros((1, 1, 4), dtype=mx.float32)
+        return logits.at[..., 1].add(1)
+
+
+def test_chunked_prefill_bounds_work_and_advances_cache():
+    model = FakeModel()
+    request = Request(model, FakeTokenizer(), "1234567", prefill_max_step=3)
+
+    request.try_prefill()
+    assert request.offset == 3
+    assert request.kv_cache[0].offset == 3
+    assert not request.is_prefill_done
+
+    request.try_prefill()
+    assert request.offset == 6
+    assert request.kv_cache[0].offset == 6
+    assert not request.is_prefill_done
+
+    request.try_prefill()
+    assert request.offset == 7
+    assert request.kv_cache[0].offset == 7
+    assert request.is_prefill_done
+    assert request.next_token == 1
+    assert model.calls == [(0, 3), (3, 3), (6, 1)]
+
+    with pytest.raises(ValueError, match="after done"):
+        request.try_prefill()

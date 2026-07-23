@@ -1,211 +1,206 @@
-from types import SimpleNamespace
+"""Week 3 Day 2 FlashAttention tests."""
 
+import pytest
+import time
 import mlx.core as mx
-
-from .tiny_llm_base import (
-    BatchingKvCache,
-    Qwen3ModelWeek2,
-    Qwen3ModelWeek3,
-    TinyKvPagedCache,
-    TinyKvPagedPool,
-    flash_attention,
-    paged_attention,
-    scaled_dot_product_attention_grouped,
-)
-from .utils import assert_allclose
+from .tiny_llm_base import *
+from .utils import *
 
 
-def _random_chunk(
-    length: int, num_heads: int = 2, head_dim: int = 4
-) -> tuple[mx.array, mx.array]:
-    key = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
-    value = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
-    return key, value
+def attention_helper(
+    stream: mx.Stream,
+    H_q,
+    H,
+    L,
+    E,
+    S,
+    BATCH,
+    mask_mode: str,
+    precision=mx.float32,
+):
+    with mx.stream(stream):
+        q_shape = (BATCH, H_q, L, E)
+        kv_shape = (BATCH, H, S, E)
+        mask_shape = (BATCH, H_q, L, S)
+        scale = 0.9
+        for _ in range(100):
+            query = mx.random.uniform(shape=q_shape, dtype=precision)
+            key = mx.random.uniform(shape=kv_shape, dtype=precision)
+            value = mx.random.uniform(shape=kv_shape, dtype=precision)
+            if mask_mode == "no_mask":
+                mask = None
+            elif mask_mode == "mask":
+                mask = mx.random.uniform(shape=mask_shape, dtype=precision)
+            elif mask_mode == "causal":
+                mask = "causal"
+            else:
+                raise ValueError(f"Unknown mask_mode: {mask_mode}")
 
-
-def _quantized_layer(
-    out_dim: int, in_dim: int, group_size: int = 128
-) -> SimpleNamespace:
-    weight = mx.random.normal(shape=(out_dim, in_dim), dtype=mx.bfloat16)
-    quantized_weight, scales, biases = mx.quantize(
-        weight, group_size=group_size, bits=4
-    )
-    return SimpleNamespace(
-        weight=quantized_weight,
-        scales=scales,
-        biases=biases,
-        group_size=group_size,
-        bits=4,
-    )
-
-
-def _fake_qwen3_mlx_model() -> SimpleNamespace:
-    mx.random.seed(0)
-    args = SimpleNamespace(
-        num_hidden_layers=2,
-        hidden_size=128,
-        vocab_size=128,
-        num_attention_heads=4,
-        num_key_value_heads=2,
-        head_dim=32,
-        intermediate_size=256,
-        rms_norm_eps=1e-5,
-        max_position_embeddings=128,
-        rope_theta=10000,
-        tie_word_embeddings=True,
-    )
-    embed_tokens = _quantized_layer(args.vocab_size, args.hidden_size)
-    kv_hidden_size = args.num_key_value_heads * args.head_dim
-    attn_hidden_size = args.num_attention_heads * args.head_dim
-    layers = []
-    for _ in range(args.num_hidden_layers):
-        layers.append(
-            SimpleNamespace(
-                self_attn=SimpleNamespace(
-                    q_proj=_quantized_layer(attn_hidden_size, args.hidden_size),
-                    k_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
-                    v_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
-                    o_proj=_quantized_layer(args.hidden_size, attn_hidden_size),
-                    q_norm=SimpleNamespace(
-                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
-                    ),
-                    k_norm=SimpleNamespace(
-                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
-                    ),
-                ),
-                mlp=SimpleNamespace(
-                    gate_proj=_quantized_layer(
-                        args.intermediate_size, args.hidden_size
-                    ),
-                    up_proj=_quantized_layer(args.intermediate_size, args.hidden_size),
-                    down_proj=_quantized_layer(
-                        args.hidden_size, args.intermediate_size
-                    ),
-                ),
-                input_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-                ),
-                post_attention_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-                ),
+            reference_output = mx.fast.scaled_dot_product_attention(
+                q=query,
+                k=key,
+                v=value,
+                scale=scale,
+                mask=mask,
             )
-        )
-    return SimpleNamespace(
-        args=args,
-        model=SimpleNamespace(
-            embed_tokens=embed_tokens,
-            layers=layers,
-            norm=SimpleNamespace(
-                weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-            ),
-        ),
+            user_output = flash_attention(
+                query,
+                key,
+                value,
+                scale=scale,
+                mask=mask,
+            )
+            mx.eval(user_output)  # so that any error will be caught here
+            assert user_output.dtype == precision
+            comparison_precision = (
+                mx.bfloat16 if precision == mx.bfloat16 else mx.float16
+            )
+            assert_allclose(
+                user_output, reference_output, precision=comparison_precision
+            )
+
+
+def time_flash_attention(
+    stream: mx.Stream,
+    query: mx.array,
+    key: mx.array,
+    value: mx.array,
+    scale: float,
+    mask: mx.array | str,
+    num_iters: int = 4,
+) -> float:
+    with mx.stream(stream):
+        start = time.perf_counter()
+        for _ in range(num_iters):
+            output = flash_attention(query, key, value, scale=scale, mask=mask)
+            mx.eval(output)
+    return (time.perf_counter() - start) / num_iters
+
+
+def median(values: list[float]) -> float:
+    values = sorted(values)
+    return values[len(values) // 2]
+
+
+def assert_causal_mask_faster_than_all_zero_mask(
+    stream: mx.Stream,
+    batch: int,
+    h_q: int,
+    h: int,
+    l: int,
+    s: int,
+    e: int,
+    scale: float = 0.9,
+    precision=mx.float32,
+):
+    q_shape = (batch, h_q, l, e)
+    kv_shape = (batch, h, s, e)
+    mask_shape = (batch, h_q, l, s)
+
+    with mx.stream(stream):
+        query = mx.random.uniform(shape=q_shape, dtype=precision)
+        key = mx.random.uniform(shape=kv_shape, dtype=precision)
+        value = mx.random.uniform(shape=kv_shape, dtype=precision)
+        zero_mask = mx.zeros(shape=mask_shape, dtype=mx.float32)
+
+        for _ in range(3):
+            mx.eval(flash_attention(query, key, value, scale=scale, mask="causal"))
+            mx.eval(flash_attention(query, key, value, scale=scale, mask=zero_mask))
+
+    causal_samples = []
+    zero_mask_samples = []
+    for round_idx in range(6):
+        if round_idx % 2 == 0:
+            causal_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask="causal"
+                )
+            )
+            zero_mask_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask=zero_mask
+                )
+            )
+        else:
+            zero_mask_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask=zero_mask
+                )
+            )
+            causal_samples.append(
+                time_flash_attention(
+                    stream, query, key, value, scale=scale, mask="causal"
+                )
+            )
+
+    causal_time = median(causal_samples)
+    zero_mask_time = median(zero_mask_samples)
+    assert causal_time < zero_mask_time, (
+        "Expected causal mask to be faster than an all-zero mask, got "
+        f"causal={causal_time:.6f}s and zero_mask={zero_mask_time:.6f}s."
     )
 
 
-def test_task_1_paged_attention_matches_dense_flash_attention():
-    page_size = 4
-    pool = TinyKvPagedPool(page_size=page_size)
-    cache = TinyKvPagedCache(pool=pool)
-    first_key, first_value = _random_chunk(3)
-    second_key, second_value = _random_chunk(3)
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_2_flash_attention_cpu_small(mask_mode: str):
+    attention_helper(mx.cpu, 6, 3, 2, 5, 3, 1, mask_mode)
 
-    cache.update_and_fetch(first_key, first_value)
-    metadata = cache.update_and_fetch_paged(second_key, second_value, mask="causal")
 
-    query = mx.random.normal(shape=(1, 4, second_key.shape[2], 4)).astype(mx.float32)
-    dense_key, dense_value = cache.gather_dense()
-    dense_output = flash_attention(
-        query,
-        dense_key,
-        dense_value,
-        mask="causal",
-    )
-    paged_output = paged_attention(
-        query,
-        metadata.key_pages,
-        metadata.value_pages,
-        metadata.block_table,
-        metadata.context_lens,
-        metadata.page_size,
-        mask=metadata.mask,
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
+def test_task_2_flash_attention_cpu(mask_mode: str):
+    attention_helper(mx.cpu, 18, 6, 7, 5, 3, 10, mask_mode)
+
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_2_flash_attention_cpu_large(mask_mode: str):
+    attention_helper(mx.cpu, 28, 4, 16, 128, 16, 3, mask_mode)
+
+
+def test_task_2_flash_attention_cpu_causal_mask_faster_than_all_zero_mask():
+    assert_causal_mask_faster_than_all_zero_mask(
+        stream=mx.cpu,
+        batch=1,
+        h_q=8,
+        h=8,
+        l=128,
+        s=128,
+        e=128,
     )
 
-    assert metadata.block_table.tolist() == [[0, 1]]
-    assert metadata.context_lens.tolist() == [6]
-    assert metadata.key_pages.shape == (2, 2, page_size, 4)
-    assert metadata.value_pages.shape == (2, 2, page_size, 4)
-    assert_allclose(paged_output, dense_output, precision=mx.float32)
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
+def test_task_3_flash_attention_gpu_extra_small(mask_mode: str):
+    attention_helper(mx.gpu, 1, 1, 5, 7, 4, 1, mask_mode)
 
 
-def test_task_2_batched_paged_attention_matches_dense_attention():
-    page_size = 4
-    pool = TinyKvPagedPool(page_size=page_size)
-    first = TinyKvPagedCache(pool=pool)
-    second = TinyKvPagedCache(pool=pool)
-    first.update_and_fetch(*_random_chunk(3))
-    second.update_and_fetch(*_random_chunk(6))
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_3_flash_attention_gpu_small(mask_mode: str):
+    attention_helper(mx.gpu, 6, 3, 2, 5, 3, 1, mask_mode)
 
-    batch = BatchingKvCache(max_active_requests=3, max_seq_len=16)
-    batch.add_request(first, 0)
-    batch.add_request(second, 2)
 
-    keys = mx.zeros((3, 2, 1, 4), dtype=mx.float32)
-    values = mx.zeros((3, 2, 1, 4), dtype=mx.float32)
-    keys[0:1], values[0:1] = _random_chunk(1)
-    keys[2:3], values[2:3] = _random_chunk(1)
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask"])
+def test_task_3_flash_attention_gpu(mask_mode: str):
+    attention_helper(mx.gpu, 18, 6, 7, 5, 3, 10, mask_mode)
 
-    metadata = batch.update_and_fetch_paged(
-        keys,
-        values,
-        mask_length=1,
-        mask="causal",
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_3_flash_attention_gpu_large(mask_mode: str):
+    attention_helper(mx.gpu, 28, 4, 16, 128, 16, 3, mask_mode, precision=mx.bfloat16)
+
+
+@pytest.mark.parametrize("mask_mode", ["no_mask", "mask", "causal"])
+def test_task_3_flash_attention_gpu_d128_partial_tiles(mask_mode: str):
+    attention_helper(mx.gpu, 8, 2, 35, 128, 47, 1, mask_mode, precision=mx.bfloat16)
+
+
+def test_task_3_flash_attention_gpu_causal_mask_faster_than_all_zero_mask():
+    assert_causal_mask_faster_than_all_zero_mask(
+        stream=mx.gpu,
+        batch=2,
+        h_q=8,
+        h=8,
+        l=512,
+        s=512,
+        e=128,
+        precision=mx.bfloat16,
     )
-    query = mx.random.normal(shape=(3, 4, 1, 4)).astype(mx.float32)
-    paged_output = paged_attention(
-        query,
-        metadata.key_pages,
-        metadata.value_pages,
-        metadata.block_table,
-        metadata.context_lens,
-        metadata.page_size,
-        mask=metadata.mask,
-    )
-
-    first_key, first_value = first.gather_dense()
-    first_output = scaled_dot_product_attention_grouped(
-        query[0:1], first_key, first_value, mask="causal"
-    )
-    second_key, second_value = second.gather_dense()
-    second_output = scaled_dot_product_attention_grouped(
-        query[2:3], second_key, second_value, mask="causal"
-    )
-
-    assert metadata.context_lens.tolist() == [4, 0, 7]
-    assert metadata.block_table.shape == (3, 2)
-    assert metadata.block_table.tolist()[1] == [-1, -1]
-    assert metadata.key_pages.shape == (3, 2, page_size, 4)
-    assert_allclose(paged_output[0:1], first_output, precision=mx.float32)
-    assert_allclose(paged_output[2:3], second_output, precision=mx.float32)
-
-
-def test_task_3_incremental_decode_matches_week2_with_paged_attention():
-    mlx_model = _fake_qwen3_mlx_model()
-    week2_model = Qwen3ModelWeek2(mlx_model)
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
-    inputs = mx.array([[1, 5, 7, 3, 9, 11]], dtype=mx.int32)
-    week2_cache = week2_model.create_kv_cache()
-    week3_cache = week3_model.create_kv_cache()
-
-    for offset in range(inputs.shape[1]):
-        token = inputs[:, offset : offset + 1]
-        week2_out = week2_model(token, offset, week2_cache)
-        week3_out = week3_model(token, offset, week3_cache)
-        week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
-        week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
-        assert_allclose(
-            week3_out,
-            week2_out,
-            precision=mx.bfloat16,
-            rtol=1e-3,
-            atol=1e-3,
-        )

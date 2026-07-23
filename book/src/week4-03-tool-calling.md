@@ -1,0 +1,20 @@
+# 🚧 Week 4: Tool Calling and Agent Serving
+
+> 🚧 This chapter is a work in progress.
+
+Tool calling turns model output into requests for external actions. Treat the
+boundary as an API, not as free-form text:
+
+- define a small schema for tool name and arguments;
+- reject unknown tools and malformed arguments;
+- enforce workspace and resource limits before execution;
+- return structured observations to the model;
+- stop on a final answer, a budget, or repeated failures.
+
+Serving an agent adds request state that lasts across many model calls. The
+target for this WIP chapter is to reuse the Week 3 scheduler and cache
+abstractions while keeping durable agent state, conversation history, and model
+KV state separate. This will make retries and cache eviction explicit instead
+of coupling them to the tool executor.
+
+{{#include copyright.md}}

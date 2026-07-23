@@ -36,6 +36,7 @@ target_sources(
   tiny_llm_ext_ref
   PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/week2_kernels.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/paged_attention.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp
@@ -60,6 +61,7 @@ if(MLX_BUILD_METAL)
     tiny_llm_ext_ref
     SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.metal
+    ${CMAKE_CURRENT_LIST_DIR}/src/week2_kernels.metal
     ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.metal
     ${CMAKE_CURRENT_LIST_DIR}/src/paged_attention.metal
     INCLUDE_DIRS

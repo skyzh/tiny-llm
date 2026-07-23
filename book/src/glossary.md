@@ -14,9 +14,11 @@
 - [Qwen3 Transformer Block](./week1-05-qwen3-model.md)
 - [Week 1 Qwen3 Model](./week1-05-qwen3-model.md)
 - [dequantize_linear](./week1-05-qwen3-model.md)
+- [Quantized Matmul](./week2-03-quantized-matvec.md)
+- [Fast RMSNorm, RoPE, and SwiGLU](./week2-05-fast-kernels.md)
 - [KV Cache](./week2-01-kv-cache.md)
-- [Quantized Matmul](./week2-02-quantized-matmul.md)
-- [Flash Attention](./week2-04-flash-attention.md)
-- [Paged Attention](./week3-02-paged-attention-part2.md)
+- [Decode Attention](./week2-04-decode-attention.md)
+- [Flash Attention](./week3-02-flash-attention.md)
+- [Paged Attention](./week3-05-paged-attention-part2.md)
 
 {{#include copyright.md}}

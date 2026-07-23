@@ -51,15 +51,15 @@ Run with pytest filters:
 
 ```bash
 pdm run test --week 1 --day 3 -- -k task_2
-pdm run test --week 2 --day 2 -- -k cpu
-pdm run test --week 2 --day 2 -- -k gpu
+pdm run test --week 2 --day 3 -- -k cpu
+pdm run test --week 2 --day 3 -- -k gpu
 ```
 
 Run reference-solution tests:
 
 ```bash
 pdm run test-refsol
-pdm run test-refsol --week 2 --day 2 -- -k cpu
+pdm run test-refsol --week 2 --day 3 -- -k cpu
 ```
 
 ## Extension Rebuild Rule

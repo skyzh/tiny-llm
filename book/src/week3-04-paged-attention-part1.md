@@ -1,13 +1,16 @@
-# Week 3 Day 1: Paged Attention, Part 1
+# 🚧 Week 3 Day 4: Paged Attention, Part 1
+
+> 🚧 This chapter was substantially revised and is a work in progress.
 
 In this chapter, we will design the **paged KV cache**. This is the storage abstraction behind paged attention.
 
-By the end of Week 2, our serving stack already supports:
+By the end of Week 3 Day 3, our serving stack already supports:
 
 - per-request KV cache
 - chunked prefill
 - continuous batching
-- FlashAttention
+- a tested FlashAttention operator, with model integration deferred until the
+  paged attention path is connected on Day 5
 
 That gives us a working miniature serving engine, but the memory layout is still too simple. KV for each request is treated as one growing dense tensor, and batching rebuilds dense K/V for all active requests. That approach is easy to teach, but it does not scale well once requests become long and numerous.
 
@@ -18,7 +21,7 @@ Paged attention starts by fixing the storage layout.
 - [vLLM Paged Attention Design](https://docs.vllm.ai/en/v0.18.0/design/paged_attention/)
 - [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)
 
-## Why the Week 2 KV Layout Becomes Expensive
+## Why the Dense KV Layout Becomes Expensive
 
 Right now, the mental model looks like this:
 
@@ -73,7 +76,7 @@ page  3 -> tokens 8..9
 
 The logical sequence is still length 10. The difference is that the runtime is no longer forced to represent it as one contiguous tensor.
 
-In our Day 1 teaching implementation, those fixed-size pages live in one shared **page pool** owned by the model. Every layer cache receives that same pool, but each layer cache keeps its own `page_ids`, `page_lens`, and `offset`.
+In our Part 1 teaching implementation, those fixed-size pages live in one shared **page pool** owned by the model. Every layer cache receives that same pool, but each layer cache keeps its own `page_ids`, `page_lens`, and `offset`.
 
 In the reference solution, `page_size` is the physical page capacity. Unused tail slots are not part of the logical sequence; `page_lens` decides which prefix of each page is valid.
 
@@ -132,7 +135,7 @@ When new K/V arrives for one layer:
 3. otherwise allocate a new page and continue writing
 4. update cache metadata such as `page_lens` and `offset`
 
-This replaces the Week 2 pattern of repeatedly concatenating along the sequence dimension.
+This replaces the dense-cache pattern of repeatedly concatenating along the sequence dimension.
 
 ## Prefill with Pages
 
@@ -206,13 +209,13 @@ Add:
 Keep `TinyKvFullCache` in `src/tiny_llm/kv_cache.py` as a baseline and test
 oracle.
 
-The key Day 1 behavior is:
+The key Part 1 behavior is:
 
 1. write new K/V into the layer cache's tail page or newly allocated pages,
 2. gather the layer cache's pages back into dense K/V,
 3. feed that dense K/V into the old attention path.
 
-So Day 1 changes the storage model first, not the attention kernel yet.
+So Part 1 changes the storage model first, not the attention kernel yet.
 
 ## `src/tiny_llm/batch.py`
 
@@ -226,9 +229,9 @@ The scheduler should still:
 
 The difference is that freeing a request now means releasing all pages owned by its layer caches back to the pool.
 
-Day 1 also keeps a small `rewind(n)` lifecycle hook. Rewind is useful for speculative decoding: if some drafted tokens are rejected, the cache must forget their K/V. In the paged cache, rewind frees whole pages that are no longer needed and shortens the valid length of the final remaining page.
+Part 1 also keeps a small `rewind(n)` lifecycle hook. Rewind is useful for speculative decoding: if some drafted tokens are rejected, the cache must forget their K/V. In the paged cache, rewind frees whole pages that are no longer needed and shortens the valid length of the final remaining page.
 
-## Design Questions for Day 1
+## Design Questions for Part 1
 
 Before implementing, make sure the following are clear:
 
@@ -276,7 +279,35 @@ src/tiny_llm/qwen3_week3.py
 Build a compatibility path that reconstructs dense K/V from pages and compares it against `TinyKvFullCache`.
 
 This gives us a correctness check before we change the attention path itself.
+Instantiate the Week 3 model with `enable_paged_attention=False` in this
+chapter so its attention reads the gathered dense tensors. Day 5 switches the
+same model to page-table metadata and the paged kernel.
+
+Run that cumulative checkpoint through the normal generation and benchmark
+entry points:
+
+```bash
+pdm run main --solution tiny_llm --loader week3 \
+  --disable-paged-attention --model qwen3-0.6b
+
+pdm run bench --solution tiny_llm --loader week3 \
+  --disable-paged-attention --model qwen3-0.6b
+```
 
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
+
+## What Paging Buys on a Mac
+
+Apple silicon's unified memory removes a CPU-to-GPU copy boundary, but it does
+not remove allocation, fragmentation, or copying inside the GPU-visible heap.
+Fixed-size pages still let a server reuse freed capacity, grow requests without
+reserving their maximum sequence length, and batch requests with different
+context lengths. These are capacity and lifecycle wins. They should be measured
+with live-request count, allocated bytes, fragmentation, and scheduler
+throughput—not inferred from one request's token latency.
+
+```bash
+pdm run test --week 3 --day 4
+```
 
 {{#include copyright.md}}

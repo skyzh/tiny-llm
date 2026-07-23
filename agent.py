@@ -7,6 +7,8 @@ from itertools import cycle
 from pathlib import Path
 from threading import Event, Thread
 
+from model_names import shortcut_name_to_full_name
+
 
 def run_with_spinner(label, function, *args):
     """CLI support for Week 4: show progress without changing agent behavior."""
@@ -47,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loader", choices=["week2", "week3"], default="week2")
     parser.add_argument("--device", choices=["cpu", "gpu"], default="gpu")
     parser.add_argument("--enable-flash-attn", action="store_true")
+    parser.add_argument("--enable-performance-lab", action="store_true")
     parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--max-tokens", type=int, default=256)
@@ -89,6 +92,13 @@ def main():
 
     parser = build_parser()
     args = parser.parse_args()
+    if (
+        args.solution != "mlx"
+        and args.loader == "week3"
+        and args.enable_flash_attn
+        and args.device != "gpu"
+    ):
+        parser.error("Week 3 FlashAttention requires --device gpu")
     try:
         allowed_commands = parse_allowed_commands(args.allow_command)
     except ValueError as error:
@@ -98,8 +108,8 @@ def main():
     if args.max_tokens <= 0:
         parser.error("--max-tokens must be positive")
 
-    from mlx_lm import load
     import mlx.core as mx
+    from mlx_lm import load
 
     package = (
         "tiny_llm_ref"
@@ -107,7 +117,9 @@ def main():
         else "tiny_llm"
     )
     agent = importlib.import_module(f"{package}.agent")
-    models = importlib.import_module(f"{package}.models")
+    models = None
+    if args.solution != "mlx":
+        models = importlib.import_module(f"{package}.models")
     policy = agent.ToolPolicy(
         root=args.root,
         allow_writes=args.allow_writes,
@@ -126,19 +138,28 @@ def main():
     else:
         print("Safety: command execution is disabled")
 
-    model_name = models.shortcut_name_to_full_name(args.model)
+    model_name = shortcut_name_to_full_name(args.model)
     mlx_model, tokenizer = load(model_name)
     if args.solution == "mlx":
         model = mlx_model
         print(f"Using the MLX executor on {args.device}; --loader is ignored")
         if args.enable_flash_attn:
             print("MLX selects optimized attention automatically; ignoring the flag")
+        if args.enable_performance_lab:
+            print("MLX selects optimized kernels automatically; ignoring the flag")
     else:
-        dispatch_args = {"enable_flash_attn": args.enable_flash_attn}
+        assert models is not None
+        dispatch_args = {}
         if args.loader == "week3":
-            dispatch_args = {}
+            dispatch_args = {
+                "enable_flash_attn": args.enable_flash_attn,
+                "enable_performance_lab": args.enable_performance_lab,
+            }
+        else:
             if args.enable_flash_attn:
-                print("--enable-flash-attn is only used by week2; ignoring it")
+                print("--enable-flash-attn belongs to Week 3; ignoring it")
+            if args.enable_performance_lab:
+                print("--enable-performance-lab belongs to Week 3; ignoring it")
         model = models.dispatch_model(
             model_name, mlx_model, week=int(args.loader[-1]), **dispatch_args
         )

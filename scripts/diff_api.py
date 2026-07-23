@@ -32,7 +32,7 @@ def export_public_members(module):
                         not attr_name.startswith("_")
                         or attr_name == "__init__"
                         or attr_name == "__call__"
-                    ):
+                    ) and hasattr(attr_value, "__annotations__"):
                         path = f"{module.__name__}.{name}.{attr_name}"
                         public_members_info.append((path, attr_value.__annotations__))
             if inspect.ismodule(member):

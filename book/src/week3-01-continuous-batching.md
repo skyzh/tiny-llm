@@ -1,4 +1,6 @@
-# Week 2 Days 6-7: Chunked Prefill and Continuous Batching
+# 🚧 Week 3 Day 1: Continuous Batching
+
+> 🚧 This chapter was substantially revised and is a work in progress.
 
 In this chapter, we will implement **continuous batching**, which keeps a batch
 of active requests on the device and replaces each request as soon as it
@@ -34,7 +36,7 @@ while requests_in_queue_or_in_progress:
             request.append(token)
 ```
 
-We will also implement **chunked prefill**. A long prompt can make one prefill
+Day 3 will refine this scheduler with **chunked prefill**. A long prompt can make one prefill
 step much slower than a decode step, delaying every active request's next token.
 Splitting the prompt into smaller chunks bounds the amount of prefill work in
 each scheduler iteration.
@@ -63,21 +65,24 @@ mask has shape `3 x 8`:
 Each row can attend to all five cached tokens, itself, and any earlier token in
 the same chunk.
 
-## Task 1: Batch RoPE and Causal Mask for Prefill
+## Task 1: Verify the Week 2 Batch Contract
 
 ```
-src/tiny_llm/positional_encoding.py
-src/tiny_llm/attention.py::causal_mask
+src/tiny_llm/week2_kernels.py::FastRoPE  (reuse unchanged)
+src/tiny_llm/attention.py::causal_mask   (reuse unchanged)
 ```
 
-Extend RoPE to accept a `list[slice]` containing one position range per batch
-element. Also update `causal_mask` to handle `L != S`, as required by chunked
-prefill.
+Week 3 begins by exercising interfaces established earlier rather than editing
+them retroactively. Confirm that Week 2 `FastRoPE` accepts one integer offset
+per batch element and that the existing causal-mask helper handles `L != S`,
+as required by chunked prefill. If either contract is missing, return to the
+corresponding earlier-week task and complete it there; do not create a second
+incompatible implementation in Week 3.
 
 Verify multi-offset RoPE and both attention paths with:
 
 ```bash
-pdm run test --week 2 --day 6 -- -k task_1
+pdm run test --week 3 --day 1 -- -k task_1
 ```
 
 ## Task 2: Batch KV Cache
@@ -113,23 +118,25 @@ mask[i, :, 0:L, (S - S_i):S] = causal_mask(L, S_i)
 You can verify your implementation by running:
 
 ```bash
-pdm run test --week 2 --day 6 -- -k task_2
+pdm run test --week 3 --day 1 -- -k task_2
 ```
 
-## Task 3: Handle Batches in the Model
+## Task 3: Exercise the Batch-Ready Model
 
 ```
-src/tiny_llm/qwen3_week2.py
+src/tiny_llm/qwen3_week2.py  (reuse unchanged)
 ```
 
-Update the model to accept multiple requests and a separate offset for each
-batch element. Use the mask returned by `BatchingKvCache` instead of discarding
-it.
+The Week 2 model already accepts multiple requests, a separate offset for each
+batch element, and the mask returned by `BatchingKvCache`. Exercise that
+contract with several requests joining and leaving at different positions.
+The new Week 3 work belongs in the cache and scheduler; do not modify the Week
+2 model to make this test pass.
 
 You should pass all of the tests by running:
 
 ```bash
-pdm run test --week 2 --day 6 -- -k task_3
+pdm run test --week 3 --day 1 -- -k task_3
 ```
 
 ## Task 4: Batch Generate
@@ -143,14 +150,14 @@ call. Then complete the scheduler in `batch_generate`: move finished prefills
 into idle decode slots, collect the next token and offset for each slot, and
 remove requests that reach EOS or `max_seq_len`.
 
-## Task 5: Chunked Prefill
+## Day 3 Preview: Chunked Prefill
 
 ```
 src/tiny_llm/batch.py
 ```
 
-Modify `Request.try_prefill` to process at most `prefill_max_step` prompt tokens
-per call.
+On Day 3, modify `Request.try_prefill` to process at most `prefill_max_step`
+prompt tokens per call.
 
 Materialize the KV cache between chunks. MLX evaluates lazily, so repeatedly
 extending an unevaluated cache creates an increasingly long computation graph

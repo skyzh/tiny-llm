@@ -1,8 +1,14 @@
-# Week 2 Day 1: Key-Value Cache
+# 🚧 Week 2 Day 1: KV Cache
+
+> 🚧 This chapter was substantially revised and is a work in progress.
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
 previous tokens instead of recomputing the entire prefix at every step.
+
+This is the foundation of Week 2 decode optimization, not a serving-only Week 3
+feature. Without it, every generated token reruns all model layers over an
+ever-growing prefix, overwhelming the gains from faster individual kernels.
 
 **📚 Readings**
 
@@ -103,8 +109,8 @@ method, `update_and_fetch`, which:
 2. Appends them along the sequence dimension.
 3. Returns the complete cached `K` and `V`, the updated offset, and the mask.
 
-On Day 1, the cache passes `mask` through unchanged and does not use
-`mask_length`. Those parameters become important later for batching.
+In this chapter, the cache passes `mask` through unchanged and does not use
+`mask_length`. Those parameters become important in Week 3 for batching.
 
 You may implement this in `kv_cache.py` as `TinyKvFullCache`:
 
@@ -131,14 +137,18 @@ key, value = self.key_values  # B, H, offset, D
 return key, value, self.offset, mask
 ```
 
-## Task 2: Use the Key-Value Cache
+## Task 2: Preserve the Week 1 Boundary
 
 ```
 src/tiny_llm/qwen3_week2.py
 ```
 
-With the cache in place, update the Week 1 Qwen3 implementation to use it.
-Implement `Qwen3MultiHeadAttention` in `qwen3_week2.py`.
+Keep the readable Week 1 model and its full-prefix generation loop unchanged.
+Start a separate `qwen3_week2.py` model with the same dense weights and readable
+RMSNorm, RoPE, SwiGLU, and attention equations. Change only the state flow in
+this chapter: the Week 2 model accepts a cache and an offset while Week 1 keeps
+recomputing the full prefix. This produces the baseline that every later Week 2
+chapter will optimize.
 
 - Give each layer its own cache.
 - Add an `offset` argument to the model. It is the number of tokens already in
@@ -170,19 +180,19 @@ sequence length after the update. This matches the Week 1 GQA convention: `L`
 is the query length, while `S` is the key/value source length. During
 single-token decoding, `L = 1` and `S` grows by one on each call.
 
-Week 2 also changes linear-layer weights from `mx.array` to `QuantizedWeights`.
-For this task, move dequantization from the model loader into the modules that
-use those weights. Later in the week, you will replace that temporary step with
-your own quantized matrix multiplication.
+The linear layers, RMSNorm, RoPE, SwiGLU, and attention remain the readable
+implementations at this checkpoint. Do not introduce packed weights or fast
+kernels yet: measuring one algorithmic change makes the gain attributable.
 
-## Task 3: Implement the Model
+## Task 3: Create Request-Scoped Caches
 
 ```
 src/tiny_llm/qwen3_week2.py
 ```
 
-Complete the rest of the model using the Week 1 implementation as a base, and
-pass the appropriate layer cache through every Transformer block.
+Implement `create_kv_cache` so every request gets one cache handle per
+Transformer layer. Pass the matching layer cache through every block and keep
+the caller's offset consistent with the cache's logical length.
 
 To verify correctness, run the following test, which is similar to the Week 1
 model test:
@@ -191,16 +201,16 @@ model test:
 pdm run test --week 2 --day 1
 ```
 
-## Task 4: Implement Decoding
+## Task 4: Connect the Serving Loop
 
 ```
 src/tiny_llm/generate.py
 ```
 
-Complete `simple_generate_with_kv_cache` in `generate.py`. The first model call
-prefills the cache with the complete prompt. Each later call passes only the
-token produced by the preceding step, together with the number of tokens already
-cached.
+The first model call prefills the cache with the complete prompt. Each later
+call passes only the token produced by the preceding step, together with the
+number of tokens already cached. The same lifecycle will be owned by the
+continuous-batching scheduler in Week 3.
 
 For example:
 
@@ -215,15 +225,42 @@ decode:  _step(model, [8], 7)  # returns 9
 You can test your implementation with:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run main --solution tiny_llm --loader week2 --model qwen3-4b
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-0.6b
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-4b
 ```
 
-You can also benchmark throughput and compare your implementation with the reference solution:
+You can also run the same loop with the reference solution:
 
 ```bash
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
+pdm run main --solution tiny_llm_ref --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-0.6b
 ```
+
+## Integrate and Measure
+
+Run the cached readable checkpoint end to end before changing any operator:
+
+```bash
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-0.6b \
+  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
+  --min-output-len 65 --max-output-len 65 --warmup 2
+```
+
+Record this number in your optimization ledger. The next chapter teaches how
+to compare it fairly with Week 1 and MLX; every later command changes exactly
+one cumulative checkpoint.
+
+## Expected Performance Contribution
+
+**Measured cumulative improvement: 19.51 to 101.80 tok/s, or 5.22x over Week 1,
+after a 128-token prompt on Qwen3-0.6B on an M4 Pro.** This three-process median
+compares the readable full-prefix Week 1 model with the dense cached checkpoint;
+no operator kernel has changed yet. The exact ratio depends strongly on context
+and output length. Unlike a constant-factor kernel optimization, KV caching
+changes each decode step from recomputing the full prefix to processing one new
+query token, so the advantage grows throughout a generation.
 
 {{#include copyright.md}}

@@ -1,236 +1,219 @@
-from types import SimpleNamespace
+"""Week 3 Day 1 continuous-batching tests."""
 
 import mlx.core as mx
+import numpy as np
+import pytest
+from mlx_lm import load
 
-from .tiny_llm_base import (
-    Qwen3ModelWeek2,
-    Qwen3ModelWeek3,
-    TinyKvFullCache,
-    TinyKvPagedCache,
-    TinyKvPagedPool,
-)
-from .utils import assert_allclose
+from .tiny_llm_base import *
+from .utils import *
 
 
-def _random_chunk(
-    length: int, num_heads: int = 2, head_dim: int = 4
-) -> tuple[mx.array, mx.array]:
-    key = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
-    value = mx.random.normal(shape=(1, num_heads, length, head_dim)).astype(mx.float32)
-    return key, value
-
-
-def _quantized_layer(
-    out_dim: int, in_dim: int, group_size: int = 128
-) -> SimpleNamespace:
-    weight = mx.random.normal(shape=(out_dim, in_dim), dtype=mx.bfloat16)
-    quantized_weight, scales, biases = mx.quantize(
-        weight, group_size=group_size, bits=4
-    )
-    return SimpleNamespace(
-        weight=quantized_weight,
-        scales=scales,
-        biases=biases,
-        group_size=group_size,
-        bits=4,
-    )
-
-
-def _fake_qwen3_mlx_model() -> SimpleNamespace:
-    mx.random.seed(0)
-    args = SimpleNamespace(
-        num_hidden_layers=2,
-        hidden_size=128,
-        vocab_size=128,
-        num_attention_heads=4,
-        num_key_value_heads=2,
-        head_dim=32,
-        intermediate_size=256,
-        rms_norm_eps=1e-5,
-        max_position_embeddings=128,
-        rope_theta=10000,
-        tie_word_embeddings=True,
-    )
-    embed_tokens = _quantized_layer(args.vocab_size, args.hidden_size)
-    kv_hidden_size = args.num_key_value_heads * args.head_dim
-    attn_hidden_size = args.num_attention_heads * args.head_dim
-    layers = []
-    for _ in range(args.num_hidden_layers):
-        layers.append(
-            SimpleNamespace(
-                self_attn=SimpleNamespace(
-                    q_proj=_quantized_layer(attn_hidden_size, args.hidden_size),
-                    k_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
-                    v_proj=_quantized_layer(kv_hidden_size, args.hidden_size),
-                    o_proj=_quantized_layer(args.hidden_size, attn_hidden_size),
-                    q_norm=SimpleNamespace(
-                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
-                    ),
-                    k_norm=SimpleNamespace(
-                        weight=mx.ones((args.head_dim,), dtype=mx.bfloat16)
-                    ),
-                ),
-                mlp=SimpleNamespace(
-                    gate_proj=_quantized_layer(
-                        args.intermediate_size, args.hidden_size
-                    ),
-                    up_proj=_quantized_layer(args.intermediate_size, args.hidden_size),
-                    down_proj=_quantized_layer(
-                        args.hidden_size, args.intermediate_size
-                    ),
-                ),
-                input_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-                ),
-                post_attention_layernorm=SimpleNamespace(
-                    weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-                ),
+def rope_helper(stream: mx.Stream, traditional: bool, precision: mx.Dtype):
+    BATCH_SIZE = 16
+    NUM_HEADS = 8
+    HEAD_DIM = 4
+    MAX_SEQ_LEN = 14
+    SEQ_LEN = 9
+    BASE = 10000
+    with mx.stream(stream):
+        for _ in range(100):
+            user_layer = FastRoPE(HEAD_DIM, MAX_SEQ_LEN, BASE, traditional=traditional)
+            x = mx.random.uniform(
+                shape=(BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM), dtype=precision
             )
-        )
-    return SimpleNamespace(
-        args=args,
-        model=SimpleNamespace(
-            embed_tokens=embed_tokens,
-            layers=layers,
-            norm=SimpleNamespace(
-                weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
-            ),
-        ),
+
+            input_pos = np.random.randint(0, MAX_SEQ_LEN - SEQ_LEN, size=BATCH_SIZE)
+            input_pos_mx = mx.array(input_pos, dtype=mx.int32)
+            input_pos_user = input_pos.tolist()
+
+            reference_output = mx.fast.rope(
+                x.transpose(0, 2, 1, 3),
+                dims=HEAD_DIM,
+                traditional=traditional,
+                base=BASE,
+                scale=1.0,
+                offset=input_pos_mx,
+            ).transpose(0, 2, 1, 3)
+            user_output = user_layer(x, input_pos_user)
+            assert_allclose(
+                user_output,
+                reference_output,
+                precision,
+                atol=5e-6 if precision == mx.float32 else 1e-3,
+            )
+
+
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize("traditional", [False, True], ids=["default", "traditional"])
+@pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
+def test_task_1_rope_multiple_offsets(
+    stream: mx.Stream, traditional: bool, precision: mx.Dtype
+):
+    rope_helper(stream, traditional, precision)
+
+
+def test_task_2_batching_kv_cache():
+    cache = BatchingKvCache(max_active_requests=3, max_seq_len=8)
+
+    slot0 = TinyKvFullCache()
+    slot0.update_and_fetch(
+        mx.array([[[[10.0]]]], dtype=mx.float32),
+        mx.array([[[[110.0]]]], dtype=mx.float32),
     )
 
+    slot2 = TinyKvFullCache()
+    slot2.update_and_fetch(
+        mx.array([[[[20.0], [21.0]]]], dtype=mx.float32),
+        mx.array([[[[120.0], [121.0]]]], dtype=mx.float32),
+    )
 
-def test_task_1_paged_cache_matches_full_cache():
-    page_size = 4
-    full = TinyKvFullCache()
-    pool = TinyKvPagedPool(page_size=page_size)
-    paged = TinyKvPagedCache(pool=pool)
+    cache.add_request(slot0, 0)
+    cache.add_request(slot2, 2)
 
-    total_len = 0
-    for length in [3, 2, 5]:
-        key, value = _random_chunk(length)
-        full_key, full_value, full_len, _ = full.update_and_fetch(key, value)
-        paged_key, paged_value, paged_len, _ = paged.update_and_fetch(key, value)
-        total_len += length
-        assert full_len == paged_len == total_len
-        assert paged.num_pages == (total_len + page_size - 1) // page_size
-        physical_page_capacity = [
-            paged.pool.read_page(page_id)[0].shape[2] for page_id in paged.page_ids
+    keys = mx.array(
+        [
+            [[[12.0], [13.0]]],
+            [[[0.0], [0.0]]],
+            [[[22.0], [23.0]]],
+        ],
+        dtype=mx.float32,
+    )
+    values = mx.array(
+        [
+            [[[112.0], [113.0]]],
+            [[[0.0], [0.0]]],
+            [[[122.0], [123.0]]],
+        ],
+        dtype=mx.float32,
+    )
+
+    batched_keys, batched_values, seq_len, mask = cache.update_and_fetch(
+        keys, values, mask_length=2
+    )
+
+    expected_keys = mx.array(
+        [
+            [[[0.0], [10.0], [12.0], [13.0]]],
+            [[[0.0], [0.0], [0.0], [0.0]]],
+            [[[20.0], [21.0], [22.0], [23.0]]],
+        ],
+        dtype=mx.float32,
+    )
+    expected_values = mx.array(
+        [
+            [[[0.0], [110.0], [112.0], [113.0]]],
+            [[[0.0], [0.0], [0.0], [0.0]]],
+            [[[120.0], [121.0], [122.0], [123.0]]],
+        ],
+        dtype=mx.float32,
+    )
+    expected_mask = mx.array(
+        [
+            [[[-mx.inf, 0.0, 0.0, -mx.inf], [-mx.inf, 0.0, 0.0, 0.0]]],
+            [
+                [
+                    [-mx.inf, -mx.inf, -mx.inf, -mx.inf],
+                    [-mx.inf, -mx.inf, -mx.inf, -mx.inf],
+                ]
+            ],
+            [[[0.0, 0.0, 0.0, -mx.inf], [0.0, 0.0, 0.0, 0.0]]],
+        ],
+        dtype=mx.float32,
+    ).reshape(3, 1, 2, 4)
+
+    assert seq_len is None
+    assert_allclose(batched_keys, expected_keys, mx.float32)
+    assert_allclose(batched_values, expected_values, mx.float32)
+    assert_allclose(mask, expected_mask, mx.float32)
+
+
+def helper_test_task_3(
+    model_name: str,
+    seq_len: int,
+    iters: int = 1,
+):
+    """Tests for continuous batching of decode requests."""
+    requests = 4
+    max_seq_len = seq_len
+
+    mlx_model, tokenizer = load(model_name)
+    model = Qwen3ModelWeek2(mlx_model)
+    for _ in range(iters):
+        cache = [
+            BatchingKvCache(requests, max_seq_len)
+            for _ in range(model.num_hidden_layers)
         ]
-        assert physical_page_capacity == [page_size] * paged.num_pages
-        assert sum(paged.page_lens) == total_len
-        assert_allclose(paged_key, full_key, precision=mx.float32)
-        assert_allclose(paged_value, full_value, precision=mx.float32)
-
-
-def test_task_1_paged_pool_reuses_freed_pages():
-    pool = TinyKvPagedPool(page_size=4)
-    first = TinyKvPagedCache(pool=pool)
-    second = TinyKvPagedCache(pool=pool)
-
-    key, value = _random_chunk(6)
-    first.update_and_fetch(key, value)
-    assert first.page_ids == [0, 1]
-    assert pool.num_pages == 2
-    assert pool.num_free_pages == 0
-
-    first.release()
-    assert first.offset == 0
-    assert pool.num_pages == 2
-    assert pool.num_free_pages == 2
-
-    second_key, second_value = _random_chunk(5)
-    gathered_key, gathered_value, seq_len, _ = second.update_and_fetch(
-        second_key, second_value
-    )
-    assert seq_len == 5
-    assert pool.num_pages == 2
-    assert pool.num_free_pages == 0
-    assert set(second.page_ids) == {0, 1}
-    assert_allclose(gathered_key, second_key, precision=mx.float32)
-    assert_allclose(gathered_value, second_value, precision=mx.float32)
-
-
-def test_task_1_paged_cache_rewind():
-    page_size = 4
-    pool = TinyKvPagedPool(page_size=page_size)
-    paged = TinyKvPagedCache(pool=pool)
-    full = TinyKvFullCache()
-
-    for length in [4, 3, 2]:
-        key, value = _random_chunk(length)
-        paged.update_and_fetch(key, value)
-        full.update_and_fetch(key, value)
-
-    assert paged.page_lens == [4, 4, 1]
-    paged.rewind(3)
-    full.rewind(3)
-
-    paged_key, paged_value = paged.gather_dense()
-    full_key, full_value = full.key_values
-    assert paged.offset == full.offset == 6
-    assert paged.page_lens == [4, 2]
-    assert paged.num_pages == 2
-    assert paged.pool.num_pages == 3
-    assert paged.pool.num_free_pages == 1
-    physical_page_capacity = [
-        paged.pool.read_page(page_id)[0].shape[2] for page_id in paged.page_ids
-    ]
-    assert physical_page_capacity == [page_size] * paged.num_pages
-    assert_allclose(paged_key, full_key, precision=mx.float32)
-    assert_allclose(paged_value, full_value, precision=mx.float32)
-
-
-def test_task_1_model_kv_caches_share_layer_pools():
-    mlx_model = _fake_qwen3_mlx_model()
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
-    first_request_cache = week3_model.create_kv_cache()
-    second_request_cache = week3_model.create_kv_cache()
-
-    assert len(first_request_cache) == week3_model.num_hidden_layers
-    for layer in range(week3_model.num_hidden_layers):
-        assert first_request_cache[layer].pool is week3_model.page_pool
-        assert second_request_cache[layer].pool is week3_model.page_pool
-
-    assert first_request_cache[0].page_ids is not first_request_cache[1].page_ids
-    assert first_request_cache[0].page_lens is not first_request_cache[1].page_lens
-    assert first_request_cache[0].pool is first_request_cache[1].pool
-
-
-def test_task_1_model_layer_caches_keep_independent_page_metadata():
-    mlx_model = _fake_qwen3_mlx_model()
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
-    cache = week3_model.create_kv_cache()
-    inputs = mx.array([[1, 5, 7, 3, 9]], dtype=mx.int32)
-
-    week3_model(inputs, 0, cache)
-
-    assert cache[0].page_ids == [0, 1]
-    assert cache[0].page_lens == [4, 1]
-    owned_page_ids = set(cache[0].page_ids)
-    for layer in range(1, week3_model.num_hidden_layers):
-        assert cache[layer].page_lens == cache[0].page_lens
-        assert owned_page_ids.isdisjoint(cache[layer].page_ids)
-        owned_page_ids.update(cache[layer].page_ids)
-        for page_id in cache[layer].page_ids:
-            key_page, value_page = week3_model.page_pool.read_page(page_id)
-            assert key_page.shape[2] == week3_model.page_size
-            assert value_page.shape[2] == week3_model.page_size
-
-
-def test_task_3_incremental_decode_matches_week2():
-    mlx_model = _fake_qwen3_mlx_model()
-    week2_model = Qwen3ModelWeek2(mlx_model)
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
-    inputs = mx.array([[1, 5, 7, 3, 9, 11]], dtype=mx.int32)
-    week2_cache = week2_model.create_kv_cache()
-    week3_cache = week3_model.create_kv_cache()
-
-    for offset in range(inputs.shape[1]):
-        token = inputs[:, offset : offset + 1]
-        week2_out = week2_model(token, offset, week2_cache)
-        week3_out = week3_model(token, offset, week3_cache)
-        week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
-        week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
-        assert_allclose(
-            week3_out, week2_out, precision=mx.bfloat16, rtol=1e-3, atol=1e-3
+        # Start each request at a staggered token index.
+        staggered_start = [seq_len * i // requests for i in range(requests)]
+        inputs = (
+            mx.arange(requests * seq_len, dtype=mx.int32).reshape(requests, seq_len)
+            % tokenizer.vocab_size
         )
+        ref_outputs = mlx_model(inputs)
+        for offset in range(seq_len + staggered_start[-1]):
+            seq_idx = [offset - start for start in staggered_start]
+
+            # Requests join at the staggered start, and leave when they reach seq_len.
+            for request_id, sidx in enumerate(seq_idx):
+                if sidx == 0:
+                    for c in cache:
+                        c.add_request(TinyKvFullCache(), request_id)
+                elif sidx == seq_len:
+                    for c in cache:
+                        c.remove_request(request_id)
+
+            next_tokens = []
+            next_offsets = []
+            for request_id, sidx in enumerate(seq_idx):
+                if 0 <= sidx < seq_len:
+                    next_tokens.append(inputs[request_id, sidx].item())
+                    next_offsets.append(sidx)
+                else:
+                    next_tokens.append(0)
+                    next_offsets.append(0)
+
+            user_out = model(
+                inputs=mx.array(next_tokens, dtype=mx.int32).reshape(-1, 1),
+                offset=mx.array(next_offsets, dtype=mx.int32),
+                cache=cache,
+            )
+
+            for request_id, sidx in enumerate(seq_idx):
+                if 0 <= sidx < seq_len:
+                    user_out_r = user_out[request_id, 0, :]
+                    ref_out_r = ref_outputs[request_id, sidx, :]
+                    user_out_r = user_out_r - mx.logsumexp(user_out_r, keepdims=True)
+                    ref_out_r = ref_out_r - mx.logsumexp(ref_out_r, keepdims=True)
+                    assert_allclose(
+                        user_out_r,
+                        ref_out_r,
+                        precision=mx.bfloat16,
+                        rtol=0.1,
+                        atol=2.0,
+                    )
+
+
+@pytest.mark.skipif(
+    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
+)
+def test_task_3_qwen3_0_6b():
+    helper_test_task_3("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
+
+
+@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
+def test_task_3_qwen3_4b():
+    helper_test_task_3(
+        "Qwen/Qwen3-4B-MLX-4bit",
+        seq_len=3,
+    )
+
+
+@pytest.mark.skipif(
+    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
+)
+def test_task_3_qwen3_1_7b():
+    helper_test_task_3(
+        "Qwen/Qwen3-1.7B-MLX-4bit",
+        seq_len=3,
+    )

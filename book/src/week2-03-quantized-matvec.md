@@ -1,6 +1,8 @@
-# Week 2 Days 2-3: Quantized Matmul
+# 🚧 Week 2 Day 3: Quantized Matvec
 
-In this chapter, we will implement quantized matrix multiplication. Quantizing
+> 🚧 This chapter was substantially revised and is a work in progress.
+
+In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and
 the memory traffic required for each generated token.
 
@@ -258,14 +260,19 @@ Keep the token embedding table quantized as well. Add a `QuantizedEmbedding`
 wrapper with two call patterns:
 
 - `embedding(input_ids)` performs a row lookup. Gather the matching packed
-  weights, scales, and biases, then call `mx.dequantize` only on those rows.
+  weights, scales, and biases. Unpack each `uint32` with shifts and masks,
+  repeat each group's scale and bias across its 128 values, and compute
+  `q * scale + bias` with basic `mlx.core` array operations. Do not call
+  `mx.dequantize`. Put this readable unpacking logic in
+  `dequantize_weights(...)` so the embedding and its direct tests share one
+  explicit implementation.
 - `embedding.as_linear(h)` is the tied output projection. Implement this with
   `quantized_linear(h, embedding_weight)` so it uses your quantized matmul path
   instead of materializing the full `vocab_size x hidden_size` table. This path
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
-## Task 2: Implement `quantized_matmul` (CPU version)
+## Task 2: Implement a CPU Primitive
 
 Implement quantized matrix multiplication as an MLX C++ extension. Follow the
 existing `axpby` example: read `axpby.h`, `axpby.cpp`, and its binding in
@@ -300,28 +307,118 @@ Write the CPU implementation as a template, following `axpby`'s dtype-dispatch
 pattern. Dispatch with `mx::float16_t` or `mx::bfloat16_t` according to the
 output dtype.
 
-You can test your implementation by running:
+The extension API is infrastructure: it lets an `mx.array` graph node schedule
+the C++ loop you wrote. MLX owns the array lifetime and command encoder, but it
+does not supply the quantized multiplication.
+
+Build and test the extension:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k task_2
+pdm run test --week 2 --day 3 -- -k task_2
 ```
 
-## Task 3: Implement `quantized_matmul` (GPU version)
+## Task 3: Implement Metal Matrix Products
 
 ```
 src/extensions/src/quantized_matmul.metal
 src/extensions/src/quantized_matmul.cpp
 ```
 
-Write the Metal kernel and connect `eval_gpu` to it. The math remains identical
-to the CPU implementation from Task 2; only its execution model changes.
+Write the Metal kernels and connect `eval_gpu` to them. The Python
+`quantized_matmul` wrapper always dispatches this course-owned primitive on
+GPU; the required path never routes through `mx.quantized_matmul`.
 
-### Metal Kernel
+Do this in two measured stages. They expose the same math but schedule
+different shapes differently:
 
-You need to implement one kernel entry in `quantized_matmul.metal`:
+1. **Vanilla matmul:** one Metal thread computes one output element. This is
+   the direct GPU translation of the CPU loop and the correctness baseline.
+2. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
+   activation row and calculate several output columns together.
 
-- Use a **one-thread-per-output-element** mapping: each thread computes `out[i, k]`.
+Keep the vanilla function callable as `quantized_matmul_vanilla`. An
+optimization is much easier to trust when it can be compared directly with
+the implementation it replaces.
+
+### Stage 1: Vanilla Matmul
+
+Start with a two-dimensional grid over output row `i` and output column `k`.
+Each thread walks all `N` input values, unpacks eight int4 weights from each
+`uint32`, applies the group scale and bias, and accumulates one `C[i, k]` in
+float32. This kernel repeats activation loads and does not share work, but its
+control flow mirrors the equation and is a useful debugging oracle.
+
+### Prefill Tiling Moves to Week 3
+
+Prefill has many activation rows and benefits from a different matrix-matrix
+schedule. Week 2 keeps the vanilla kernel for that shape so its required path
+stays focused on decode. The optional Week 3 performance lab adds 8×8
+`simdgroup_matrix` tiles and studies reuse, barriers, register pressure, and
+threadgroup scheduling.
+
+### Stage 2: SIMD Matvec
+
+Decode normally has `M = 1`; an 8×8 matrix tile would leave most rows empty.
+Instead, one SIMD group reduces the input dimension and uses `simd_sum` to
+combine lane-local partial sums. The regular projection kernel calculates two
+output columns per SIMD group. The much wider tied vocabulary projection uses
+eight columns so each activation load is reused across more weights.
+
+The wide path also uses the affine identity
+
+$$
+\sum_j a_j(sq_j+b) = s\sum_j a_jq_j + b\sum_j a_j
+$$
+
+to avoid applying the bias separately to every unpacked value. Do not apply a
+micro-optimization blindly to every shape: applying this rearrangement to the
+two-output projection kernel reduced the measured full-model result from about
+249 to 244.5 tok/s, while the extra live accumulators that help the vocabulary
+projection also make smaller projections more difficult to schedule.
+
+The scheduling numbers in this section are historical one-factor ablations run
+against a completed model while developing the kernel. They explain why the
+retained schedule looks this way; they are not Day 3's cumulative course
+result. The end of this chapter reports the matched Day 2 to Day 3 checkpoint
+change.
+
+Likewise, raising the ordinary projection tile from two to four output columns
+increased register pressure enough to reduce decode to about 232 tok/s. The
+best measured split is two columns for normal projections and eight only for
+the unusually wide vocabulary projection.
+
+The first matvec copied the 2 KB activation vector into threadgroup memory and
+waited at a barrier. Removing that copy was faster: the vector is cache-hot,
+while every projection paid the synchronization cost. The measured decode
+rate rose from roughly 238.6 to 246-249 tok/s. This is GPU scheduling in
+practice: dispatch shape, occupancy, cache behavior, and barriers are part of
+the algorithm.
+
+After removing the barrier, grouping four SIMD groups per threadgroup instead
+of eight was effectively neutral to slightly slower (about 248.5 tok/s in two
+runs). Independent work does not guarantee a win from smaller threadgroups;
+the extra threadgroups also add scheduling overhead. Keep eight for this M1
+Pro workload and remeasure on different hardware.
+
+Doubling only the wide vocabulary kernel to sixteen SIMD groups also regressed
+the final run from 250.6 to 247.2 tok/s. Fewer threadgroups did not compensate
+for the larger 512-thread scheduling unit, so the retained kernel uses eight
+groups for both projection shapes.
+
+### Direct Quantized Embedding Moves to Week 3
+
+Week 2 performs row lookup and dequantization with basic `mlx.core` array
+operations. The optional Week 3 performance lab fuses row gather, int4
+unpacking, and affine dequantization into one Metal dispatch.
+
+### Kernel Requirements
+
+Implement both required kernel layouts in `quantized_matmul.metal`:
+
+- First, implement the vanilla one-thread-per-output matrix grid.
+- For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
+  the input dimension and compute several output columns per group.
 - The kernel should support both `half` and `bfloat16_t` inputs and outputs.
 - Apply the same group-wise dequantization loop as the CPU version:
   - Iterate over groups of 128 values.
@@ -344,17 +441,24 @@ pattern:
 2. Load the quantized matmul kernel matching the output dtype from the Metal library.
 3. Bind the input and output buffers and the dimension constants (`M`, `N`,
    `K`). The buffer order must match the kernel signature.
-4. Calculate a 2D thread group configuration: use `kernel->maxTotalThreadsPerThreadgroup()` to determine the total threads, then split between the M and K dimensions (e.g., 32 threads for M, the rest for K).
+4. Select the matrix-vector layout for `M <= 8`; otherwise select the vanilla
+   matrix layout. Keep both paths explicit for direct comparisons.
+   Calculate a SIMD-aligned thread-group configuration and tile output columns
+   so packed input values and activations can be reused.
 5. Dispatch with `dispatchThreadgroups`.
 
 You can test your implementation by running:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k task_3
+pdm run test --week 2 --day 3 -- -k gpu
 ```
 
-## Task 4: Model Integration
+The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
+`M = 128`, and compare them with an MLX oracle. The oracle checks the result;
+it is not the implementation under test.
+
+## Task 4: Integrate Before Continuing
 
 ```
 src/tiny_llm/qwen3_week2.py
@@ -367,9 +471,8 @@ Change the weight type from `mx.array` to `QuantizedWeights` for every attention
 projection (`wq`, `wk`, `wv`, and `wo`) and MLP projection (`w_gate`, `w_up`,
 and `w_down`). Replace `linear(x, w)` with `quantized_linear(x, w)`. In the Week
 2 model loader, use `QuantizedWeights.from_mlx_layer(...)` instead of
-materializing a 16-bit matrix with `mx.dequantize`. Keep the Week 1 loader's
-dequantization behavior because its layers still expect plain `mx.array`
-weights.
+materializing a 16-bit matrix. Keep the Week 1 model's readable boundary; its
+layers still expect plain `mx.array` weights.
 
 For embeddings, wire the `QuantizedEmbedding` from Task 1 into the loader:
 load `embed_tokens` with `QuantizedWeights.from_mlx_layer(...)` and pass it to
@@ -389,14 +492,40 @@ assumptions: `group_size = 128` and `bits = 4`.
 You can test your implementation by running:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b
 ```
 
 You can also benchmark throughput and compare your implementation with the reference solution:
 
 ```bash
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
+  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
+  --min-output-len 65 --max-output-len 65 --warmup 2
 ```
+
+Compare this result with the Day 1 `kv-cache` row. Do not start the decode
+attention chapter until the complete model uses packed weights and the
+end-to-end number has been recorded. The vanilla matrix product remains
+callable as a correctness oracle, but only the SIMD matvec is integrated into
+decode.
+
+## Expected Performance Contribution
+
+**Measured decode-kernel improvement: about 1.4-1.9x for ordinary projections
+and about 10.5x for the vocabulary head over the scalar quantized kernel.** In
+a Qwen3-0.6B M4 Pro run, the Q/K/V/O projection speedups ranged from 1.39-1.65x,
+the gate/up/down projections from 1.86-1.89x, and the 151,936-row tied output
+head reached about 10.5x. In the cumulative M4 Pro course ladder, integrating
+packed weights and the retained SIMD matvec increased decode from 101.80 to
+134.24 tok/s (+31.9%): 6.88x Week 1 and 59.1% below MLX. On the earlier M1 Pro
+reference, the first two-column SIMD matvec improved the then-current path by
+about 5.7%; removing its activation barrier later added roughly another 3-4%.
+
+Prefill tiling and direct quantized embedding are measured in the optional
+Week 3 performance lab. They are intentionally excluded from the minimal Week
+2 acceptance path. Percentages from later chapters overlap with this one and
+must not be added together.
 
 {{#include copyright.md}}

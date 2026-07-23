@@ -1,115 +1,46 @@
+"""Week 2 Day 1 dense KV-cache tests."""
+
+import mlx.core as mx
 import pytest
-from .utils import *
-from .tiny_llm_base import (
-    Qwen3ModelWeek2,
-    TinyKvFullCache,
-)
-from mlx_lm import load
 
-# TODO: task 1 tests
+from .tiny_llm_base import Embedding, Qwen3ModelWeek2, RMSNorm, RoPE, TinyKvFullCache
+from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_utils_qwen3_0_6b():
-    pass
+def test_task_1_full_cache_appends_chunks():
+    cache = TinyKvFullCache()
+    key_1 = mx.random.normal((1, 2, 3, 4)).astype(mx.float32)
+    value_1 = mx.random.normal((1, 2, 3, 4)).astype(mx.float32)
+    key_2 = mx.random.normal((1, 2, 2, 4)).astype(mx.float32)
+    value_2 = mx.random.normal((1, 2, 2, 4)).astype(mx.float32)
 
-
-@pytest.mark.skipif(
-    not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
-)
-def test_utils_qwen3_4b():
-    pass
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_utils_qwen3_1_7b():
-    pass
-
-
-def helper_test_task_3(model_name: str, iters: int = 10):
-    mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model)
-    for _ in range(iters):
-        cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
-        input = mx.random.randint(low=0, high=tokenizer.vocab_size, shape=(1, 10))
-        user_output = model(input, 0, cache)
-        ref_output = mlx_model(input)
-        user_output = user_output - mx.logsumexp(user_output, keepdims=True)
-        ref_output = ref_output - mx.logsumexp(ref_output, keepdims=True)
-        assert_allclose(
-            user_output, ref_output, precision=mx.bfloat16, rtol=0.1, atol=1.0
-        )
-
-
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_task_3_qwen3_0_6b():
-    helper_test_task_3("Qwen/Qwen3-0.6B-MLX-4bit", 5)
-
-
-@pytest.mark.skipif(
-    not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
-)
-def test_task_3_qwen3_4b():
-    helper_test_task_3("Qwen/Qwen3-4B-MLX-4bit", 1)
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_task_3_qwen3_1_7b():
-    helper_test_task_3("Qwen/Qwen3-1.7B-MLX-4bit", 3)
-
-
-def helper_test_task_4(
-    model_name: str,
-    seq_len: int,
-    iters: int = 1,
-):
-    mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model)
-    for _ in range(iters):
-        inputs = mx.random.randint(0, tokenizer.vocab_size, (1, seq_len))
-        ref_outputs = mlx_model(inputs)
-        decode_cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
-        for offset in range(seq_len):
-            user_out = model(
-                inputs=inputs[:, offset : offset + 1],
-                offset=offset,
-                cache=decode_cache,
-            )
-            ref_out = ref_outputs[:, offset : offset + 1, :]
-            user_out = user_out - mx.logsumexp(user_out, keepdims=True)
-            ref_out = ref_out - mx.logsumexp(ref_out, keepdims=True)
-            assert_allclose(
-                user_out, ref_out, precision=mx.bfloat16, rtol=0.1, atol=1.0
-            )
-
-
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_task_4_qwen3_0_6b():
-    helper_test_task_4("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
-
-
-@pytest.mark.skipif(
-    not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
-)
-def test_task_4_qwen3_4b():
-    helper_test_task_4(
-        "Qwen/Qwen3-4B-MLX-4bit",
-        seq_len=3,
+    cached_key, cached_value, offset, mask = cache.update_and_fetch(
+        key_1, value_1, mask="causal"
     )
+    assert offset == 3
+    assert mask == "causal"
+    assert_allclose(cached_key, key_1, mx.float32)
+    assert_allclose(cached_value, value_1, mx.float32)
+
+    cached_key, cached_value, offset, _ = cache.update_and_fetch(key_2, value_2)
+    assert offset == 5
+    assert_allclose(cached_key, mx.concat([key_1, key_2], axis=2), mx.float32)
+    assert_allclose(cached_value, mx.concat([value_1, value_2], axis=2), mx.float32)
 
 
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_task_4_qwen3_1_7b():
-    helper_test_task_4("Qwen/Qwen3-1.7B-MLX-4bit", seq_len=3)
+def test_tasks_2_and_3_cached_checkpoint_is_runnable_and_readable():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="kv-cache")
+    layer = model.layers_inner[0]
+
+    assert isinstance(model.embedding, Embedding)
+    assert isinstance(layer.input_layernorm, RMSNorm)
+    assert isinstance(layer.self_attn.rope, RoPE)
+    assert not layer.self_attn.use_decode_attention
+    assert not layer.mlp.use_fast_swiglu
+    assert len(model.create_kv_cache()) == model.num_hidden_layers
+
+
+def test_task_3_rejects_a_position_that_disagrees_with_the_cache():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="kv-cache")
+    with pytest.raises(ValueError, match="does not match model offset"):
+        model(mx.array([[1]], dtype=mx.int32), 1, model.create_kv_cache())

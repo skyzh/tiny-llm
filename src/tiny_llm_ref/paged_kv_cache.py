@@ -213,8 +213,8 @@ class TinyKvPagedCache(TinyKvCache):
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
         assert key.shape == value.shape
         self._append_chunk(key, value)
-        # Keep the old dense interface for Day 1 callers. Day 2 uses
-        # update_and_fetch_paged so attention can read pages directly.
+        # Keep the old dense interface for earlier callers. Paged attention
+        # uses update_and_fetch_paged so it can read pages directly.
         dense_key, dense_value = self.gather_dense()
         return dense_key, dense_value, self.offset, mask
 

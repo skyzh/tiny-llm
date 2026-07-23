@@ -14,7 +14,7 @@ NB_MODULE(_ext, m) {
     m.def("load_library", &tiny_llm_ext_ref::load_library, "device"_a, "path"_a);
 
     m.def("quantized_matmul", &tiny_llm_ext_ref::quantized_matmul, "scales"_a, "biases"_a, "group_size"_a, "bits"_a,
-          "a"_a, "b"_a, "transpose_b"_a = false, "stream"_a = nb::none(),
+          "a"_a, "b"_a, "transpose_b"_a = false, "use_simdgroup"_a = true, "stream"_a = nb::none(),
           R"(
         Quantized matmul layer
 
@@ -30,6 +30,14 @@ NB_MODULE(_ext, m) {
         Returns:
             array: ``a * b``
       )");
+    m.def("quantized_embedding", &tiny_llm_ext_ref::quantized_embedding, "indices"_a, "scales"_a, "biases"_a,
+          "weight"_a, "group_size"_a, "bits"_a, "stream"_a = nb::none());
+    m.def("rms_norm", &tiny_llm_ext_ref::rms_norm, "x"_a, "weight"_a, "eps"_a, "stream"_a = nb::none());
+    m.def("rope", &tiny_llm_ext_ref::rope, "x"_a, "offsets"_a, "dims"_a, "base"_a, "traditional"_a = false,
+          "stream"_a = nb::none());
+    m.def("swiglu", &tiny_llm_ext_ref::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
+    m.def("decode_attention", &tiny_llm_ext_ref::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
+          "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
 
     m.def("flash_attention", &tiny_llm_ext_ref::flash_attention, "query"_a, "key"_a, "value"_a, "mask"_a,
           "scale"_a = 1.0, "mask_mode"_a = 0, "num_kv_heads"_a, "num_heads"_a, "stream"_a = nb::none(), R"(
