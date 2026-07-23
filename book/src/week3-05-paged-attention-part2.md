@@ -276,11 +276,22 @@ Update request admission, slot reuse, and request removal so that:
 
 After this chapter, the serving stack has the right structure for a real high-throughput runtime: paging is no longer just a storage trick, but part of the execution model itself.
 
-## Performance Reality on Apple Silicon
+## Performance Lab: Make Paging Earn Its Cost
 
-The current course kernel proves that attention can walk pages without a dense
-K/V repack, but it is not faster yet. On the same M4 Pro operator benchmark,
-representative timings were:
+The goal of this lab is to decide when direct page traversal is useful. Paged
+attention is not automatically a faster attention operator: it trades regular,
+contiguous K/V access for flexible allocation and removes the dense repack that
+would otherwise happen before attention. Your measurements must include both
+sides of that trade.
+
+Start by recording three operator baselines on the same machine:
+
+1. the dense course attention path, including any required K/V gather,
+2. your direct paged-attention path,
+3. the MLX attention path as a production-library reference.
+
+These M4 Pro measurements are reference points, not target values to copy into
+your report:
 
 | Batch / context | Dense course attention | Course paged attention | MLX attention |
 |---|---:|---:|---:|
@@ -290,13 +301,53 @@ representative timings were:
 | 8 / 512 | 489 µs | 3,553 µs | 304 µs |
 | 8 / 2048 | 1,371 µs | 13,611 µs | 816 µs |
 
-The page-table loads and irregular access are real costs. Paged attention can
-improve a Mac serving system when it avoids repeated dense repacks, admits more
-concurrent requests, and reuses pages over many scheduling steps. To improve
-the kernel itself, group adjacent logical pages, coalesce K/V loads within a
-SIMD group, keep online-softmax state in registers, specialize the one-token
-decode case, and batch page-table metadata once per scheduler step. Measure
-aggregate request throughput and memory use as well as kernel latency.
+### Checkpoint 1: Establish a Correct Direct Path
+
+Implement the simplest page-walking kernel first. Verify that it:
+
+- reads K/V through `block_table` without constructing a dense K/V tensor,
+- ignores unused slots in the final page,
+- matches dense attention for several page boundaries and context lengths,
+- supports grouped-query attention when `H_q != H_kv`.
+
+A correct first version may be slower than dense attention. At this checkpoint,
+the useful result is a trustworthy baseline and a working runtime interface.
+
+### Checkpoint 2: Design the Decode Schedule
+
+Optimize for the one-token decode shape instead of treating page traversal as a
+serial loop. Work through these changes one at a time and benchmark after each
+one:
+
+1. assign the lanes of a SIMD group to adjacent elements of a head so K/V loads
+   can be coalesced,
+2. load a page-table entry once and reuse it for all positions in that page,
+3. keep the query and online-softmax state in registers across page tiles,
+4. combine partial dot products with SIMD reductions instead of threadgroup
+   scratch memory and repeated barriers,
+5. specialize the `L = 1` decode case so it does not carry prefill control flow,
+6. prepare the batch's page metadata once per scheduler step rather than once
+   per layer or attention head.
+
+For each change, explain which cost it targets: memory traffic, synchronization,
+address calculation, or dispatch overhead. Keep a change only when the measured
+result supports the explanation.
+
+### Checkpoint 3: Evaluate the Serving System
+
+Operator latency alone does not capture the purpose of paging. Run an
+end-to-end workload with requests entering and leaving the batch, then report:
+
+- time per decode step and aggregate tokens per second,
+- peak KV-cache memory and the number of live requests admitted,
+- bytes or time spent gathering and repacking K/V,
+- paged-attention latency relative to the dense course path and MLX.
+
+On Apple Silicon, retain a dense path for workloads where contiguous attention
+is faster. Use paged attention when eliminating repacks, reusing pages across
+scheduler steps, or admitting more concurrent requests improves the system-level
+result. The lesson is to make dispatch a measured policy decision, not to assume
+that paging must win every microbenchmark.
 
 ```bash
 pdm run test --week 3 --day 5
