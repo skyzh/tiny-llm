@@ -94,22 +94,23 @@ introduce the features.
 
 | Checkpoint | Prefill tok/s | Versus Week 1 | Gap to MLX | Decode tok/s | Versus Week 1 | Gap to MLX |
 |---|---:|---:|---:|---:|---:|---:|
-| Week 1 readable model | 3,340.46 | baseline | 24.2% slower | 19.48 | baseline | 94.0% slower |
-| Week 2 decode checkpoint | 778.71 | 76.7% slower | 82.3% slower | 239.48 | 12.29x | 26.5% slower |
-| Week 3 paged stack (Flash off) | 655.47 | 80.4% slower | 85.1% slower | 37.82 | 1.94x | 88.4% slower |
-| Week 3 paged stack + FlashAttention | 742.93 | 77.8% slower | 83.1% slower | 37.67 | 1.93x | 88.4% slower |
-| Week 3 paged stack + performance lab | 1,118.09 | 66.5% slower | 74.6% slower | 37.84 | 1.94x | 88.4% slower |
-| Week 3 paged stack + FlashAttention + performance lab | 1,420.27 | 57.5% slower | 67.8% slower | 37.70 | 1.94x | 88.4% slower |
-| MLX | 4,407.38 | 1.32x | baseline | 325.70 | 16.72x | baseline |
+| Week 1 readable model | 3,342.45 | baseline | 24.1% slower | 19.49 | baseline | 93.4% slower |
+| Week 2 decode checkpoint | 1,012.27 | 69.7% slower | 77.0% slower | 240.17 | 12.32x | 18.5% slower |
+| Week 3 paged stack (Flash off) | 987.25 | 70.5% slower | 77.6% slower | 206.96 | 10.62x | 29.8% slower |
+| Week 3 paged stack + FlashAttention | 983.90 | 70.6% slower | 77.7% slower | 206.33 | 10.59x | 30.0% slower |
+| Week 3 paged stack + performance lab | 1,948.88 | 41.7% slower | 55.7% slower | 205.40 | 10.54x | 30.3% slower |
+| Week 3 paged stack + FlashAttention + performance lab | 1,956.79 | 41.5% slower | 55.6% slower | 204.80 | 10.51x | 30.5% slower |
+| MLX | 4,402.94 | 1.32x | baseline | 294.75 | 15.12x | baseline |
 
 Week 1 prefill is fast because it materializes dense 16-bit weights and uses
 efficient dense matrix multiplication. Week 2 deliberately optimizes the
 memory-bound one-token decode shape first; its readable scalar quantized
 prefill path therefore regresses. Week 3's optional SIMD-matrix lab recovers
-part of that prefill gap. The current paged-attention kernel dominates Week 3
-decode and is a teaching implementation, not a claim of production speed. The
-runner releases every request cache, including warmups, so paged checkpoints
-reuse allocator capacity rather than timing pool growth left by an earlier run.
+part of that prefill gap. The paged vector decode kernel now stays close to the
+dense course kernel, while page-cache and serving-runtime overhead leave the
+single-request checkpoint about 13.8% behind Week 2 decode. The runner releases
+every request cache, including warmups, so paged checkpoints reuse allocator
+capacity rather than timing pool growth left by an earlier run.
 
 ## Week 1: Establish the Readable Baseline
 
@@ -138,20 +139,20 @@ reuse allocator capacity rather than timing pool growth left by an earlier run.
 
 | Chapter | What improves | Performance reality |
 |---|---|---|
-| 3.1 Continuous Batching | Reuses decode slots as requests finish and keeps multiple requests active. | Improves aggregate utilization, not single-request latency. In one four-request snapshot, dense batching reached 288.4 aggregate decode tok/s versus 240.4 for one Week 2 request; do not treat different batch sizes as a kernel speedup. |
-| 3.2 FlashAttention | Streams K/V tiles with online softmax and bounds scratch memory instead of materializing `L x S`. | As a reverse ablation inside the completed paged stack, enabling it improved prefill from 655.47 to 742.93 tok/s (+13.3%) but remained 83.1% below MLX. Decode did not move. The standalone course kernel is about 9% slower than explicit attention at 4096 tokens and about 3.4x slower than MLX at 2048, while avoiding roughly 1 GiB of scores at the documented 4096-token Qwen3-4B shape. |
+| 3.1 Continuous Batching | Reuses decode slots as requests finish and keeps multiple requests active. | Improves aggregate utilization, not single-request latency. In one four-request snapshot, dense batching reached 305.3 aggregate decode tok/s versus 240.2 for one Week 2 request; do not treat different batch sizes as a kernel speedup. |
+| 3.2 FlashAttention | Streams K/V tiles with online softmax and bounds scratch memory instead of materializing `L x S`. | At the short 128-token progression shape, enabling dense FlashAttention left prefill effectively unchanged at 987.25 versus 983.90 tok/s. Its opportunity is long prefill, and Day 5 reuses its BF16 SIMD-matrix recurrence for paged prefill. Decode uses a separate vector kernel. |
 | 3.3 Chunked Prefill | Bounds how long a prompt can delay active decoders. | Primarily improves fairness and time-to-next-token. Smaller chunks add launches and may reduce aggregate throughput; report both latency and throughput. |
-| 3.4 Paged Attention, Part 1 | Allocates a paged KV cache with fixed-size reusable pages and separates logical context from physical storage. | Improves capacity, reuse, removal, and fragmentation. It is an allocator/usability gain; no raw kernel speedup is claimed. |
-| 3.5 Paged Attention, Part 2 | Reads K/V through page tables without rebuilding dense per-request K/V. | The current operator is about 4.4-16.7x slower than MLX across the documented batch/context cases. The end-to-end paged model reached 37.82 decode tok/s, about 88.4% below MLX. |
+| 3.4 Paged Attention, Part 1 | Allocates a paged KV cache with fixed-size reusable pages and separates logical context from physical storage. | Per-layer pools grow geometrically and share storage across requests in that layer. This improves capacity, reuse, removal, and fragmentation without serializing every layer through one backing tensor. |
+| 3.5 Paged Attention, Part 2 | Reads K/V through page tables without rebuilding dense per-request K/V. | The BF16 decode operator is approximately matched with the dense course kernel across the documented batch/context cases. The single-request paged checkpoint reached 206.96 decode tok/s, 29.8% below MLX; the matched four-request serving run reached 348.75 aggregate decode tok/s. |
 | 3.6 Optional MoE | Routes tokens through selected experts and supports sparse Qwen3 variants. | Expands model coverage and can reduce active parameter work, but the course has no controlled dense-versus-MoE speed claim. |
-| 3.7 Optional Performance Lab | Adds SIMD-matrix quantized prefill, direct quantized embedding, and last-token projection analysis. | Without FlashAttention, it improved the completed paged stack from 655.47 to 1,118.09 prefill tok/s (+70.6%) and remained 74.6% below MLX. With FlashAttention, it improved 742.93 to 1,420.27 prefill tok/s (+91.2%) and remained 67.8% below MLX. Paged decode remained about 37.8 tok/s. |
+| 3.7 Optional Performance Lab | Adds SIMD-matrix quantized prefill, direct quantized embedding, and last-token projection analysis. | Without dense FlashAttention, it improved the completed paged stack from 987.25 to 1,948.88 prefill tok/s (+97.4%) and remained 55.7% below MLX. With FlashAttention, it improved 983.90 to 1,956.79 tok/s (+98.9%) and remained 55.6% below MLX. Paged decode remained about 205 tok/s. |
 | 3.8 Optional Speculative Decoding | Drafts several tokens and verifies them with the target model. | Work in progress. Speed depends on acceptance rate and cache-rewind cost; no result should be claimed yet. |
 
-Paged attention is currently slower even under batching. In one matched
-four-request snapshot, the dense compatibility path reached 288.4 aggregate
-decode tok/s while the Week 3 paged path reached 26.6 tok/s. Paging still
-teaches the correct ownership and memory-management structure, but the page
-walker needs a decode-specific schedule before it becomes a performance win.
+In one matched four-request snapshot, the dense path reached 305.31 aggregate
+decode tok/s while the Week 3 paged path reached 348.75 tok/s. This is not a
+universal paged-kernel speedup: it is an end-to-end serving result that includes
+avoided repacking and cache reuse. The isolated operator remains close to the
+dense course kernel and behind MLX.
 
 ## Week 4: Measure Application Quality Separately
 

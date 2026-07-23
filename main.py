@@ -21,7 +21,14 @@ parser.add_argument("--sampler-temp", type=float, default=0)
 parser.add_argument("--sampler-top-p", type=float, default=None)
 parser.add_argument("--sampler-top-k", type=int, default=None)
 parser.add_argument("--enable-thinking", action="store_true")
-parser.add_argument("--enable-flash-attn", action="store_true")
+flash_group = parser.add_mutually_exclusive_group()
+flash_group.add_argument(
+    "--enable-flash-attn", dest="enable_flash_attn", action="store_true"
+)
+flash_group.add_argument(
+    "--disable-flash-attn", dest="enable_flash_attn", action="store_false"
+)
+parser.set_defaults(enable_flash_attn=None)
 parser.add_argument("--enable-performance-lab", action="store_true")
 parser.add_argument(
     "--disable-paged-attention",
@@ -46,7 +53,7 @@ args = parser.parse_args()
 if (
     args.solution != "mlx"
     and args.loader == "week3"
-    and args.enable_flash_attn
+    and args.enable_flash_attn is not False
     and args.device != "gpu"
 ):
     parser.error("Week 3 FlashAttention requires --device gpu")

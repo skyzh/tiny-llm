@@ -23,6 +23,33 @@ accumulator fragment until the final store. Keeping only the input fragments in
 16-bit precision matters: a 16-bit accumulator passed an isolated loose test
 but accumulated visible error across transformer layers.
 
+### Hoist Quantization Parameters at the Group Boundary
+
+The weights use 4-bit values with one scale and bias for every 128 reduction
+elements. An 8×8 matrix kernel advances through that group in sixteen
+eight-wide tiles. Loading the same scale and bias inside every tile repeats
+parameter-address calculation and device reads sixteen times for each output
+fragment.
+
+Loop over quantization groups first. Each lane loads the scale and bias for
+its two output-fragment elements into registers, then reuses them while it
+unpacks all sixteen matrix tiles in that group:
+
+```plain
+for each 128-value quantization group:
+    load scale and bias for this output fragment
+    for each of its sixteen 8-value reduction tiles:
+        unpack and dequantize weights with the registered parameters
+        matrix-multiply-accumulate into FP32
+```
+
+This changes scheduling, not the quantization equation or model format. In the
+matched Qwen3-0.6B measurement it reduced the synchronized 128-token Q
+projection from about 370 to 328 µs. Experiments that computed two output
+tiles per SIMD group, broadcast packed weights with shuffles, or reduced the
+threadgroup from eight to four SIMD groups all regressed; the optimization
+ledger records those results so they are not rediscovered as assumed wins.
+
 The kernel borrows the scheduling ideas behind MLX Steel without instantiating
 Steel templates or calling MLX operator kernels. An attempted 32×16 tile copied
 shared A/B blocks through threadgroup memory. It reduced global loads but added
@@ -92,12 +119,13 @@ Check full-sequence logits with `logits_to_keep=None`, last-position logits with
 ## Measure the Result
 
 Repeat the matched benchmark from Week 2. The minimal Week 2 path should reach
-at least 70% of MLX decode throughput on the same machine. Week 3 adds a slower
-teaching paged-attention path, so do not reuse that single-request acceptance
-ratio as a serving-engine target. Measure prefill, aggregate request
-throughput, cache capacity, and page reuse separately. The lab may not replace
-a slow operator with the matching MLX implementation; profile and report each
-remaining gap honestly.
+at least 70% of MLX decode throughput on the same machine. Week 3 adds paging,
+allocator, and scheduler work around a paged decode kernel that is now close to
+the dense course attention operator; do not reuse the Week 2 single-request
+acceptance ratio as the serving-engine target. Measure prefill, aggregate
+request throughput, cache capacity, and page reuse separately. The lab may not
+replace a slow operator with the matching MLX implementation; profile and
+report each remaining gap honestly.
 
 ```bash
 pdm run bench --solution tiny_llm_ref --loader week3 \
@@ -131,6 +159,7 @@ independently additive.
 | Eight-column vocabulary matvec | Keep | Best measured layout for the very wide tied output head; smaller projections use two columns to avoid register pressure. |
 | Remove matvec activation barrier | Keep | Roughly 238.6 → 247-252 tok/s; a cache-hot 2 KB vector was cheaper to reread than to copy and synchronize in every threadgroup. |
 | Vanilla → `simdgroup_matrix` prefill | Keep | About 1,005 → 2,052 prefill tok/s; 8×8 matrix fragments replace scalar dot products. |
+| Hoist quantization parameters per group | Keep | Scale and bias are constant across sixteen 8-wide reduction tiles. Keeping them in registers improved the 128-token Q projection from about 370 to 328 µs and the matched lab checkpoint to 2,371 prefill tok/s. |
 | Direct quantized embedding | Keep | Roughly 20% lower isolated latency in a representative run, about 1% end to end; gathers and dequantizes without intermediate arrays. |
 | 256-thread RMSNorm | Keep | Closes most of the gap left by a one-SIMD-group reduction. |
 | Four-head RoPE reuse | Keep | Avoids repeated angle/sine/cosine work; current isolated latency is within roughly 7-14% of MLX. |
@@ -139,10 +168,14 @@ independently additive.
 | No decode causal-mask graph | Keep | Pass `None` when `L = 1`; every cached position is already valid. |
 | Normalize RoPE offsets once | Keep | Builds one batch offset array per model call rather than once per layer. |
 | Last-token logits | Keep | Avoids vocabulary projection for prompt positions that generation never samples. |
+| Zero-gather FlashAttention prefill | Keep | Runs Day 2 FlashAttention directly on fresh K/V before paged decode. With the SIMD-matrix lab it improved matched prefill about 1.7% at 128 tokens and 2.0% at 512; decode was unchanged. |
 | Fuse Q/K/V and gate/up projections | Reject | About 242 → 227 tok/s; fewer Python calls did not offset a more complex kernel and dispatch map. |
 | Concatenate quantized weights at runtime | Reject | About 235 → 217 tok/s; constructing larger arrays added work and memory traffic. |
 | Preallocate chunked dense KV cache | Reject | About 235 → 229 tok/s; strided logical slices hurt the following operations. Paging belongs in Week 3. |
 | Share 32×16 prefill tiles in threadgroup memory | Reject | About 2,052 → 1,848 prefill tok/s; barriers outweighed reduced global loads at 128 tokens. |
+| Two output tiles per SIMD group | Reject | About 328 → 338 µs for the 128-token Q projection; reusing the activation fragment did not offset the second FP32 accumulator's register pressure. |
+| Broadcast packed weights within a SIMD group | Reject | About 370 → 699 µs for the 128-token Q projection; coalesced cached loads were cheaper than repeated SIMD shuffles. |
+| Four SIMD groups per prefill threadgroup | Reject | About 370 → 385 µs for the same projection; the smaller scheduling unit added launches without improving occupancy. |
 | Broadcast scale/bias within the wide matvec | Reject | Increased vocabulary-head latency; extra loop structure and broadcasts outweighed parameter-load savings. |
 | Four-output ordinary matvec | Reject | About 249 → 232 tok/s; extra register pressure outweighed activation reuse. |
 | Affine identity in the ordinary matvec | Reject | About 249 → 244.5 tok/s; fewer arithmetic instructions did not improve the executed schedule. |
@@ -168,11 +201,12 @@ measured about 2,042 tok/s versus about 3,318 for the dense Week 1 model. That
 number isolates the lab kernels from Week 3 paging; it is not the output of the
 integrated `--loader week3` command above.
 
-On the completed paged stack, the matched three-process median measured about
-1,118 prefill tok/s and 37.8 decode tok/s without FlashAttention on an M4 Pro.
-The paged-attention teaching kernel dominates decode there. Use the
-performance appendix's progression runner to compare both configurations with
-Week 1 and MLX on the same machine instead of combining their numbers.
+On the completed paged stack after hoisting quantization parameters, a matched
+three-process run measured about 2,371 prefill tok/s and 210 decode tok/s with
+the performance lab, versus 4,416 prefill tok/s and 329 decode tok/s for MLX.
+The lab changes prefill matrix products and should not materially move decode.
+Use the performance appendix's progression runner to compare configurations on
+the same machine instead of combining numbers from separate runs.
 
 One-factor cached-decode ablations give the following attribution. Each row
 uses two models with the same loaded weights, alternates optimized and vanilla

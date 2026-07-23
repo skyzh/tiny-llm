@@ -4,7 +4,15 @@
 
 In this chapter, we move from **paged KV storage** to the runtime metadata and execution path needed for **real paged attention**.
 
-Part 1 introduced fixed-size pages, a model-owned page pool shared by layer caches, and per-layer page metadata. That change already improves the storage abstraction, but it does not yet remove the dense gather before attention. To get the full benefit, the attention path itself must understand how to read from pages.
+Part 1 introduced fixed-size pages, one model-owned physical pool per layer,
+and request-local page metadata. That change already improves the storage
+abstraction, but it does not yet remove the dense gather before attention. To
+get the full benefit, the attention path itself must understand how to read
+from pages.
+
+> **Prerequisite:** Complete Day 2 FlashAttention before this chapter. Paged
+> prefill reuses its BF16 SIMD-matrix tiles and online-softmax recurrence; the
+> new concept here is translating logical K/V positions through a block table.
 
 ## Paged KV Cache vs Paged Attention
 
@@ -122,6 +130,34 @@ The runtime should be able to:
 
 This is the point where decode stops paying the repeated dense-repack cost from Day 1.
 
+## Why the First Paged Kernel Was Slow
+
+The first correct implementation used one scalar FP32 prefill schedule for
+every query length. That combined three expensive choices during decode:
+
+1. It promoted complete BF16 Q/K/V tensors to FP32 and converted the result
+   back, doubling their storage traffic and adding conversion work.
+2. Its threadgroup reserved work for 32 query rows even when decode supplied
+   one row, so almost all of the query-row parallelism was idle.
+3. It walked K/V serially inside that under-filled tile instead of splitting a
+   long context across independent SIMD groups.
+
+Paged addressing was therefore not the main explanation for the end-to-end
+gap. The schedule was mismatched to the decode shape. The optimized design
+preserves BF16 storage, keeps only dot products and online-softmax state in
+FP32, and chooses a different kernel according to query shape.
+
+| Shape | Course-owned dispatch | Work decomposition |
+|---|---|---|
+| `L <= 8`, FP32 or BF16 | Vector paged decode | One threadgroup per query row; 32 SIMD groups stride over the context and merge partial `(max, sum, output)` states. |
+| `L > 8`, BF16, `D == 128` | SIMD-matrix paged prefill | Eight SIMD groups cover a 64-row query block, stage 32 K/V rows at a time through the block table, and use 8×8 matrix fragments. |
+| `L > 8`, FP32 | Scalar paged prefill | A small correctness/reference path with 16 query rows and 32 K/V rows per tile. |
+| CPU FP32 | Scalar reference | A readable oracle used for correctness rather than the performance target. |
+
+The threshold is deliberately part of the extension dispatch rather than a
+Python conversion or dense fallback. Students can benchmark each shape while
+the model-facing `paged_attention` API remains unchanged.
+
 ## How This Maps to `tiny-llm`
 
 ### `src/tiny_llm/attention.py`
@@ -150,7 +186,15 @@ logical key position -> logical page -> physical page id -> slot in page
 ```
 
 After that lookup, the online-softmax update is the same idea as Day 2
-FlashAttention. We still avoid a dense K/V gather before attention.
+FlashAttention. For BF16 prefill, reuse the Day 2 SIMD-matrix tile directly and
+replace only its dense K/V loads with page-table loads. We still avoid a dense
+K/V gather before attention.
+
+One-token decode needs a different work decomposition. A 64-row prefill tile
+would leave almost every query row idle, so dispatch short queries to a
+vector-oriented kernel that partitions the context across SIMD groups and
+merges their partial online-softmax states. Do not run decode through a fixed
+32-row scalar prefill tile.
 
 The page pool should therefore expose contiguous physical storage:
 
@@ -229,7 +273,7 @@ src/extensions/src/paged_attention.cpp
 src/extensions/src/paged_attention.metal
 ```
 
-Add a paged attention interface whose inputs come from the paged runtime rather than a dense reconstructed `S` dimension.
+Add a paged attention interface whose inputs come from the paged runtime rather than a dense reconstructed `S` dimension. Preserve BF16 Q/K/V and output; scores, softmax statistics, and output accumulators remain FP32.
 
 The reference solution walks every request's block table and keeps online
 softmax state:
@@ -244,6 +288,34 @@ After all visible pages are consumed, divide `output` by `running_sum`.
 This is the key idea that lets the kernel avoid materializing dense K/V while
 still producing the same result as dense attention.
 
+Implement two GPU dispatches:
+
+1. For `L <= 8`, partition logical context positions across SIMD groups and
+   merge their partial `(max, sum, output)` states in threadgroup memory. The
+   reference schedule uses 32 SIMD groups per query so group `g` visits
+   positions `g`, `g + 32`, `g + 64`, and so on.
+2. For BF16 `D == 128` prefill, start from Day 2's SIMD-matrix FlashAttention
+   kernel and resolve each staged K/V row through `block_table`. Use a 64-row
+   query block and 32-row K/V tiles so all eight SIMD groups own useful query
+   rows.
+
+Keep a scalar FP32 path for small correctness fixtures and the CPU reference.
+
+### Course implementation boundary
+
+MLX remains the array runtime for shapes, reshapes, transposes, contiguous
+storage, dtype conversion, allocation, and custom-primitive dispatch. The
+attention implementation itself must remain course-owned: do not call
+`mx.fast.scaled_dot_product_attention`, reuse an MLX attention/Steel kernel, or
+reconstruct dense K/V and express the paged operator as MLX matmul plus
+softmax. MLX SDPA may appear only in tests and benchmarks as an external
+correctness/performance reference.
+
+Ordinary prefill runs the course-owned Day 2 FlashAttention kernel directly on
+the freshly projected dense K/V, then stores those same tensors in the paged
+cache for decode. It must not gather them back from the cache. Paged prefill
+remains useful when chunked prefill already has history in the page pool.
+
 ## Task 3: Dispatch from the Model
 
 ```
@@ -252,14 +324,31 @@ src/tiny_llm/qwen3_week3.py
 
 Update the model so it can route to paged attention when the cache provides paged runtime metadata.
 
-The optional dense FlashAttention prefill and the paged decode path must share
-one request cache. When `enable_flash_attn=True` and the current query has more
-than eight tokens, append BF16 K/V to the paged cache, gather its logical dense
-view, and run the Week 3 FlashAttention kernel. Subsequent short decode steps
-append the same BF16 dtype and pass page metadata directly to paged attention.
-The paged wrapper may promote values at its extension boundary, but changing
-the cache dtype between prefill and decode is an error. Keep this dispatch
-behind the Week 3 model so Week 2 remains independent.
+FlashAttention prefill and the paged paths must share one request cache. For an
+ordinary first prefill with more than eight tokens, append BF16 K/V to the
+paged cache and run the Day 2 FlashAttention kernel directly on the freshly
+projected K/V. Do not gather the tensors back from the cache. If chunked
+prefill already has cached history, pass page metadata to the paged BF16
+prefill kernel instead. Subsequent short decode steps always use the
+vector-oriented paged kernel. Neither path may upcast the complete Q/K/V
+tensors or change cache dtype. Keep this dispatch behind the Week 3 model so
+Week 2 remains independent. The final Week 3 model selects FlashAttention
+prefill automatically for supported `D == 128` models; `--disable-flash-attn`
+exists only for the measured paged-prefill ablation.
+
+This creates the final routing policy:
+
+```plain
+fresh prefill, L > 8, D == 128 -> Day 2 dense FlashAttention on fresh K/V
+long prefill with cached history -> paged BF16 SIMD-matrix attention
+decode or another short chunk    -> paged vector attention
+```
+
+All three paths write or retain the same paged cache. The first path is
+"zero-gather" because it stores fresh K/V in the cache but attends to the
+already-available projection tensors instead of gathering an equivalent dense
+copy back out. `--disable-paged-attention` is a Day 4 dense-gather teaching
+ablation, not the completed Day 5 serving path.
 
 ## Task 4: Connect It to Continuous Batching
 
@@ -271,32 +360,30 @@ Update request admission, slot reuse, and request removal so that:
 
 - finished requests free their pages,
 - in this teaching implementation, that means freeing pages from every layer cache,
-- new requests allocate from the shared pool,
+- new requests allocate from the corresponding layer pool,
 - active decode steps reuse page metadata instead of rebuilding dense K/V.
 
 After this chapter, the serving stack has the right structure for a real high-throughput runtime: paging is no longer just a storage trick, but part of the execution model itself.
 
 ## Performance Reality on Apple Silicon
 
-The current course kernel proves that attention can walk pages without a dense
-K/V repack, but it is not faster yet. On the same M4 Pro operator benchmark,
-representative timings were:
+The optimized course kernel shows that page walking itself can be close to the
+dense decode path when both use the same BF16/vector decomposition. On an M4
+Pro operator benchmark, representative synchronized decode timings were:
 
 | Batch / context | Dense course attention | Course paged attention | MLX attention |
 |---|---:|---:|---:|
-| 1 / 128 | 175 µs | 784 µs | 144 µs |
-| 1 / 512 | 217 µs | 694 µs | 157 µs |
-| 1 / 2048 | 315 µs | 2,100 µs | 204 µs |
-| 8 / 512 | 489 µs | 3,553 µs | 304 µs |
-| 8 / 2048 | 1,371 µs | 13,611 µs | 816 µs |
+| 1 / 128 | 226 µs | 219 µs | 170 µs |
+| 1 / 512 | 300 µs | 309 µs | 192 µs |
+| 1 / 2048 | 729 µs | 726 µs | 263 µs |
+| 8 / 512 | 800 µs | 626 µs | 225 µs |
+| 8 / 2048 | 1,347 µs | 1,322 µs | 460 µs |
 
-The page-table loads and irregular access are real costs. Paged attention can
-improve a Mac serving system when it avoids repeated dense repacks, admits more
-concurrent requests, and reuses pages over many scheduling steps. To improve
-the kernel itself, group adjacent logical pages, coalesce K/V loads within a
-SIMD group, keep online-softmax state in registers, specialize the one-token
-decode case, and batch page-table metadata once per scheduler step. Measure
-aggregate request throughput and memory use as well as kernel latency.
+The page-table loads and irregular access are still real costs. Paged attention
+earns its place by avoiding repeated dense repacks, admitting more concurrent
+requests, and reusing pages over many scheduling steps—not by making every
+isolated kernel faster than MLX. Measure aggregate request throughput and
+memory use as well as kernel latency.
 
 ```bash
 pdm run test --week 3 --day 5

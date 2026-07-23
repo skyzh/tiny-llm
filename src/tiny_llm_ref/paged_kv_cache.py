@@ -17,21 +17,39 @@ class PagedKvMetadata:
 
 
 class TinyKvPagedPool:
-    """Model-local physical storage for paged KV.
+    """Layer-local physical storage for paged KV.
 
-    The model owns one pool and passes it to every layer cache. The pool gives
-    out physical page ids from one free list. Because every live page id is
-    unique, the page id alone is enough to find the physical K/V page.
+    The model owns one pool per transformer layer. Request caches for the same
+    layer share that pool, so a physical page id only needs to be unique within
+    its layer.
     """
 
     def __init__(self, page_size: int = 128):
         assert page_size > 0
         self.page_size = page_size
-        self.key_pages: mx.array | None = None
-        self.value_pages: mx.array | None = None
+        self._key_pages: mx.array | None = None
+        self._value_pages: mx.array | None = None
         self.free_page_ids: list[int] = []
         self.used_page_ids: set[int] = set()
         self.num_allocated_pages = 0
+
+    @property
+    def key_pages(self) -> mx.array | None:
+        if self._key_pages is None:
+            return None
+        return self._key_pages[: self.num_pages]
+
+    @property
+    def value_pages(self) -> mx.array | None:
+        if self._value_pages is None:
+            return None
+        return self._value_pages[: self.num_pages]
+
+    @property
+    def capacity(self) -> int:
+        if self._key_pages is None:
+            return 0
+        return self._key_pages.shape[0]
 
     @property
     def num_pages(self) -> int:
@@ -57,39 +75,38 @@ class TinyKvPagedPool:
         return page_id
 
     def read_page(self, page_id: int) -> tuple[mx.array, mx.array]:
-        if self.key_pages is None or self.value_pages is None:
+        if self._key_pages is None or self._value_pages is None:
             raise ValueError(f"Page {page_id} has no storage")
         if page_id >= self.num_pages:
             raise ValueError(f"Page {page_id} is out of range")
         return (
-            self.key_pages[page_id : page_id + 1],
-            self.value_pages[page_id : page_id + 1],
+            self._key_pages[page_id : page_id + 1],
+            self._value_pages[page_id : page_id + 1],
         )
 
     def _ensure_page_storage(self, key: mx.array, value: mx.array) -> None:
         B, H, _, D = key.shape
         assert B == 1
 
-        if self.key_pages is not None and self.value_pages is not None:
-            assert self.key_pages.shape[1:] == (H, self.page_size, D)
-            assert self.value_pages.shape == self.key_pages.shape
-            assert self.key_pages.dtype == key.dtype
-            assert self.value_pages.dtype == value.dtype
-            if self.key_pages.shape[0] >= self.num_pages:
+        if self._key_pages is not None and self._value_pages is not None:
+            assert self._key_pages.shape[1:] == (H, self.page_size, D)
+            assert self._value_pages.shape == self._key_pages.shape
+            assert self._key_pages.dtype == key.dtype
+            assert self._value_pages.dtype == value.dtype
+            if self.capacity >= self.num_pages:
                 return
 
-        new_key_pages = mx.zeros(
-            (self.num_pages, H, self.page_size, D), dtype=key.dtype
-        )
+        new_capacity = max(4, self.num_pages, self.capacity * 2)
+        new_key_pages = mx.zeros((new_capacity, H, self.page_size, D), dtype=key.dtype)
         new_value_pages = mx.zeros(
-            (self.num_pages, H, self.page_size, D), dtype=value.dtype
+            (new_capacity, H, self.page_size, D), dtype=value.dtype
         )
-        if self.key_pages is not None and self.value_pages is not None:
-            old_pages = self.key_pages.shape[0]
-            new_key_pages[:old_pages, :, :, :] = self.key_pages
-            new_value_pages[:old_pages, :, :, :] = self.value_pages
-        self.key_pages = new_key_pages
-        self.value_pages = new_value_pages
+        if self._key_pages is not None and self._value_pages is not None:
+            old_pages = self.num_pages - 1
+            new_key_pages[:old_pages, :, :, :] = self._key_pages[:old_pages]
+            new_value_pages[:old_pages, :, :, :] = self._value_pages[:old_pages]
+        self._key_pages = new_key_pages
+        self._value_pages = new_value_pages
 
     def write_page_slice(
         self,
@@ -103,10 +120,10 @@ class TinyKvPagedPool:
         if page_id not in self.used_page_ids:
             raise ValueError(f"Page {page_id} is free")
         self._ensure_page_storage(key, value)
-        assert self.key_pages is not None
-        assert self.value_pages is not None
-        H, capacity, D = self.key_pages.shape[1:]
-        assert self.value_pages.shape == self.key_pages.shape
+        assert self._key_pages is not None
+        assert self._value_pages is not None
+        H, capacity, D = self._key_pages.shape[1:]
+        assert self._value_pages.shape == self._key_pages.shape
         assert capacity == self.page_size
         assert key.shape[:2] == (1, H)
         assert key.shape[3] == D
@@ -114,8 +131,8 @@ class TinyKvPagedPool:
         assert 0 <= start <= capacity
         assert end <= self.page_size
 
-        self.key_pages[page_id, :, start:end, :] = key[0]
-        self.value_pages[page_id, :, start:end, :] = value[0]
+        self._key_pages[page_id, :, start:end, :] = key[0]
+        self._value_pages[page_id, :, start:end, :] = value[0]
 
     def free_page(self, page_id: int) -> None:
         if page_id not in self.used_page_ids:
@@ -127,11 +144,10 @@ class TinyKvPagedPool:
 
 
 class TinyKvPagedCache(TinyKvCache):
-    """Layer-local K/V cache backed by a model-owned page pool.
+    """Request-and-layer-local K/V cache backed by a layer page pool.
 
-    Each transformer layer gets its own TinyKvPagedCache and therefore its own
-    `page_ids`, `page_lens`, and `offset`. The shared part is only the pool,
-    which lets pages be recycled across requests and layers.
+    Each request gets one cache handle per transformer layer. Cache handles for
+    the same layer share a pool so pages can be recycled across requests.
     """
 
     def __init__(self, pool: TinyKvPagedPool):

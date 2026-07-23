@@ -72,6 +72,9 @@ NB_MODULE(_ext, m) {
             scale (float): Scaling factor.
             is_causal (bool): Enable causal masking.
 
+        Q, K, V, and output preserve bfloat16 on the optimized GPU paths.
+        Scores and online-softmax accumulation use float32.
+
         Returns:
             array: ``softmax(query @ paged_key.T * scale) @ paged_value``
       )");

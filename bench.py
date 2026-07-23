@@ -40,7 +40,14 @@ def parse_args() -> argparse.Namespace:
         default="week2",
         choices=["week1", "week2", "week3"],
     )
-    parser.add_argument("--enable-flash-attn", action="store_true")
+    flash_group = parser.add_mutually_exclusive_group()
+    flash_group.add_argument(
+        "--enable-flash-attn", dest="enable_flash_attn", action="store_true"
+    )
+    flash_group.add_argument(
+        "--disable-flash-attn", dest="enable_flash_attn", action="store_false"
+    )
+    parser.set_defaults(enable_flash_attn=None)
     parser.add_argument("--enable-performance-lab", action="store_true")
     parser.add_argument(
         "--disable-paged-attention",
@@ -106,7 +113,7 @@ def validate_args(args: argparse.Namespace) -> None:
     if (
         args.solution != "mlx"
         and args.loader == "week3"
-        and args.enable_flash_attn
+        and args.enable_flash_attn is not False
         and args.device != "gpu"
     ):
         raise ValueError("Week 3 FlashAttention requires --device gpu")
