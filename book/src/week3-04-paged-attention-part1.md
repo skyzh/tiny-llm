@@ -117,6 +117,15 @@ Keep logical `num_pages` separate from physical capacity so callers still see
 only allocated pages while pool growth copies old storage logarithmically many
 times.
 
+Growing an exact-size slab from `p` to `p + 1` pages copies approximately
+`1 + 2 + ... + p` old pages, which is quadratic in the final page count.
+Starting with four pages and doubling capacity copies fewer than twice the
+eventual capacity across all growth events. Splitting the slab by transformer
+layer also prevents a new page in layer 0 from replacing the storage object
+used by every other layer. These two changes amortize allocator-copy work so
+most new-page allocations do not copy old pages, without changing the logical
+page table.
+
 In the reference solution, this becomes `TinyKvPagedPool`.
 
 ## 2. `PagedRequestCache`
@@ -270,6 +279,11 @@ Design layer-owned page pools that:
 - supports writing a chunk into page storage,
 - grows backing capacity geometrically,
 - is shared by all request caches for that layer, but not by other layers.
+
+Test logical size and physical capacity separately. Allocating the fifth page,
+for example, may create capacity for eight pages, but `key_pages` and
+`value_pages` exposed to the attention runtime should contain only the five
+allocated page ids.
 
 ## Task 2: Design `PagedRequestCache`
 

@@ -130,6 +130,34 @@ The runtime should be able to:
 
 This is the point where decode stops paying the repeated dense-repack cost from Day 1.
 
+## Why the First Paged Kernel Was Slow
+
+The first correct implementation used one scalar FP32 prefill schedule for
+every query length. That combined three expensive choices during decode:
+
+1. It promoted complete BF16 Q/K/V tensors to FP32 and converted the result
+   back, doubling their storage traffic and adding conversion work.
+2. Its threadgroup reserved work for 32 query rows even when decode supplied
+   one row, so almost all of the query-row parallelism was idle.
+3. It walked K/V serially inside that under-filled tile instead of splitting a
+   long context across independent SIMD groups.
+
+Paged addressing was therefore not the main explanation for the end-to-end
+gap. The schedule was mismatched to the decode shape. The optimized design
+preserves BF16 storage, keeps only dot products and online-softmax state in
+FP32, and chooses a different kernel according to query shape.
+
+| Shape | Course-owned dispatch | Work decomposition |
+|---|---|---|
+| `L <= 8`, FP32 or BF16 | Vector paged decode | One threadgroup per query row; 32 SIMD groups stride over the context and merge partial `(max, sum, output)` states. |
+| `L > 8`, BF16, `D == 128` | SIMD-matrix paged prefill | Eight SIMD groups cover a 64-row query block, stage 32 K/V rows at a time through the block table, and use 8×8 matrix fragments. |
+| `L > 8`, FP32 | Scalar paged prefill | A small correctness/reference path with 16 query rows and 32 K/V rows per tile. |
+| CPU FP32 | Scalar reference | A readable oracle used for correctness rather than the performance target. |
+
+The threshold is deliberately part of the extension dispatch rather than a
+Python conversion or dense fallback. Students can benchmark each shape while
+the model-facing `paged_attention` API remains unchanged.
+
 ## How This Maps to `tiny-llm`
 
 ### `src/tiny_llm/attention.py`
@@ -263,9 +291,13 @@ still producing the same result as dense attention.
 Implement two GPU dispatches:
 
 1. For `L <= 8`, partition logical context positions across SIMD groups and
-   merge their partial `(max, sum, output)` states in threadgroup memory.
+   merge their partial `(max, sum, output)` states in threadgroup memory. The
+   reference schedule uses 32 SIMD groups per query so group `g` visits
+   positions `g`, `g + 32`, `g + 64`, and so on.
 2. For BF16 `D == 128` prefill, start from Day 2's SIMD-matrix FlashAttention
-   kernel and resolve each staged K/V row through `block_table`.
+   kernel and resolve each staged K/V row through `block_table`. Use a 64-row
+   query block and 32-row K/V tiles so all eight SIMD groups own useful query
+   rows.
 
 Keep a scalar FP32 path for small correctness fixtures and the CPU reference.
 
@@ -303,6 +335,20 @@ tensors or change cache dtype. Keep this dispatch behind the Week 3 model so
 Week 2 remains independent. The final Week 3 model selects FlashAttention
 prefill automatically for supported `D == 128` models; `--disable-flash-attn`
 exists only for the measured paged-prefill ablation.
+
+This creates the final routing policy:
+
+```plain
+fresh prefill, L > 8, D == 128 -> Day 2 dense FlashAttention on fresh K/V
+long prefill with cached history -> paged BF16 SIMD-matrix attention
+decode or another short chunk    -> paged vector attention
+```
+
+All three paths write or retain the same paged cache. The first path is
+"zero-gather" because it stores fresh K/V in the cache but attends to the
+already-available projection tensors instead of gathering an equivalent dense
+copy back out. `--disable-paged-attention` is a Day 4 dense-gather teaching
+ablation, not the completed Day 5 serving path.
 
 ## Task 4: Connect It to Continuous Batching
 

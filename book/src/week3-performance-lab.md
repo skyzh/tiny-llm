@@ -23,6 +23,33 @@ accumulator fragment until the final store. Keeping only the input fragments in
 16-bit precision matters: a 16-bit accumulator passed an isolated loose test
 but accumulated visible error across transformer layers.
 
+### Hoist Quantization Parameters at the Group Boundary
+
+The weights use 4-bit values with one scale and bias for every 128 reduction
+elements. An 8×8 matrix kernel advances through that group in sixteen
+eight-wide tiles. Loading the same scale and bias inside every tile repeats
+parameter-address calculation and device reads sixteen times for each output
+fragment.
+
+Loop over quantization groups first. Each lane loads the scale and bias for
+its two output-fragment elements into registers, then reuses them while it
+unpacks all sixteen matrix tiles in that group:
+
+```plain
+for each 128-value quantization group:
+    load scale and bias for this output fragment
+    for each of its sixteen 8-value reduction tiles:
+        unpack and dequantize weights with the registered parameters
+        matrix-multiply-accumulate into FP32
+```
+
+This changes scheduling, not the quantization equation or model format. In the
+matched Qwen3-0.6B measurement it reduced the synchronized 128-token Q
+projection from about 370 to 328 µs. Experiments that computed two output
+tiles per SIMD group, broadcast packed weights with shuffles, or reduced the
+threadgroup from eight to four SIMD groups all regressed; the optimization
+ledger records those results so they are not rediscovered as assumed wins.
+
 The kernel borrows the scheduling ideas behind MLX Steel without instantiating
 Steel templates or calling MLX operator kernels. An attempted 32×16 tile copied
 shared A/B blocks through threadgroup memory. It reduced global loads but added
@@ -92,12 +119,13 @@ Check full-sequence logits with `logits_to_keep=None`, last-position logits with
 ## Measure the Result
 
 Repeat the matched benchmark from Week 2. The minimal Week 2 path should reach
-at least 70% of MLX decode throughput on the same machine. Week 3 adds a slower
-teaching paged-attention path, so do not reuse that single-request acceptance
-ratio as a serving-engine target. Measure prefill, aggregate request
-throughput, cache capacity, and page reuse separately. The lab may not replace
-a slow operator with the matching MLX implementation; profile and report each
-remaining gap honestly.
+at least 70% of MLX decode throughput on the same machine. Week 3 adds paging,
+allocator, and scheduler work around a paged decode kernel that is now close to
+the dense course attention operator; do not reuse the Week 2 single-request
+acceptance ratio as the serving-engine target. Measure prefill, aggregate
+request throughput, cache capacity, and page reuse separately. The lab may not
+replace a slow operator with the matching MLX implementation; profile and
+report each remaining gap honestly.
 
 ```bash
 pdm run bench --solution tiny_llm_ref --loader week3 \
