@@ -383,6 +383,20 @@ retained schedule looks this way; they are not Day 3's cumulative course
 result. The end of this chapter reports the matched Day 2 to Day 3 checkpoint
 change.
 
+The final host dispatcher makes that schedule explicit. Flatten all leading
+activation dimensions into `M`, then use the custom matvec when `M <= 8`.
+Within that path, use two output columns per SIMD group for ordinary
+projections and switch to eight when `K >= 8192`, which selects the wide
+vocabulary head. These are measured dispatch thresholds, not mathematical
+requirements; keep them visible so a later profile can replace them.
+
+At the Python-to-extension boundary, make scales, biases, activations, and
+packed weights row-contiguous once with `mx.contiguous`. The C++ primitive
+validates that contract before encoding the kernel. A Metal kernel receives
+raw buffers and strides are not implicit, so silently accepting a noncontiguous
+view would produce either wrong addressing or a slower hidden copy in a less
+explicit layer.
+
 Likewise, raising the ordinary projection tile from two to four output columns
 increased register pressure enough to reduce decode to about 232 tok/s. The
 best measured split is two columns for normal projections and eight only for
@@ -444,7 +458,8 @@ pattern:
 4. Select the matrix-vector layout for `M <= 8`; otherwise select the vanilla
    matrix layout. Keep both paths explicit for direct comparisons.
    Calculate a SIMD-aligned thread-group configuration and tile output columns
-   so packed input values and activations can be reused.
+   so packed input values and activations can be reused. Use the two-column
+   kernel below `K = 8192` and the eight-column kernel at or above it.
 5. Dispatch with `dispatchThreadgroups`.
 
 You can test your implementation by running:

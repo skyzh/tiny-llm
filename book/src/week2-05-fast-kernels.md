@@ -155,6 +155,13 @@ Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
 inside a timed iteration when measuring these lazy operations.
 
+The operator benchmark must also compare the same logical RoPE layout. The
+course kernel accepts the model-native `B, L, H, D` tensor. `mx.fast.rope`
+expects `B, H, L, D`, so transpose into that layout before the MLX call and
+transpose its result back afterward. Without those transposes, a one-token
+benchmark accidentally treats the head axis as sequence positions and the
+timing no longer measures an equivalent operation.
+
 ## Expected Performance Contribution
 
 **Measured operator improvement: about 34-39% over the readable Week 1
