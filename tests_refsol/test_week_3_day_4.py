@@ -154,6 +154,19 @@ def test_task_1_paged_pool_reuses_freed_pages():
     assert_allclose(gathered_value, second_value, precision=mx.float32)
 
 
+def test_task_1_paged_pool_grows_storage_geometrically():
+    pool = TinyKvPagedPool(page_size=4)
+    cache = TinyKvPagedCache(pool=pool)
+    key, value = _random_chunk(17)
+
+    cache.update_and_fetch_paged(key, value)
+
+    assert pool.num_pages == 5
+    assert pool.capacity == 8
+    assert pool.key_pages.shape[0] == pool.num_pages
+    assert pool.value_pages.shape[0] == pool.num_pages
+
+
 def test_task_1_paged_cache_rewind():
     page_size = 4
     pool = TinyKvPagedPool(page_size=page_size)
@@ -184,7 +197,7 @@ def test_task_1_paged_cache_rewind():
     assert_allclose(paged_value, full_value, precision=mx.float32)
 
 
-def test_task_1_model_kv_caches_share_layer_pools():
+def test_task_1_model_kv_caches_share_storage_within_each_layer():
     mlx_model = _fake_qwen3_mlx_model()
     week3_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_paged_attention=False)
     first_request_cache = week3_model.create_kv_cache()
@@ -192,12 +205,12 @@ def test_task_1_model_kv_caches_share_layer_pools():
 
     assert len(first_request_cache) == week3_model.num_hidden_layers
     for layer in range(week3_model.num_hidden_layers):
-        assert first_request_cache[layer].pool is week3_model.page_pool
-        assert second_request_cache[layer].pool is week3_model.page_pool
+        assert first_request_cache[layer].pool is week3_model.page_pools[layer]
+        assert second_request_cache[layer].pool is week3_model.page_pools[layer]
 
     assert first_request_cache[0].page_ids is not first_request_cache[1].page_ids
     assert first_request_cache[0].page_lens is not first_request_cache[1].page_lens
-    assert first_request_cache[0].pool is first_request_cache[1].pool
+    assert first_request_cache[0].pool is not first_request_cache[1].pool
 
 
 def test_task_1_model_layer_caches_keep_independent_page_metadata():
@@ -210,13 +223,11 @@ def test_task_1_model_layer_caches_keep_independent_page_metadata():
 
     assert cache[0].page_ids == [0, 1]
     assert cache[0].page_lens == [4, 1]
-    owned_page_ids = set(cache[0].page_ids)
     for layer in range(1, week3_model.num_hidden_layers):
         assert cache[layer].page_lens == cache[0].page_lens
-        assert owned_page_ids.isdisjoint(cache[layer].page_ids)
-        owned_page_ids.update(cache[layer].page_ids)
+        assert cache[layer].page_ids == cache[0].page_ids
         for page_id in cache[layer].page_ids:
-            key_page, value_page = week3_model.page_pool.read_page(page_id)
+            key_page, value_page = week3_model.page_pools[layer].read_page(page_id)
             assert key_page.shape[2] == week3_model.page_size
             assert value_page.shape[2] == week3_model.page_size
 

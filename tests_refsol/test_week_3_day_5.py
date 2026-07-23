@@ -191,6 +191,48 @@ def test_task_2_batched_paged_attention_matches_dense_attention():
     assert_allclose(paged_output[2:3], second_output, precision=mx.float32)
 
 
+@pytest.mark.parametrize("query_length", [1, 65])
+def test_paged_attention_preserves_bfloat16_for_decode_and_prefill(query_length):
+    page_size = 32
+    pool = TinyKvPagedPool(page_size=page_size)
+    cache = TinyKvPagedCache(pool=pool)
+    blocker = TinyKvPagedCache(pool=pool)
+    first_key, first_value = _random_chunk(64, head_dim=128)
+    first_key = first_key.astype(mx.bfloat16)
+    first_value = first_value.astype(mx.bfloat16)
+    cache.update_and_fetch(first_key, first_value)
+
+    blocker_key, blocker_value = _random_chunk(page_size, head_dim=128)
+    blocker.update_and_fetch(
+        blocker_key.astype(mx.bfloat16),
+        blocker_value.astype(mx.bfloat16),
+    )
+    next_key, next_value = _random_chunk(query_length, head_dim=128)
+    metadata = cache.update_and_fetch_paged(
+        next_key.astype(mx.bfloat16),
+        next_value.astype(mx.bfloat16),
+        mask="causal",
+    )
+    query = mx.random.normal(shape=(1, 4, query_length, 128)).astype(mx.bfloat16)
+
+    dense_key, dense_value = cache.gather_dense()
+    expected = flash_attention(query, dense_key, dense_value, mask="causal")
+    output = paged_attention(
+        query,
+        metadata.key_pages,
+        metadata.value_pages,
+        metadata.block_table,
+        metadata.context_lens,
+        metadata.page_size,
+        mask=metadata.mask,
+    )
+
+    assert cache.page_ids[:2] == [0, 1]
+    assert cache.page_ids[2] == 3
+    assert output.dtype == mx.bfloat16
+    assert_allclose(output, expected, precision=mx.bfloat16, rtol=0.02, atol=0.02)
+
+
 def test_task_3_incremental_decode_matches_week2_with_paged_attention():
     mlx_model = _fake_qwen3_mlx_model()
     week2_model = Qwen3ModelWeek2(mlx_model)

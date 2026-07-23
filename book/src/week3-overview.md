@@ -22,6 +22,11 @@ left out of the minimal Week 2 checkpoint.
 - Optional prefill, embedding, and scheduling experiments
 - Optional MoE and speculative-decoding extensions
 
+The ordering is intentional: students implement dense FlashAttention on Day 2
+before paged storage and paged attention on Days 4–5. The paged prefill kernel
+then reuses the same BF16 tiling and online-softmax machinery, leaving page
+translation and decode work partitioning as the new concepts.
+
 On Apple silicon, FlashAttention and paged attention are not automatic latency
 wins. FlashAttention has the best opportunity at long prefill lengths, where
 avoiding an `L x S` intermediate can save substantial memory traffic. Paged

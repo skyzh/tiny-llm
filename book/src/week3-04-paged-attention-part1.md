@@ -76,7 +76,11 @@ page  3 -> tokens 8..9
 
 The logical sequence is still length 10. The difference is that the runtime is no longer forced to represent it as one contiguous tensor.
 
-In our Part 1 teaching implementation, those fixed-size pages live in one shared **page pool** owned by the model. Every layer cache receives that same pool, but each layer cache keeps its own `page_ids`, `page_lens`, and `offset`.
+In our Part 1 teaching implementation, the model owns one physical **page
+pool per transformer layer**. Request caches for the same layer share its pool,
+while every request-and-layer cache keeps its own `page_ids`, `page_lens`, and
+`offset`. A page id is therefore local to one layer, matching the K/V storage
+buffer that the attention kernel receives.
 
 In the reference solution, `page_size` is the physical page capacity. Unused tail slots are not part of the logical sequence; `page_lens` decides which prefix of each page is valid.
 
@@ -85,7 +89,7 @@ In the reference solution, `page_size` is the physical page capacity. Unused tai
 The page abstraction gives us two immediate wins:
 
 1. Appending a token usually updates only the current tail page in the pool.
-2. Finished requests can return their pages to a shared free list.
+2. Finished requests can return their pages to the layer's shared free list.
 
 This is the key memory-management idea behind paged attention systems such as vLLM.
 
@@ -93,15 +97,25 @@ This is the key memory-management idea behind paged attention systems such as vL
 
 ## 1. `PagePool`
 
-The model should own one pool with a model-wide page allocator and flat K/V page storage:
+The model should own one pool per layer, each with a free-page allocator and
+flat K/V page storage:
 
 ```plain
-free_pages: available page ids for the whole model
+free_pages: available page ids for this layer
 keys[page_id]:   physical key page
 values[page_id]: physical value page
 ```
 
-Each layer still has distinct K/V contents because each layer cache allocates its own physical pages. In this teaching version, each layer cache also has its own logical page table. That is simpler than nano-vllm's shared block table: layer 0 might own pages `[0, 1]`, while layer 1 owns pages `[2, 3]`, but both page sets came from the same model-owned pool.
+Requests share physical storage only when they are executing the same layer.
+Layer 0 and layer 1 may both use page ids `[0, 1]` because those ids address
+different buffers. Keeping the layer dimension outside `page_id` prevents a
+one-token write in one layer from copying or serializing the page storage for
+every other layer.
+
+The backing slab should grow geometrically rather than by exactly one page.
+Keep logical `num_pages` separate from physical capacity so callers still see
+only allocated pages while pool growth copies old storage logarithmically many
+times.
 
 In the reference solution, this becomes `TinyKvPagedPool`.
 
@@ -186,7 +200,7 @@ The cleanest first implementation is **paged storage with dense gather**.
 
 That means:
 
-- pages in the shared pool are the source of truth,
+- pages in each layer pool are the source of truth,
 - layer caches stop owning one monolithic K/V tensor,
 - layer caches only track page metadata,
 - attention still receives dense K/V reconstructed from pages.
@@ -238,8 +252,9 @@ Before implementing, make sure the following are clear:
 1. What page size should this repo use for teaching?
 2. How do we represent the free-page allocator?
 3. How do we prove that paged storage reconstructs the same logical KV as `TinyKvFullCache`?
-4. How do layer cache handles share one pool while keeping their own page metadata?
+4. How do request cache handles share a layer pool while keeping their own page metadata?
 5. When do we materialize page writes to avoid MLX lazy-graph growth?
+6. How do we grow physical capacity without copying all old pages on every allocation?
 
 ## Task 1: Design `PagePool`
 
@@ -247,13 +262,14 @@ Before implementing, make sure the following are clear:
 src/tiny_llm/paged_kv_cache.py
 ```
 
-Design a model-owned page pool that:
+Design layer-owned page pools that:
 
-- owns the model-wide free-page allocator,
+- own one free-page allocator per layer,
 - stores flat fixed-size K/V pages,
 - allocates and frees page ids,
 - supports writing a chunk into page storage,
-- is shared by every layer cache created by the model.
+- grows backing capacity geometrically,
+- is shared by all request caches for that layer, but not by other layers.
 
 ## Task 2: Design `PagedRequestCache`
 

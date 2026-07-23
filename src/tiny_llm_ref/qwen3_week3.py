@@ -101,7 +101,7 @@ class Qwen3MultiHeadAttention:
                 mask=mask,
             )
             x = paged_attention(
-                projection_q.astype(mx.float32),
+                projection_q,
                 metadata.key_pages,
                 metadata.value_pages,
                 metadata.block_table,
@@ -109,7 +109,7 @@ class Qwen3MultiHeadAttention:
                 metadata.page_size,
                 scale=self.scale,
                 mask=metadata.mask,
-            ).astype(x.dtype)
+            )
         else:
             key, value, _, mask = cache.update_and_fetch(
                 projection_k,
@@ -248,9 +248,12 @@ class Qwen3ModelWeek3:
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size
         self.page_size = page_size
-        # One model-level pool is shared by all layer caches. Each layer cache
-        # still owns its own page table and allocates its own physical pages.
-        self.page_pool = TinyKvPagedPool(page_size=self.page_size)
+        # Each layer owns physical storage shared by all request caches for that
+        # layer. Page ids are therefore layer-local, as they are in the kernel.
+        self.page_pools = [
+            TinyKvPagedPool(page_size=self.page_size)
+            for _ in range(self.num_hidden_layers)
+        ]
         precision = mx.bfloat16
         self.precision = precision
 
@@ -331,11 +334,9 @@ class Qwen3ModelWeek3:
         self.mlx_model = mlx_model
 
     def create_kv_cache(self) -> list[TinyKvCache]:
-        # One request gets one cache handle per layer. The handles share the
-        # model-level pool, but their page_ids/page_lens/offset are independent.
-        return [
-            TinyKvPagedCache(pool=self.page_pool) for _ in range(self.num_hidden_layers)
-        ]
+        # One request gets one cache handle per layer. Requests share storage
+        # within a layer, while every handle keeps independent logical metadata.
+        return [TinyKvPagedCache(pool=pool) for pool in self.page_pools]
 
     def __call__(
         self,

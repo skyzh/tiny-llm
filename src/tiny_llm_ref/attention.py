@@ -89,12 +89,21 @@ def paged_attention(
 
     factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
     B, H_q, L, D = query.shape
-    _, H, _, _ = key_pages.shape
+    _, H, stored_page_size, _ = key_pages.shape
     assert H_q % H == 0
+    if stored_page_size != page_size:
+        raise ValueError(
+            f"page_size={page_size} does not match page storage {stored_page_size}"
+        )
 
-    query = mx.contiguous(query.astype(mx.float32).reshape(B * H_q, L, D))
-    key_pages = mx.contiguous(key_pages.astype(mx.float32))
-    value_pages = mx.contiguous(value_pages.astype(mx.float32))
+    if query.dtype != key_pages.dtype or query.dtype != value_pages.dtype:
+        raise ValueError("query, key pages, and value pages must have the same dtype")
+    if query.dtype not in (mx.float32, mx.bfloat16):
+        raise ValueError("paged attention supports float32 or bfloat16 inputs")
+
+    query = mx.contiguous(query.reshape(B * H_q, L, D))
+    key_pages = mx.contiguous(key_pages)
+    value_pages = mx.contiguous(value_pages)
     block_table = mx.contiguous(block_table.astype(mx.int32))
     context_lens = mx.contiguous(context_lens.astype(mx.int32))
     is_causal = mask == "causal"

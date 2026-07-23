@@ -1,8 +1,9 @@
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "mlx/backend/cpu/encoder.h"
@@ -19,8 +20,10 @@ namespace tiny_llm_ext_ref {
 mx::array paged_attention(const mx::array &q, const mx::array &key_pages, const mx::array &value_pages,
                           const mx::array &block_table, const mx::array &context_lens, const float scale,
                           const bool is_causal, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s) {
-    if (q.dtype() != mx::float32 || key_pages.dtype() != mx::float32 || value_pages.dtype() != mx::float32) {
-        throw std::runtime_error("paged_attention: q, key_pages, and value_pages must be float32");
+    if ((q.dtype() != mx::float32 && q.dtype() != mx::bfloat16) || key_pages.dtype() != q.dtype() ||
+        value_pages.dtype() != q.dtype()) {
+        throw std::runtime_error(
+            "paged_attention: q, key_pages, and value_pages must have the same float32 or bfloat16 dtype");
     }
     if (block_table.dtype() != mx::int32 || context_lens.dtype() != mx::int32) {
         throw std::runtime_error("paged_attention: block_table and context_lens must be int32");
@@ -56,7 +59,7 @@ mx::array paged_attention(const mx::array &q, const mx::array &key_pages, const 
         throw std::runtime_error("paged_attention: q batch size must match block_table batch size");
     }
 
-    return mx::array(q.shape(), mx::float32,
+    return mx::array(q.shape(), q.dtype(),
                      std::make_shared<PagedAttention>(to_stream(s), scale, is_causal, num_kv_heads, num_heads),
                      {q, key_pages, value_pages, block_table, context_lens});
 }
@@ -70,7 +73,7 @@ void PagedAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
     auto &out = outputs[0];
 
     if (out.dtype() != mx::float32) {
-        throw std::runtime_error("paged_attention: output dtype must be float32");
+        throw std::runtime_error("paged_attention: the CPU path only supports float32");
     }
     if (!q.flags().row_contiguous || !key_pages.flags().row_contiguous || !value_pages.flags().row_contiguous ||
         !block_table.flags().row_contiguous || !context_lens.flags().row_contiguous) {
@@ -91,8 +94,8 @@ void PagedAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<
                       key_pages = mx::array::unsafe_weak_copy(key_pages),
                       value_pages = mx::array::unsafe_weak_copy(value_pages),
                       block_table = mx::array::unsafe_weak_copy(block_table),
-                      context_lens = mx::array::unsafe_weak_copy(context_lens), scale = scale_,
-                      is_causal = is_causal_, num_kv_heads = num_kv_heads_, num_heads = num_heads_]() {
+                      context_lens = mx::array::unsafe_weak_copy(context_lens), scale = scale_, is_causal = is_causal_,
+                      num_kv_heads = num_kv_heads_, num_heads = num_heads_]() {
         const int64_t N = q.shape()[0];
         const int64_t L = q.shape()[1];
         const int64_t D = q.shape()[2];
@@ -236,9 +239,6 @@ void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     const auto &context_lens = inputs[4];
     auto &out = outputs[0];
 
-    if (out.dtype() != mx::float32) {
-        throw std::runtime_error("paged_attention: output dtype must be float32");
-    }
     if (!q.flags().row_contiguous || !key_pages.flags().row_contiguous || !value_pages.flags().row_contiguous ||
         !block_table.flags().row_contiguous || !context_lens.flags().row_contiguous) {
         throw std::runtime_error("paged_attention: all inputs must be contiguous");
@@ -249,56 +249,82 @@ void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     auto &s = stream();
     auto &d = mx::metal::device(s.device);
     auto library = d.get_library("tiny_llm_ext_ref");
-    auto kernel = d.get_kernel("paged_attention_f32", library);
-
     auto &compute_encoder = d.get_command_encoder(s.index);
-    compute_encoder.set_compute_pipeline_state(kernel);
-    compute_encoder.set_input_array(q, 0);
-    compute_encoder.set_input_array(key_pages, 1);
-    compute_encoder.set_input_array(value_pages, 2);
-    compute_encoder.set_input_array(block_table, 3);
-    compute_encoder.set_input_array(context_lens, 4);
-    compute_encoder.set_output_array(out, 5);
 
     const int N = q.shape()[0];
     const int L = q.shape()[1];
     const int D = q.shape()[2];
     const int page_size = key_pages.shape()[2];
     const int max_pages = block_table.shape()[1];
+    const int is_causal = static_cast<int>(is_causal_);
+    if (D <= 0 || D > 128) {
+        throw std::runtime_error("paged_attention: head dimension must be in the range [1, 128]");
+    }
+
+    auto bind_arrays = [&]() {
+        compute_encoder.set_input_array(q, 0);
+        compute_encoder.set_input_array(key_pages, 1);
+        compute_encoder.set_input_array(value_pages, 2);
+        compute_encoder.set_input_array(block_table, 3);
+        compute_encoder.set_input_array(context_lens, 4);
+        compute_encoder.set_output_array(out, 5);
+    };
+
+    if (L <= 8) {
+        const char *suffix = q.dtype() == mx::bfloat16 ? "bf16" : "f32";
+        auto kernel = d.get_kernel(std::string("paged_attention_decode_") + suffix, library);
+        compute_encoder.set_compute_pipeline_state(kernel);
+        bind_arrays();
+        compute_encoder.set_bytes(N, 6);
+        compute_encoder.set_bytes(L, 7);
+        compute_encoder.set_bytes(D, 8);
+        compute_encoder.set_bytes(page_size, 9);
+        compute_encoder.set_bytes(max_pages, 10);
+        compute_encoder.set_bytes(is_causal, 11);
+        compute_encoder.set_bytes(num_kv_heads_, 12);
+        compute_encoder.set_bytes(num_heads_, 13);
+        compute_encoder.set_bytes(scale_, 14);
+        constexpr int simdgroups_per_query = 32;
+        compute_encoder.set_threadgroup_memory_length(simdgroups_per_query * (D + 3) * sizeof(float), 0);
+        compute_encoder.dispatch_threadgroups(MTL::Size(N * L, 1, 1), MTL::Size(simdgroups_per_query * 32, 1, 1));
+        return;
+    }
+
+    if (q.dtype() == mx::bfloat16) {
+        if (D != 128) {
+            throw std::runtime_error("paged_attention: bfloat16 prefill requires head dimension 128");
+        }
+        auto kernel = d.get_kernel("paged_attention_mma_bf16_d128", library);
+        compute_encoder.set_compute_pipeline_state(kernel);
+        bind_arrays();
+        compute_encoder.set_bytes(N, 6);
+        compute_encoder.set_bytes(L, 7);
+        compute_encoder.set_bytes(page_size, 8);
+        compute_encoder.set_bytes(max_pages, 9);
+        compute_encoder.set_bytes(is_causal, 10);
+        compute_encoder.set_bytes(num_kv_heads_, 11);
+        compute_encoder.set_bytes(num_heads_, 12);
+        compute_encoder.set_bytes(scale_, 13);
+        const int batch_size = N / num_heads_;
+        const int query_blocks = (L + 63) / 64;
+        compute_encoder.dispatch_threadgroups(MTL::Size(query_blocks, num_heads_, batch_size), MTL::Size(32, 8, 1));
+        return;
+    }
+
+    auto kernel = d.get_kernel("paged_attention_scalar_f32", library);
+    compute_encoder.set_compute_pipeline_state(kernel);
+    bind_arrays();
     compute_encoder.set_bytes(N, 6);
     compute_encoder.set_bytes(L, 7);
     compute_encoder.set_bytes(D, 8);
     compute_encoder.set_bytes(page_size, 9);
     compute_encoder.set_bytes(max_pages, 10);
-    compute_encoder.set_bytes(static_cast<int>(is_causal_), 11);
+    compute_encoder.set_bytes(is_causal, 11);
     compute_encoder.set_bytes(num_kv_heads_, 12);
     compute_encoder.set_bytes(num_heads_, 13);
     compute_encoder.set_bytes(scale_, 14);
-
-    size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
-    size_t simd_width = kernel->threadExecutionWidth();
-
-    const int Br = 32;
-    const int Bc = 32;
-    if (simd_width * Br > tgp_size) {
-        throw std::runtime_error("paged_attention: simd_width * Br must fit in the threadgroup");
-    }
-    if (Bc > simd_width) {
-        throw std::runtime_error("paged_attention: Bc must be less than or equal to simd_width");
-    }
-    if (D > 128) {
-        throw std::runtime_error("paged_attention: head dimension must be less than or equal to 128");
-    }
-
-    const int Tr = (L + Br - 1) / Br;
-    const int Tc = (max_pages * page_size + Bc - 1) / Bc;
-
-    compute_encoder.set_bytes(Br, 15);
-    compute_encoder.set_bytes(Bc, 16);
-    compute_encoder.set_bytes(Tr, 17);
-    compute_encoder.set_bytes(Tc, 18);
-
-    compute_encoder.dispatch_threadgroups(MTL::Size(N, Tr, 1), MTL::Size(Br, simd_width, 1));
+    const int query_blocks = (L + 15) / 16;
+    compute_encoder.dispatch_threadgroups(MTL::Size(N, query_blocks, 1), MTL::Size(32, 16, 1));
 }
 #else
 void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
