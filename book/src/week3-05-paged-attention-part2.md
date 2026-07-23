@@ -269,6 +269,20 @@ Implement two GPU dispatches:
 
 Keep a scalar FP32 path for small correctness fixtures and the CPU reference.
 
+### Course implementation boundary
+
+MLX remains the array runtime for shapes, reshapes, transposes, contiguous
+storage, dtype conversion, allocation, and custom-primitive dispatch. The
+attention implementation itself must remain course-owned: do not call
+`mx.fast.scaled_dot_product_attention`, reuse an MLX attention/Steel kernel, or
+reconstruct dense K/V and express the paged operator as MLX matmul plus
+softmax. MLX SDPA may appear only in tests and benchmarks as an external
+correctness/performance reference.
+
+The optional dense FlashAttention prefill path below gathers K/V only to run
+the course-owned Day 2 kernel. The default paged path still reads the page pool
+directly in the Day 5 Metal kernel.
+
 ## Task 3: Dispatch from the Model
 
 ```

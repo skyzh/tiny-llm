@@ -1,5 +1,6 @@
 """Week 3 Day 5 paged-attention runtime tests."""
 
+import inspect
 from types import SimpleNamespace
 
 import mlx.core as mx
@@ -16,6 +17,15 @@ from .tiny_llm_base import (
     scaled_dot_product_attention_grouped,
 )
 from .utils import assert_allclose
+
+
+def test_paged_attention_is_course_owned():
+    source = inspect.getsource(paged_attention)
+
+    assert "mx.fast" not in source
+    assert "scaled_dot_product_attention" not in source
+    assert "gather_dense" not in source
+    assert ".paged_attention(" in source
 
 
 def _random_chunk(
