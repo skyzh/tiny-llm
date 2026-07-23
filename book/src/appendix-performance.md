@@ -14,14 +14,15 @@ MLX work inside the timer, and reports the median:
 
 ```bash
 pdm run bench-week2-progression --offline --repeats 3 \
-  --variant week2-simd-matmul --variant week2-split-k --variant mlx \
-  --model qwen3-4b --input-len 32 --output-len 33 --warmup 2 \
-  --prefill-logits last --json-output week2-32.json
+  --variant week2-split-k --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last --json-output week2-128.json
 
-pdm run bench-course-progression --offline --repeats 3 \
-  --variant week3 --variant mlx \
-  --model qwen3-4b --input-len 2048 --output-len 129 --warmup 2 \
-  --prefill-logits all --json-output course-2048.json
+pdm run bench-serving-progression --offline --repeats 3 \
+  --model qwen3-4b --num-seqs 16 --batch-size 4 \
+  --min-input-len 128 --max-input-len 1024 \
+  --min-output-len 32 --max-output-len 128 \
+  --prefill-step 128 --json-output serving-qwen3-4b.json
 ```
 
 `--prefill-logits last` is a generation-serving workload: both the course and
@@ -31,13 +32,13 @@ Decode throughput excludes the first generated token because that token is
 produced by prefill.
 
 MLX's published `mlx_lm.benchmark` table uses a 2,048-token prompt and 128
-generated tokens. That makes 2K/128 the primary comparison point, not a
-long-context proof. Use a context sweep:
+generated tokens. That makes 2K/128 a useful static-library comparison point,
+not a paging acceptance test or a long-context proof. Use a context sweep:
 
 | Point | Purpose |
 |---:|---|
-| 128 | launch overhead and short interactive requests |
-| 2,048 | standard MLX-style acceptance comparison |
+| 128 | fixed Week 2 acceptance and short interactive requests |
+| 2,048 | standard MLX-style static stress comparison |
 | 8,192 | long-context attention and KV-cache stress |
 | 16,384 | stress point after the 8K path is healthy |
 
@@ -98,80 +99,96 @@ The final 32-token median was:
 Split-K adds 10.9% prefill and no decode gain. At large `M`, the base grid is
 already full and the dispatch falls back to Day 6.
 
-## Current Qwen3-4B Results
+## Week 2 Acceptance Result
 
-The table separates the completed dense-cache Week 2 checkpoint from Week 3's
-direct paged attention path:
+Week 2 has a fixed single-request acceptance shape: Qwen3-4B, a 128-token
+prompt, 128 timed decode steps, last-row logits, two complete warmups, and the
+median of three alternating fresh processes. The output length is 129 because
+the first generated token belongs to prefill.
 
-| Prompt / decode | Path | Prefill tok/s | Prefill / MLX | Decode tok/s | Decode / MLX |
-|---|---|---:|---:|---:|---:|
-| 32 / 32 | Week 2 Day 7 | 671.80 | 92.3% | 75.93 | 85.8% |
-| 32 / 32 | MLX | 727.61 | 100% | 88.48 | 100% |
-| 128 / 32 | Week 2 Day 7 | 623.51 | 74.8% | 73.30 | 82.6% |
-| 128 / 32 | MLX | 833.04 | 100% | 88.79 | 100% |
-| 2,048 / 128 | Week 2 dense attention | 586.09 | 78.3% | 47.27 | 62.4% |
-| 2,048 / 128 | Week 3 paged | 653.96 | 87.4% | 58.88 | 77.7% |
-| 2,048 / 128 | MLX | 748.41 | 100% | 75.74 | 100% |
-| 8,192 / 128 | Week 3 paged | 427.01 | 75.1% | 31.42 | 56.7% |
-| 8,192 / 128 | MLX | 568.74 | 100% | 55.44 | 100% |
+| Path | Prefill tok/s | Prefill / MLX | Decode tok/s | Decode / MLX |
+|---|---:|---:|---:|---:|
+| Week 2 Day 7 | 791.63 | 95.6% | 77.45 | 88.4% |
+| MLX 0.32.0 | 828.27 | 100% | 87.62 | 100% |
 
-The 2K and 8K rows use prompt scoring, one warmup or more, and the median of
-three fresh processes. The standard 2K checkpoint is inside the requested
-70-80% decode band and above it for prefill. The 8K comparison shows the
-remaining boundary clearly: paged FlashAttention prefill still meets the
-target, while long-context decode does not.
+Both sides clear the 80% course target. Longer static context sweeps remain
+useful diagnostics, especially for showing attention's linear growth, but they
+do not test the memory-management reasons for paging.
 
-## Paged Attention: Copies Versus Indirection
+## Week 3 Serving Result
 
-Paging does not make an indirect K/V read intrinsically faster than a
-contiguous read. Its expected advantages are stable reusable storage, no dense
-cache repack, and attention that reads live pages directly. All three must be
-present in the benchmark.
+Paging adds an indirect K/V read and is not expected to beat contiguous
+attention in an isolated static request. Its acceptance workload must include
+requests entering and leaving the batch, incremental growth without a known
+cache capacity, dense batch reconstruction, and page reuse.
 
-The original implementation used Python slice assignment for each page append.
-In MLX's functional graph that produced a whole-array update instead of the
-small physical write the source suggested. A synchronized append cost about
-159 µs per layer. The fixed `paged_cache_update` primitive aliases the existing
-page buffer and dispatches a kernel over only the appended slice; geometric
-pool growth remains the only full storage copy.
+The serving runner launches dense and paged variants in fresh alternating
+processes. A complete warmup compiles the kernels; immediately afterward it
+synchronizes and resets every page pool. The measured paged run therefore
+starts with zero pages and zero backing capacity rather than inheriting the
+warmup allocation.
 
-The original decode attention also assigned only `D` threads to a final loop
-over 32 partial outputs and reserved about 16.8 KiB of scratch. The current
-Qwen D=128 path:
+```bash
+pdm run bench-serving-progression --offline --repeats 3 \
+  --model qwen3-4b --num-seqs 16 --batch-size 4 \
+  --min-input-len 128 --max-input-len 1024 \
+  --min-output-len 32 --max-output-len 128 \
+  --prefill-step 128 --warmup 1 \
+  --json-output serving-qwen3-4b.json
+```
 
-- specializes four contiguous values per lane;
-- transposes partials through a compact 32×32 tile;
-- uses `simd_sum` for the final reduction;
-- reserves about 4.25 KiB of scratch;
-- retains a correct generic BF16 fallback for non-Qwen head dimensions.
+On the same M4 Pro, the median result was:
 
-Qwen3-4B and 8B use four query heads per K/V head. The retained GQA4 decode
-specialization computes those four query heads in one threadgroup so each K/V
-load is reused four times. It also uses base-2 exponentials in the online and
-final softmax reductions. The generic path remains available for other GQA
-ratios and head dimensions.
+| Storage path | Output tok/s | Decode tok/s | Requests/s | Peak KV MiB | Avoidable KV copy MiB |
+|---|---:|---:|---:|---:|---:|
+| Week 2 dense KV | 35.87 | 58.65 | 0.48 | 1,096 | 209,532 |
+| Week 3 paged KV | 46.70 | 104.19 | 0.62 | 576 | 504 |
 
-At 2K, the measured progression was:
+The paged path improves output and request throughput by 30.2%, aggregate
+decode throughput by 77.7%, and reduces peak KV storage by 47.4%. Its measured
+avoidable copy volume is 99.8% lower.
 
-| Path | Decode tok/s |
-|---|---:|
-| Original direct paged kernel | 36.17 |
-| Paged storage plus dense gather/attention ablation | 46.15 |
-| Corrected direct paged kernel before GQA4 reuse | 54.54 |
-| GQA4 reuse plus current quantized matvec | 58.88 |
-| MLX | 75.74 |
+The checked-in result
+`benchmark_results/m4-pro-qwen3-4b-mlx-0.32.0.json` contains the three samples,
+medians, configurations, and host metadata used by the Week 2 and serving
+tables.
 
-The final direct page path is 24.6% faster than Week 2's dense-cache decode;
-prefill is 11.6% faster as well. That is the full-model comparison that
-supports the claim that paging removes useful cache work.
+The copy counters report logical operation volume, not a hardware DRAM
+counter. Dense volume includes old K/V copied during each request-cache growth
+and live K/V copied into a newly padded batch tensor at every decode step.
+Paged volume includes old physical pages copied only when a layer's geometric
+pool grows. Appending a token writes just its page slice, and later requests
+reuse freed pages.
 
-For prefill, the same scalar-load mistake found in quantized matmul appeared in
-the paged FlashAttention tile. Qwen's 128-token pages make each 32-token K/V
-tile physically contiguous, so a cooperative block loader can use aligned
-reads while the generic page-crossing fallback remains available. Together
-with base-2 online softmax, this raised the retained paired 8K prefill result
-from the earlier 384.88 tok/s baseline to 427.01 tok/s. The paired median,
-rather than a faster isolated process, is the acceptance result.
+The paged median reached 1,116 live pages out of 1,152 reserved pages, reused
+2,196 page allocations, and recorded 15,840 unused tail slots across layer
+caches. It grew the layer pools 144 times because the measured run started
+empty. These allocator counters make memory reuse and fragmentation visible;
+a static single-request latency table cannot.
+
+This workload validates continuous batching, chunked prefill, incremental
+growth, and page reuse. It does not validate prefix sharing or speculative
+decoding; those require separate request traces with shared prefixes or cache
+rewind events.
+
+## Retained and Removed Optimizations
+
+The course keeps changes with a clear measured role: the x4 quantized matvec,
+cooperative prefill matmul, split-K for under-filled grids, page-slice writes,
+the compact D=128 paged reduction, and cooperative paged prefill loads.
+
+Two shape-specific duplicates were removed. A pointer-streaming matvec copied
+the complete x4 reduction loop for a small end-to-end gain. A four-query-head
+paged-decode kernel copied the complete attention recurrence to improve static
+latency, even though static latency is no longer Week 3's acceptance metric.
+The compact generic Qwen path is easier to teach and still wins decisively in
+the serving workload because it removes dense growth and repacking.
+
+Several other plausible changes had already measured poorly and remain
+removed: reducing the decode threadgroup to eight SIMD groups, pairing K/V
+cache writes in one primitive, forcing vector K/V loads, and a two-pass
+attention kernel. Each added work or synchronization without an end-to-end
+win.
 
 ## Decode Profile and CLI Tools
 
@@ -192,55 +209,25 @@ xcrun xctrace record \
 xcrun xctrace export --input /tmp/tiny-llm-decode.trace --toc
 ```
 
-The stock Metal System Trace on the reference Xcode installation exposes
-queues and command buffers, but its table of contents reports the Shader
-Timeline as disabled. Adding the `Metal GPU Counters` instrument from the CLI
-also reports that its selected counter profile is unsupported on this host.
-Use a compatible custom Instruments template or an MLX `.gputrace` capture for
-shader-level counters. Do not infer ALU or bandwidth saturation from the stock
-trace, and do not treat trace wall time as a throughput number.
-
-When the stock trace cannot attribute shaders, use synchronized operator
-timings and one-factor full-model ablations. At 2K on the final code:
-
-| One-factor run | Decode tok/s | Change from 58.88 baseline |
-|---|---:|---:|
-| Replace course quantized matvec with MLX | 60.33 | +2.4% |
-| Bypass page-cache writes | 61.14 | +3.8% |
-| Bypass paged attention | 88.23 | +49.8% |
-
-These ablations are upper bounds, not alternative correct models, but they
-reject both "matvec is the whole decode gap" and "page copies dominate." The
-context sweep reinforces the result: increasing context fourfold lowers course
-decode by 46.6%, from 58.88 to 31.42 tok/s, while MLX falls 26.8%. Projection
-shapes stay fixed; K/V traversal grows with context.
-
-The GQA4 kernel performs roughly four FLOPs per K/V byte before page-table,
-softmax, and reduction overhead, so it has low arithmetic intensity even after
-four query heads reuse each K/V load. Without supported hardware counters we
-cannot claim an exact ALU-versus-bandwidth percentage, but the ablations and
-context slope identify K/V access and attention reduction as the next path to
-profile—not quantized-matvec arithmetic.
-
-Several plausible changes were measured and removed: reducing the decode
-threadgroup to eight SIMD groups, pairing K/V cache writes in one primitive,
-and forcing vector K/V loads did not improve end-to-end throughput. A two-pass
-attention prototype also regressed because its temporary allocation and second
-launch cost more than it saved. The 8K decode row remains below target and is
-the next measured optimization boundary.
+The stock Metal System Trace exposes queues and command buffers on the
+reference machine, but its Shader Timeline is disabled and the selected Metal
+GPU counter profile is unsupported. Use a compatible custom Instruments
+template or an MLX `.gputrace` capture for shader-level counters. Never infer
+ALU or bandwidth saturation from an unavailable counter, and do not use trace
+wall time as a throughput result.
 
 ## Optimization Map
 
 | Measured bottleneck | Retained change | Chapter |
 |---|---|---|
 | Full-prefix decode recomputation | Dense request KV cache | Week 2 Day 1 |
-| Quantized projection weight traffic | Packed W4A16 SIMD matvec, then measured x4/two-packed-word schedule | Week 2 Day 3 |
+| Quantized projection weight traffic | Packed W4A16 x4 SIMD matvec | Week 2 Day 3 |
 | Growing short-context attention | Online-softmax decode kernel | Week 2 Day 4 |
 | Repeated small graph dispatches | RMSNorm, RoPE, SwiGLU kernels | Week 2 Day 5 |
 | Scalar/strided prefill projection loads | Cooperative 32×32×32 quantized matmul | Week 2 Day 6 |
 | Under-filled short-prefill result grid | Measured split-K dispatch | Week 2 Day 7 |
 | Functional whole-cache page updates | Aliasing page-slice write primitive | Week 3 Day 3 |
-| Repeated GQA K/V reads and scalar final reduction | D=128 SIMD reduction plus four-head K/V reuse | Week 3 Day 4 |
+| Scalar paged final reduction | Compact D=128 SIMD reduction | Week 3 Day 4 |
 | Scalar contiguous-page K/V tile loads | Cooperative paged FlashAttention loads | Week 3 Day 5 |
 
 This is the course progression: optimize one measured cost, benchmark and

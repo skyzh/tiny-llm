@@ -35,8 +35,10 @@ Paged attention is not an automatic single-request latency win. It primarily
 improves serving capacity, cache reuse, and batching; page-table indirection
 can make one request slower. This week measures those tradeoffs rather than
 assuming an algorithm with a production name is already production-fast. The
-[performance appendix](./appendix-performance.md) keeps kernel throughput and
-serving usability as separate measurements.
+[serving performance lab](./week3-performance-lab.md) starts measured page
+pools at zero capacity and turns requests over through a continuous batch. The
+[performance appendix](./appendix-performance.md) keeps static kernel
+throughput and serving usability as separate measurements.
 
 Week 4 owns application concerns such as RAG and tool calling. This separation
 keeps Week 3 focused on the reusable serving substrate.

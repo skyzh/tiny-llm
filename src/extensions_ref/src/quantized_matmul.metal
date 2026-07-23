@@ -537,102 +537,6 @@ template <typename T>
     }
 }
 
-// Qwen decode dimensions are aligned to a 512-value reduction block and an
-// eight-row output tile. Precompute the four row pointers once, then advance
-// activation, packed-weight, and quantization-parameter pointers linearly.
-template <typename T>
-[[kernel]] void quantized_matvec_x4_streaming_w4a16_g128(
-    device const T* scales [[buffer(0)]],
-    device const T* biases [[buffer(1)]],
-    device const T* a [[buffer(2)]],
-    device const uint32_t* b [[buffer(3)]],
-    device T* out [[buffer(4)]],
-    device const int &M [[buffer(5)]],
-    device const int &N [[buffer(6)]],
-    device const int &K [[buffer(7)]],
-    uint2 output_tile [[threadgroup_position_in_grid]],
-    uint simdgroup [[simdgroup_index_in_threadgroup]],
-    uint lane [[thread_index_in_simdgroup]]) {
-    constexpr int values_per_lane = 16;
-    constexpr int outputs_per_simdgroup = 4;
-    constexpr int outputs_per_threadgroup = 8;
-    constexpr int reduction_block = values_per_lane * 32;
-
-    const int row = output_tile.y;
-    const int column_base =
-        output_tile.x * outputs_per_threadgroup +
-        simdgroup * outputs_per_simdgroup;
-    if (row >= M) return;
-    const int packed_cols = N / 8;
-    const int groups_per_row = N / 128;
-    const int weight_row_stride = packed_cols * 2;
-
-    device const T* activation_source =
-        a + row * N + lane * values_per_lane;
-    device const uint16_t* weight_source =
-        reinterpret_cast<const device uint16_t*>(
-            b + column_base * packed_cols + lane * 2);
-    device const T* scale_source =
-        scales + column_base * groups_per_row + lane / 8;
-    device const T* bias_source =
-        biases + column_base * groups_per_row + lane / 8;
-    float sums[outputs_per_simdgroup] = {0.0f};
-
-    for (int reduction = 0; reduction < N; reduction += reduction_block) {
-        float activations[values_per_lane];
-        float activation_sum = 0.0f;
-        #pragma clang loop unroll(full)
-        for (int value = 0; value < values_per_lane; value++) {
-            const float activation =
-                static_cast<float>(activation_source[value]);
-            activation_sum += activation;
-            activations[value] = activation /
-                static_cast<float>(1 << ((value & 3) * 4));
-        }
-
-        #pragma clang loop unroll(full)
-        for (int output = 0; output < outputs_per_simdgroup; output++) {
-            const device uint16_t* weights =
-                weight_source + output * weight_row_stride;
-            float quantized_dot = 0.0f;
-            #pragma clang loop unroll(full)
-            for (int group = 0; group < values_per_lane / 4; group++) {
-                const uint16_t packed = weights[group];
-                const int local = group * 4;
-                quantized_dot +=
-                    activations[local] * (packed & 0x000f) +
-                    activations[local + 1] * (packed & 0x00f0) +
-                    activations[local + 2] * (packed & 0x0f00) +
-                    activations[local + 3] * (packed & 0xf000);
-            }
-            sums[output] +=
-                static_cast<float>(
-                    scale_source[output * groups_per_row]) *
-                    quantized_dot +
-                static_cast<float>(
-                    bias_source[output * groups_per_row]) *
-                    activation_sum;
-        }
-
-        activation_source += reduction_block;
-        weight_source += reduction_block / 4;
-        scale_source += reduction_block / 128;
-        bias_source += reduction_block / 128;
-    }
-
-    #pragma clang loop unroll(full)
-    for (int output = 0; output < outputs_per_simdgroup; output++) {
-        sums[output] = simd_sum(sums[output]);
-    }
-    if (lane == 0) {
-        #pragma clang loop unroll(full)
-        for (int output = 0; output < outputs_per_simdgroup; output++) {
-            out[row * K + column_base + output] =
-                static_cast<T>(sums[output]);
-        }
-    }
-}
-
 instantiate_kernel("quantized_matmul_vanilla_w4a16_g128_f16", quantized_matmul_vanilla_w4a16_g128, half);
 instantiate_kernel("quantized_matmul_vanilla_w4a16_g128_bf16", quantized_matmul_vanilla_w4a16_g128, bfloat16_t);
 instantiate_kernel("quantized_matmul_simdgroup_w4a16_g128_f16", quantized_matmul_simdgroup_w4a16_g128, half);
@@ -651,5 +555,3 @@ instantiate_kernel("quantized_matvec_x8_w4a16_g128_f16", quantized_matvec_x8_w4a
 instantiate_kernel("quantized_matvec_x8_w4a16_g128_bf16", quantized_matvec_x8_w4a16_g128, bfloat16_t);
 instantiate_kernel("quantized_matvec_x4_fast_w4a16_g128_f16", quantized_matvec_x4_fast_w4a16_g128, half);
 instantiate_kernel("quantized_matvec_x4_fast_w4a16_g128_bf16", quantized_matvec_x4_fast_w4a16_g128, bfloat16_t);
-instantiate_kernel("quantized_matvec_x4_streaming_w4a16_g128_f16", quantized_matvec_x4_streaming_w4a16_g128, half);
-instantiate_kernel("quantized_matvec_x4_streaming_w4a16_g128_bf16", quantized_matvec_x4_streaming_w4a16_g128, bfloat16_t);

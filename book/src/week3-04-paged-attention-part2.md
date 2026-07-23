@@ -419,9 +419,7 @@ one:
 4. combine partial dot products with SIMD reductions instead of threadgroup
    scratch memory and repeated barriers,
 5. specialize the `L = 1` decode case so it does not carry prefill control flow,
-6. for Qwen's four-to-one GQA ratio, compute the four query heads together so
-   they reuse each K/V load,
-7. prepare the batch's page metadata once per scheduler step rather than once
+6. prepare the batch's page metadata once per scheduler step rather than once
    per layer or attention head.
 
 Also benchmark the write path separately. A fast page-reading kernel cannot
@@ -431,18 +429,11 @@ For each change, explain which cost it targets: memory traffic, synchronization,
 address calculation, or dispatch overhead. Keep a change only when the measured
 result supports the explanation.
 
-On the reference Qwen3-4B run, the GQA4 specialization and current quantized
-matvec reach 58.88 decode tok/s at 2K, or 77.7% of MLX. A full-model ablation
-that replaces every course matvec with MLX reaches only 60.33 tok/s, while
-bypassing paged attention reaches 88.23 tok/s. Bypassing all cache writes
-reaches 61.14 tok/s. These are deliberately end-to-end measurements: isolated
-matvec timings had overstated their importance.
-
-The next bottleneck is therefore the page-walking attention path, not cache
-copying or one remaining projection. Confirm it with a context sweep: on the
-same machine, increasing the prompt from 2K to 8K lowers course decode from
-58.88 to 31.42 tok/s, while MLX moves from 75.74 to 55.44 tok/s. Projection
-shapes are unchanged; K/V traversal and reduction work grow with context.
+An earlier Qwen-specific kernel computed four query heads in one threadgroup.
+It improved static decode latency, but duplicated the entire online-softmax
+kernel for one GQA ratio. Static latency is not Week 3's acceptance metric, so
+the course removes that specialization and keeps the compact D=128 schedule.
+This is an explicit simplicity decision, not a claim that K/V reuse is invalid.
 
 ### Checkpoint 3: Evaluate the Serving System
 
@@ -459,6 +450,19 @@ attention is faster. The completed serving route stays paged: it eliminates
 repacks, reuses pages across scheduler steps, and can admit more concurrent
 requests. Day 5 optimizes its long-prefill schedule rather than routing around
 the page-table contract.
+
+Use the paired serving runner rather than a preallocated static request:
+
+```bash
+pdm run bench-serving-progression --offline --repeats 3 \
+  --model qwen3-4b --num-seqs 16 --batch-size 4 \
+  --min-input-len 128 --max-input-len 1024 \
+  --min-output-len 32 --max-output-len 128 --prefill-step 128
+```
+
+It compares the Week 2 dense batch reconstruction with the Week 3 direct paged
+path, resets page capacity after warmup, and reports throughput, peak KV bytes,
+copy volume, page reuse, and tail fragmentation.
 
 ```bash
 pdm run test --week 3 --day 4

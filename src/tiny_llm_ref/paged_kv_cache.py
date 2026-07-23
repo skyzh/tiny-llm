@@ -34,6 +34,10 @@ class TinyKvPagedPool:
         self.free_page_ids: list[int] = []
         self.used_page_ids: set[int] = set()
         self.num_allocated_pages = 0
+        self.reused_page_allocations = 0
+        self.storage_growths = 0
+        self.copied_pages_on_growth = 0
+        self.copied_bytes_on_growth = 0
 
     @property
     def key_pages(self) -> mx.array | None:
@@ -61,6 +65,12 @@ class TinyKvPagedPool:
     def num_free_pages(self) -> int:
         return len(self.free_page_ids)
 
+    @property
+    def storage_nbytes(self) -> int:
+        if self._key_pages is None or self._value_pages is None:
+            return 0
+        return self._key_pages.nbytes + self._value_pages.nbytes
+
     def _check_page_chunk(self, x: mx.array) -> None:
         B, H, S, D = x.shape
         assert 0 < S <= self.page_size
@@ -70,6 +80,7 @@ class TinyKvPagedPool:
         # version, a layer cache owns the page until release/rewind returns it.
         if self.free_page_ids:
             page_id = self.free_page_ids.pop()
+            self.reused_page_allocations += 1
         else:
             page_id = self.num_pages
             self.num_allocated_pages += 1
@@ -103,12 +114,30 @@ class TinyKvPagedPool:
         new_value_pages = mx.zeros(
             (new_capacity, H, self.page_size, D), dtype=value.dtype
         )
+        self.storage_growths += 1
         if self._key_pages is not None and self._value_pages is not None:
             old_pages = self.num_pages - 1
+            self.copied_pages_on_growth += old_pages
+            self.copied_bytes_on_growth += (
+                self._key_pages[:old_pages].nbytes
+                + self._value_pages[:old_pages].nbytes
+            )
             new_key_pages[:old_pages, :, :, :] = self._key_pages[:old_pages]
             new_value_pages[:old_pages, :, :, :] = self._value_pages[:old_pages]
         self._key_pages = new_key_pages
         self._value_pages = new_value_pages
+
+    def reset(self) -> None:
+        if self.used_page_ids:
+            raise ValueError("Cannot reset a page pool with live requests")
+        self._key_pages = None
+        self._value_pages = None
+        self.free_page_ids.clear()
+        self.num_allocated_pages = 0
+        self.reused_page_allocations = 0
+        self.storage_growths = 0
+        self.copied_pages_on_growth = 0
+        self.copied_bytes_on_growth = 0
 
     def write_page_slice(
         self,

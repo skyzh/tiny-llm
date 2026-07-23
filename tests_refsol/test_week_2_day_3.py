@@ -176,7 +176,7 @@ def test_task_4_quantized_matvec_custom_m8_gpu():
     quantized_matvec_custom_helper(8)
 
 
-def test_task_4_quantized_matvec_streaming_qwen_shape_gpu():
+def test_task_4_quantized_matvec_custom_qwen_shape_gpu():
     with mx.stream(mx.gpu):
         input = mx.random.normal((1, 2560)).astype(mx.bfloat16)
         weight = mx.random.normal((1024, 2560)).astype(mx.bfloat16)

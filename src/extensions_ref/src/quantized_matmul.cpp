@@ -135,7 +135,6 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
     out.set_data(mx::allocator::malloc(out.nbytes()));
 
     const bool use_matvec = use_simdgroup_ && M <= 8;
-    const bool use_streaming_matvec = use_matvec && N % 512 == 0 && K % 8 == 0;
     int split_k = 1;
     if (use_split_k_ && use_simdgroup_ && !use_matvec) {
         constexpr int block_size = 32;
@@ -153,13 +152,8 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
 
     const char *kernel_name;
     if (use_matvec) {
-        if (use_streaming_matvec) {
-            kernel_name = out.dtype() == mx::float16 ? "quantized_matvec_x4_streaming_w4a16_g128_f16"
-                                                     : "quantized_matvec_x4_streaming_w4a16_g128_bf16";
-        } else {
-            kernel_name = out.dtype() == mx::float16 ? "quantized_matvec_x4_fast_w4a16_g128_f16"
-                                                     : "quantized_matvec_x4_fast_w4a16_g128_bf16";
-        }
+        kernel_name = out.dtype() == mx::float16 ? "quantized_matvec_x4_fast_w4a16_g128_f16"
+                                                 : "quantized_matvec_x4_fast_w4a16_g128_bf16";
     } else if (use_split_k) {
         kernel_name = out.dtype() == mx::float16 ? "quantized_matmul_simdgroup_splitk_w4a16_g128_f16"
                                                  : "quantized_matmul_simdgroup_splitk_w4a16_g128_bf16";
@@ -222,9 +216,8 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
         constexpr int simdgroups_per_threadgroup = 2;
         const int outputs_per_threadgroup = simdgroups_per_threadgroup * outputs_per_simdgroup;
         const int column_tiles = (K + outputs_per_threadgroup - 1) / outputs_per_threadgroup;
-        const auto grid = use_streaming_matvec ? MTL::Size(column_tiles, M, 1)
-                                               : MTL::Size(M * column_tiles, 1, 1);
-        compute_encoder.dispatch_threadgroups(grid, MTL::Size(simdgroups_per_threadgroup * 32, 1, 1));
+        compute_encoder.dispatch_threadgroups(MTL::Size(M * column_tiles, 1, 1),
+                                              MTL::Size(simdgroups_per_threadgroup * 32, 1, 1));
         return;
     }
 

@@ -1,0 +1,71 @@
+{
+  "host": {
+    "chip": "Apple M4 Pro",
+    "gpu_cores": 20,
+    "memory_gib": 64,
+    "mlx_version": "0.32.0"
+  },
+  "week2_static": {
+    "command": "pdm run bench-week2-progression --offline --model qwen3-4b --variant week2-split-k --variant mlx --input-len 128 --output-len 129 --prefill-logits last --warmup 2 --repeats 3",
+    "samples": {
+      "week2": [
+        {"prefill_tokens_per_second": 791.63, "decode_tokens_per_second": 77.45},
+        {"prefill_tokens_per_second": 791.41, "decode_tokens_per_second": 77.47},
+        {"prefill_tokens_per_second": 791.64, "decode_tokens_per_second": 77.30}
+      ],
+      "mlx": [
+        {"prefill_tokens_per_second": 828.39, "decode_tokens_per_second": 87.77},
+        {"prefill_tokens_per_second": 828.27, "decode_tokens_per_second": 87.62},
+        {"prefill_tokens_per_second": 827.54, "decode_tokens_per_second": 87.44}
+      ]
+    },
+    "median": {
+      "week2": {
+        "prefill_tokens_per_second": 791.63,
+        "decode_tokens_per_second": 77.45,
+        "prefill_fraction_of_mlx": 0.956,
+        "decode_fraction_of_mlx": 0.884
+      },
+      "mlx": {
+        "prefill_tokens_per_second": 828.27,
+        "decode_tokens_per_second": 87.62
+      }
+    }
+  },
+  "continuous_serving": {
+    "command": "pdm run bench-serving-progression --offline --model qwen3-4b --num-seqs 16 --batch-size 4 --min-input-len 128 --max-input-len 1024 --min-output-len 32 --max-output-len 128 --prefill-step 128 --warmup 1 --repeats 3",
+    "samples": {
+      "dense": [
+        {"output_tokens_per_second": 35.8844, "decode_tokens_per_second": 58.5767, "requests_per_second": 0.4781},
+        {"output_tokens_per_second": 35.8670, "decode_tokens_per_second": 58.6746, "requests_per_second": 0.4778},
+        {"output_tokens_per_second": 35.7607, "decode_tokens_per_second": 58.6454, "requests_per_second": 0.4764}
+      ],
+      "paged": [
+        {"output_tokens_per_second": 46.0799, "decode_tokens_per_second": 104.1245, "requests_per_second": 0.6139},
+        {"output_tokens_per_second": 46.6991, "decode_tokens_per_second": 104.1914, "requests_per_second": 0.6221},
+        {"output_tokens_per_second": 46.9755, "decode_tokens_per_second": 104.2764, "requests_per_second": 0.6258}
+      ]
+    },
+    "median": {
+      "dense": {
+        "output_tokens_per_second": 35.8670,
+        "decode_tokens_per_second": 58.6454,
+        "requests_per_second": 0.4778,
+        "peak_kv_bytes": 1149272064,
+        "avoidable_kv_copy_bytes": 219710472192
+      },
+      "paged": {
+        "output_tokens_per_second": 46.6991,
+        "decode_tokens_per_second": 104.1914,
+        "requests_per_second": 0.6221,
+        "peak_kv_bytes": 603979776,
+        "avoidable_kv_copy_bytes": 528482304,
+        "peak_live_pages": 1116,
+        "peak_capacity_pages": 1152,
+        "peak_tail_waste_slots": 15840,
+        "reused_page_allocations": 2196,
+        "storage_growths": 144
+      }
+    }
+  }
+}

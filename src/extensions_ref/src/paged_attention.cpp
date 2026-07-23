@@ -166,29 +166,6 @@ void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
     };
 
     if (L <= 8) {
-        if (q.dtype() == mx::bfloat16 && D == 128 && num_heads_ / num_kv_heads_ == 4) {
-            auto kernel = d.get_kernel("paged_attention_decode_bf16_d128_gqa4", library);
-            compute_encoder.set_compute_pipeline_state(kernel);
-            bind_arrays();
-            compute_encoder.set_bytes(N, 6);
-            compute_encoder.set_bytes(L, 7);
-            compute_encoder.set_bytes(page_size, 8);
-            compute_encoder.set_bytes(max_pages, 9);
-            compute_encoder.set_bytes(is_causal, 10);
-            compute_encoder.set_bytes(num_kv_heads_, 11);
-            compute_encoder.set_bytes(num_heads_, 12);
-            compute_encoder.set_bytes(scale_, 13);
-            constexpr int query_heads_per_kv = 4;
-            constexpr int simdgroups = 32;
-            compute_encoder.set_threadgroup_memory_length(
-                (query_heads_per_kv * simdgroups * 32 +
-                 2 * query_heads_per_kv * simdgroups) * sizeof(float),
-                0);
-            compute_encoder.dispatch_threadgroups(
-                MTL::Size(N * L / query_heads_per_kv, 1, 1),
-                MTL::Size(simdgroups * 32, 1, 1));
-            return;
-        }
         const char *suffix =
             q.dtype() == mx::bfloat16 && D == 128 ? "bf16_d128" : (q.dtype() == mx::bfloat16 ? "bf16" : "f32");
         auto kernel = d.get_kernel(std::string("paged_attention_decode_") + suffix, library);

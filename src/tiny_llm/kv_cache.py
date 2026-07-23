@@ -49,7 +49,7 @@ class TinyKvCache(ABC):
 
 
 class BatchingKvCache(TinyKvCache):
-    def __init__(self, max_active_requests: int, max_seq_len: int):
+    def __init__(self, max_active_requests: int, max_seq_len: int | None = None):
         self.max_active_requests = max_active_requests
         self.max_seq_len = max_seq_len
 

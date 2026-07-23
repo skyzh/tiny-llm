@@ -50,7 +50,8 @@ def test_task_1_rope_multiple_offsets(traditional: bool):
 
 
 def test_task_2_batching_kv_cache():
-    cache = BatchingKvCache(max_active_requests=3, max_seq_len=8)
+    cache = BatchingKvCache(max_active_requests=3)
+    assert cache.max_seq_len is None
 
     slot0 = TinyKvFullCache()
     slot0.update_and_fetch(
@@ -122,6 +123,8 @@ def test_task_2_batching_kv_cache():
     assert_allclose(batched_keys, expected_keys, mx.float32)
     assert_allclose(batched_values, expected_values, mx.float32)
     assert_allclose(mask, expected_mask, mx.float32)
+    assert cache.last_batch_bytes == 96
+    assert cache.staging_copy_bytes == 56
 
 
 def helper_test_task_3(

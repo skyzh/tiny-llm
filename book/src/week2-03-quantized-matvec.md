@@ -378,10 +378,7 @@ variables. The retained host dispatch is:
 - use the custom matvec when `M <= 8`,
 - compute four output columns per SIMD group and load two adjacent packed words
   per lane,
-- launch two SIMD groups, or eight output rows, per threadgroup,
-- when `N` is divisible by 512 and `K` by 8, use the Qwen streaming variant
-  that advances precomputed activation, weight, scale, and bias pointers
-  linearly through the reduction.
+- launch two SIMD groups, or eight output rows, per threadgroup.
 
 These thresholds are measured starting points, not mathematical requirements.
 Keep them visible in the dispatcher, then vary one choice at a time. The older
@@ -393,13 +390,10 @@ special case for `K >= 8192`. End-to-end profiling showed that the wide output
 dimension did not justify its extra register and threadgroup pressure, so the
 same x4/two-group schedule is now used for the vocabulary head too.
 
-The final streaming-pointer change leaves the course focused on Qwen's aligned
-4-bit shapes rather than making the kernel arbitrary. On the reference M4 Pro,
-the retained Q/K/V/O projections measured 121.9/108.1/104.7/121.1 µs versus
-MLX at 115.7/101.8/99.2/117.7 µs. Gate/up/down measured
-136.0/139.4/139.4 µs versus 131.5/135.4/135.0 µs. The vocabulary projection
-was effectively tied at 1019.7 versus 1004.3 µs. Report results from your own
-hardware.
+An additional pointer-streaming specialization measured only a small
+end-to-end improvement while duplicating the reduction loop. It is deliberately
+not retained. The x4 kernel is the one schedule students profile, test, and
+carry into the rest of the course.
 
 For output tiling, an older four-column experiment reduced full-model decode
 from about 249 to 232 tok/s because the extra accumulators increased register
@@ -475,9 +469,7 @@ pattern:
    matrix layout. Keep both paths explicit for direct comparisons.
    Calculate a SIMD-aligned thread-group configuration and tile output columns
    so packed input values and activations can be reused. Use the four-column,
-   two-packed-word kernel with two SIMD groups. For Qwen-aligned shapes, add
-   the pointer-streaming specialization only after benchmarking the safe x4
-   fallback.
+   two-packed-word kernel with two SIMD groups.
 5. Dispatch with `dispatchThreadgroups`.
 
 You can test your implementation by running:

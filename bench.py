@@ -1,5 +1,7 @@
 import argparse
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from random import Random
 from time import perf_counter
 
@@ -26,6 +28,25 @@ class BatchRequestState:
     generated_tokens: int = 0
     next_token: int | None = None
     is_prefill_done: bool = False
+
+
+@dataclass
+class ServingMetrics:
+    generated_tokens: int = 0
+    decode_tokens: int = 0
+    prefill_time: float = 0.0
+    decode_time: float = 0.0
+    peak_active_requests: int = 0
+    peak_live_pages: int = 0
+    peak_capacity_pages: int = 0
+    peak_tail_waste_slots: int = 0
+    peak_kv_bytes: int = 0
+    reused_page_allocations: int = 0
+    storage_growths: int = 0
+    copied_pages_on_growth: int = 0
+    paged_growth_copy_bytes: int = 0
+    dense_growth_copy_bytes: int = 0
+    dense_staging_copy_bytes: int = 0
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,10 +110,9 @@ def parse_args() -> argparse.Namespace:
         help="Maximum number of prompt tokens to prefill per scheduler step.",
     )
     parser.add_argument(
-        "--max-seq-len",
-        type=int,
-        default=512,
-        help="Maximum prompt+generated length for a batched request.",
+        "--json-output",
+        type=Path,
+        help="Optionally save benchmark configuration and metrics as JSON.",
     )
     return parser.parse_args()
 
@@ -118,8 +138,6 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--batch-size must be > 0")
     if args.batch_decode and args.prefill_step <= 0:
         raise ValueError("--prefill-step must be > 0")
-    if args.batch_decode and args.max_seq_len <= 0:
-        raise ValueError("--max-seq-len must be > 0")
     if args.batch_decode and args.num_seqs < args.batch_size:
         raise ValueError("--batch-decode requires --num-seqs >= --batch-size")
     if args.week2_checkpoint is not None and args.loader != "week2":
@@ -325,22 +343,59 @@ def run_batch_requests_serving(
     *,
     batch_size: int,
     prefill_step: int,
-    max_seq_len: int,
-) -> tuple[int, int, float, float]:
+) -> ServingMetrics:
     """Benchmark continuous batching without tokenizer/detokenizer overhead."""
 
     decode_requests: list[BatchRequestState | None] = [None] * batch_size
     batch_kv_cache = [
-        batching_kv_cache_cls(max_active_requests=batch_size, max_seq_len=max_seq_len)
+        batching_kv_cache_cls(max_active_requests=batch_size)
         for _ in range(model.num_hidden_layers)
     ]
     pending_prefill: BatchRequestState | None = None
     next_request_idx = 0
+    metrics = ServingMetrics()
 
-    generated_tokens = 0
-    decode_tokens = 0
-    prefill_time = 0.0
-    decode_time = 0.0
+    def live_states() -> list[BatchRequestState]:
+        states = [state for state in decode_requests if state is not None]
+        if pending_prefill is not None:
+            states.append(pending_prefill)
+        return states
+
+    def record_cache_state() -> None:
+        states = live_states()
+        metrics.peak_active_requests = max(metrics.peak_active_requests, len(states))
+        live_pages = 0
+        tail_waste = 0
+        dense_bytes = 0
+        for state in states:
+            for cache in state.kv_cache:
+                page_ids = getattr(cache, "page_ids", None)
+                page_lens = getattr(cache, "page_lens", None)
+                page_size = getattr(cache, "page_size", None)
+                if page_ids is not None:
+                    live_pages += len(page_ids)
+                    if page_lens and page_size is not None:
+                        tail_waste += page_size - page_lens[-1]
+                else:
+                    key_values = getattr(cache, "key_values", None)
+                    if key_values is not None:
+                        dense_bytes += key_values[0].nbytes + key_values[1].nbytes
+
+        pools = getattr(model, "page_pools", ())
+        capacity_pages = sum(getattr(pool, "capacity", 0) for pool in pools)
+        paged_bytes = sum(getattr(pool, "storage_nbytes", 0) for pool in pools)
+        dense_bytes += sum(
+            getattr(cache, "last_batch_bytes", 0) for cache in batch_kv_cache
+        )
+        metrics.peak_live_pages = max(metrics.peak_live_pages, live_pages)
+        metrics.peak_capacity_pages = max(metrics.peak_capacity_pages, capacity_pages)
+        metrics.peak_tail_waste_slots = max(metrics.peak_tail_waste_slots, tail_waste)
+        metrics.peak_kv_bytes = max(metrics.peak_kv_bytes, dense_bytes, paged_bytes)
+
+    def record_dense_growth(state: BatchRequestState) -> None:
+        metrics.dense_growth_copy_bytes += sum(
+            getattr(cache, "growth_copy_bytes", 0) for cache in state.kv_cache
+        )
 
     while True:
         if (
@@ -373,7 +428,7 @@ def run_batch_requests_serving(
                 pending_prefill.kv_cache,
             )
             mx.eval(token)
-            prefill_time += perf_counter() - t0
+            metrics.prefill_time += perf_counter() - t0
             pending_prefill.offset += chunk_len
 
             for layer_cache in pending_prefill.kv_cache:
@@ -383,14 +438,15 @@ def run_batch_requests_serving(
                 pending_prefill.is_prefill_done = True
                 pending_prefill.generated_tokens = 1
                 pending_prefill.next_token = token.item()
-                generated_tokens += 1
+                metrics.generated_tokens += 1
+            record_cache_state()
 
         if pending_prefill is not None and pending_prefill.is_prefill_done:
             if (
                 pending_prefill.generated_tokens
                 >= pending_prefill.request.max_new_tokens
-                or pending_prefill.offset >= max_seq_len
             ):
+                record_dense_growth(pending_prefill)
                 for layer_cache in pending_prefill.kv_cache:
                     layer_cache.release()
                 pending_prefill = None
@@ -427,24 +483,37 @@ def run_batch_requests_serving(
                 batch_kv_cache,
             )
             mx.eval(decoded)
-            decode_time += perf_counter() - t1
+            metrics.decode_time += perf_counter() - t1
+            record_cache_state()
 
             for slot in active_slots:
                 req = decode_requests[slot]
                 req.next_token = decoded[slot].item()
                 req.offset += 1
                 req.generated_tokens += 1
-                generated_tokens += 1
-                decode_tokens += 1
-                if (
-                    req.generated_tokens >= req.request.max_new_tokens
-                    or req.offset >= max_seq_len
-                ):
+                metrics.generated_tokens += 1
+                metrics.decode_tokens += 1
+                if req.generated_tokens >= req.request.max_new_tokens:
+                    record_dense_growth(req)
                     for layer_cache in batch_kv_cache:
                         layer_cache.remove_request(slot)
                     decode_requests[slot] = None
 
-    return generated_tokens, decode_tokens, prefill_time, decode_time
+    pools = getattr(model, "page_pools", ())
+    metrics.reused_page_allocations = sum(
+        getattr(pool, "reused_page_allocations", 0) for pool in pools
+    )
+    metrics.storage_growths = sum(getattr(pool, "storage_growths", 0) for pool in pools)
+    metrics.copied_pages_on_growth = sum(
+        getattr(pool, "copied_pages_on_growth", 0) for pool in pools
+    )
+    metrics.paged_growth_copy_bytes = sum(
+        getattr(pool, "copied_bytes_on_growth", 0) for pool in pools
+    )
+    metrics.dense_staging_copy_bytes = sum(
+        getattr(cache, "staging_copy_bytes", 0) for cache in batch_kv_cache
+    )
+    return metrics
 
 
 def safe_div(num: float, den: float) -> float:
@@ -526,7 +595,7 @@ def main() -> None:
 
                 def run_benchmark(
                     bench_requests: list[BenchRequest],
-                ) -> tuple[int, int, float, float]:
+                ) -> ServingMetrics:
                     return run_batch_requests_serving(
                         model,
                         bench_requests,
@@ -534,7 +603,6 @@ def main() -> None:
                         batching_kv_cache_cls,
                         batch_size=args.batch_size,
                         prefill_step=args.prefill_step,
-                        max_seq_len=args.max_seq_len,
                     )
 
             else:
@@ -573,6 +641,10 @@ def main() -> None:
                     run_benchmark(requests)
                 else:
                     run_one_request(requests[i % len(requests)])
+            if args.batch_decode:
+                mx.synchronize()
+                for pool in getattr(model, "page_pools", ()):
+                    pool.reset()
 
         total_prompt_tokens = sum(len(request.prompt_token_ids) for request in requests)
         progress = tqdm(total=len(requests), desc="Bench", dynamic_ncols=True)
@@ -581,15 +653,15 @@ def main() -> None:
         total_decode_tokens = 0
         total_prefill_time = 0.0
         total_decode_time = 0.0
+        serving_metrics = None
 
         t0 = perf_counter()
         if args.batch_decode:
-            (
-                total_generated_tokens,
-                total_decode_tokens,
-                total_prefill_time,
-                total_decode_time,
-            ) = run_benchmark(requests)
+            serving_metrics = run_benchmark(requests)
+            total_generated_tokens = serving_metrics.generated_tokens
+            total_decode_tokens = serving_metrics.decode_tokens
+            total_prefill_time = serving_metrics.prefill_time
+            total_decode_time = serving_metrics.decode_time
             progress.update(len(requests))
             elapsed = perf_counter() - t0
             progress.set_postfix(
@@ -641,6 +713,65 @@ def main() -> None:
         f"Decode throughput: "
         f"{safe_div(total_decode_tokens, total_decode_time):.2f} tok/s"
     )
+    if serving_metrics is not None:
+        print(f"Request throughput: {safe_div(args.num_seqs, total_time):.2f} req/s")
+        print(f"Peak active requests: {serving_metrics.peak_active_requests}")
+        print(f"Peak KV bytes: {serving_metrics.peak_kv_bytes}")
+        print(f"Peak live KV pages: {serving_metrics.peak_live_pages}")
+        print(f"Peak KV capacity pages: {serving_metrics.peak_capacity_pages}")
+        print(f"Peak tail waste slots: {serving_metrics.peak_tail_waste_slots}")
+        print(f"Reused page allocations: {serving_metrics.reused_page_allocations}")
+        print(f"Page-pool growths: {serving_metrics.storage_growths}")
+        print(
+            f"Pages copied during pool growth: {serving_metrics.copied_pages_on_growth}"
+        )
+        print(
+            "Dense KV bytes copied during growth: "
+            f"{serving_metrics.dense_growth_copy_bytes}"
+        )
+        print(
+            "Dense KV bytes copied into batch tensors: "
+            f"{serving_metrics.dense_staging_copy_bytes}"
+        )
+        print(
+            "Paged KV bytes copied during pool growth: "
+            f"{serving_metrics.paged_growth_copy_bytes}"
+        )
+
+    if args.json_output:
+        payload = {
+            "configuration": {
+                "model": args.model,
+                "solution": args.solution,
+                "loader": args.loader,
+                "num_seqs": args.num_seqs,
+                "min_input_len": args.min_input_len,
+                "max_input_len": args.max_input_len,
+                "min_output_len": args.min_output_len,
+                "max_output_len": args.max_output_len,
+                "batch_decode": args.batch_decode,
+                "batch_size": args.batch_size,
+                "prefill_step": args.prefill_step,
+                "seed": args.seed,
+            },
+            "metrics": {
+                "elapsed_seconds": total_time,
+                "output_tokens_per_second": safe_div(
+                    total_generated_tokens, total_time
+                ),
+                "total_tokens_per_second": safe_div(total_model_tokens, total_time),
+                "prefill_tokens_per_second": safe_div(
+                    total_prompt_tokens, total_prefill_time
+                ),
+                "decode_tokens_per_second": safe_div(
+                    total_decode_tokens, total_decode_time
+                ),
+                "requests_per_second": safe_div(args.num_seqs, total_time),
+                **(asdict(serving_metrics) if serving_metrics is not None else {}),
+            },
+        }
+        args.json_output.write_text(json.dumps(payload, indent=2) + "\n")
+        print(f"Wrote {args.json_output}")
 
 
 if __name__ == "__main__":

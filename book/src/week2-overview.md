@@ -39,7 +39,8 @@ describe new storage and scheduling behavior.
 - A BF16 SIMD-matrix quantized prefill kernel
 - A measured split-K schedule for small Qwen prefill matrices
 - A last-token output interface for generation
-- Acceptance targets of 70% of MLX prefill and decode throughput
+- Acceptance targets of 80% of MLX prefill and decode throughput on the
+  fixed Week 2 checkpoint
 
 Week 2 does **not** call MLX-provided implementations of the operators we are
 learning. The required path implements quantized matmul, decode attention,
@@ -100,7 +101,7 @@ The cumulative ladder is executable at any time. The
 
 ```bash
 pdm run bench-week2-progression --offline --repeats 3 \
-  --model qwen3-4b --input-len 32 --output-len 33 --warmup 2 \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last
 ```
 
@@ -109,6 +110,13 @@ against Week 1 and MLX. It also records the MLX version because that baseline
 changes. The performance appendix records the cumulative percentages in one
 place. They are not additive promises: replacing one bottleneck changes how
 much every later replacement matters.
+
+The acceptance shape uses a 128-token prompt followed by 128 timed decode
+steps; `--output-len 129` includes the first token produced by prefill.
+It is long enough to amortize compilation and launch noise while remaining in
+Week 2's single-request interactive scope. Publish 2K and longer context sweeps
+as diagnostics too; they expose the dense-attention boundary that motivates
+Week 3, but do not silently replace the fixed acceptance denominator.
 
 The default runs the reference checkpoints. After implementing the cumulative
 selector in your model, add `--solution tiny_llm` to measure your own complete

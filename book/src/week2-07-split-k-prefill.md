@@ -100,7 +100,7 @@ pdm run build-ext
 pdm run test --week 2 --day 7
 ```
 
-## Reference Measurement
+## Reference Split-K Measurement
 
 This matched run used Qwen3-4B, MLX 0.32.0, mlx-lm 0.31.3, an M4 Pro with a
 20-core GPU and 64 GB memory, last-logit prefill, 32 prompt tokens, 33 output
@@ -117,6 +117,12 @@ one-token decode still uses Day 3's matvec. At 2,048 prompt tokens the base
 tile grid is already large, so Day 7 falls back to Day 6 and the completed
 Week 2 model reaches about 78% of MLX prefill in the current prompt-scoring
 campaign.
+
+The final Week 2 acceptance run uses the fixed 128-token prompt and 128-token
+decode workload from Day 2. After removing the marginal pointer-streaming
+duplicate, the three-process median is 791.63 prefill tok/s and 77.45 decode
+tok/s. MLX 0.32.0 reaches 828.27 and 87.62 tok/s respectively, so the course
+path finishes at 95.6% prefill and 88.4% decode.
 
 The Week 2 loop is now complete:
 

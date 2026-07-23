@@ -195,7 +195,7 @@ meaningful as you complete their chapters.
 
 ```bash
 pdm run bench-week2-progression --offline --repeats 3 \
-  --model qwen3-0.6b --input-len 128 --output-len 65 --warmup 2 \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last --json-output week2-baseline.json
 ```
 
@@ -212,14 +212,22 @@ denominator forward.
 The Week 2 targets are:
 
 ```plain
-reference prefill throughput / MLX prefill throughput >= 0.70
-reference decode throughput / MLX decode throughput >= 0.70
+reference prefill throughput / MLX prefill throughput >= 0.80
+reference decode throughput / MLX decode throughput >= 0.80
 ```
 
-Reaching 70% is the acceptance threshold, not a promise that every educational
-kernel individually matches its MLX counterpart. MLX is the comparison
-baseline; the Week 2 solution must reach both targets with course-owned
-operator implementations. If either ratio misses, the next chapter starts
-from the new benchmark and profile rather than a predetermined optimization.
+The prefill ratio is also 0.80; both ratios use Qwen3-4B, a 128-token prompt,
+128 timed decode steps, and last-row logits. `--output-len 129` includes the
+first token produced by prefill. Reaching 80% is the acceptance threshold, not
+a promise that every educational kernel individually matches its MLX
+counterpart. MLX is the comparison baseline; the Week 2 solution must reach
+both targets with course-owned operator implementations. If either ratio
+misses, the next chapter starts from the new benchmark and profile rather than
+a predetermined optimization.
+
+Keep a 2K context run in the report as a stress diagnostic. It is useful for
+showing when attention overtakes fixed-shape projections, but changing context
+also changes the problem. Do not move the acceptance shape after seeing a
+result.
 
 {{#include copyright.md}}
