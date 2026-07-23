@@ -179,104 +179,190 @@ src/extensions/src/flash_attention.cpp
 src/extensions/CMakeLists.txt
 ```
 
-### Why the First Scalar Mapping Is Slow
+### From the Scalar Kernel to the SIMD-Matrix Kernel
 
-A kernel can implement the FlashAttention recurrence correctly and still be
-slower than ordinary attention. The original mapping had four main problems:
-
-- It launched `32 × 32 = 1024` threads per threadgroup. A hardware maximum is
-  a budget, not an occupancy target.
-- Each score used a serial 128-element dot product instead of a matrix
-  instruction.
-- `P @ V` looped over 128 output columns and performed a SIMD reduction for
-  every column.
-- Q/K/V were converted to FP32 and dense no-mask/causal arrays were created,
-  even though Week 2 Qwen activations are BF16.
-
-The ordinary implementation writes a quadratic score tensor, but its QK and
-PV operations are highly optimized matrix kernels. Eliminating the tensor
-cannot compensate for slow scalar arithmetic.
-
-### Keep a General Fallback
-
-Use a small scalar kernel for FP32 correctness tests and head dimensions below
-128. A useful mapping is a `16 × 32` query/key tile with 512 threads: one SIMD
-group owns one query row, and one lane owns one key. This path keeps the
-implementation general and testable, but Qwen3 does not use it.
-
-The required Week 2 GPU path is a separate BF16, `E = 128` specialization that
-returns BF16. Specialize the common model shape instead of adding branches and
-dynamic loops to its hot path.
-
-### BF16 SIMD-Matrix Tile
-
-Use this tile on the optimized path:
+The original diagrams described the FP32 scalar implementation. The Qwen3 path
+now uses a separate BF16 specialization:
 
 ```plain
-BQ = 64 query rows
-BK = 32 key/value rows
-D  = 128
-8 SIMD groups × 32 lanes = 256 threads
+CURRENT FP32 FALLBACK                  QWEN3 BF16 FAST PATH
+
+Q tile       16 x 128                  64 x 128
+K/V tile     32 x 128                  32 x 128
+threadgroup  16 SIMD groups            8 SIMD groups
+threads      16 x 32 = 512             8 x 32 = 256
+
+QK           serial 128-element dots   8 x 8 matrix fragments
+softmax      FP32                      FP32
+PV           scalar loops              8 x 8 matrix fragments
+output       FP32                      BF16
+
+              variable D               fixed D = 128
+                   |                         |
+                   +---- correctness --------+---- Week 2 model
 ```
 
-Each SIMD group owns eight query rows. Metal's public
-`simdgroup_matrix<T, 8, 8>` distributes one 8×8 fragment across its 32 lanes,
-with two fragment elements per lane.
+The fallback remains useful for FP32 tests and smaller head dimensions. Qwen3
+uses the right-hand path so the hot loop has no dynamic-D or dtype branches.
+
+### Dispatch Grid and Thread Ownership
+
+The host launches a three-dimensional grid. One threadgroup owns one query
+block for one query head in one batch:
 
 ```plain
-one SIMD group
+grid = (ceil(L / 64), Hq, B)       threadgroup = (32 lanes, 8 SIMD groups, 1)
 
-Q fragment [8, 8] × Kᵀ fragment [8, 8] -> score fragment [8, 8]
+grid.x: query block
 
-D=128: 16 multiply-accumulate steps
-BK=32: 4 score fragments
+       qb=0           qb=1                         qb=ceil(L/64)-1
+    +-----------+  +-----------+                  +-----------+
+Q   | rows 0:64 |  | rows 64:128|       ...       | tail rows |
+    +-----------+  +-----------+                  +-----------+
 
-P fragment [8, 8] × V fragment [8, 8] -> output fragment [8, 8]
+grid.y: query head qh = 0 .. Hq-1
+grid.z: batch      b  = 0 .. B-1
 
-BK=32: 4 multiply-accumulate steps
-D=128: 16 output fragments
+TG(qb, qh, b)
+    |
+    +-- writes O[b, qh, qb*64 : min((qb+1)*64, L), 0:128]
+    |
+    +-- reads  K/V[b, kv_head, 0:S, 0:128]
+                    ^
+                    +-- kv_head = qh / (Hq / Hkv)
 ```
 
-Use native `bfloat` matrix operands and FP32 accumulator fragments. Keep the
-row maxima, row sums, and online-softmax output accumulators in FP32, then
-convert only the final output to BF16. This matches the Week 2 model without
-whole-tensor dtype conversions.
+Inside the threadgroup, each SIMD group owns eight of the 64 query rows:
+
+```plain
+threadgroup: 8 SIMD groups x 32 lanes = 256 threads
+
+SIMD group       query rows in this tile       output owned
+    0                    0 .. 7                 O[ 0: 8, :]
+    1                    8 .. 15                O[ 8:16, :]
+    2                   16 .. 23                O[16:24, :]
+    3                   24 .. 31                O[24:32, :]
+    4                   32 .. 39                O[32:40, :]
+    5                   40 .. 47                O[40:48, :]
+    6                   48 .. 55                O[48:56, :]
+    7                   56 .. 63                O[56:64, :]
+
+One 8 x 8 fragment is distributed across 32 lanes.
+Each lane holds exactly two fragment elements.
+```
+
+### Matrix-Fragment Dataflow
+
+For one SIMD group, QK turns one `8 × 128` query slice into four FP32 score
+fragments:
+
+```plain
+                         D = 128 = 16 fragments
+
+Q rows [8 x 128]     [ Q0 ][ Q1 ] ... [ Q15 ]
+                         |     |            |
+                         |     | 16 MMA     |
+                         v     v  steps     v
+K^T [128 x 32]       +------+------+------+------+
+                     | K*,0 | K*,1 | K*,2 | K*,3 |   four columns cover 32 keys
+                     +------+------+------+------+
+                         |      |      |      |
+                         v      v      v      v
+scores [8 x 32]      [ S0 ][ S1 ][ S2 ][ S3 ]     four FP32 8 x 8 fragments
+```
+
+After online softmax, PV turns those four probability fragments into sixteen
+FP32 output fragments:
+
+```plain
+P [8 x 32]           [ P0 ][ P1 ][ P2 ][ P3 ]
+                         \      \      \      \
+                          \      4 MMA steps per output fragment
+                           v      v      v      v
+V [32 x 128]         [ V*,0 ][ V*,1 ] ... [ V*,15 ]
+                           |       |              |
+                           v       v              v
+O [8 x 128]          [ O0  ][ O1  ] ... [ O15  ]  sixteen FP32 8 x 8 fragments
+```
+
+The matrix operands are BF16. Scores, row maxima, row sums, and output
+accumulators remain FP32; only the final normalized output is converted to BF16.
 
 ### Threadgroup Memory and Registers
 
-Stage Q once and stream K/V through a reused allocation:
+Q stays resident while K and V take turns using the same allocation:
 
 ```plain
-threadgroup BF16 Q tile:  64 × 130
-threadgroup BF16 K/V:    128 × 34
-total:                   about 25 KiB
+THREADGROUP MEMORY                                      total = 24.75 KiB
+
++----------------------------------------------------+
+| q_tile: BF16 [64 x 130]                 16.25 KiB  |  loaded once
+| 128 values + 2 padding values per row              |
++----------------------------------------------------+
+
++----------------------------------------------------+
+| kv_tile: BF16 [128 x 34]                 8.50 KiB  |  reused every tile
+|                                                    |
+| K phase: transposed K^T [128 x (32 + 2 padding)]   |
+| V phase: row-major V  [32 x (128 + 2 padding)]     |
++----------------------------------------------------+
+
+REGISTERS, PER SIMD GROUP
+
+  scores/probabilities:  4 x 8x8 fragments
+  output accumulator:   16 x 8x8 FP32 fragments
+  online softmax:        running max + running sum for each row
 ```
 
-K is transposed while loading so QK can consume ordinary row-major 8×8
-fragments. After QK and softmax, reuse the same allocation for row-major V.
-The output's 16 matrix fragments and online-softmax statistics remain in
-registers.
-
-The two-element padding makes each BF16 row stride odd when measured in
-32-bit threadgroup-memory banks. Padding should be chosen from the element
-width and bank mapping; copying a padding value from an FP32 or CUDA kernel is
-not generally correct.
+The two padding elements give BF16 rows an odd stride in 32-bit memory banks,
+reducing systematic bank conflicts during fragment loads.
 
 ### Per-Tile Sequence
 
-For every K/V tile:
+The barriers line up with each change in ownership of shared memory:
 
-1. Cooperatively load and transpose K into threadgroup memory.
-2. Compute four 8×8 score fragments with
-   `simdgroup_multiply_accumulate` over the 16 D fragments.
-3. Apply scale and mask, then reduce each eight-row fragment's maximum.
-4. Update online-softmax maxima and sums in FP32.
-5. Convert the probabilities to BF16 matrix fragments.
-6. Reuse the K allocation for V and compute all 16 output fragments.
-7. Rescale the previous output whenever the running maximum changes.
+```plain
+once per query tile
 
-For causal prefill, stop the K/V loop at the last tile that can contain a
-visible key. This avoids approximately half the matrix work when `L = S`.
+device Q --load--> q_tile --B--+
+                              |
+for each K/V tile j            v
+
+device K_j --load + transpose--> kv_tile as K^T --B--> QK
+                                                        |
+                                                        v
+                                           scale + mask + softmax
+                                                        |
+                         running max, sum, O <----------+
+                                                        |
+                                                        B
+                                                        |
+device V_j --load--------------> kv_tile as V   <-------+
+                                         |
+                                         B
+                                         |
+                                         v
+                                  P @ V, rescale O
+                                         |
+                                         B
+                                         |
+                                         +----> next K/V tile
+
+after final tile:  O / running_sum --convert--> BF16 output
+
+B = threadgroup barrier
+```
+
+Causal mode bounds the loop before it starts processing tiles:
+
+```plain
+last visible key = last query row in block + (S - L)
+
+K/V tiles:  [ 0 ][ 1 ][ 2 ] ... [ limit-1 ] | [ limit ][ limit+1 ] ...
+             <---------- process ----------> | <------- skip entirely ------>
+```
+
+For `L = S`, this skips approximately half of the matrix work.
 
 ### Implemented Optimization Inventory
 
