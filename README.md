@@ -51,7 +51,7 @@ Week 1 and 2 is complete. Week 3 is in progress.
 | 3.5            | RAG Pipeline                                                | 🚧    | 🚧   | 🚧  |
 | 3.6            | AI Agent     / Tool Calling                                 | 🚧    | 🚧   | 🚧  |
 | 3.7            | Long Context                                                | 🚧    | 🚧   | 🚧  |
-| 4              | CLI Coding Agent                                             | ✅    | 🚧   | ✅  |
+| 4              | CLI Coding Agent                                             | ✅    | ✅   | ✅  |
 
 Other topics not covered: quantized/compressed kv cache, prefix/prompt cache; sampling, fine tuning; smaller kernels (softmax, silu, etc)
 

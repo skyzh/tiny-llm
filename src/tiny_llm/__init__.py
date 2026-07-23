@@ -16,3 +16,4 @@ from .paged_kv_cache import *
 from .batch import *
 from .models import *
 from .moe import *
+from .agent import *

@@ -1,27 +1,23 @@
 import argparse
 import importlib
 import json
+import shlex
 import sys
 from itertools import cycle
 from pathlib import Path
 from threading import Event, Thread
 
-SYSTEM = """You are a coding agent. Inspect the workspace before editing it.
-Reply with exactly one JSON object and no markdown. Available actions:
-{"tool":"list_files","path":"."}
-{"tool":"read_file","path":"README.md"}
-{"tool":"write_file","path":"hello.py","content":"print('hello')\n"}
-When the task is complete: {"final":"brief summary"}
-Paths must be relative. Keep changes small and never invent file contents."""
-ROOT = Path.cwd().resolve()
-
 
 def run_with_spinner(label, function, *args):
+    """CLI support for Week 4: show progress without changing agent behavior."""
+
     if not sys.stdout.isatty():
         return function(*args)
     stopped = Event()
 
     def animate():
+        """CLI support for Week 4: redraw a spinner until generation finishes."""
+
         for frame in cycle("|/-\\"):
             print(f"\r{frame} {label}", end="", flush=True)
             if stopped.wait(0.1):
@@ -37,83 +33,9 @@ def run_with_spinner(label, function, *args):
         print(f"\r{' ' * (len(label) + 2)}\r", end="", flush=True)
 
 
-def generate(model, tokenizer, messages, cache_type, args):
-    import mlx.core as mx
+def build_parser() -> argparse.ArgumentParser:
+    """CLI support for Week 4: define model, budget, and safety policy flags."""
 
-    kwargs = dict(
-        tokenize=False,
-        add_generation_prompt=True,
-        enable_thinking=args.enable_thinking,
-    )
-    prompt = tokenizer.apply_chat_template(messages, **kwargs)
-    if args.solution == "mlx":
-        from mlx_lm import generate as mlx_generate
-
-        return mlx_generate(
-            model, tokenizer, prompt, max_tokens=args.max_tokens, verbose=False
-        )
-    if args.loader == "week2":
-        caches = [cache_type() for _ in range(model.num_hidden_layers)]
-    else:
-        caches = model.create_kv_cache()
-    tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
-    output, offset = [], 0
-    try:
-        for _ in range(args.max_tokens):
-            logits = model(tokens[None], offset, caches)[:, -1, :]
-            token = int(mx.argmax(logits, axis=-1).item())
-            if token == tokenizer.eos_token_id:
-                break
-            output.append(token)
-            offset += tokens.size
-            tokens = mx.array([token])
-        return tokenizer.decode(output)
-    finally:
-        for cache in caches:
-            cache.release()
-
-
-def safe_path(raw):
-    path = (ROOT / raw).resolve()
-    path.relative_to(ROOT)
-    if ".git" in path.relative_to(ROOT).parts:
-        raise ValueError(".git is not accessible")
-    return path
-
-
-def run_tool(action):
-    try:
-        path = safe_path(action.get("path", "."))
-        if action["tool"] == "list_files":
-            items = sorted(path.iterdir(), key=lambda item: item.name)
-            return "\n".join(
-                f"{'dir' if item.is_dir() else 'file'} {item.relative_to(ROOT)}"
-                for item in items[:100]
-                if item.name != ".git"
-            )
-        if action["tool"] == "read_file":
-            return path.read_text()[:12000]
-        if action["tool"] == "write_file":
-            content = action["content"]
-            if len(content) > 12000:
-                raise ValueError("content exceeds 12000 characters")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
-            return f"wrote {path.relative_to(ROOT)}"
-        return "error: unknown tool"
-    except (KeyError, OSError, ValueError) as error:
-        return f"error: {error}"
-
-
-def parse_action(response):
-    try:
-        action, _ = json.JSONDecoder().raw_decode(response[response.index("{") :])
-        return action
-    except (ValueError, json.JSONDecodeError):
-        return None
-
-
-def main():
     parser = argparse.ArgumentParser(description="A tiny Week 4 coding agent.")
     parser.add_argument("task", nargs="+", help="coding task for the agent")
     parser.add_argument("--model", default="qwen3-4b")
@@ -128,65 +50,167 @@ def main():
     parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--max-tokens", type=int, default=256)
+    parser.add_argument("--max-context-chars", type=int, default=48_000)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path.cwd(),
+        help="workspace boundary (defaults to the current directory)",
+    )
+    parser.add_argument(
+        "--allow-writes",
+        action="store_true",
+        help="allow file writes; existing files still must be read first",
+    )
+    parser.add_argument(
+        "--allow-command",
+        action="append",
+        default=[],
+        metavar="COMMAND",
+        help="allow one exact command; repeat the flag to add another",
+    )
+    return parser
+
+
+def parse_allowed_commands(values: list[str]) -> tuple[tuple[str, ...], ...]:
+    """Week 4, Day 5: convert operator-approved commands into exact argv tuples."""
+
+    commands = []
+    for value in values:
+        argv = tuple(shlex.split(value))
+        if not argv:
+            raise ValueError("--allow-command must not be empty")
+        commands.append(argv)
+    return tuple(commands)
+
+
+def main():
+    """CLI support for Week 4: load a backend and invoke the bounded agent loop."""
+
+    parser = build_parser()
     args = parser.parse_args()
+    try:
+        allowed_commands = parse_allowed_commands(args.allow_command)
+    except ValueError as error:
+        parser.error(str(error))
+    if not args.root.exists() or not args.root.is_dir():
+        parser.error("--root must be an existing directory")
+    if args.max_tokens <= 0:
+        parser.error("--max-tokens must be positive")
+
     from mlx_lm import load
     import mlx.core as mx
 
-    models = importlib.import_module("tiny_llm.models")
+    package = (
+        "tiny_llm_ref"
+        if args.solution in {"tiny_llm_ref", "ref", "mlx"}
+        else "tiny_llm"
+    )
+    agent = importlib.import_module(f"{package}.agent")
+    models = importlib.import_module(f"{package}.models")
+    policy = agent.ToolPolicy(
+        root=args.root,
+        allow_writes=args.allow_writes,
+        allowed_commands=allowed_commands,
+    )
+    workspace = agent.Workspace(policy)
+    limits = agent.AgentLimits(
+        max_steps=args.max_steps,
+        max_context_chars=args.max_context_chars,
+    )
+
+    if not args.allow_writes:
+        print("Safety: read-only mode; pass --allow-writes to permit file changes")
+    if allowed_commands:
+        print("Safety: only the exact --allow-command values may be executed")
+    else:
+        print("Safety: command execution is disabled")
+
+    model_name = models.shortcut_name_to_full_name(args.model)
+    mlx_model, tokenizer = load(model_name)
     if args.solution == "mlx":
-        package, cache_type = "mlx", None
+        model = mlx_model
         print(f"Using the MLX executor on {args.device}; --loader is ignored")
         if args.enable_flash_attn:
             print("MLX selects optimized attention automatically; ignoring the flag")
     else:
-        package = (
-            "tiny_llm_ref" if args.solution in {"tiny_llm_ref", "ref"} else "tiny_llm"
+        dispatch_args = {"enable_flash_attn": args.enable_flash_attn}
+        if args.loader == "week3":
+            dispatch_args = {}
+            if args.enable_flash_attn:
+                print("--enable-flash-attn is only used by week2; ignoring it")
+        model = models.dispatch_model(
+            model_name, mlx_model, week=int(args.loader[-1]), **dispatch_args
         )
-        models = importlib.import_module(f"{package}.models")
-        cache_type = importlib.import_module(f"{package}.kv_cache").TinyKvFullCache
         print(f"Using {package} with the {args.loader} loader on {args.device}")
-    model_name = models.shortcut_name_to_full_name(args.model)
-    mlx_model, tokenizer = load(model_name)
-    dispatch_args = {"enable_flash_attn": args.enable_flash_attn}
-    if args.loader == "week3":
-        dispatch_args = {}
-        if args.enable_flash_attn:
-            print("--enable-flash-attn is only used by the week2 loader; ignoring it")
-    with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
+
+    def generate(messages):
+        """Week 4, Day 1: adapt the selected inference backend to the agent API."""
+
         if args.solution == "mlx":
-            model = mlx_model
-        else:
-            model = models.dispatch_model(
-                model_name, mlx_model, week=int(args.loader[-1]), **dispatch_args
-            )
-        messages = [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": " ".join(args.task)},
-        ]
-        for step in range(args.max_steps):
-            response = run_with_spinner(
-                "Model is working...",
-                generate,
-                model,
-                tokenizer,
+            from mlx_lm import generate as mlx_generate
+
+            prompt = tokenizer.apply_chat_template(
                 messages,
-                cache_type,
-                args,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=args.enable_thinking,
             )
-            print(f"\n[{step + 1}] {response}")
-            action = parse_action(response)
-            if action and "final" in action:
-                return
-            if action and "tool" in action:
-                print(f"tool call> {json.dumps(action, ensure_ascii=False)}")
-                result = run_tool(action)
-            else:
-                result = "error: reply with one valid JSON action"
-            print(f"tool> {result}")
-            messages += [
-                {"role": "assistant", "content": response},
-                {"role": "user", "content": f"Tool result:\n{result}"},
-            ]
+
+            def generate_mlx():
+                """Week 4, Day 1: decode with the optimized MLX-LM backend."""
+
+                return mlx_generate(
+                    model,
+                    tokenizer,
+                    prompt,
+                    max_tokens=args.max_tokens,
+                    verbose=False,
+                )
+
+            return run_with_spinner("Model is working...", generate_mlx)
+
+        if args.loader == "week2":
+            cache_type = importlib.import_module(f"{package}.kv_cache").TinyKvFullCache
+
+            def cache_factory():
+                """Week 4, Day 1: allocate one full cache per decoder layer."""
+
+                return [cache_type() for _ in range(model.num_hidden_layers)]
+
+        else:
+            cache_factory = model.create_kv_cache
+        return run_with_spinner(
+            "Model is working...",
+            agent.generate_response,
+            model,
+            tokenizer,
+            messages,
+            cache_factory,
+            args.max_tokens,
+            args.enable_thinking,
+        )
+
+    def show_event(event):
+        """Week 4, Day 7: print the same trace represented by AgentEvent."""
+
+        print(f"\n[{event.step}] {event.response}")
+        if isinstance(event.action, agent.ToolAction):
+            action = {"tool": event.action.tool, **event.action.arguments}
+            print(f"tool call> {json.dumps(action, ensure_ascii=False)}")
+        if event.result is not None:
+            print(f"tool> {event.result}")
+
+    with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
+        result = agent.run_agent(
+            " ".join(args.task), generate, workspace, limits, show_event
+        )
+    if result.completed:
+        print(f"\nCompleted: {result.final}")
+    else:
+        print(f"\nStopped: {result.reason}")
+    if result.modified_files:
+        print("Modified: " + ", ".join(result.modified_files))
 
 
 if __name__ == "__main__":
