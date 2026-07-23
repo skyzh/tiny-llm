@@ -1,5 +1,7 @@
 # Week 2 Days 4-5: FlashAttention-2
 
+> **Status:** Under review (WIP).
+
 In this chapter, we will implement a small FlashAttention-style Metal kernel
 for the Week 2 Qwen3 serving pipeline. The goal is to learn the tiled,
 IO-aware algorithm and map both matrix multiplications to Metal's public
