@@ -121,7 +121,7 @@ def flash_attention(
     mask: mx.array | str | None = None,
 ) -> mx.array:
     factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
-    factor = factor.astype(query.dtype)
+    factor = factor.astype(mx.float32)
 
     *B, H_q, L, E = query.shape
     _, H, S, _ = key.shape
@@ -132,22 +132,27 @@ def flash_attention(
     query = mx.contiguous(query)
     key = mx.contiguous(key)
     value = mx.contiguous(value)
-    is_causal = mask == "causal"
     N = query.shape[0]
-    if is_causal:
-        mask = mx.broadcast_to(causal_mask(L, S, mx.float32), (*B, H_q, L, S))
-    elif mask is None:
-        mask = mx.broadcast_to(mx.zeros((L, S), dtype=mx.float32), (*B, H_q, L, S))
+    if mask is None:
+        mask_mode = 0
+        mask = mx.zeros((1,), dtype=mx.float32)
+    elif isinstance(mask, str):
+        if mask != "causal":
+            raise ValueError(f"unsupported attention mask mode: {mask}")
+        mask_mode = 1
+        mask = mx.zeros((1,), dtype=mx.float32)
     else:
-        mask = mx.broadcast_to(mask, (*B, H_q, L, S))
-    mask = mx.contiguous(mask.reshape(N, L, S)).astype(mx.float32)
+        mask_mode = 2
+        mask = mx.contiguous(
+            mx.broadcast_to(mask, (*B, H_q, L, S)).reshape(N, L, S)
+        ).astype(mx.float32)
     result = tiny_llm_ext_ref.flash_attention(
         query,
         key,
         value,
         mask,
         factor,
-        is_causal=is_causal,
+        mask_mode=mask_mode,
         num_heads=H_q,
         num_kv_heads=H,
     )

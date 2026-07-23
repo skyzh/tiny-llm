@@ -30,8 +30,12 @@
         "dequantization",
         "dequantizes",
         "dtype",
+        "exponentials",
         "threadgroups",
         "threadgroup",
+        "autotune",
+        "autotuning",
+        "retuned",
     ],
     "ignoreRegExpList": [
         "`[^`]*`",
