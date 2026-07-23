@@ -1,17 +1,19 @@
-# 🚧 Week 2 Day 6: Decode Attention
+# 🚧 Week 2 Day 4: Decode Attention
 
 > 🚧 This newly introduced chapter is a work in progress.
 
-During single-request decode, query length is normally one while the cached
+This chapter starts from the quantized-matvec checkpoint. During
+single-request decode, query length is normally one while the cached
 key/value sequence grows by one token at a time. Week 1 expresses attention as
 matrix multiplication, masking, softmax, and another matrix multiplication.
 That is readable, but it materializes the complete score and probability rows.
 
-In this chapter, first write a readable composition to preserve the equation,
-then replace its matmuls and softmax with a course-owned online-softmax Metal
-kernel. The final Week 2 decode path dispatches that kernel; it does not call
-`mx.matmul` or an MLX-provided scaled-dot-product-attention implementation.
-MLX still provides arrays, streams, buffers, and extension dispatch.
+First write a readable composition to preserve the equation, then replace its
+matmuls and softmax with a course-owned online-softmax Metal kernel. Measure the
+complete model before deciding whether to retain the dispatch. The kernel does
+not call `mx.matmul` or an MLX-provided scaled-dot-product-attention
+implementation; MLX still provides arrays, streams, buffers, and extension
+dispatch.
 
 ## Task 1: Preserve the Interface
 
@@ -96,16 +98,19 @@ The number of SIMD groups is a workload parameter, not a universal constant.
 On the M1 Pro benchmark, eight groups reduced scratch memory but serialized too
 many cache positions and achieved only about 215 decode tok/s. Sixteen groups
 reached roughly 232 tok/s. Thirty-two groups plus the parallel final reduction
-reached roughly 238-239 tok/s before the later matvec improvement. More groups
-increase parallel score work but also consume more threads and threadgroup
-memory; measure again when context length or head dimension changes.
+reached roughly 238-239 tok/s in the historical completed-model ablation. More
+groups increase parallel score work but also consume more threads and
+threadgroup memory; measure again when context length or head dimension
+changes.
 
-## Task 3: Integrate and Test
+## Task 3: Integrate and Measure
 
-Route short-query Week 2 attention through the Metal implementation. Retain the
-readable composition for tests and ablations, and retain tiled prefill
-FlashAttention in Week 3; prefill is a different workload where both query and
-context lengths are large.
+Route short-query, short-context Week 2 attention through the Metal
+implementation. Dispatch back to the readable composition when the cached
+context exceeds the measured crossover; a schedule that wins at 128 tokens
+should not be forced onto 2,048 tokens. Retain the readable composition for
+tests and ablations, and retain tiled prefill FlashAttention in Week 3; prefill
+is a different workload where both query and context lengths are large.
 
 Keep arbitrary dense, per-request masks on the readable compatibility path.
 They appear in the first continuous-batching exercise, while the normal Week 2
@@ -114,26 +119,43 @@ attention metadata instead of complicating this focused decode kernel.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 6
+pdm run test --week 2 --day 4
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit
 masks against the readable Week 1 implementation. Use a tolerance because the
 online softmax changes the floating-point reduction order.
 
+Run the preceding checkpoint and the model with the new dispatch under
+otherwise identical settings:
+
+```bash
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
+  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
+  --min-output-len 65 --max-output-len 65 --warmup 2
+
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint decode-attention --model qwen3-0.6b \
+  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
+  --min-output-len 65 --max-output-len 65 --warmup 2
+```
+
+The model dispatches short-query contexts through the course kernel and falls
+back to the exact readable Week 1 composition outside the measured range. This
+is the same evidence-driven decision used for tile sizes, barriers, and
+threadgroup layouts elsewhere in the course.
+
 ## Expected Performance Contribution
 
-**Measured operator change: about +7% at context 128, -5% at context 512, and
--28% at context 2,048 versus the readable bfloat16 composition on an M4 Pro.**
-Against Week 1's integrated float32 attention path, the same kernel was about
-18% faster at 128, 11% faster at 512, and indistinguishable from noise at
-2,048. Quantized weight reads dominate short-context end-to-end decode, and the
-fixed 32-group schedule does not scale monotonically. The custom kernel remains
-the required path because it owns the attention implementation rather than
-delegating matmul to MLX. Do not claim the theoretical memory saving as a
-speedup: report dtype, context length, schedule, and measured throughput.
-In the complete context-128 model, replacing only the readable composition
-with the custom kernel changed decode throughput by just +0.2%, which is below
-the practical noise floor.
+**Measured cumulative improvement: 134.24 to 143.42 tok/s (+6.8%) on an M4
+Pro at context 128.** The resulting checkpoint is 7.35x Week 1 and 56.3% below
+matched MLX. Against an alternative readable bfloat16 composition, the same
+operator was about 7% faster at context 128 but slower at longer contexts;
+that comparison is not the course ladder because the preceding checkpoint
+deliberately preserves Week 1's float32 equation. Quantized weight reads still
+dominate short-context decode, and the fixed 32-group schedule does not scale
+monotonically. Do not claim the theoretical memory saving as a speedup: report
+dtype, context length, schedule, and measured end-to-end throughput.
 
 {{#include copyright.md}}

@@ -28,8 +28,11 @@ class Throughput:
     output: float
 
 
-VARIANTS = (
-    Variant("week1", "Week 1 readable", "ref", "week1"),
+WEEK1_VARIANT = Variant("week1", "Week 1 readable", "ref", "week1")
+MLX_VARIANT = Variant("mlx", "MLX", "mlx", "week2")
+
+COURSE_VARIANTS = (
+    WEEK1_VARIANT,
     Variant("week2", "Week 2 decode", "ref", "week2"),
     Variant("week3-paged", "Week 3 paged (Flash off)", "ref", "week3"),
     Variant(
@@ -53,9 +56,57 @@ VARIANTS = (
         "week3",
         ("--enable-flash-attn", "--enable-performance-lab"),
     ),
-    Variant("mlx", "MLX", "mlx", "week2"),
+    MLX_VARIANT,
 )
-VARIANTS_BY_KEY = {variant.key: variant for variant in VARIANTS}
+WEEK2_VARIANTS = (
+    WEEK1_VARIANT,
+    Variant(
+        "week2-kv-cache",
+        "2.1 KV cache",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "kv-cache"),
+    ),
+    Variant(
+        "week2-quantized-matvec",
+        "2.3 Quantized matvec",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "quantized-matvec"),
+    ),
+    Variant(
+        "week2-decode-attention",
+        "2.4 Decode attention",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "decode-attention"),
+    ),
+    Variant(
+        "week2-rmsnorm",
+        "2.5 Fast RMSNorm",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "rmsnorm"),
+    ),
+    Variant(
+        "week2-rope",
+        "2.5 + Fast RoPE",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "rope"),
+    ),
+    Variant(
+        "week2-swiglu",
+        "2.5 + Fused SwiGLU",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "swiglu"),
+    ),
+    MLX_VARIANT,
+)
+VARIANTS_BY_KEY = {
+    variant.key: variant for variant in (*COURSE_VARIANTS, *WEEK2_VARIANTS)
+}
 METRIC_PATTERN = re.compile(
     r"(Prefill|Decode|Output) throughput: ([0-9]+(?:\.[0-9]+)?) tok/s"
 )
@@ -69,6 +120,18 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--model", default="qwen3-0.6b")
+    parser.add_argument(
+        "--solution",
+        choices=("ref", "tiny_llm"),
+        default="ref",
+        help="benchmark the reference or student course checkpoints",
+    )
+    parser.add_argument(
+        "--suite",
+        choices=("course", "week2"),
+        default="course",
+        help="compare weekly checkpoints or the cumulative Week 2 ladder",
+    )
     parser.add_argument(
         "--device",
         choices=["gpu"],
@@ -113,6 +176,14 @@ def parse_args() -> argparse.Namespace:
         parser.error("--repeats must be positive")
     if args.cooldown_seconds < 0:
         parser.error("--cooldown-seconds must be non-negative")
+    if args.variant:
+        suite_variants = WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS
+        suite_keys = {variant.key for variant in suite_variants}
+        invalid = [key for key in args.variant if key not in suite_keys]
+        if invalid:
+            parser.error(
+                f"variants {invalid} do not belong to the {args.suite!r} suite"
+            )
     return args
 
 
@@ -139,7 +210,7 @@ def run_variant(
         sys.executable,
         str(root / "bench.py"),
         "--solution",
-        variant.solution,
+        args.solution if variant.solution == "ref" else variant.solution,
         "--loader",
         variant.loader,
         "--model",
@@ -284,7 +355,7 @@ def main() -> None:
     variants = (
         [VARIANTS_BY_KEY[key] for key in args.variant]
         if args.variant
-        else list(VARIANTS)
+        else list(WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS)
     )
     samples: dict[str, list[Throughput]] = {variant.key: [] for variant in variants}
 
@@ -324,6 +395,8 @@ def main() -> None:
             "host": host,
             "configuration": {
                 "model": args.model,
+                "solution": args.solution,
+                "suite": args.suite,
                 "device": args.device,
                 "input_len": args.input_len,
                 "output_len": args.output_len,

@@ -8,7 +8,13 @@ from .kv_cache import TinyKvCache
 from .moe import Moe
 from .paged_kv_cache import TinyKvPagedCache, TinyKvPagedPool
 from .quantize import QuantizedWeights, quantized_linear
-from .week2_kernels import FastRMSNorm, FastRoPE, swiglu
+from .week2_kernels import (
+    FastRMSNorm,
+    FastRoPE,
+    decode_attention_custom,
+    scaled_dot_product_attention,
+    swiglu,
+)
 
 
 class Qwen3MultiHeadAttention:
@@ -28,6 +34,7 @@ class Qwen3MultiHeadAttention:
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
         use_flash_attention: bool = False,
+        use_paged_attention: bool = True,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -45,6 +52,7 @@ class Qwen3MultiHeadAttention:
         self.q_norm = FastRMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
         self.k_norm = FastRMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
         self.use_flash_attention = use_flash_attention
+        self.use_paged_attention = use_paged_attention
 
     def __call__(
         self,
@@ -85,7 +93,7 @@ class Qwen3MultiHeadAttention:
                 scale=self.scale,
                 mask=mask,
             )
-        else:
+        elif self.use_paged_attention:
             metadata = cache.update_and_fetch_paged(
                 projection_k,
                 projection_v,
@@ -102,6 +110,29 @@ class Qwen3MultiHeadAttention:
                 scale=self.scale,
                 mask=metadata.mask,
             ).astype(x.dtype)
+        else:
+            key, value, _, mask = cache.update_and_fetch(
+                projection_k,
+                projection_v,
+                mask_length=L,
+                mask=mask,
+            )
+            if L <= 8 and key.shape[-2] <= 256:
+                x = decode_attention_custom(
+                    projection_q,
+                    key,
+                    value,
+                    scale=self.scale,
+                    mask=mask,
+                )
+            else:
+                x = scaled_dot_product_attention(
+                    projection_q,
+                    key,
+                    value,
+                    scale=self.scale,
+                    mask=mask,
+                )
         x = x.transpose(0, 2, 1, 3).reshape(B, L, self.num_heads * self.head_dim)
         return quantized_linear(x, self.wo)
 
@@ -151,6 +182,7 @@ class Qwen3TransformerBlock:
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
+        use_paged_attention: bool = True,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
@@ -176,6 +208,7 @@ class Qwen3TransformerBlock:
             theta=theta,
             rms_norm_eps=rms_norm_eps,
             use_flash_attention=use_flash_attention,
+            use_paged_attention=use_paged_attention,
         )
 
     def __call__(
@@ -207,6 +240,7 @@ class Qwen3ModelWeek3:
         page_size: int = 128,
         enable_flash_attn: bool = False,
         enable_performance_lab: bool = False,
+        enable_paged_attention: bool = True,
     ):
         if enable_flash_attn and mlx_model.args.head_dim != 128:
             raise ValueError("Week 3 FlashAttention requires head_dim=128")
@@ -282,6 +316,7 @@ class Qwen3ModelWeek3:
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
                 use_flash_attention=enable_flash_attn,
+                use_paged_attention=enable_paged_attention,
             )
             self.layers_inner.append(layer)
         self.norm = FastRMSNorm(

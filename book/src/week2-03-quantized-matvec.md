@@ -1,4 +1,4 @@
-# Week 2: Quantized Matvec
+# Week 2 Day 3: Quantized Matvec
 
 In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and
@@ -313,7 +313,7 @@ Build and test the extension:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k task_2
+pdm run test --week 2 --day 3 -- -k task_2
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -374,6 +374,12 @@ micro-optimization blindly to every shape: applying this rearrangement to the
 two-output projection kernel reduced the measured full-model result from about
 249 to 244.5 tok/s, while the extra live accumulators that help the vocabulary
 projection also make smaller projections more difficult to schedule.
+
+The scheduling numbers in this section are historical one-factor ablations run
+against a completed model while developing the kernel. They explain why the
+retained schedule looks this way; they are not Day 3's cumulative course
+result. The end of this chapter reports the matched Day 2 to Day 3 checkpoint
+change.
 
 Likewise, raising the ordinary projection tile from two to four output columns
 increased register pressure enough to reduce decode to about 232 tok/s. The
@@ -450,7 +456,7 @@ The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
 `M = 128`, and compare them with an MLX oracle. The oracle checks the result;
 it is not the implementation under test.
 
-## Task 4: Model Integration
+## Task 4: Integrate Before Continuing
 
 ```
 src/tiny_llm/qwen3_week2.py
@@ -484,15 +490,24 @@ assumptions: `group_size = 128` and `bits = 4`.
 You can test your implementation by running:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b
 ```
 
 You can also benchmark throughput and compare your implementation with the reference solution:
 
 ```bash
-pdm run bench --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
+  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
+  --min-output-len 65 --max-output-len 65 --warmup 2
 ```
+
+Compare this result with the Day 1 `kv-cache` row. Do not start the decode
+attention chapter until the complete model uses packed weights and the
+end-to-end number has been recorded. The vanilla matrix product remains
+callable as a correctness oracle, but only the SIMD matvec is integrated into
+decode.
 
 ## Expected Performance Contribution
 
@@ -500,10 +515,11 @@ pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
 and about 10.5x for the vocabulary head over the scalar quantized kernel.** In
 a Qwen3-0.6B M4 Pro run, the Q/K/V/O projection speedups ranged from 1.39-1.65x,
 the gate/up/down projections from 1.86-1.89x, and the 151,936-row tied output
-head reached about 10.5x. On the earlier M1 Pro reference, the first two-column
-SIMD matvec improved the then-current end-to-end decode path by about 5.7%.
-Removing its activation barrier later added roughly another 3-4% on the fully
-course-owned path.
+head reached about 10.5x. In the cumulative M4 Pro course ladder, integrating
+packed weights and the retained SIMD matvec increased decode from 101.80 to
+134.24 tok/s (+31.9%): 6.88x Week 1 and 59.1% below MLX. On the earlier M1 Pro
+reference, the first two-column SIMD matvec improved the then-current path by
+about 5.7%; removing its activation barrier later added roughly another 3-4%.
 
 Prefill tiling and direct quantized embedding are measured in the optional
 Week 3 performance lab. They are intentionally excluded from the minimal Week

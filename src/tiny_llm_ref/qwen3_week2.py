@@ -1,15 +1,48 @@
-import mlx.core as mx
 from typing import Any
-from .embedding import QuantizedEmbedding
-from .quantize import QuantizedWeights, quantized_linear
+
+import mlx.core as mx
+
+from .basics import linear, silu
+from .attention import scaled_dot_product_attention_grouped
+from .embedding import Embedding, QuantizedEmbedding
 from .kv_cache import TinyKvCache
+from .layer_norm import RMSNorm
+from .positional_encoding import RoPE
+from .quantize import QuantizedWeights, dequantize_linear, quantized_linear
 from .week2_kernels import (
     FastRMSNorm,
     FastRoPE,
     decode_attention_custom,
-    scaled_dot_product_attention,
     swiglu,
 )
+
+WEEK2_CHECKPOINTS = (
+    "kv-cache",
+    "quantized-matvec",
+    "decode-attention",
+    "rmsnorm",
+    "rope",
+    "swiglu",
+)
+
+
+def _linear(x: mx.array, weight: mx.array | QuantizedWeights) -> mx.array:
+    if isinstance(weight, QuantizedWeights):
+        return quantized_linear(x, weight)
+    return linear(x, weight)
+
+
+def _readable_rope_offset(
+    offset: int | list[int] | mx.array, sequence_length: int
+) -> slice | list[slice]:
+    if isinstance(offset, int):
+        return slice(offset, offset + sequence_length)
+    if isinstance(offset, list):
+        return [slice(value, value + sequence_length) for value in offset]
+    values = offset.tolist()
+    if not isinstance(values, list):
+        values = [values]
+    return [slice(value, value + sequence_length) for value in values]
 
 
 class Qwen3MultiHeadAttention:
@@ -19,15 +52,18 @@ class Qwen3MultiHeadAttention:
         num_heads: int,
         num_kv_heads: int,
         head_dim: int,
-        wq: QuantizedWeights,
-        wk: QuantizedWeights,
-        wv: QuantizedWeights,
-        wo: QuantizedWeights,
+        wq: mx.array | QuantizedWeights,
+        wk: mx.array | QuantizedWeights,
+        wv: mx.array | QuantizedWeights,
+        wo: mx.array | QuantizedWeights,
         q_norm: mx.array,
         k_norm: mx.array,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
+        use_fast_rms_norm: bool = True,
+        use_fast_rope: bool = True,
+        use_decode_attention: bool = True,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -44,9 +80,13 @@ class Qwen3MultiHeadAttention:
         self.wk = wk
         self.wv = wv
         self.wo = wo
-        self.rope = FastRoPE(self.head_dim, max_seq_len, theta)
-        self.q_norm = FastRMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
-        self.k_norm = FastRMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
+        self.use_fast_rope = use_fast_rope
+        self.use_decode_attention = use_decode_attention
+        rope_cls = FastRoPE if use_fast_rope else RoPE
+        norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
+        self.rope = rope_cls(self.head_dim, max_seq_len, theta)
+        self.q_norm = norm_cls(self.head_dim, q_norm, eps=rms_norm_eps)
+        self.k_norm = norm_cls(self.head_dim, k_norm, eps=rms_norm_eps)
 
     def __call__(
         self,
@@ -56,21 +96,18 @@ class Qwen3MultiHeadAttention:
         mask: mx.array | str | None = None,
     ) -> mx.array:
         B, L, _ = x.shape
-        projection_q = quantized_linear(x, self.wq).reshape(
-            B, L, self.num_heads, self.head_dim
-        )
-        projection_k = quantized_linear(x, self.wk).reshape(
+        projection_q = _linear(x, self.wq).reshape(B, L, self.num_heads, self.head_dim)
+        projection_k = _linear(x, self.wk).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
         projection_q = self.q_norm(projection_q)
         projection_k = self.k_norm(projection_k)
-        projection_v = quantized_linear(x, self.wv).reshape(
+        projection_v = _linear(x, self.wv).reshape(
             B, L, self.num_kv_heads, self.head_dim
         )
-        if isinstance(offsets, int):
-            rope_offsets = offsets
-        else:
-            rope_offsets = offsets
+        rope_offsets = offsets
+        if not self.use_fast_rope:
+            rope_offsets = _readable_rope_offset(rope_offsets, L)
         projection_q = self.rope(projection_q, offset=rope_offsets)
         projection_k = self.rope(projection_k, offset=rope_offsets)
         projection_q = projection_q.transpose(0, 2, 1, 3)
@@ -79,7 +116,7 @@ class Qwen3MultiHeadAttention:
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        if L <= 8:
+        if self.use_decode_attention and L <= 8 and projection_k.shape[-2] <= 256:
             x = decode_attention_custom(
                 projection_q,
                 projection_k,
@@ -88,15 +125,15 @@ class Qwen3MultiHeadAttention:
                 mask=mask,
             )
         else:
-            x = scaled_dot_product_attention(
-                projection_q,
-                projection_k,
-                projection_v,
+            x = scaled_dot_product_attention_grouped(
+                projection_q.astype(mx.float32),
+                projection_k.astype(mx.float32),
+                projection_v.astype(mx.float32),
                 scale=self.scale,
                 mask=mask,
-            )
+            ).astype(x.dtype)
         x = x.transpose(0, 2, 1, 3).reshape(B, L, self.num_heads * self.head_dim)
-        return quantized_linear(x, self.wo)
+        return _linear(x, self.wo)
 
 
 class Qwen3MLP:
@@ -104,24 +141,23 @@ class Qwen3MLP:
         self,
         dim: int,
         hidden_dim: int,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
+        w_gate: mx.array | QuantizedWeights,
+        w_up: mx.array | QuantizedWeights,
+        w_down: mx.array | QuantizedWeights,
+        use_fast_swiglu: bool = True,
     ):
         self.dim = dim
         self.hidden_dim = hidden_dim
         self.w_gate = w_gate
         self.w_up = w_up
         self.w_down = w_down
+        self.use_fast_swiglu = use_fast_swiglu
 
     def __call__(self, x: mx.array) -> mx.array:
-        return quantized_linear(
-            swiglu(
-                quantized_linear(x, self.w_gate),
-                quantized_linear(x, self.w_up),
-            ),
-            self.w_down,
-        )
+        gate = _linear(x, self.w_gate)
+        up = _linear(x, self.w_up)
+        hidden = swiglu(gate, up) if self.use_fast_swiglu else silu(gate) * up
+        return _linear(hidden, self.w_down)
 
 
 class Qwen3TransformerBlock:
@@ -133,27 +169,39 @@ class Qwen3TransformerBlock:
         head_dim: int,
         intermediate_size: int,
         rms_norm_eps: float,
-        wq: QuantizedWeights,
-        wk: QuantizedWeights,
-        wv: QuantizedWeights,
-        wo: QuantizedWeights,
+        wq: mx.array | QuantizedWeights,
+        wk: mx.array | QuantizedWeights,
+        wv: mx.array | QuantizedWeights,
+        wo: mx.array | QuantizedWeights,
         q_norm: mx.array,
         k_norm: mx.array,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
+        w_gate: mx.array | QuantizedWeights,
+        w_up: mx.array | QuantizedWeights,
+        w_down: mx.array | QuantizedWeights,
         w_input_layernorm: mx.array,
         w_post_attention_layernorm: mx.array,
         max_seq_len: int = 32768,
         theta: int = 1000000,
+        use_fast_rms_norm: bool = True,
+        use_fast_rope: bool = True,
+        use_fast_swiglu: bool = True,
+        use_decode_attention: bool = True,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
-        self.mlp = Qwen3MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
-        self.input_layernorm = FastRMSNorm(
+        self.mlp = Qwen3MLP(
+            hidden_size,
+            intermediate_size,
+            w_gate,
+            w_up,
+            w_down,
+            use_fast_swiglu=use_fast_swiglu,
+        )
+        norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
+        self.input_layernorm = norm_cls(
             hidden_size, w_input_layernorm, eps=rms_norm_eps
         )
-        self.post_attention_layernorm = FastRMSNorm(
+        self.post_attention_layernorm = norm_cls(
             hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
         )
         self.self_attn = Qwen3MultiHeadAttention(
@@ -170,6 +218,9 @@ class Qwen3TransformerBlock:
             max_seq_len=max_seq_len,
             theta=theta,
             rms_norm_eps=rms_norm_eps,
+            use_fast_rms_norm=use_fast_rms_norm,
+            use_fast_rope=use_fast_rope,
+            use_decode_attention=use_decode_attention,
         )
 
     def __call__(
@@ -187,42 +238,58 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
-    def __init__(self, mlx_model: Any):
+    def __init__(self, mlx_model: Any, checkpoint: str = "swiglu"):
+        if checkpoint not in WEEK2_CHECKPOINTS:
+            raise ValueError(
+                f"unknown Week 2 checkpoint {checkpoint!r}; "
+                f"choose one of {WEEK2_CHECKPOINTS}"
+            )
+        checkpoint_index = WEEK2_CHECKPOINTS.index(checkpoint)
+        self.checkpoint = checkpoint
+        use_quantized_weights = checkpoint_index >= WEEK2_CHECKPOINTS.index(
+            "quantized-matvec"
+        )
+        use_fast_rms_norm = checkpoint_index >= WEEK2_CHECKPOINTS.index("rmsnorm")
+        use_fast_rope = checkpoint_index >= WEEK2_CHECKPOINTS.index("rope")
+        use_fast_swiglu = checkpoint_index >= WEEK2_CHECKPOINTS.index("swiglu")
+        use_decode_attention = checkpoint_index >= WEEK2_CHECKPOINTS.index(
+            "decode-attention"
+        )
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
+        self.use_fast_rope = use_fast_rope
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size
         precision = mx.bfloat16
         self.precision = precision
 
-        self.embedding = QuantizedEmbedding(
-            vocab_size=self.vocab_size,
-            embedding_dim=self.hidden_size,
-            weight=QuantizedWeights.from_mlx_layer(mlx_model.model.embed_tokens),
-        )
+        def model_weight(layer: Any) -> mx.array | QuantizedWeights:
+            if use_quantized_weights:
+                return QuantizedWeights.from_mlx_layer(layer)
+            return dequantize_linear(layer)
+
+        embedding_weight = model_weight(mlx_model.model.embed_tokens)
+        if isinstance(embedding_weight, QuantizedWeights):
+            self.embedding = QuantizedEmbedding(
+                vocab_size=self.vocab_size,
+                embedding_dim=self.hidden_size,
+                weight=embedding_weight,
+            )
+        else:
+            self.embedding = Embedding(
+                vocab_size=self.vocab_size,
+                embedding_dim=self.hidden_size,
+                weight=embedding_weight,
+            )
         self.layers_inner = []
 
         for i in range(mlx_model.args.num_hidden_layers):
-            wq = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.q_proj
-            )
-            wk = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.k_proj
-            )
-            wv = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.v_proj
-            )
-            wo = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.o_proj
-            )
-            w_gate = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.gate_proj
-            )
-            w_up = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.up_proj
-            )
-            w_down = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.down_proj
-            )
+            wq = model_weight(mlx_model.model.layers[i].self_attn.q_proj)
+            wk = model_weight(mlx_model.model.layers[i].self_attn.k_proj)
+            wv = model_weight(mlx_model.model.layers[i].self_attn.v_proj)
+            wo = model_weight(mlx_model.model.layers[i].self_attn.o_proj)
+            w_gate = model_weight(mlx_model.model.layers[i].mlp.gate_proj)
+            w_up = model_weight(mlx_model.model.layers[i].mlp.up_proj)
+            w_down = model_weight(mlx_model.model.layers[i].mlp.down_proj)
 
             layer = Qwen3TransformerBlock(
                 num_attention_heads=mlx_model.args.num_attention_heads,
@@ -246,15 +313,20 @@ class Qwen3ModelWeek2:
                 ].post_attention_layernorm.weight,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
+                use_fast_rms_norm=use_fast_rms_norm,
+                use_fast_rope=use_fast_rope,
+                use_fast_swiglu=use_fast_swiglu,
+                use_decode_attention=use_decode_attention,
             )
             self.layers_inner.append(layer)
-        self.norm = FastRMSNorm(
+        norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
+        self.norm = norm_cls(
             mlx_model.args.hidden_size,
             weight=mlx_model.model.norm.weight,
             eps=mlx_model.args.rms_norm_eps,
         )
         if not mlx_model.args.tie_word_embeddings:
-            self.w_lm_head = QuantizedWeights.from_mlx_layer(mlx_model.lm_head)
+            self.w_lm_head = model_weight(mlx_model.lm_head)
         else:
             self.w_lm_head = None
         self.mlx_model = mlx_model
@@ -271,9 +343,19 @@ class Qwen3ModelWeek2:
         cache: list[TinyKvCache],
         logits_to_keep: int | None = None,
     ) -> mx.array:
+        if isinstance(offset, int):
+            for layer, layer_cache in enumerate(cache):
+                cache_offset = getattr(layer_cache, "offset", None)
+                if cache_offset is not None and cache_offset != offset:
+                    raise ValueError(
+                        f"layer {layer} cache offset {cache_offset} "
+                        f"does not match model offset {offset}"
+                    )
         h = self.embedding(inputs)
         mask = None if inputs.shape[1] == 1 else "causal"
-        if isinstance(offset, int):
+        if not getattr(self, "use_fast_rope", True):
+            rope_offsets = offset
+        elif isinstance(offset, int):
             rope_offsets = mx.full((inputs.shape[0],), offset, dtype=mx.int32)
         elif isinstance(offset, list):
             rope_offsets = mx.array(offset, dtype=mx.int32)
@@ -287,6 +369,6 @@ class Qwen3ModelWeek2:
             h = h[:, -logits_to_keep:, :]
         h = self.norm(h)
         if self.w_lm_head is not None:
-            return quantized_linear(h, self.w_lm_head)
+            return _linear(h, self.w_lm_head)
         else:
             return self.embedding.as_linear(h)

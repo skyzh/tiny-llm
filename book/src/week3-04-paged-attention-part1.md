@@ -7,7 +7,8 @@ By the end of Week 3 Day 3, our serving stack already supports:
 - per-request KV cache
 - chunked prefill
 - continuous batching
-- FlashAttention
+- a tested FlashAttention operator, with model integration deferred until the
+  paged attention path is connected on Day 5
 
 That gives us a working miniature serving engine, but the memory layout is still too simple. KV for each request is treated as one growing dense tensor, and batching rebuilds dense K/V for all active requests. That approach is easy to teach, but it does not scale well once requests become long and numerous.
 
@@ -276,6 +277,20 @@ src/tiny_llm/qwen3_week3.py
 Build a compatibility path that reconstructs dense K/V from pages and compares it against `TinyKvFullCache`.
 
 This gives us a correctness check before we change the attention path itself.
+Instantiate the Week 3 model with `enable_paged_attention=False` in this
+chapter so its attention reads the gathered dense tensors. Day 5 switches the
+same model to page-table metadata and the paged kernel.
+
+Run that cumulative checkpoint through the normal generation and benchmark
+entry points:
+
+```bash
+pdm run main --solution tiny_llm --loader week3 \
+  --disable-paged-attention --model qwen3-0.6b
+
+pdm run bench --solution tiny_llm --loader week3 \
+  --disable-paged-attention --model qwen3-0.6b
+```
 
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
 

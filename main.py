@@ -23,6 +23,23 @@ parser.add_argument("--sampler-top-k", type=int, default=None)
 parser.add_argument("--enable-thinking", action="store_true")
 parser.add_argument("--enable-flash-attn", action="store_true")
 parser.add_argument("--enable-performance-lab", action="store_true")
+parser.add_argument(
+    "--disable-paged-attention",
+    action="store_true",
+    help="run the Week 3 Day 4 dense-gather compatibility checkpoint",
+)
+parser.add_argument(
+    "--week2-checkpoint",
+    choices=(
+        "kv-cache",
+        "quantized-matvec",
+        "decode-attention",
+        "rmsnorm",
+        "rope",
+        "swiglu",
+    ),
+    help="run one cumulative Week 2 model checkpoint",
+)
 
 args = parser.parse_args()
 
@@ -33,6 +50,14 @@ if (
     and args.device != "gpu"
 ):
     parser.error("Week 3 FlashAttention requires --device gpu")
+if args.week2_checkpoint is not None and args.loader != "week2":
+    parser.error("--week2-checkpoint requires --loader week2")
+if args.week2_checkpoint is not None and args.solution == "mlx":
+    parser.error("--week2-checkpoint is not supported with --solution mlx")
+if args.disable_paged_attention and args.loader != "week3":
+    parser.error("--disable-paged-attention requires --loader week3")
+if args.disable_paged_attention and args.solution == "mlx":
+    parser.error("--disable-paged-attention is not supported with --solution mlx")
 
 use_mlx = False
 if args.solution == "tiny_llm":
@@ -94,19 +119,27 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
                 print("--enable-flash-attn belongs to Week 3; ignoring it")
             if args.enable_performance_lab:
                 print("--enable-performance-lab belongs to Week 3; ignoring it")
-            tiny_llm_model = models.dispatch_model(args.model, mlx_model, week=2)
+            dispatch_kwargs = {}
+            if args.week2_checkpoint is not None:
+                dispatch_kwargs["checkpoint"] = args.week2_checkpoint
+            tiny_llm_model = models.dispatch_model(
+                args.model, mlx_model, week=2, **dispatch_kwargs
+            )
             if draft_mlx_model is not None:
                 print(f"Using draft model {args.draft_model}")
                 draft_tiny_llm_model = models.dispatch_model(
                     args.draft_model,
                     draft_mlx_model,
                     week=2,
+                    **dispatch_kwargs,
                 )
             else:
                 draft_tiny_llm_model = None
         elif args.loader == "week3":
             print(
-                f"Using week3 loader with flash_attn={args.enable_flash_attn} thinking={args.enable_thinking} for {args.model}"
+                f"Using week3 loader with flash_attn={args.enable_flash_attn} "
+                f"paged_attention={not args.disable_paged_attention} "
+                f"thinking={args.enable_thinking} for {args.model}"
             )
             tiny_llm_model = models.dispatch_model(
                 args.model,
@@ -114,6 +147,7 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
                 week=3,
                 enable_flash_attn=args.enable_flash_attn,
                 enable_performance_lab=args.enable_performance_lab,
+                enable_paged_attention=not args.disable_paged_attention,
             )
             if draft_mlx_model is not None:
                 print(f"Using draft model {args.draft_model}")
@@ -123,6 +157,7 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
                     week=3,
                     enable_flash_attn=args.enable_flash_attn,
                     enable_performance_lab=args.enable_performance_lab,
+                    enable_paged_attention=not args.disable_paged_attention,
                 )
             else:
                 draft_tiny_llm_model = None

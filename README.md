@@ -8,7 +8,7 @@ can build the model serving infrastructure from scratch and dig into the optimiz
 
 The goal is to learn the techniques behind efficiently serving a large language model (e.g., Qwen3 models).
 
-In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen3 model to generate responses (e.g., attention, RoPE, etc). In week 2, **A Step Closer to vLLM**, you will build the minimal course-owned Metal decode path needed to reach about 70% of MLX's performance. In week 3, **Build a Mini vLLM**, you will turn that fast model into a serving engine with continuous batching, optimized prefill, FlashAttention experiments, and paged attention. In week 4, you will use the engine to build applications such as coding agents and RAG.
+In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen3 model to generate responses (e.g., attention, RoPE, etc). In week 2, **A Step Closer to vLLM**, you will add a KV cache first, then integrate and measure one course-owned Metal optimization at a time until the model reaches about 70% of MLX's performance. In week 3, **Build a Mini vLLM**, you will turn that fast model into a serving engine with continuous batching, optimized prefill, FlashAttention experiments, and paged attention. In week 4, you will use the engine to build applications such as coding agents and RAG.
 
 Why MLX: nowadays it's easier to get a macOS-based local development environment than setting up an NVIDIA GPU.
 
@@ -38,11 +38,11 @@ introduced material and all Week 4 application material are work in progress.
 | 1.5            | Load the Model                                              | ✅    | ✅   | ✅  |
 | 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
 | 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
-| 2.1            | Benchmarking and the MLX Baseline                            | 🚧    | 🚧   | 🚧  |
-| 2.2            | Quantized Matvec                                             | ✅    | ✅   | ✅  |
-| 2.3            | Fast Model Kernels                                           | 🚧    | 🚧   | 🚧  |
-| 2.4            | KV Cache                                                     | ✅    | ✅   | ✅  |
-| 2.5            | Decode Attention                                             | 🚧    | 🚧   | 🚧  |
+| 2.1            | KV Cache                                                     | ✅    | ✅   | ✅  |
+| 2.2            | Benchmarking and the MLX Baseline                            | 🚧    | 🚧   | 🚧  |
+| 2.3            | Quantized Matvec                                             | ✅    | ✅   | ✅  |
+| 2.4            | Decode Attention                                             | 🚧    | 🚧   | 🚧  |
+| 2.5            | Fast Model Kernels                                           | 🚧    | 🚧   | 🚧  |
 | 3.1            | Continuous Batching                                           | ✅    | ✅   | ✅  |
 | 3.2            | Flash Attention for Prefill                                  | ✅    | ✅   | ✅  |
 | 3.3            | Chunked Prefill                                               | ✅    | ✅   | ✅  |

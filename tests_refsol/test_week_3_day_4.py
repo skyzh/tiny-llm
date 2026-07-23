@@ -186,7 +186,7 @@ def test_task_1_paged_cache_rewind():
 
 def test_task_1_model_kv_caches_share_layer_pools():
     mlx_model = _fake_qwen3_mlx_model()
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
+    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_paged_attention=False)
     first_request_cache = week3_model.create_kv_cache()
     second_request_cache = week3_model.create_kv_cache()
 
@@ -202,7 +202,7 @@ def test_task_1_model_kv_caches_share_layer_pools():
 
 def test_task_1_model_layer_caches_keep_independent_page_metadata():
     mlx_model = _fake_qwen3_mlx_model()
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
+    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_paged_attention=False)
     cache = week3_model.create_kv_cache()
     inputs = mx.array([[1, 5, 7, 3, 9]], dtype=mx.int32)
 
@@ -222,7 +222,9 @@ def test_task_1_model_layer_caches_keep_independent_page_metadata():
 
 
 def test_task_3_week3_model_reuses_week2_fast_kernels():
-    week3_model = Qwen3ModelWeek3(_fake_qwen3_mlx_model(), page_size=4)
+    week3_model = Qwen3ModelWeek3(
+        _fake_qwen3_mlx_model(), page_size=4, enable_paged_attention=False
+    )
     for layer in week3_model.layers_inner:
         assert isinstance(layer.input_layernorm, FastRMSNorm)
         assert isinstance(layer.post_attention_layernorm, FastRMSNorm)
@@ -234,7 +236,7 @@ def test_task_3_week3_model_reuses_week2_fast_kernels():
 def test_task_3_incremental_decode_matches_week2():
     mlx_model = _fake_qwen3_mlx_model()
     week2_model = Qwen3ModelWeek2(mlx_model)
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4)
+    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_paged_attention=False)
     inputs = mx.array([[1, 5, 7, 3, 9, 11]], dtype=mx.int32)
     week2_cache = week2_model.create_kv_cache()
     week3_cache = week3_model.create_kv_cache()

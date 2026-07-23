@@ -1,4 +1,4 @@
-# 🚧 Week 3 Performance Lab
+# 🚧 Week 3 Day 7 (Optional): Performance Lab
 
 > 🚧 This newly introduced chapter is a work in progress.
 
@@ -168,9 +168,9 @@ measured about 2,042 tok/s versus about 3,318 for the dense Week 1 model. That
 number isolates the lab kernels from Week 3 paging; it is not the output of the
 integrated `--loader week3` command above.
 
-On the completed paged stack, the matched command measured about 1,334 prefill
-tok/s and 37.8 decode tok/s without FlashAttention in one representative M4 Pro
-run. The paged-attention teaching kernel dominates decode there. Use the
+On the completed paged stack, the matched three-process median measured about
+1,118 prefill tok/s and 37.8 decode tok/s without FlashAttention on an M4 Pro.
+The paged-attention teaching kernel dominates decode there. Use the
 performance appendix's progression runner to compare both configurations with
 Week 1 and MLX on the same machine instead of combining their numbers.
 

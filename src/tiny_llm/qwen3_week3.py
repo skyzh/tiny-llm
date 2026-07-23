@@ -22,6 +22,7 @@ class Qwen3MultiHeadAttention:
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
         use_flash_attention: bool = False,
+        use_paged_attention: bool = True,
     ):
         pass
 
@@ -70,6 +71,7 @@ class Qwen3TransformerBlock:
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
+        use_paged_attention: bool = True,
     ):
         pass
 
@@ -94,6 +96,7 @@ class Qwen3ModelWeek3:
         page_size: int = 128,
         enable_flash_attn: bool = False,
         enable_performance_lab: bool = False,
+        enable_paged_attention: bool = True,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass

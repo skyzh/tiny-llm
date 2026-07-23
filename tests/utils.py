@@ -1,11 +1,72 @@
 import numpy as np
 import mlx.core as mx
 import huggingface_hub
+from types import SimpleNamespace
 
 AVAILABLE_STREAMS = [mx.cpu, mx.gpu]
 AVAILABLE_STREAMS_IDS = ["cpu", "gpu"]
 PRECISIONS = [mx.float32, mx.float16]
 PRECISION_IDS = ["f32", "f16"]
+
+
+def tiny_qwen3_mlx_model(num_hidden_layers: int = 1) -> SimpleNamespace:
+    """Build a small MLX-shaped Qwen3 model for integration tests."""
+
+    def quantized_layer(out_dim: int, in_dim: int) -> SimpleNamespace:
+        weight = mx.random.normal((out_dim, in_dim)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        return SimpleNamespace(
+            weight=packed,
+            scales=scales,
+            biases=biases,
+            group_size=128,
+            bits=4,
+        )
+
+    args = SimpleNamespace(
+        num_hidden_layers=num_hidden_layers,
+        hidden_size=128,
+        vocab_size=128,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=64,
+        intermediate_size=128,
+        rms_norm_eps=1e-5,
+        max_position_embeddings=256,
+        rope_theta=10000,
+        tie_word_embeddings=True,
+    )
+    layers = []
+    for _ in range(num_hidden_layers):
+        layers.append(
+            SimpleNamespace(
+                self_attn=SimpleNamespace(
+                    q_proj=quantized_layer(128, 128),
+                    k_proj=quantized_layer(64, 128),
+                    v_proj=quantized_layer(64, 128),
+                    o_proj=quantized_layer(128, 128),
+                    q_norm=SimpleNamespace(weight=mx.ones((64,), mx.bfloat16)),
+                    k_norm=SimpleNamespace(weight=mx.ones((64,), mx.bfloat16)),
+                ),
+                mlp=SimpleNamespace(
+                    gate_proj=quantized_layer(128, 128),
+                    up_proj=quantized_layer(128, 128),
+                    down_proj=quantized_layer(128, 128),
+                ),
+                input_layernorm=SimpleNamespace(weight=mx.ones((128,), mx.bfloat16)),
+                post_attention_layernorm=SimpleNamespace(
+                    weight=mx.ones((128,), mx.bfloat16)
+                ),
+            )
+        )
+    return SimpleNamespace(
+        args=args,
+        model=SimpleNamespace(
+            embed_tokens=quantized_layer(128, 128),
+            layers=layers,
+            norm=SimpleNamespace(weight=mx.ones((128,), mx.bfloat16)),
+        ),
+    )
 
 
 def assert_allclose(

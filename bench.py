@@ -42,6 +42,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--enable-flash-attn", action="store_true")
     parser.add_argument("--enable-performance-lab", action="store_true")
+    parser.add_argument(
+        "--disable-paged-attention",
+        action="store_true",
+        help="run the Week 3 Day 4 dense-gather compatibility checkpoint",
+    )
+    parser.add_argument(
+        "--week2-checkpoint",
+        choices=(
+            "kv-cache",
+            "quantized-matvec",
+            "decode-attention",
+            "rmsnorm",
+            "rope",
+            "swiglu",
+        ),
+        help="run one cumulative Week 2 end-to-end checkpoint",
+    )
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)
     parser.add_argument("--min-input-len", type=int, default=64)
@@ -101,6 +118,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--max-seq-len must be > 0")
     if args.batch_decode and args.num_seqs < args.batch_size:
         raise ValueError("--batch-decode requires --num-seqs >= --batch-size")
+    if args.week2_checkpoint is not None and args.loader != "week2":
+        raise ValueError("--week2-checkpoint requires --loader week2")
+    if args.disable_paged_attention and args.loader != "week3":
+        raise ValueError("--disable-paged-attention requires --loader week3")
 
 
 def load_solution_modules(solution: str):
@@ -163,8 +184,14 @@ def sample_next_week1(model, y: mx.array) -> mx.array:
     return mx.argmax(logits, axis=-1)
 
 
-def sample_next_week2(model, y: mx.array, offset: int, kv_cache: list) -> mx.array:
-    output_logits = model(y[None, :], offset, kv_cache, logits_to_keep=1)
+def sample_next_week2(
+    model,
+    y: mx.array,
+    offset: int,
+    kv_cache: list,
+    logits_to_keep: int | None = 1,
+) -> mx.array:
+    output_logits = model(y[None, :], offset, kv_cache, logits_to_keep=logits_to_keep)
     logits = output_logits[:, -1, :]
     return mx.argmax(logits, axis=-1)
 
@@ -210,7 +237,9 @@ def run_one_request_week2(
         offset = 0
 
         t0 = perf_counter()
-        token = sample_next_week2(model, context, offset, kv_cache)
+        # Match Week 1 and MLX prefill by computing logits for every prompt
+        # position. Decode has L=1, so keeping one row changes no decode work.
+        token = sample_next_week2(model, context, offset, kv_cache, logits_to_keep=None)
         mx.eval(token)
         prefill_time = perf_counter() - t0
         offset += context.size
@@ -404,14 +433,24 @@ def main() -> None:
     print(
         f"Solution={solution_name} Loader={args.loader} Device={args.device} "
         f"Model={model_name} FlashAttn={args.enable_flash_attn} "
-        f"PerformanceLab={args.enable_performance_lab}"
+        f"PerformanceLab={args.enable_performance_lab} "
+        f"PagedAttention={not args.disable_paged_attention} "
+        f"Week2Checkpoint={args.week2_checkpoint}"
     )
     mlx_model, tokenizer = load(model_name)
 
     with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         if solution_name == "mlx":
+            if args.week2_checkpoint is not None:
+                raise ValueError(
+                    "--week2-checkpoint is not supported with --solution mlx"
+                )
             if args.batch_decode:
                 raise ValueError("--batch-decode is not supported with --solution mlx")
+            if args.disable_paged_attention:
+                raise ValueError(
+                    "--disable-paged-attention is not supported with --solution mlx"
+                )
             model = mlx_model
 
             def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
@@ -430,6 +469,11 @@ def main() -> None:
             if args.loader == "week3":
                 dispatch_kwargs["enable_flash_attn"] = args.enable_flash_attn
                 dispatch_kwargs["enable_performance_lab"] = args.enable_performance_lab
+                dispatch_kwargs[
+                    "enable_paged_attention"
+                ] = not args.disable_paged_attention
+            elif args.loader == "week2" and args.week2_checkpoint is not None:
+                dispatch_kwargs["checkpoint"] = args.week2_checkpoint
             elif args.enable_flash_attn:
                 print("--enable-flash-attn belongs to Week 3; ignoring it")
             if args.loader != "week3" and args.enable_performance_lab:

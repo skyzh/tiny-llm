@@ -1,5 +1,7 @@
-import mlx.core as mx
 from typing import Any
+
+import mlx.core as mx
+
 from extensions_ref import tiny_llm_ext_ref
 
 
@@ -12,6 +14,7 @@ class QuantizedWeights:
         bits: int,
         weight: mx.array,
         use_simdgroup_matmul: bool = False,
+        use_simdgroup_matvec: bool = True,
     ):
         self.scales = scales
         self.biases = biases
@@ -19,10 +22,13 @@ class QuantizedWeights:
         self.bits = bits
         self.weight = weight
         self.use_simdgroup_matmul = use_simdgroup_matmul
+        self.use_simdgroup_matvec = use_simdgroup_matvec
 
     @staticmethod
     def from_mlx_layer(
-        mlx_layer: Any, use_simdgroup_matmul: bool = False
+        mlx_layer: Any,
+        use_simdgroup_matmul: bool = False,
+        use_simdgroup_matvec: bool = True,
     ) -> "QuantizedWeights":
         return QuantizedWeights(
             scales=mlx_layer.scales,
@@ -31,6 +37,7 @@ class QuantizedWeights:
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,
             use_simdgroup_matmul=use_simdgroup_matmul,
+            use_simdgroup_matvec=use_simdgroup_matvec,
         )
 
 
@@ -42,7 +49,11 @@ def quantized_linear(
     rows = 1
     for size in x.shape[:-1]:
         rows *= size
-    operation = quantized_matvec_custom if rows <= 8 else quantized_matmul
+    operation = (
+        quantized_matvec_custom
+        if rows <= 8 and w.use_simdgroup_matvec
+        else quantized_matmul
+    )
     kwargs = {}
     if operation is quantized_matmul:
         kwargs["use_simdgroup"] = w.use_simdgroup_matmul

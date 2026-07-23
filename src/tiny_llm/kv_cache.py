@@ -24,7 +24,7 @@ class TinyKvCache(ABC):
 
         Returns:
             The updated keys, updated values, sequence length, and mask. On
-            On Week 2 Day 5, the mask is passed through unchanged. Week 3 Day 1
+            On Week 2 Day 1, the mask is passed through unchanged. Week 3 Day 1
             uses the sequence length and mask to construct a dense batch.
         """
 

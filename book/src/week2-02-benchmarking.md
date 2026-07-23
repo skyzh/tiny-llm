@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 1: Benchmark MLX
+# 🚧 Week 2 Day 2: Benchmark Decode
 
 > 🚧 This newly introduced chapter is a work in progress.
 
@@ -20,12 +20,17 @@ phase while hurting the other, so `bench.py` reports both:
 The first generated token belongs to prefill. Excluding it from decode prevents
 prompt length from distorting the decode number.
 
-Both sides of the Week 2 comparison must use a KV cache: prefill the prompt
+For a matched prefill comparison, all implementations compute logits for every
+prompt position. The generation path may request only the final logit row, but
+using that shortcut for the course model while MLX projects all rows would make
+the prefill columns incomparable. Cached decode has `L = 1`, so
+`logits_to_keep=1` removes no decode work.
+
+Both sides of the Week 2 comparison use a KV cache: prefill the prompt
 once, then pass only the newly generated token on each decode step. Comparing a
 cached MLX baseline with a course model that recomputes the full prefix would
-measure two different algorithms and make the kernel target meaningless. The
-KV Cache chapter (Chapter 2.4) implements the dense cache used by every later
-Week 2 benchmark.
+measure two different algorithms and make the kernel target meaningless. Day 1
+already produced the cached readable model used as this week's starting point.
 
 ## Synchronize Lazy Work
 
@@ -37,6 +42,13 @@ start = perf_counter()
 output = function()
 mx.eval(output)
 elapsed = perf_counter() - start
+```
+
+The benchmark must also release request-owned caches after warmups and timed
+runs so a later sample does not inherit allocator state:
+
+```bash
+pdm run test --week 2 --day 2
 ```
 
 The isolated benchmarks in `benches/` use the same rule. Evaluate input setup
@@ -57,16 +69,27 @@ commands used two complete warmups and three fresh measured runs.
 ## Record a Matched Baseline
 
 Use the same model, prompt length, output length, device, and warmup count for
-the reference and MLX runs:
+your implementation and the MLX run. Replace `tiny_llm` with `tiny_llm_ref` to
+compare against the course reference:
 
 ```bash
-pdm run bench --solution tiny_llm_ref --loader week2 --model qwen3-0.6b \
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 
 pdm run bench --solution mlx --loader week2 --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
+```
+
+Or run the complete cumulative ladder in fresh processes. At this point, only
+the Week 1, KV-cache, and MLX rows are course prerequisites; later rows become
+meaningful as you complete their chapters.
+
+```bash
+pdm run bench-week2-progression --offline --repeats 3 \
+  --model qwen3-0.6b --input-len 128 --output-len 65 --warmup 2
 ```
 
 Benchmark on an otherwise idle machine: stop other CPU- and GPU-intensive

@@ -1,4 +1,4 @@
-# Week 2 Day 5: KV Cache
+# Week 2 Day 1: KV Cache
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
@@ -107,7 +107,7 @@ method, `update_and_fetch`, which:
 2. Appends them along the sequence dimension.
 3. Returns the complete cached `K` and `V`, the updated offset, and the mask.
 
-On Day 5, the cache passes `mask` through unchanged and does not use
+In this chapter, the cache passes `mask` through unchanged and does not use
 `mask_length`. Those parameters become important in Week 3 for batching.
 
 You may implement this in `kv_cache.py` as `TinyKvFullCache`:
@@ -142,9 +142,11 @@ src/tiny_llm/qwen3_week2.py
 ```
 
 Keep the readable Week 1 model and its full-prefix generation loop unchanged.
-Add cache-aware calls to the separate `qwen3_week2.py` model. At this point its
-quantized projections and fast operators already come from Days 2-4; this
-chapter supplies the incremental state that Day 6 decode attention consumes.
+Start a separate `qwen3_week2.py` model with the same dense weights and readable
+RMSNorm, RoPE, SwiGLU, and attention equations. Change only the state flow in
+this chapter: the Week 2 model accepts a cache and an offset while Week 1 keeps
+recomputing the full prefix. This produces the baseline that every later Week 2
+chapter will optimize.
 
 - Give each layer its own cache.
 - Add an `offset` argument to the model. It is the number of tokens already in
@@ -176,10 +178,9 @@ sequence length after the update. This matches the Week 1 GQA convention: `L`
 is the query length, while `S` is the key/value source length. During
 single-token decoding, `L = 1` and `S` grows by one on each call.
 
-The linear layers remain `QuantizedWeights`, RMSNorm, RoPE, and SwiGLU remain
-behind `week2_kernels.py`, and Day 6 adds decode attention through that same
-optimization interface. The dense cache is their common incremental-decode
-foundation.
+The linear layers, RMSNorm, RoPE, SwiGLU, and attention remain the readable
+implementations at this checkpoint. Do not introduce packed weights or fast
+kernels yet: measuring one algorithmic change makes the gain attributable.
 
 ## Task 3: Create Request-Scoped Caches
 
@@ -195,7 +196,7 @@ To verify correctness, run the following test, which is similar to the Week 1
 model test:
 
 ```bash
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 1
 ```
 
 ## Task 4: Connect the Serving Loop
@@ -222,23 +223,41 @@ decode:  _step(model, [8], 7)  # returns 9
 You can test your implementation with:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 --model qwen3-0.6b
-pdm run main --solution tiny_llm --loader week2 --model qwen3-4b
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-0.6b
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-4b
 ```
 
 You can also run the same loop with the reference solution:
 
 ```bash
-pdm run main --solution tiny_llm_ref --loader week2 --model qwen3-0.6b
+pdm run main --solution tiny_llm_ref --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-0.6b
 ```
+
+## Integrate and Measure
+
+Run the cached readable checkpoint end to end before changing any operator:
+
+```bash
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint kv-cache --model qwen3-0.6b \
+  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
+  --min-output-len 65 --max-output-len 65 --warmup 2
+```
+
+Record this number in your optimization ledger. The next chapter teaches how
+to compare it fairly with Week 1 and MLX; every later command changes exactly
+one cumulative checkpoint.
 
 ## Expected Performance Contribution
 
-**Measured improvement: about 16.2x for cached decode after a 128-token prompt
-on Qwen3-0.6B on an M4 Pro.** This ablation used the same Week 2 model on both
-sides and timed 16 tokens: prefix recomputation reached 14.29 tok/s, while the
-persistent cache reached 231.53 tok/s. The exact ratio depends strongly on
-context length. Unlike a constant-factor kernel optimization, KV caching
+**Measured cumulative improvement: 19.51 to 101.80 tok/s, or 5.22x over Week 1,
+after a 128-token prompt on Qwen3-0.6B on an M4 Pro.** This three-process median
+compares the readable full-prefix Week 1 model with the dense cached checkpoint;
+no operator kernel has changed yet. The exact ratio depends strongly on context
+and output length. Unlike a constant-factor kernel optimization, KV caching
 changes each decode step from recomputing the full prefix to processing one new
 query token, so the advantage grows throughout a generation.
 

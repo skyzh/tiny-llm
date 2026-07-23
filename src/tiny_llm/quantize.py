@@ -1,5 +1,6 @@
-import mlx.core as mx
 from typing import Any
+
+import mlx.core as mx
 
 
 def dequantize_linear(mx_layer: Any) -> mx.array:
@@ -22,6 +23,7 @@ class QuantizedWeights:
         bits: int,
         weight: mx.array,
         use_simdgroup_matmul: bool = False,
+        use_simdgroup_matvec: bool = True,
     ):
         self.scales = scales
         self.biases = biases
@@ -29,10 +31,13 @@ class QuantizedWeights:
         self.bits = bits
         self.weight = weight
         self.use_simdgroup_matmul = use_simdgroup_matmul
+        self.use_simdgroup_matvec = use_simdgroup_matvec
 
     @staticmethod
     def from_mlx_layer(
-        mlx_layer: Any, use_simdgroup_matmul: bool = False
+        mlx_layer: Any,
+        use_simdgroup_matmul: bool = False,
+        use_simdgroup_matvec: bool = True,
     ) -> "QuantizedWeights":
         return QuantizedWeights(
             scales=mlx_layer.scales,
@@ -41,6 +46,7 @@ class QuantizedWeights:
             bits=mlx_layer.bits,
             weight=mlx_layer.weight,
             use_simdgroup_matmul=use_simdgroup_matmul,
+            use_simdgroup_matvec=use_simdgroup_matvec,
         )
 
 

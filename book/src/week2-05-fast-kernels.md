@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 4: Fast Kernels
+# 🚧 Week 2 Day 5: Fast Kernels
 
 > 🚧 This newly introduced chapter is a work in progress.
 
@@ -70,6 +70,16 @@ launches one 256-thread group per row. The two-level reduction was the largest
 small-operator improvement in the measured stack; a single SIMD group left too
 little parallel work available.
 
+Integrate `FastRMSNorm` into every Week 2 norm immediately, run the RMSNorm
+tests, and record the cumulative model result before writing RoPE:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 5 -- -k rms
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint rmsnorm --model qwen3-0.6b
+```
+
 ## Task 2: RoPE
 
 Implement RoPE for the model's native `B, L, H, D` layout. A naive element
@@ -98,6 +108,15 @@ and `fast::cos`; retain precise functions for float32 so strict correctness
 tests remain meaningful. Normalize a batch's offsets once in the model call,
 outside the layer loop, instead of rebuilding the same array in every layer.
 
+Replace the readable RoPE in the already optimized model, then test and measure
+that cumulative checkpoint before implementing SwiGLU:
+
+```bash
+pdm run test --week 2 --day 5 -- -k rope
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint rope --model qwen3-0.6b
+```
+
 ## Task 3: SwiGLU
 
 SwiGLU combines the gate and up branches:
@@ -107,21 +126,29 @@ output = (gate / (1 + exp(-gate))) * up
 ```
 
 Implement it as one thread per element. That thread loads `gate` and `up`,
-evaluates SiLU with one exponential, multiplies the branches, and performs one output write. The
-Week 1 form is easier to inspect, but it describes `abs`, `exp`, division,
-selection, and multiplication as separate array operations. The fused kernel
-removes those intermediate tensors and dispatch boundaries.
+evaluates SiLU with one exponential, multiplies the branches, and performs one
+output write. The Week 1 form is easier to inspect, but it describes `abs`,
+`exp`, division, selection, and multiplication as separate array operations.
+The fused kernel removes those intermediate tensors and dispatch boundaries.
 
-## Task 4: Integrate and Test
+Integrate the fused expression immediately and record the third checkpoint:
 
-Expose all three kernels through a C++ MLX primitive and thin Python wrappers.
-Import those wrappers only in `qwen3_week2.py`; `qwen3_week1.py` must continue
-using its readable operators. Week 3 should import the Week 2 interfaces so the
-serving model does not regress.
+```bash
+pdm run test --week 2 --day 5 -- -k swiglu
+pdm run bench --solution tiny_llm --loader week2 \
+  --week2-checkpoint swiglu --model qwen3-0.6b
+```
+
+## Task 4: Verify the Cumulative Model
+
+At this point all three kernels have already been exposed through C++ MLX
+primitives, integrated, and measured. Run the complete test file now to verify
+their composition. `qwen3_week1.py` must still use its readable operators, and
+Week 3 should import the Week 2 interfaces so the serving model does not regress.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 5
 ```
 
 Compare against the readable equations with tolerances rather than bit-for-bit
@@ -132,11 +159,10 @@ inside a timed iteration when measuring these lazy operations.
 
 **Measured operator improvement: about 34-39% over the readable Week 1
 equations at decode shapes.** In repeated Qwen3-0.6B M4 Pro runs, RMSNorm was
-about 1.36x faster, RoPE about 1.34x, and SwiGLU about 1.39x. Replacing one
-component at a time across the complete cached-decode model improved throughput
-by 32.9%, 27.2%, and 11.9%, respectively. Each decode token invokes these
-operators many times across all layers, so small per-call savings accumulate.
-The optimized operators were also close to MLX in the same isolated run. The
-three end-to-end percentages overlap and must not be added together.
+about 1.36x faster, RoPE about 1.34x, and SwiGLU about 1.39x. The cumulative
+course ladder integrates them after decode attention: RMSNorm increased 143.42
+to 193.18 tok/s (+34.7%), RoPE increased 193.18 to 222.51 (+15.2%), and SwiGLU
+increased 222.51 to 242.67 (+9.1%). These sequential deltas already include all
+earlier changes; do not add them to isolated or reverse-ablation percentages.
 
 {{#include copyright.md}}
