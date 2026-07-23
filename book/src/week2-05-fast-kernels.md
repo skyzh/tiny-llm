@@ -57,7 +57,7 @@ output[i] = input[i] * inverse_rms * weight[i]
 
 All 256 lanes then normalize and scale their strided elements. This fuses the
 reduction and output pass into one dispatch and avoids materializing the
-squared tensor. Instantiate the kernel for float32, float16, and bfloat16. Keep
+squared tensor. Instantiate the required kernel for bfloat16. Keep
 the reduction, normalization, and weight multiplication in float, then cast the
 final result once. The readable Week 1 equation rounds once before applying the
 weight, so compare the two with a tolerance rather than expecting bit-identical
@@ -103,9 +103,8 @@ Unlike a graph that builds position arrays, gathers sine and cosine values,
 splits the head, performs several element-by-element operations, and
 concatenates the result, this kernel reads each input pair and writes each
 rotated element directly. Reusing trigonometry across four heads is the key
-optimization. For float16 and bfloat16, use Metal's `fast::exp2`, `fast::sin`,
-and `fast::cos`; retain precise functions for float32 so strict correctness
-tests remain meaningful. Normalize a batch's offsets once in the model call,
+optimization. Use Metal's `fast::exp2`, `fast::sin`, and `fast::cos` for the
+BF16 path. Normalize a batch's offsets once in the model call,
 outside the layer loop, instead of rebuilding the same array in every layer.
 
 Replace the readable RoPE in the already optimized model, then test and measure
@@ -150,6 +149,11 @@ Week 3 should import the Week 2 interfaces so the serving model does not regress
 pdm run build-ext
 pdm run test --week 2 --day 5
 ```
+
+Day 6 changes workload shape rather than replacing another element-wise or
+reduction operator: it introduces SIMD-matrix fragments for quantized prefill.
+Keep today's `swiglu` checkpoint intact so that prefill tiling has a clean
+before-and-after comparison.
 
 Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`

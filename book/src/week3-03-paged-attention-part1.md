@@ -1,16 +1,15 @@
-# 🚧 Week 3 Day 4: Paged Attention, Part 1
+# 🚧 Week 3 Day 3: Paged Attention, Part 1
 
 > 🚧 This chapter is under review and may change.
 
 In this chapter, we will design the **paged KV cache**. This is the storage abstraction behind paged attention.
 
-By the end of Week 3 Day 3, our serving stack already supports:
+By the end of Week 3 Day 2, our serving stack already supports:
 
 - per-request KV cache
 - chunked prefill
 - continuous batching
-- a tested FlashAttention operator, with model integration deferred until the
-  paged attention path is connected on Day 5
+- the Week 2 SIMD-matrix prefill operator
 
 That gives us a working miniature serving engine, but the memory layout is still too simple. KV for each request is treated as one growing dense tensor, and batching rebuilds dense K/V for all active requests. That approach is easy to teach, but it does not scale well once requests become long and numerous.
 
@@ -310,7 +309,7 @@ Build a compatibility path that reconstructs dense K/V from pages and compares i
 
 This gives us a correctness check before we change the attention path itself.
 Instantiate the Week 3 model with `enable_paged_attention=False` in this
-chapter so its attention reads the gathered dense tensors. Day 5 switches the
+chapter so its attention reads the gathered dense tensors. Day 4 switches the
 same model to page-table metadata and the paged kernel.
 
 Run that cumulative checkpoint through the normal generation and benchmark
@@ -328,8 +327,9 @@ In the next chapter, we will take the next step: instead of gathering dense K/V 
 
 ## What Paging Buys on a Mac
 
-Apple silicon's unified memory removes a CPU-to-GPU copy boundary, but it does
-not remove allocation, fragmentation, or copying inside the GPU-visible heap.
+Apple silicon's unified memory removes the discrete-device transfer boundary,
+but it does not remove allocation, fragmentation, or copying inside the
+GPU-visible heap.
 Fixed-size pages still let a server reuse freed capacity, grow requests without
 reserving their maximum sequence length, and batch requests with different
 context lengths. These are capacity and lifecycle wins. They should be measured
@@ -337,7 +337,7 @@ with live-request count, allocated bytes, fragmentation, and scheduler
 throughput—not inferred from one request's token latency.
 
 ```bash
-pdm run test --week 3 --day 4
+pdm run test --week 3 --day 3
 ```
 
 {{#include copyright.md}}

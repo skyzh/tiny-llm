@@ -44,13 +44,9 @@ def rope_helper(stream: mx.Stream, traditional: bool, precision: mx.Dtype):
             )
 
 
-@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("traditional", [False, True], ids=["default", "traditional"])
-@pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
-def test_task_1_rope_multiple_offsets(
-    stream: mx.Stream, traditional: bool, precision: mx.Dtype
-):
-    rope_helper(stream, traditional, precision)
+def test_task_1_rope_multiple_offsets(traditional: bool):
+    rope_helper(mx.gpu, traditional, mx.bfloat16)
 
 
 def test_task_2_batching_kv_cache():

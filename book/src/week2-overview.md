@@ -13,6 +13,15 @@ model immediately, verify correctness, and measure the new end-to-end decode
 rate before continuing. There is no final chapter where a pile of isolated
 operators suddenly becomes a model.
 
+Week 2 inherits Week 1's BF16 model-storage contract. Dense and quantized
+weights, activations, projections, KV-cache entries, and model-facing kernel
+outputs are BF16. Numerically sensitive reductions, dot products, and
+online-softmax state accumulate in FP32 inside readable expressions or kernel
+registers. Week 2 extensions are GPU-only: readable Python/MLX equations and
+vanilla Metal kernels provide correctness references without requiring CPU BF16
+support. This contract remains in force for Week 3, so later chapters only
+describe new storage and scheduling behavior.
+
 ## What We Will Cover
 
 - A dense per-request key-value cache for incremental decoding
@@ -20,6 +29,7 @@ operators suddenly becomes a model.
 - A readable quantized matrix product and a SIMD matrix-vector decode kernel
 - The course-owned decode-attention primitive
 - Fast RMSNorm, RoPE, and SwiGLU operations
+- A BF16 SIMD-matrix quantized prefill kernel
 - A last-token output interface for generation
 - An acceptance target of 70% of MLX decode throughput
 
@@ -51,20 +61,24 @@ The order is intentional:
    with the course-owned online-softmax kernel and measure the whole model.
 5. **Fast kernels:** replace RMSNorm, then RoPE, then SwiGLU. Each replacement
    is integrated and benchmarked before the next one begins.
+6. **SIMD-matrix prefill:** optimize the larger matrix shape, introduce 8×8
+   matrix fragments, and retain FP32 accumulators behind BF16 inputs/outputs.
 
 A later chapter never becomes an undeclared prerequisite for an earlier one.
 
 Unlike Week 1, the completed Week 2 model prefills a dense KV cache once,
 passes only the new token during decode, keeps its linear and embedding weights
-quantized, and imports optimized operations from `week2_kernels.py`. Week 1
-continues to use its readable full-prefix generation loop and Python RMSNorm,
-RoPE, attention, and MLP implementations.
+quantized, dispatches separate decode and prefill matrix schedules, and imports optimized operations from
+`week2_kernels.py`. Week 1 continues to use its readable full-prefix generation
+loop and Python RMSNorm, RoPE, attention, and MLP implementations.
 
 Week 3 imports these Week 2 interfaces rather than copying or replacing them.
-That boundary lets each week's model remain understandable and runnable on its
-own.
+Its paged-attention chapters combine Day 4 online softmax and Day 6 matrix
+fragments only after page-table translation has been introduced. That boundary
+lets each week's model remain understandable and runnable on its own.
 
-The cumulative ladder is executable at any time:
+The cumulative ladder is executable at any time. The
+[performance appendix](./appendix-performance.md) records the matched results:
 
 ```bash
 pdm run bench-week2-progression --offline --repeats 3 \
@@ -84,7 +98,6 @@ should add a new branch without changing what an earlier checkpoint executes.
 {{#include copyright.md}}
 
 <!--
-https://github.com/ml-explore/mlx/blob/main/mlx/backend/cpu/quantized.cpp
 https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/linear.py
 MLX uses INT4 W4A16
 https://ml-explore.github.io/mlx/build/html/dev/extensions.html

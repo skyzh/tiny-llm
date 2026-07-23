@@ -51,7 +51,7 @@ Run with pytest filters:
 
 ```bash
 pdm run test --week 1 --day 3 -- -k task_2
-pdm run test --week 2 --day 3 -- -k cpu
+pdm run test --week 2 --day 3 -- -k task_3
 pdm run test --week 2 --day 3 -- -k gpu
 ```
 
@@ -59,7 +59,7 @@ Run reference-solution tests:
 
 ```bash
 pdm run test-refsol
-pdm run test-refsol --week 2 --day 3 -- -k cpu
+pdm run test-refsol --week 2 --day 3 -- -k task_3
 ```
 
 ## Extension Rebuild Rule
@@ -79,6 +79,8 @@ pdm run build-ext
 - Use `--` before pytest args (`-k`, `-q`, `--collect-only`, etc.).
 - `pdm run test --week X --day Y` auto-copies `tests_refsol/test_week_X_day_Y.py` into `tests/`.
 - Model-dependent tests (0.5B/1.5B/7B) skip when models are not downloaded locally.
+- Before every push, run `npx --yes cspell "book/**/*.md"` and fix every
+  reported spelling issue.
 
 ## GitHub CLI
 

@@ -3,8 +3,17 @@
 This week, we will start with basic array and matrix operations and use them to turn Qwen3 model parameters into a model
 that generates text. We will implement the neural network layers used by Qwen3 with MLX's array APIs.
 
-We will use `Qwen/Qwen3-0.6B-MLX-4bit`. Week 1 dequantizes model parameters into bfloat16, so start with the 0.6B model
-before trying larger Qwen3 models.
+We will use `Qwen/Qwen3-0.6B-MLX-4bit`. The course model uses BF16 weights and
+activations by default, so start with the 0.6B model before trying larger Qwen3
+models. The required model path runs on the GPU. Small operator fixtures may
+use a different dtype as a readable correctness reference; they do not define
+the model-storage dtype.
+
+Numerically sensitive operations may promote arithmetic to FP32 and cast the
+result back to BF16. Week 1 favors readable array expressions, even when that
+means materializing an FP32 intermediate. Week 2 replaces those full-tensor
+promotions with kernels that keep model-sized storage in BF16 and accumulate in
+FP32 registers.
 
 ## What We Will Cover
 

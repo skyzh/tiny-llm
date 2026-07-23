@@ -42,24 +42,11 @@ parser.add_argument("--device", type=str, default="gpu")
 parser.add_argument("--batch-size", type=int, default=5)
 parser.add_argument("--prefill-step", type=int, default=128)
 parser.add_argument("--max-seq-len", type=int, default=512)
-flash_group = parser.add_mutually_exclusive_group()
-flash_group.add_argument(
-    "--enable-flash-attn", dest="enable_flash_attn", action="store_true"
-)
-flash_group.add_argument(
-    "--disable-flash-attn", dest="enable_flash_attn", action="store_false"
-)
-parser.set_defaults(enable_flash_attn=None)
-parser.add_argument("--enable-performance-lab", action="store_true")
 parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
 
-if (
-    args.loader == "week3"
-    and args.enable_flash_attn is not False
-    and args.device != "gpu"
-):
-    parser.error("Week 3 FlashAttention requires --device gpu")
+if args.device != "gpu":
+    parser.error("The completed Week 2 and Week 3 models require --device gpu")
 
 if args.solution == "tiny_llm":
     print("Using your tiny_llm solution")
@@ -77,13 +64,6 @@ mlx_model, tokenizer = load(args.model)
 
 with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
     dispatch_kwargs = {}
-    if args.loader == "week3":
-        dispatch_kwargs["enable_flash_attn"] = args.enable_flash_attn
-        dispatch_kwargs["enable_performance_lab"] = args.enable_performance_lab
-    elif args.enable_flash_attn:
-        print("--enable-flash-attn belongs to Week 3; ignoring it")
-    if args.loader != "week3" and args.enable_performance_lab:
-        print("--enable-performance-lab belongs to Week 3; ignoring it")
 
     print(
         f"Using {args.loader} loader with thinking={args.enable_thinking} for {args.model}"

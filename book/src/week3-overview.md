@@ -5,36 +5,38 @@
 
 Week 3 takes the optimized single-request model from Week 2 and builds a serving
 engine around it. The Week 2 operator interfaces remain intact; this week adds
-opt-in prefill kernels, multi-request cache ownership, scheduling, and runtime
-metadata. It also contains a performance lab for optimizations deliberately
-left out of the minimal Week 2 checkpoint.
+multi-request cache ownership, scheduling, and runtime metadata. Week 2 has
+already introduced BF16 model storage, online softmax, and SIMD-matrix
+fragments. Week 3 adds page translation before combining those pieces into
+paged FlashAttention.
 
 ## What We’ll Cover
 
 - Continuous batching and request-slot reuse
-- FlashAttention for prefill
 - Chunked prefill and scheduler fairness
 - Paged KV storage and page-walking attention
-- Optional prefill, embedding, and scheduling experiments
+- Paged FlashAttention for long prefill
+- Optional serving and scheduling experiments
 - Optional MoE and speculative-decoding extensions
 
-The ordering is intentional: students implement dense FlashAttention on Day 2
-before paged storage and paged attention on Days 4–5. The paged prefill kernel
-then reuses the same BF16 tiling and online-softmax machinery, leaving page
-translation and decode work partitioning as the new concepts.
+The ordering is intentional. Day 1 batches independent request states. Day 2
+splits long prefills so they cannot monopolize the scheduler. Day 3 replaces a
+growing dense cache with fixed-size pages while retaining a dense-gather
+compatibility path. Day 4 removes that gather by teaching attention to walk the
+page table directly with a correctness-first schedule. Day 5 then tiles that
+same page-walking operation with Week 2's matrix fragments. Page translation
+is therefore introduced before it is optimized.
 
-The final model runs dense FlashAttention directly on fresh K/V for an
-ordinary first prefill, stores the same K/V in paged cache, and switches to the
-paged vector kernel for decode. Page-walking prefill remains for a chunked
-prefill that already has cached history.
+The final model runs paged FlashAttention for long prefill and the paged vector
+kernel for short queries. Both schedules read the same page pool through the
+same block-table interface; neither rebuilds dense K/V.
 
-On Apple silicon, FlashAttention and paged attention are not automatic latency
-wins. FlashAttention has the best opportunity at long prefill lengths, where
-avoiding an `L x S` intermediate can save substantial memory traffic. Paged
-attention primarily improves serving capacity, cache reuse, and batching; its
-page-table indirection can make a single request slower. This week measures
-those tradeoffs rather than assuming an algorithm with a production name is
-already production-fast.
+Paged attention is not an automatic single-request latency win. It primarily
+improves serving capacity, cache reuse, and batching; page-table indirection
+can make one request slower. This week measures those tradeoffs rather than
+assuming an algorithm with a production name is already production-fast. The
+[performance appendix](./appendix-performance.md) keeps kernel throughput and
+serving usability as separate measurements.
 
 Week 4 owns application concerns such as RAG and tool calling. This separation
 keeps Week 3 focused on the reusable serving substrate.

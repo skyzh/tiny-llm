@@ -18,7 +18,8 @@
 - [Fast RMSNorm, RoPE, and SwiGLU](./week2-05-fast-kernels.md)
 - [KV Cache](./week2-01-kv-cache.md)
 - [Decode Attention](./week2-04-decode-attention.md)
-- [Flash Attention](./week3-02-flash-attention.md)
-- [Paged Attention](./week3-05-paged-attention-part2.md)
+- [SIMD-Matrix Prefill](./week2-06-simd-matrix-prefill.md)
+- [Flash Attention](./week3-05-flash-attention.md)
+- [Paged Attention](./week3-04-paged-attention-part2.md)
 
 {{#include copyright.md}}

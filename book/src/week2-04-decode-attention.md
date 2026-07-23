@@ -81,7 +81,7 @@ Week 1 graph. It is especially relevant as context grows: the avoided score and
 probability tensors are proportional to `L * S`, while decode needs only the
 final `D`-element result for each query head.
 
-Load and store float16 or bfloat16 directly, but accumulate dot products,
+Load and store BF16 directly, but accumulate dot products,
 softmax state, and weighted values in float32. Casting whole Q, K, and V tensors
 outside the kernel creates extra dispatches and memory traffic; doing the
 conversion in registers avoids that cost.
@@ -107,8 +107,9 @@ Route short-query, short-context Week 2 attention through the Metal
 implementation. Dispatch back to the readable composition when the cached
 context exceeds the measured crossover; a schedule that wins at 128 tokens
 should not be forced onto 2,048 tokens. Retain the readable composition for
-tests and ablations, and retain tiled prefill FlashAttention in Week 3; prefill
-is a different workload where both query and context lengths are large.
+tests and ablations. Week 3 later combines this recurrence with paged K/V and
+SIMD-matrix tiles for FlashAttention; prefill is a different workload where
+both query and context lengths are large.
 
 Set a concrete dispatch guard: use the course kernel only when query length is
 at most eight and cached context length is at most 256. Otherwise use the

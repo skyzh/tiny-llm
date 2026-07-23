@@ -38,7 +38,7 @@ def test_fast_rms_norm_matches_week1_implementation():
 def test_fast_rope_matches_week1_implementation(offsets):
     batch_size = 1 if isinstance(offsets, int) else len(offsets)
     seq_len = 4
-    x = mx.random.normal((batch_size, seq_len, 2, 16)).astype(mx.float32)
+    x = mx.random.normal((batch_size, seq_len, 2, 16)).astype(mx.bfloat16)
     fast = FastRoPE(16, 32, base=10000)
     readable = RoPE(16, 32, base=10000)
     readable_offsets = (
@@ -48,13 +48,13 @@ def test_fast_rope_matches_week1_implementation(offsets):
     )
     result = fast(x, offsets)
     expected = readable(x, readable_offsets)
-    assert_allclose(result, expected, mx.float32, atol=1e-5, rtol=1e-5)
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
 def test_swiglu_matches_readable_expression():
-    gate = mx.random.normal((2, 4, 16)).astype(mx.float32)
-    up = mx.random.normal((2, 4, 16)).astype(mx.float32)
-    assert_allclose(swiglu(gate, up), silu(gate) * up, mx.float32)
+    gate = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
+    up = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
+    assert_allclose(swiglu(gate, up), silu(gate) * up, mx.bfloat16)
 
 
 def test_completed_model_integrates_all_cumulative_kernels():

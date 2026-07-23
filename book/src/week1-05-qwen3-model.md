@@ -138,8 +138,12 @@ output embeddings and use `Embedding.as_linear`; others have a separate `lm_head
 The model takes a sequence of token IDs and returns unnormalized logits for every sequence position. On Day 6, we will
 use the final position's logits to select the next token and generate a response.
 
-The MLX models used in this course have quantized weights. Dequantize each linear or embedding layer before loading it
-into tiny-llm by using the provided `quantize.dequantize_linear` function.
+The MLX models used in this course have quantized weights. Dequantize each
+linear or embedding layer before loading it into tiny-llm by using the provided
+`quantize.dequantize_linear` function, then store the readable Week 1 weight as
+BF16. Model activations and layer outputs should remain BF16. A readable
+attention or normalization expression may compute in FP32 for stability, but it
+must cast its model-facing result back to BF16.
 
 Pass `mask="causal"` to every Transformer block. For a one-token sequence the mask has no effect; for longer sequences,
 it prevents each position from attending to future tokens.

@@ -48,8 +48,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--loader", choices=["week2", "week3"], default="week2")
     parser.add_argument("--device", choices=["cpu", "gpu"], default="gpu")
-    parser.add_argument("--enable-flash-attn", action="store_true")
-    parser.add_argument("--enable-performance-lab", action="store_true")
     parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--max-tokens", type=int, default=256)
@@ -92,13 +90,8 @@ def main():
 
     parser = build_parser()
     args = parser.parse_args()
-    if (
-        args.solution != "mlx"
-        and args.loader == "week3"
-        and args.enable_flash_attn
-        and args.device != "gpu"
-    ):
-        parser.error("Week 3 FlashAttention requires --device gpu")
+    if args.solution != "mlx" and args.device != "gpu":
+        parser.error("The completed Week 2 and Week 3 models require --device gpu")
     try:
         allowed_commands = parse_allowed_commands(args.allow_command)
     except ValueError as error:
@@ -143,23 +136,9 @@ def main():
     if args.solution == "mlx":
         model = mlx_model
         print(f"Using the MLX executor on {args.device}; --loader is ignored")
-        if args.enable_flash_attn:
-            print("MLX selects optimized attention automatically; ignoring the flag")
-        if args.enable_performance_lab:
-            print("MLX selects optimized kernels automatically; ignoring the flag")
     else:
         assert models is not None
         dispatch_args = {}
-        if args.loader == "week3":
-            dispatch_args = {
-                "enable_flash_attn": args.enable_flash_attn,
-                "enable_performance_lab": args.enable_performance_lab,
-            }
-        else:
-            if args.enable_flash_attn:
-                print("--enable-flash-attn belongs to Week 3; ignoring it")
-            if args.enable_performance_lab:
-                print("--enable-performance-lab belongs to Week 3; ignoring it")
         model = models.dispatch_model(
             model_name, mlx_model, week=int(args.loader[-1]), **dispatch_args
         )

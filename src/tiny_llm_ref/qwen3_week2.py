@@ -23,6 +23,7 @@ WEEK2_CHECKPOINTS = (
     "rmsnorm",
     "rope",
     "swiglu",
+    "simd-matmul",
 )
 
 
@@ -238,7 +239,7 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
-    def __init__(self, mlx_model: Any, checkpoint: str = "swiglu"):
+    def __init__(self, mlx_model: Any, checkpoint: str = "simd-matmul"):
         if checkpoint not in WEEK2_CHECKPOINTS:
             raise ValueError(
                 f"unknown Week 2 checkpoint {checkpoint!r}; "
@@ -255,6 +256,9 @@ class Qwen3ModelWeek2:
         use_decode_attention = checkpoint_index >= WEEK2_CHECKPOINTS.index(
             "decode-attention"
         )
+        use_simdgroup_matmul = checkpoint_index >= WEEK2_CHECKPOINTS.index(
+            "simd-matmul"
+        )
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.use_fast_rope = use_fast_rope
         self.hidden_size = mlx_model.args.hidden_size
@@ -264,8 +268,10 @@ class Qwen3ModelWeek2:
 
         def model_weight(layer: Any) -> mx.array | QuantizedWeights:
             if use_quantized_weights:
-                return QuantizedWeights.from_mlx_layer(layer)
-            return dequantize_linear(layer)
+                return QuantizedWeights.from_mlx_layer(
+                    layer, use_simdgroup_matmul=use_simdgroup_matmul
+                )
+            return dequantize_linear(layer).astype(mx.bfloat16)
 
         embedding_weight = model_weight(mlx_model.model.embed_tokens)
         if isinstance(embedding_weight, QuantizedWeights):
@@ -273,6 +279,7 @@ class Qwen3ModelWeek2:
                 vocab_size=self.vocab_size,
                 embedding_dim=self.hidden_size,
                 weight=embedding_weight,
+                use_custom_kernel=use_simdgroup_matmul,
             )
         else:
             self.embedding = Embedding(

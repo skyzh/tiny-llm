@@ -2,7 +2,7 @@ from typing import Any
 
 import mlx.core as mx
 
-from .attention import flash_attention, paged_attention
+from .attention import paged_attention
 from .embedding import QuantizedEmbedding
 from .kv_cache import TinyKvCache
 from .moe import Moe
@@ -33,7 +33,6 @@ class Qwen3MultiHeadAttention:
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
-        use_flash_attention: bool = False,
         use_paged_attention: bool = True,
     ):
         self.hidden_size = hidden_size
@@ -51,7 +50,6 @@ class Qwen3MultiHeadAttention:
         self.rope = FastRoPE(self.head_dim, max_seq_len, theta)
         self.q_norm = FastRMSNorm(self.head_dim, q_norm, eps=rms_norm_eps)
         self.k_norm = FastRMSNorm(self.head_dim, k_norm, eps=rms_norm_eps)
-        self.use_flash_attention = use_flash_attention
         self.use_paged_attention = use_paged_attention
 
     def __call__(
@@ -79,21 +77,7 @@ class Qwen3MultiHeadAttention:
         projection_k = projection_k.transpose(0, 2, 1, 3)
         projection_v = projection_v.transpose(0, 2, 1, 3)
 
-        if self.use_flash_attention and L > 8 and cache.offset == 0:
-            metadata = cache.update_and_fetch_paged(
-                projection_k,
-                projection_v,
-                mask_length=L,
-                mask=mask,
-            )
-            x = flash_attention(
-                projection_q,
-                projection_k,
-                projection_v,
-                scale=self.scale,
-                mask=metadata.mask,
-            )
-        elif self.use_paged_attention:
+        if self.use_paged_attention:
             metadata = cache.update_and_fetch_paged(
                 projection_k,
                 projection_v,
@@ -181,7 +165,6 @@ class Qwen3TransformerBlock:
         mlp: Qwen3MLP | Moe,
         max_seq_len: int = 32768,
         theta: int = 1000000,
-        use_flash_attention: bool = False,
         use_paged_attention: bool = True,
     ):
         self.num_attention_heads = num_attention_heads
@@ -207,7 +190,6 @@ class Qwen3TransformerBlock:
             max_seq_len=max_seq_len,
             theta=theta,
             rms_norm_eps=rms_norm_eps,
-            use_flash_attention=use_flash_attention,
             use_paged_attention=use_paged_attention,
         )
 
@@ -238,14 +220,8 @@ class Qwen3ModelWeek3:
         self,
         mlx_model: Any,
         page_size: int = 128,
-        enable_flash_attn: bool | None = None,
-        enable_performance_lab: bool = False,
         enable_paged_attention: bool = True,
     ):
-        if enable_flash_attn is None:
-            enable_flash_attn = mlx_model.args.head_dim == 128
-        elif enable_flash_attn and mlx_model.args.head_dim != 128:
-            raise ValueError("Week 3 FlashAttention requires head_dim=128")
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
         self.vocab_size = mlx_model.args.vocab_size
@@ -260,15 +236,13 @@ class Qwen3ModelWeek3:
         self.precision = precision
 
         def week3_weights(layer: Any) -> QuantizedWeights:
-            return QuantizedWeights.from_mlx_layer(
-                layer, use_simdgroup_matmul=enable_performance_lab
-            )
+            return QuantizedWeights.from_mlx_layer(layer, use_simdgroup_matmul=True)
 
         self.embedding = QuantizedEmbedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
             weight=week3_weights(mlx_model.model.embed_tokens),
-            use_custom_kernel=enable_performance_lab,
+            use_custom_kernel=True,
         )
         self.layers_inner = []
 
@@ -320,7 +294,6 @@ class Qwen3ModelWeek3:
                 mlp=mlp,
                 max_seq_len=mlx_model.args.max_position_embeddings,
                 theta=mlx_model.args.rope_theta,
-                use_flash_attention=enable_flash_attn,
                 use_paged_attention=enable_paged_attention,
             )
             self.layers_inner.append(layer)
