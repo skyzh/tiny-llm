@@ -1,48 +1,63 @@
 # 🚧 Week 4: Build a Coding Agent
 
-> 🚧 **Course status:** The daily chapters are drafts and are not included in
-> the rendered book yet.
+> 🚧 This overview and its daily chapters are under review and may change.
 
-Weeks 1 through 3 turned tokens into text, made decoding efficient, and
-introduced serving techniques. Week 4 adds the next layer: an agent loop that
-lets the model observe a workspace, choose a tool, see the result, and continue
-until a coding task is complete.
+Weeks 1 through 3 built the inference stack that turns tokens into text and
+serves multiple requests. Week 4 treats that stack as a generation backend and
+adds an application layer: a coding agent that observes a workspace, proposes
+one action, receives the result, and continues until it finishes or reaches a
+budget.
 
-The goal is not to reproduce a production coding agent. It is to understand the
-small mechanism underneath one and identify where reliability, efficiency, and
-safety come from. By the end of the week, you will have a local CLI agent powered
-by the inference stack you already built.
+The goal is a small system whose behavior you can inspect. It is not a production
+agent or an operating-system sandbox.
 
-## What You Will Build
+## Learning Objectives
 
-The finished agent can:
+By the end of the week, you should be able to:
 
-- inspect a repository without loading every file into the prompt;
-- read files in bounded chunks and make exact, reviewable edits;
-- run a narrowly scoped test command and use its output as feedback;
-- save and resume a session;
-- compact an overlong context while retaining task state;
-- checkpoint and undo its own file mutations;
-- accept steering messages and interrupt long-running work; and
-- solve a small repository task graded by held-out tests.
+- separate model generation, action validation, tool execution, and session
+  state;
+- expose a small set of bounded repository tools;
+- make file mutations explicit, bounded, and reviewable;
+- preserve useful task state when a conversation grows too long;
+- stop an agent with step, token, context, and tool limits; and
+- evaluate a repository task by its result and side effects, not by how
+  convincing the model's narration sounds.
 
-This is a deliberately small target. Features such as multi-agent delegation,
-remote execution, MCP integrations, and long-term user memory remain extensions
-rather than prerequisites.
+Features such as multi-agent delegation, remote execution, MCP integrations, and
+long-term user memory remain optional extensions.
 
-## The Core Loop
+## Prerequisites
 
-Every chapter builds on the same loop:
+Before starting Week 4:
 
-1. Render the task, project instructions, recent events, and tool descriptions.
-2. Decode one structured action using the model and KV cache.
-3. Parse and validate the action before it reaches the operating system.
-4. Run one workspace tool and append its observation to the session.
-5. Repeat until the model returns a final answer or reaches a budget.
+1. Complete the Week 2 model, including its request-scoped KV cache, or use the
+   reference solution.
+2. Be able to run one generation through `pdm run main --loader week2`.
+3. If you want to serve concurrent agent sessions, complete the Week 3 scheduler
+   and paged-cache chapters first.
+4. Create a disposable exercise workspace. A working-directory check is not a
+   security boundary, so do not point the agent at sensitive files or a checkout
+   that you cannot replace.
 
-The model does not edit files directly. It proposes an action; ordinary code
-decides whether that action is valid and performs it. This boundary makes agent
-behavior easy to inspect and test.
+Start by confirming that the reference agent can inspect a workspace in read-only
+mode:
+
+```bash
+pdm run agent --root . "inspect this project and summarize its files"
+```
+
+The CLI defaults to the reference Week 2 backend. Use `--solution tiny_llm` to
+exercise your implementation, `--loader week3` to use the Week 3 model, or
+`--solution mlx` to use MLX-LM as the executor. Qwen3-4B follows the structured
+action protocol more reliably; `--model qwen3-0.6b` uses less memory but produces
+more malformed actions.
+
+## The Agent Boundary
+
+Keep the model below a narrow application interface. It receives messages and
+returns text. Ordinary code parses that text, decides whether an action is
+allowed, executes it, and records the observation:
 
 ```text
 task + session events
@@ -57,68 +72,66 @@ task + session events
                       workspace
 ```
 
-## A Small Tool Surface
-
-The target agent uses four tools inspired by small coding-agent harnesses:
+The target JSON tool surface is intentionally small:
 
 ```text
-read(path, offset?, limit?)
-edit(path, old_text, new_text)
-write(path, content)
-bash(command, timeout?)
+list_files(path?)
+read_file(path)
+write_file(path, content)
+edit_file(path, old, new)
+run_command(argv)
 ```
 
-`read` and `edit` are preferable to shell equivalents because they can enforce
-consistent bounds and return structured errors. `bash` supplies repository
-search, file discovery, and test execution without requiring a separate tool for
-every command-line program.
-
-A shell working directory is not a security sandbox. During this course, run the
-agent only in a disposable exercise workspace. A production agent would need a
-container, virtual machine, or similarly strong isolation boundary.
-
-The week then extends that loop with retrieval-augmented generation and a
-serving-oriented tool API. The WIP milestone is to move these application
-layers onto the Week 3 engine without changing the model kernels; the initial
-demo still calls the model directly.
+Prefer `list_files`, `read_file`, and `edit_file` to shell equivalents because
+they enforce consistent bounds and return structured errors. Treat
+`run_command` as an explicitly authorized escape hatch for repository search
+and validation; accept a non-empty argument array rather than an interpolated
+shell string.
 
 ## Seven-Day Plan
 
-| Day | Topic | Working milestone |
+Each day should end with one observable checkpoint. Do not add the next
+capability until the current one has a focused test.
+
+| Day | Task | Checkpoint |
 | --- | --- | --- |
-| 1 | Agent loop | The model alternates between actions and observations. |
-| 2 | Tools | The agent can read, edit, write, and run a bounded command. |
-| 3 | Safety and validation | Mutations are confined, reviewable, and followed by validation. |
-| 4 | Sessions | Work survives process exit and can be resumed. |
-| 5 | Compaction | Long sessions retain a small, useful working context. |
-| 6 | Control and recovery | The user can steer, interrupt, checkpoint, and undo. |
-| 7 | Evaluation | The agent fixes a small bug and passes held-out tests. |
+| 1 | Build initial messages and connect generation. | The task and system instructions reach a fresh model conversation. |
+| 2 | Parse structured actions and expose only enabled tools. | Malformed or disabled actions fail before execution. |
+| 3 | Add bounded listing and reading. | Paths, secrets, symlinks, and default read-only policy are enforced. |
+| 4 | Append observations and compact context. | The task anchors and newest complete tool turn survive compaction. |
+| 5 | Add writes, exact edits, and authorized commands. | Existing files must be inspected, edits match once, and commands match an exact allowlist. |
+| 6 | Run the bounded recovery loop. | The agent recovers from invalid output and stops repeated actions. |
+| 7 | Evaluate a held-out repository task. | The expected tests pass and forbidden side effects are absent. |
 
-## Run the Starting Demo
+The coding-agent chapter develops the loop and tool boundary. The RAG chapter
+adds retrieved evidence before generation. The tool-calling and serving chapter
+moves durable agent state onto the Week 3 serving interfaces without changing
+the model kernels.
 
-The repository contains a minimal demonstration that uses the reference model
-implementation:
+## Validation Strategy
+
+Validate the layer you just added before running an end-to-end demo:
+
+- parser tests cover malformed JSON, unknown tools, missing arguments, and extra
+  arguments;
+- workspace tests cover path traversal, symlinks, protected files, size limits,
+  and uninspected overwrites;
+- loop tests cover step limits, repeated invalid actions, repeated identical
+  actions, and model/tool errors;
+- context tests ensure compaction keeps the original task and complete recent
+  action/observation turns; and
+- capstone tests check the requested result, modified paths, tool trace, and
+  forbidden side effects.
+
+Run the focused test for the day you are implementing:
 
 ```bash
-pdm run agent "inspect this project and summarize its files"
+pdm run test --week 4 --day <N>
 ```
 
-Pass `--solution tiny_llm` to use your implementation, or `--solution mlx` to
-use MLX-LM's optimized executor. The starting program is intentionally smaller
-than the final agent: each day replaces one shortcut with an explicit component
-that can be inspected and tested.
-
-The default Qwen3 4B model follows the structured action protocol more reliably.
-Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more
-time on malformed-action recovery.
-
-## Milestones
-
-- **Minimal:** the model can inspect a workspace and produce one valid action.
-- **Useful:** the agent can make a precise change and run its test.
-- **Recoverable:** the session can resume, compact, and undo its own changes.
-- **Controllable:** budgets bind and the user can steer or interrupt work.
-- **Measurable:** a repeatable task suite distinguishes progress from anecdotes.
+Then run the CLI in read-only mode. Enable mutations only in a disposable
+workspace, and authorize validation commands one exact argument vector at a
+time.
 
 ## Further Reading
 

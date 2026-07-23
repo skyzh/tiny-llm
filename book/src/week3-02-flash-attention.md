@@ -1,6 +1,6 @@
 # 🚧 Week 3 Day 2: FlashAttention for Prefill
 
-> 🚧 This chapter was substantially revised and is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 In this chapter, we will implement a small FlashAttention-style Metal kernel
 for the Week 3 Qwen3 prefill path. The goal is to learn the tiled,
@@ -179,10 +179,10 @@ src/extensions/src/flash_attention.cpp
 src/extensions/CMakeLists.txt
 ```
 
-### From the Scalar Kernel to the SIMD-Matrix Kernel
+### Build from a Scalar Oracle to a SIMD-Matrix Kernel
 
-The original diagrams described the FP32 scalar implementation. The Qwen3 path
-now uses a separate BF16 specialization:
+Keep an FP32 scalar implementation as the correctness oracle, then add a
+separate BF16 specialization for the Qwen3 performance path:
 
 ```plain
 CURRENT FP32 FALLBACK                  QWEN3 BF16 FAST PATH
@@ -202,8 +202,8 @@ output       FP32                      BF16
                    +---- correctness --------+---- Week 3 model
 ```
 
-The fallback remains useful for FP32 tests and smaller head dimensions. Qwen3
-uses the right-hand path so the hot loop has no dynamic-D or dtype branches.
+Use the fallback for FP32 tests and smaller head dimensions. Dispatch Qwen3 to
+the right-hand path so its hot loop has no dynamic-D or dtype branches.
 
 ### Dispatch Grid and Thread Ownership
 
@@ -364,14 +364,13 @@ K/V tiles:  [ 0 ][ 1 ][ 2 ] ... [ limit-1 ] | [ limit ][ limit+1 ] ...
 
 For `L = S`, this skips approximately half of the matrix work.
 
-### Implemented Optimization Inventory
+### Required Implementation Checklist
 
-The following table is the complete inventory of performance choices in the
-course implementation. These are present in the Python wrapper, C++ dispatch,
-or Metal shader; they are not suggestions borrowed from the later Steel
-comparison.
+Use this table to build the performance path in explicit layers. After each
+row, rerun the correctness cases and the synchronized operator benchmark so a
+layout or scheduling change cannot hide behind later optimizations.
 
-| Layer | Implemented optimization | What it saves or improves |
+| Layer | Required optimization | What it saves or improves |
 | --- | --- | --- |
 | Python | Preserve BF16 Q/K/V and make only contiguous views | avoids three full-tensor FP32 conversions and keeps device traffic at two bytes per element |
 | Python | Represent no-mask and causal mode with an integer plus a one-element placeholder | avoids allocating and reading an `N × L × S` mask; only a real additive mask is broadcast and materialized |
@@ -395,7 +394,8 @@ comparison.
 | Metal | Divide by the online denominator only at the final BF16 store | avoids normalizing and rewriting the output after every K/V tile |
 | Dispatch | Keep the variable-`D` FP32 scalar kernel separate | preserves a readable correctness fallback without adding generality or extra branches to the Qwen3 specialization |
 
-Two details are easy to miss when reading the shader. First, the manual
+Before considering the kernel complete, verify two synchronization details.
+First, the manual
 `matrix_coord` mapping gives every lane exactly two elements of each 8×8
 fragment. `row_max` and `row_sum` therefore need only the `xor(1)` and
 `xor(8)` exchanges that connect the lanes holding the same row; a reduction
@@ -404,14 +404,13 @@ K/V loop is required even though PV writes only registers: it prevents an
 early SIMD group from overwriting the shared V tile with the next K tile while
 another SIMD group is still reading V.
 
-The current implementation deliberately does **not** include function-constant
+Stop the required implementation at this boundary. Leave function-constant
 mask variants, unchecked aligned interior loaders, Q pre-scaling with
 `fast::exp2`, FP32 probability/V fragments, overlapped or double-buffered V
 loads, GQA sharing within a threadgroup, tile autotuning, or a decode-specific
-kernel. Those are the follow-up exercises below. Keeping this boundary explicit
-is important: `simdgroup_matrix` alone delivers the largest structural fix,
-while these unimplemented scheduling and specialization techniques explain
-most of the remaining gap to MLX Steel.
+kernel for the follow-up exercises below. This keeps the core task focused on
+the largest structural change—using `simdgroup_matrix`—while leaving the
+remaining MLX Steel gap as a set of measurable extensions.
 
 ### Do Not Import an MLX Kernel
 
@@ -478,12 +477,13 @@ implementation remains about 3.4× faster at 2048 tokens because it adds deeper
 specialization and scheduling work beyond merely using matrix instructions.
 Do not report memory efficiency as a latency speedup.
 
-### Why MLX Steel Is Much Faster
+### Study a Production Schedule
 
-The MLX 0.29.1 result in the table uses its classic Steel attention kernel. It
-uses the same public 8×8 `simdgroup_matrix` operation available to this course,
-so the difference is not a different attention algorithm or a larger matrix
-instruction. It is the accumulation of many smaller implementation choices.
+After your course kernel passes correctness and benchmark checks, compare its
+schedule with MLX 0.29.1 Steel. Steel uses the same public 8×8
+`simdgroup_matrix` operation, so this comparison isolates the cumulative effect
+of specialization, loading, occupancy, and instruction scheduling rather than
+introducing a different attention algorithm.
 
 For D=128, MLX 0.29.1 dispatches a compile-time `BQ=32`, `BK=16`, `BD=128`
 specialization with four SIMD groups, or 128 threads. Compare its hot path with

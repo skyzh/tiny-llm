@@ -1,6 +1,6 @@
 # 🚧 Week 3 Day 3: Chunked Prefill
 
-> 🚧 This newly introduced chapter is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 A long prompt can monopolize the device while active decode requests wait for
 their next token. Chunked prefill limits the number of prompt tokens admitted in

@@ -1,6 +1,6 @@
 # 🚧 Week 3 Day 1: Continuous Batching
 
-> 🚧 This chapter was substantially revised and is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 In this chapter, we will implement **continuous batching**, which keeps a batch
 of active requests on the device and replaces each request as soon as it

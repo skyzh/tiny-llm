@@ -1,6 +1,6 @@
 # 🚧 Week 3 Day 4: Paged Attention, Part 1
 
-> 🚧 This chapter was substantially revised and is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 In this chapter, we will design the **paged KV cache**. This is the storage abstraction behind paged attention.
 

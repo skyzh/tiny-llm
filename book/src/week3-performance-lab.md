@@ -1,6 +1,6 @@
 # 🚧 Week 3 Day 7 (Optional): Performance Lab
 
-> 🚧 This newly introduced chapter is a work in progress.
+> 🚧 This chapter is under review and may change.
 
 This optional lab starts from the minimal Week 2 decode model and explores
 optimizations that are useful but not required to understand that model. It is
@@ -148,9 +148,11 @@ must resolve to the Python/C++/Metal implementations from this course.
 
 ## Optimization Ledger
 
-Record both retained and rejected experiments. End-to-end effects overlap, so
-the table uses representative ranges rather than pretending every row is
-independently additive.
+Create an experiment ledger as you work: record the hypothesis, synchronized
+measurement, correctness result, and keep/reject decision. Use the reference
+ledger below to select reproducible scheduling exercises, not as a substitute
+for measurements on your hardware. End-to-end effects overlap, so never add
+the percentages across rows.
 
 | Change | Decision | Representative effect and reason |
 |---|---|---|
@@ -185,45 +187,5 @@ independently additive.
 This ledger is also a scheduling lesson. Fewer loads, fewer graph nodes, or
 fewer dispatches are hypotheses. Only synchronized end-to-end measurement says
 whether their occupancy, barrier, register, and layout tradeoffs helped.
-
-## Expected Performance Contribution
-
-**Measured prefill improvement from last-token logits: about 40x for the output
-projection alone and 1.29x for the complete model on Qwen3-0.6B on an M4 Pro.**
-Normalizing RoPE offsets once saved about 2% per isolated call. Omitting the
-single-token causal flag was not measurable. Graph cleanup avoids work outside
-the transformer blocks, but small changes below the run-to-run noise floor
-must be reported as such.
-
-An earlier dense ablation based on the Week 2 path improved decode from about
-19.4 tok/s for Week 1 to about 246 tok/s, or about **12.7x**. Its prefill
-measured about 2,042 tok/s versus about 3,318 for the dense Week 1 model. That
-number isolates the lab kernels from Week 3 paging; it is not the output of the
-integrated `--loader week3` command above.
-
-On the completed paged stack after hoisting quantization parameters, a matched
-three-process run measured about 2,371 prefill tok/s and 210 decode tok/s with
-the performance lab, versus 4,416 prefill tok/s and 329 decode tok/s for MLX.
-The lab changes prefill matrix products and should not materially move decode.
-Use the performance appendix's progression runner to compare configurations on
-the same machine instead of combining numbers from separate runs.
-
-One-factor cached-decode ablations give the following attribution. Each row
-uses two models with the same loaded weights, alternates optimized and vanilla
-runs, and changes only the named component:
-
-| Replacement | Vanilla tok/s | Optimized tok/s | Throughput gain |
-|---|---:|---:|---:|
-| Quantized embedding gather | 243.87 | 245.75 | +0.8% |
-| RMSNorm Metal kernel | 185.28 | 246.16 | +32.9% |
-| RoPE Metal kernel | 193.38 | 245.92 | +27.2% |
-| Fused SwiGLU | 219.14 | 245.29 | +11.9% |
-| Online decode attention | 245.17 | 245.73 | +0.2% |
-
-These rows are reverse ablations from the finished model and are not additive.
-As a diagnostic only, temporarily replacing the course QMV with MLX improved
-throughput by 14.5%, replacing attention improved it by 9.8%, and replacing
-both reached about 309.7 tok/s. Those substitutions are not part of the solution;
-they identify the two course-owned kernels with the largest remaining ceiling.
 
 {{#include copyright.md}}

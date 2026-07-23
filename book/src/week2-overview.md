@@ -1,10 +1,6 @@
 # 🚧 Week 2: A Step Closer to vLLM
 
-> 🚧 This overview was substantially revised and is a work in progress.
-
-> **Course status:** All Week 2 chapters are under review after this restructure.
-> The dense KV-cache and quantized-matmul topics come from the original course;
-> the benchmarking, decode-attention, and fused-kernel checkpoints are new.
+> 🚧 This overview and all Week 2 chapters are under review and may change.
 
 Week 2 keeps the readable Week 1 model intact and builds a separate optimized
 Qwen3 path for single-request decoding. It begins by changing the algorithm:
@@ -76,26 +72,14 @@ pdm run bench-week2-progression --offline --repeats 3 \
 ```
 
 The runner executes each checkpoint in a fresh process and reports its median
-against Week 1 and MLX. The percentages at the end of each chapter are
-cumulative measurements, not additive promises: replacing one bottleneck
-changes how much every later replacement matters.
+against Week 1 and MLX. The performance appendix records the cumulative
+percentages in one place. They are not additive promises: replacing one
+bottleneck changes how much every later replacement matters.
 
 The default runs the reference checkpoints. After implementing the cumulative
 selector in your model, add `--solution tiny_llm` to measure your own complete
 ladder. Preserve the named checkpoints as you work; a later implementation
 should add a new branch without changing what an earlier checkpoint executes.
-
-## Expected Performance Contribution
-
-**Measured overall improvement: about 12.4x over the readable Week 1 decode
-path, with a goal of at least 70% of matched MLX throughput.** On an M4 Pro,
-the minimal path retains the dense KV cache, quantized SIMD matvec, decode
-attention, RMSNorm, RoPE, and SwiGLU. The three-process cumulative run measured
-242.67 decode tok/s versus 327.84 tok/s for MLX: 74.0%.
-Prefill tiling, direct quantized embedding, detailed last-token analysis, and
-further scheduling experiments move to the Week 3 performance lab. The small
-shared `logits_to_keep` interface remains available to Week 2 generation. The
-synchronized benchmark, not the estimate, is the authority.
 
 {{#include copyright.md}}
 
