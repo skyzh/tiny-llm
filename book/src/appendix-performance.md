@@ -56,6 +56,33 @@ pdm run bench --solution tiny_llm_ref --loader week3 --batch-decode \
 Always record the model, MLX version, hardware, prompt/output lengths, warmup,
 repeat count, and whether the number is a median or one representative run.
 
+## Retained Optimization Inventory
+
+This table is the implementation checklist for the optimized course path. Every
+retained optimization in the repository has a teaching location; rejected
+experiments and their measurements are recorded in the Week 3 performance lab.
+
+| Retained change | Shipped implementation boundary | Where it is explained |
+|---|---|---|
+| Synchronized, matched measurement | `bench.py` evaluates timed work, computes full prompt logits for matched prefill, releases caches, and separates prefill from decode. `bench_course_progression.py` uses fresh processes, alternating order, medians, and optional pauses between runs. | Week 2 Day 2 and this appendix |
+| KV cache before decode tuning | `TinyKvFullCache`, `create_kv_cache`, and cached generation prefill once and then pass one new token. | Week 2 Day 1 |
+| Packed 4-bit weights | `QuantizedWeights` preserves weight, scale, bias, group size, and bit width instead of materializing dense 16-bit matrices. | Week 2 Day 3 |
+| Shape-dispatched SIMD matvec | `quantized_matvec_x2` handles ordinary projections and `quantized_matvec_x8` handles `K >= 8192`; eight SIMD groups share activation loads and reduce with `simd_sum`. | Week 2 Day 3 |
+| Matvec scheduling cleanup | The retained kernel rereads the cache-hot activation vector instead of copying it to threadgroup memory and waiting at a barrier. | Week 2 Day 3 scheduling ablations |
+| Online decode attention | `decode_attention_custom` keeps the query in registers, uses 32 SIMD groups, FP32 online softmax, and a parallel final reduction for `L <= 8` and context at most 256. | Week 2 Day 4 |
+| Fused RMSNorm | One 256-thread group performs a two-level reduction, normalization, and learned scaling with FP32 accumulation. | Week 2 Day 5 |
+| Fused RoPE | One thread computes an angle once for a pair and reuses it across four heads; batch offsets are normalized once per model call. | Week 2 Day 5 |
+| Fused SwiGLU | One Metal dispatch computes SiLU and multiplies the up branch without graph intermediates. | Week 2 Day 5 |
+| Decode graph cleanup | Generation requests `logits_to_keep=1`, single-token decode omits the causal-mask graph, and Week 1 remains unchanged. | Week 3 performance lab and Week 2 overview |
+| SIMD-matrix quantized prefill | The optional `quantized_matmul_simdgroup` path uses 8-by-8 matrix fragments, unpacking weights directly and accumulating in FP32. | Week 3 performance lab |
+| Direct quantized embedding | The optional embedding kernel fuses row gather, int4 unpacking, scale, and bias for both signed and unsigned token IDs. | Week 3 performance lab |
+| FlashAttention prefill | The BF16 SIMD-matrix kernel streams Q/K/V tiles, uses FP32 online softmax, bounds causal work, and avoids the quadratic score tensor. | Week 3 Day 2 |
+| Serving and cache scheduling | Continuous batching reuses active slots, chunked prefill bounds scheduler stalls, and paged attention separates logical context from reusable physical pages. | Week 3 Days 1 and 3-5 |
+
+The model-loading boundary is not an optimization shortcut. MLX still supplies
+model files, arrays, streams, allocation, and extension dispatch; the retained
+Week 2 learned operators above execute course-owned Python, C++, or Metal code.
+
 ## End-to-End Checkpoints and Reverse Ablations
 
 The following post-restructure snapshot used Qwen3-0.6B on an Apple M4 Pro

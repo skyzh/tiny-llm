@@ -112,6 +112,12 @@ should not be forced onto 2,048 tokens. Retain the readable composition for
 tests and ablations, and retain tiled prefill FlashAttention in Week 3; prefill
 is a different workload where both query and context lengths are large.
 
+The retained reference guard is deliberately concrete: use the course kernel
+only when query length is at most eight and cached context length is at most
+256. Otherwise use the readable grouped-attention path. Keeping this condition
+at the model call site makes the benchmarked operating range reviewable instead
+of burying a performance policy inside the Metal kernel.
+
 Keep arbitrary dense, per-request masks on the readable compatibility path.
 They appear in the first continuous-batching exercise, while the normal Week 2
 decode path uses no explicit mask. Week 3 replaces dense batch masks with paged
