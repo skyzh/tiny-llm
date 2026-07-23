@@ -1,111 +1,109 @@
-# Day 1: An Interactive Baseline
+# Day 1: From Generation to an Agent Loop
 
-The Week 3 engine treats generation as a request that ends. A coding agent makes
-the cost of that boundary visible because every tool result immediately creates
-another request containing almost the same prompt. Today you will add an
-interactive driver and measure the redundant work before optimizing it.
+The decoder from Week 1 produces text once and exits. An agent repeatedly turns
+text into an action, executes that action, and gives the result back to the
+model. Today you will make that control flow explicit.
 
 ## Learning Goals
 
 By the end of the day, you will be able to:
 
-- trace the boundary between semantic messages, rendered tokens, and model K/V;
-- explain who owns and releases the current cache;
-- measure prefill work separately from decode work; and
-- replay a deterministic multi-turn workload through the stateless adapter.
+- explain the difference between a model, an agent loop, and a tool;
+- represent tool calls and final answers as structured actions;
+- preserve assistant actions and tool observations in the conversation; and
+- stop reliably on completion, malformed output, or a step budget.
 
-## The Current Agent-to-Model API
+## Actions, Not Free-Form Commands
 
-The agent depends on one callback:
+Begin with a JSON protocol because it is visible in every trace and works with a
+model that does not expose native tool calls. An assistant turn produces exactly
+one of two shapes:
 
-```python
-Message = dict[str, str]
-Generate = Callable[[list[Message]], str]
-
-def run_agent(task, generate, workspace, limits):
-    response = generate(messages)
-    ...
+```json
+{"tool":"read","path":"README.md"}
 ```
 
-The CLI callback calls `agent.generate_response()`. That function applies the
-chat template, tokenizes the whole prompt, calls `model.create_kv_cache()`,
-prefills from offset zero, decodes one action, and releases the cache in a
-`finally` block. This API is safe and simple, but it cannot express reuse.
+```json
+{"final":"The project implements a small Qwen3 inference stack."}
+```
 
-Keep the callback as the cold baseline. Later days will put a stateful object
-behind the same agent loop so application behavior does not need to know about
-layers, pages, or tensors.
+Parsing JSON is only the first check. The decoded value must be an object, must
+contain exactly one of `tool` or `final`, and must contain arguments allowed by
+that action's schema. Reject trailing text rather than silently ignoring it.
 
-## Add an Interactive Mode
-
-The starting CLI accepts one task and lets the model alternate with tools. Add a
-mode that also accepts user messages between turns:
+Return validation failures to the model as observations. This lets the model
+repair a malformed action without hiding the failure:
 
 ```text
-user> inspect the failing parser test
-assistant> {"tool":"read_file","path":"tests/test_parser.py"}
-tool> ...
-user> focus on empty strings, not missing keys
-assistant> {"tool":"read_file","path":"src/parser.py"}
+error: read requires a non-empty string field named path
 ```
 
-Record semantic events rather than saving one rendered prompt string. Rendering
-belongs at the model boundary and may change when the tokenizer or template
-changes.
+## The Loop
 
-The supplied workspace tools remain bounded and deterministic. They are the
-workload for this week, not the main implementation project.
-
-## Instrument One Generation
-
-Return a result that separates text from engine measurements:
+Keep orchestration separate from inference and tool execution:
 
 ```python
-@dataclass(frozen=True)
-class Generation:
-    text: str
-    prompt_tokens: int
-    prefill_tokens: int
-    generated_tokens: int
-    prefill_seconds: float
-    decode_seconds: float
-    peak_pages: int
+def run_agent(task, model, tools, max_steps):
+    events = [user_message(task)]
+    for _ in range(max_steps):
+        response = model.generate(events, tools)
+        events.append(assistant_message(response))
+
+        action = parse_and_validate(response)
+        if action.is_final:
+            return action.final
+
+        result = tools.execute(action)
+        events.append(tool_result(action, result))
+
+    raise StepLimitExceeded(max_steps)
 ```
 
-`prefill_tokens` measures work, not total prompt length. It equals
-`prompt_tokens` in the cold baseline. On a warm turn it will count only tokens
-whose K/V had to be computed.
+The loop owns policy such as budgets and stop conditions. The model adapter owns
+tokenization and decoding. The tool registry owns schemas and execution. These
+boundaries will matter when sessions and cancellation arrive later in the week.
 
-Synchronize lazy MLX work at timing boundaries. A timer around unevaluated array
-construction measures Python dispatch rather than device execution.
+## Preserve the Trace
 
-## A Repeatable Trace
+For now, an in-memory list is sufficient. Record at least:
 
-Use a scripted model or recorded action sequence for most tests:
+- the user's task;
+- the assistant's raw response;
+- the parsed action, when valid;
+- the tool result or validation error; and
+- token counts and elapsed time if they are available.
 
-1. inspect a test file;
-2. inspect an implementation file;
-3. receive a user steering message;
-4. make one exact edit;
-5. run one allowed test; and
-6. return a final answer.
-
-This trace is stable enough to compare cache policies without treating model
-sampling variance as a serving optimization.
+Do not store only the latest prompt string. Named events are easier to inspect
+and can later be serialized without reverse-engineering the chat template.
 
 ## Exercise
 
-1. Add `Generation` metrics without changing decoded text.
-2. Add the interactive input path and append steering as a user event.
-3. Trace rendered prompt token IDs for every model turn.
-4. Report total prompt tokens, prefill work, decode tokens, and peak pages.
-5. Verify that every cache is released on success, model error, and interrupt.
-6. Save the cold-baseline numbers for comparison on Day 7.
+Refactor the starting demo so `generate()` returns model text and a new
+`run_agent()` function owns the loop.
+
+Implement and test these cases without loading a model:
+
+1. A valid tool action is executed and its result is appended.
+2. A final action stops the loop without executing a tool.
+3. Invalid JSON becomes a useful observation and the loop continues.
+4. An unknown tool is rejected before execution.
+5. The loop stops after `max_steps` even if the model never finishes.
+
+Use a fake model that returns predetermined strings and a fake tool registry that
+records calls. Most agent-loop behavior is ordinary deterministic code and does
+not require expensive model tests.
 
 ## Checkpoint
 
-At the end of Day 1, the agent is interactive but deliberately inefficient.
-Every action produces correct output through a fresh cache, and the trace makes
-the repeated prefix work visible.
+At the end of Day 1, the following trace should be possible:
+
+```text
+user      inspect the repository
+assistant {"tool":"read","path":"README.md"}
+tool      # Tiny LLM ...
+assistant {"final":"This repository teaches LLM inference and serving."}
+```
+
+The tool can still be a stub. Tomorrow it will become a real workspace API.
 
 {{#include copyright.md}}

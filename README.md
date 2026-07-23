@@ -8,7 +8,7 @@ can build the model serving infrastructure from scratch and dig into the optimiz
 
 The goal is to learn the techniques behind efficiently serving a large language model (e.g., Qwen3 models).
 
-In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen3 model to generate responses (e.g., attention, RoPE, etc). In week 2, **A Step Closer to vLLM**, you will add a KV cache first, then integrate and measure course-owned Metal decode and SIMD-matrix prefill kernels until the model reaches about 75% of MLX's decode performance. In week 3, **Build a Mini vLLM**, you will turn that fast model into a serving engine with continuous batching, chunked prefill, paged attention, and FlashAttention over paged KV. The seven-day Week 4 draft then uses an interactive coding agent to evolve that engine again: sessions reuse prompt prefixes, rewind divergent cache state, fork copy-on-write checkpoints, persist warm state to disk, and schedule multiple paused conversations.
+In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen3 model to generate responses (e.g., attention, RoPE, etc). In week 2, **A Step Closer to vLLM**, you will add a KV cache first, then integrate and measure course-owned Metal decode and SIMD-matrix prefill kernels until the model reaches about 75% of MLX's decode performance. In week 3, **Build a Mini vLLM**, you will turn that fast model into a serving engine with continuous batching, chunked prefill, paged attention, and FlashAttention over paged KV. The seven-day Week 4 draft then builds a coding agent through an agent loop, bounded tools, safety checks, interactive sessions, context compaction, control and recovery, and held-out evaluation. Its multi-turn workload also extends the inference framework with reusable session KV state and checkpoint-aware cache rewind.
 
 Why MLX: nowadays it's easier to get a macOS-based local development environment than setting up an NVIDIA GPU.
 
@@ -56,12 +56,12 @@ existing status, and all Week 4 application material remains work in progress.
 | 4.1            | Agent Loop                                                    | 🚧    | 🚧   | 🚧  |
 | 4.2            | Tools                                                         | 🚧    | 🚧   | 🚧  |
 | 4.3            | Safety and Validation                                         | 🚧    | 🚧   | 🚧  |
-| 4.4            | Sessions                                                      | 🚧    | 🚧   | 🚧  |
+| 4.4            | Interactive Sessions                                          | 🚧    | 🚧   | 🚧  |
 | 4.5            | Context Compaction                                            | 🚧    | 🚧   | 🚧  |
 | 4.6            | Control and Recovery                                          | 🚧    | 🚧   | 🚧  |
 | 4.7            | Evaluation                                                    | 🚧    | 🚧   | 🚧  |
 
-Other topics not covered: quantized/compressed KV cache, prefix/prompt cache, fine-tuning, and long-context techniques.
+Other topics not covered: quantized/compressed KV cache, cross-request prefix/prompt cache, fine-tuning, and long-context techniques.
 
 ## Star History
 

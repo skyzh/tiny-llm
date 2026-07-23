@@ -38,10 +38,10 @@ assuming an algorithm with a production name is already production-fast. The
 [performance appendix](./appendix-performance.md) keeps kernel throughput and
 serving usability as separate measurements.
 
-Week 4 uses a tool-calling coding agent as a demanding multi-turn workload for
-this serving substrate. The agent repeatedly changes a long prompt by a small
-suffix, pauses while a tool runs, branches after checkpoints, and resumes after
-process exit. Supporting that workload will require new session and cache
-contracts without changing the attention math built this week.
+Week 4 owns application concerns such as RAG and tool calling. Its interactive
+session chapter will make one targeted extension to this substrate: retain and
+reconcile a request's KV state across compatible agent turns. Keeping that work
+in Week 4 lets this week finish a reusable request engine before a concrete
+multi-turn workload motivates a longer cache lifecycle.
 
 {{#include copyright.md}}
