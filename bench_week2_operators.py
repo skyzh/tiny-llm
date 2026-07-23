@@ -235,7 +235,8 @@ def main() -> None:
     readable_rope = RoPE(
         head_dim, model.args.max_position_embeddings, model.args.rope_theta
     )
-    mx.eval(x_rope)
+    x_rope_mlx = x_rope.transpose(0, 2, 1, 3)
+    mx.eval(x_rope, x_rope_mlx)
     mx.eval(readable_rope.cos_freqs, readable_rope.sin_freqs)
     report_matmul_progression(
         "RoPE",
@@ -247,13 +248,13 @@ def main() -> None:
         benchmark(lambda: rope(x_rope, 17), args.warmup, args.iterations),
         benchmark(
             lambda: mx.fast.rope(
-                x_rope,
+                x_rope_mlx,
                 head_dim,
                 traditional=False,
                 base=model.args.rope_theta,
                 scale=1.0,
                 offset=17,
-            ),
+            ).transpose(0, 2, 1, 3),
             args.warmup,
             args.iterations,
         ),

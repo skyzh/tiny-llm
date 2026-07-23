@@ -1,8 +1,11 @@
-# Week 3: Build a Mini vLLM
+# 🚧 Week 3: Build a Mini vLLM
 
-> **Course status:** Continuous batching, FlashAttention, chunked prefill,
-> paged attention, and MoE come from the original course. The performance lab
-> and speculative decoding remain works in progress.
+> 🚧 This overview was substantially revised and is a work in progress.
+
+> **Course status:** The overview and Days 1–5 are under review after this
+> restructure. Their topics come from the original course; the performance lab
+> and speculative-decoding chapter are new works in progress. The lightly
+> adapted MoE chapter retains its completed status.
 
 Week 3 takes the optimized single-request model from Week 2 and builds a serving
 engine around it. The Week 2 operator interfaces remain intact; this week adds

@@ -26,8 +26,9 @@ You may join skyzh's Discord server and study with the tiny-llm community.
 
 ## Roadmap
 
-The original course material retains its existing completion status. Newly
-introduced material and all Week 4 application material are work in progress.
+Chapters substantially revised in this PR are marked as work in progress even
+when they build on original course material. Unchanged chapters retain their
+existing status, and all Week 4 application material remains work in progress.
 
 | Week + Chapter | Topic                                                       | Code | Test | Doc |
 | -------------- | ----------------------------------------------------------- | ---- | ---- | --- |
@@ -38,16 +39,16 @@ introduced material and all Week 4 application material are work in progress.
 | 1.5            | Load the Model                                              | ✅    | ✅   | ✅  |
 | 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
 | 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
-| 2.1            | KV Cache                                                     | ✅    | ✅   | ✅  |
+| 2.1            | KV Cache                                                     | ✅    | ✅   | 🚧  |
 | 2.2            | Benchmarking and the MLX Baseline                            | 🚧    | 🚧   | 🚧  |
-| 2.3            | Quantized Matvec                                             | ✅    | ✅   | ✅  |
+| 2.3            | Quantized Matvec                                             | ✅    | ✅   | 🚧  |
 | 2.4            | Decode Attention                                             | 🚧    | 🚧   | 🚧  |
 | 2.5            | Fast Model Kernels                                           | 🚧    | 🚧   | 🚧  |
-| 3.1            | Continuous Batching                                           | ✅    | ✅   | ✅  |
-| 3.2            | Flash Attention for Prefill                                  | ✅    | ✅   | ✅  |
-| 3.3            | Chunked Prefill                                               | ✅    | ✅   | ✅  |
-| 3.4            | Paged KV Cache                                                | ✅    | ✅   | ✅  |
-| 3.5            | Paged Attention                                               | ✅    | ✅   | ✅  |
+| 3.1            | Continuous Batching                                           | ✅    | ✅   | 🚧  |
+| 3.2            | Flash Attention for Prefill                                  | ✅    | ✅   | 🚧  |
+| 3.3            | Chunked Prefill                                               | ✅    | ✅   | 🚧  |
+| 3.4            | Paged KV Cache                                                | ✅    | ✅   | 🚧  |
+| 3.5            | Paged Attention                                               | ✅    | ✅   | 🚧  |
 | 3.6 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | ✅  |
 | 3.7 (optional) | Performance Lab                                               | 🚧    | 🚧   | 🚧  |
 | 3.8 (optional) | Speculative Decoding                                         | 🚧    | 🚧   | 🚧  |

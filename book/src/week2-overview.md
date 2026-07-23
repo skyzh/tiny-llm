@@ -1,8 +1,10 @@
-# Week 2: A Step Closer to vLLM
+# 🚧 Week 2: A Step Closer to vLLM
 
-> **Course status:** Benchmarking, decode attention, and the fused-operator
-> chapter are works in progress. The dense KV cache and quantized-matmul
-> material come from the original course.
+> 🚧 This overview was substantially revised and is a work in progress.
+
+> **Course status:** All Week 2 chapters are under review after this restructure.
+> The dense KV-cache and quantized-matmul topics come from the original course;
+> the benchmarking, decode-attention, and fused-kernel checkpoints are new.
 
 Week 2 keeps the readable Week 1 model intact and builds a separate optimized
 Qwen3 path for single-request decoding. It begins by changing the algorithm:

@@ -1,4 +1,6 @@
-# Week 2 Day 3: Quantized Matvec
+# 🚧 Week 2 Day 3: Quantized Matvec
+
+> 🚧 This chapter was substantially revised and is a work in progress.
 
 In this chapter, we will study and implement quantized matrix multiplication. Quantizing
 weights from 16-bit floating point to 4-bit integers reduces both model size and

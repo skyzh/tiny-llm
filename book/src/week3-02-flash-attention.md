@@ -1,6 +1,6 @@
-# Week 3 Day 2: FlashAttention for Prefill
+# 🚧 Week 3 Day 2: FlashAttention for Prefill
 
-> **Status:** Under review (WIP).
+> 🚧 This chapter was substantially revised and is a work in progress.
 
 In this chapter, we will implement a small FlashAttention-style Metal kernel
 for the Week 3 Qwen3 prefill path. The goal is to learn the tiled,
@@ -703,6 +703,17 @@ depend on a later assignment. At this point, test and benchmark the operator in
 isolation for representative prefill shapes. The BF16 model integration is a
 Metal GPU path; the course CLIs reject `--device cpu --enable-flash-attn`
 instead of silently upcasting every model-sized tensor for the CPU reference.
+
+Run the Day 2 correctness suite and the matched prefill benchmark directly:
+
+```bash
+pdm run test --week 3 --day 2
+pdm run bench-test -- -k qwen3_4b_causal_prefill --benchmark-only
+```
+
+Day 2 deliberately has no end-to-end model checkpoint. The normal Week 3 model
+CLI composes later paged-cache work, so using it here would no longer isolate
+the FlashAttention operator introduced by this chapter.
 
 Days 4 and 5 reuse the same online-softmax and tiling ideas while walking a
 paged KV cache. That is the Week 3 model integration point. The dense Day 2

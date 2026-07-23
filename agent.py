@@ -7,6 +7,8 @@ from itertools import cycle
 from pathlib import Path
 from threading import Event, Thread
 
+from model_names import shortcut_name_to_full_name
+
 
 def run_with_spinner(label, function, *args):
     """CLI support for Week 4: show progress without changing agent behavior."""
@@ -115,7 +117,9 @@ def main():
         else "tiny_llm"
     )
     agent = importlib.import_module(f"{package}.agent")
-    models = importlib.import_module(f"{package}.models")
+    models = None
+    if args.solution != "mlx":
+        models = importlib.import_module(f"{package}.models")
     policy = agent.ToolPolicy(
         root=args.root,
         allow_writes=args.allow_writes,
@@ -134,7 +138,7 @@ def main():
     else:
         print("Safety: command execution is disabled")
 
-    model_name = models.shortcut_name_to_full_name(args.model)
+    model_name = shortcut_name_to_full_name(args.model)
     mlx_model, tokenizer = load(model_name)
     if args.solution == "mlx":
         model = mlx_model
@@ -144,6 +148,7 @@ def main():
         if args.enable_performance_lab:
             print("MLX selects optimized kernels automatically; ignoring the flag")
     else:
+        assert models is not None
         dispatch_args = {}
         if args.loader == "week3":
             dispatch_args = {

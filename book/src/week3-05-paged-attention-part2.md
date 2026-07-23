@@ -1,4 +1,6 @@
-# Week 3 Day 5: Paged Attention, Part 2
+# 🚧 Week 3 Day 5: Paged Attention, Part 2
+
+> 🚧 This chapter was substantially revised and is a work in progress.
 
 In this chapter, we move from **paged KV storage** to the runtime metadata and execution path needed for **real paged attention**.
 

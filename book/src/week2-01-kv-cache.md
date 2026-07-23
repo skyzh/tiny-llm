@@ -1,4 +1,6 @@
-# Week 2 Day 1: KV Cache
+# 🚧 Week 2 Day 1: KV Cache
+
+> 🚧 This chapter was substantially revised and is a work in progress.
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
