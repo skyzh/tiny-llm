@@ -84,6 +84,22 @@ The order is intentional:
 
 A later chapter never becomes an undeclared prerequisite for an earlier one.
 
+## Why FlashAttention Waits Until Week 3
+
+Week 2 intentionally does not add dense FlashAttention. The matched prefill
+profile identifies quantized projection matmul as the dominant cost, and the
+Day 6 kernel already brings the completed checkpoint close to MLX at the fixed
+acceptance shape. A second dense-attention schedule would not follow the
+measured bottleneck and would be replaced as soon as Week 3 makes paged K/V the
+canonical serving layout.
+
+Instead, Week 2 teaches the ingredients that remain useful: Day 4 introduces
+online softmax and Day 6 introduces cooperative SIMD-matrix tiling. Week 3 adds
+page-table translation and combines all three ideas in one paged
+FlashAttention operator. A dense first-prefill fast path is a reasonable
+optional performance-lab experiment when the cache is empty, but it is not a
+required Week 2 implementation or a second model-facing attention interface.
+
 Unlike Week 1, the completed Week 2 model prefills a dense KV cache once,
 passes only the new token during decode, keeps its linear and embedding weights
 quantized, dispatches separate decode and prefill matrix schedules, and imports optimized operations from
