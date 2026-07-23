@@ -94,7 +94,7 @@ class Qwen3ModelWeek3:
         self,
         mlx_model: Any,
         page_size: int = 128,
-        enable_flash_attn: bool = False,
+        enable_flash_attn: bool | None = None,
         enable_performance_lab: bool = False,
         enable_paged_attention: bool = True,
     ):

@@ -140,10 +140,12 @@ independently additive.
 | No decode causal-mask graph | Keep | Pass `None` when `L = 1`; every cached position is already valid. |
 | Normalize RoPE offsets once | Keep | Builds one batch offset array per model call rather than once per layer. |
 | Last-token logits | Keep | Avoids vocabulary projection for prompt positions that generation never samples. |
+| Zero-gather FlashAttention prefill | Keep | Runs Day 2 FlashAttention directly on fresh K/V before paged decode. With the SIMD-matrix lab it improved matched prefill about 1.7% at 128 tokens and 2.0% at 512; decode was unchanged. |
 | Fuse Q/K/V and gate/up projections | Reject | About 242 → 227 tok/s; fewer Python calls did not offset a more complex kernel and dispatch map. |
 | Concatenate quantized weights at runtime | Reject | About 235 → 217 tok/s; constructing larger arrays added work and memory traffic. |
 | Preallocate chunked dense KV cache | Reject | About 235 → 229 tok/s; strided logical slices hurt the following operations. Paging belongs in Week 3. |
 | Share 32×16 prefill tiles in threadgroup memory | Reject | About 2,052 → 1,848 prefill tok/s; barriers outweighed reduced global loads at 128 tokens. |
+| Two output tiles per SIMD group | Reject | About 328 → 338 µs for the 128-token Q projection; reusing the activation fragment did not offset the second FP32 accumulator's register pressure. |
 | Broadcast packed weights within a SIMD group | Reject | About 370 → 699 µs for the 128-token Q projection; coalesced cached loads were cheaper than repeated SIMD shuffles. |
 | Four SIMD groups per prefill threadgroup | Reject | About 370 → 385 µs for the same projection; the smaller scheduling unit added launches without improving occupancy. |
 | Broadcast scale/bias within the wide matvec | Reject | Increased vocabulary-head latency; extra loop structure and broadcasts outweighed parameter-load savings. |

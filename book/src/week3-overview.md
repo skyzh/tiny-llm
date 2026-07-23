@@ -27,6 +27,11 @@ before paged storage and paged attention on Days 4–5. The paged prefill kernel
 then reuses the same BF16 tiling and online-softmax machinery, leaving page
 translation and decode work partitioning as the new concepts.
 
+The final model runs dense FlashAttention directly on fresh K/V for an
+ordinary first prefill, stores the same K/V in paged cache, and switches to the
+paged vector kernel for decode. Page-walking prefill remains for a chunked
+prefill that already has cached history.
+
 On Apple silicon, FlashAttention and paged attention are not automatic latency
 wins. FlashAttention has the best opportunity at long prefill lengths, where
 avoiding an `L x S` intermediate can save substantial memory traffic. Paged

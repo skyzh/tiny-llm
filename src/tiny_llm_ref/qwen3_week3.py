@@ -79,8 +79,8 @@ class Qwen3MultiHeadAttention:
         projection_k = projection_k.transpose(0, 2, 1, 3)
         projection_v = projection_v.transpose(0, 2, 1, 3)
 
-        if self.use_flash_attention and L > 8:
-            key, value, _, mask = cache.update_and_fetch(
+        if self.use_flash_attention and L > 8 and cache.offset == 0:
+            metadata = cache.update_and_fetch_paged(
                 projection_k,
                 projection_v,
                 mask_length=L,
@@ -88,10 +88,10 @@ class Qwen3MultiHeadAttention:
             )
             x = flash_attention(
                 projection_q,
-                key,
-                value,
+                projection_k,
+                projection_v,
                 scale=self.scale,
-                mask=mask,
+                mask=metadata.mask,
             )
         elif self.use_paged_attention:
             metadata = cache.update_and_fetch_paged(
@@ -238,11 +238,13 @@ class Qwen3ModelWeek3:
         self,
         mlx_model: Any,
         page_size: int = 128,
-        enable_flash_attn: bool = False,
+        enable_flash_attn: bool | None = None,
         enable_performance_lab: bool = False,
         enable_paged_attention: bool = True,
     ):
-        if enable_flash_attn and mlx_model.args.head_dim != 128:
+        if enable_flash_attn is None:
+            enable_flash_attn = mlx_model.args.head_dim == 128
+        elif enable_flash_attn and mlx_model.args.head_dim != 128:
             raise ValueError("Week 3 FlashAttention requires head_dim=128")
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size

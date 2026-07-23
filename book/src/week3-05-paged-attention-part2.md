@@ -279,9 +279,10 @@ reconstruct dense K/V and express the paged operator as MLX matmul plus
 softmax. MLX SDPA may appear only in tests and benchmarks as an external
 correctness/performance reference.
 
-The optional dense FlashAttention prefill path below gathers K/V only to run
-the course-owned Day 2 kernel. The default paged path still reads the page pool
-directly in the Day 5 Metal kernel.
+Ordinary prefill runs the course-owned Day 2 FlashAttention kernel directly on
+the freshly projected dense K/V, then stores those same tensors in the paged
+cache for decode. It must not gather them back from the cache. Paged prefill
+remains useful when chunked prefill already has history in the page pool.
 
 ## Task 3: Dispatch from the Model
 
@@ -291,14 +292,17 @@ src/tiny_llm/qwen3_week3.py
 
 Update the model so it can route to paged attention when the cache provides paged runtime metadata.
 
-The optional dense FlashAttention prefill and the paged paths must share one
-request cache. When `enable_flash_attn=True` and the current query has more than
-eight tokens, append BF16 K/V to the paged cache, gather its logical dense view,
-and run the Day 2 FlashAttention kernel. Otherwise, pass page metadata to the
-paged BF16 prefill kernel. Subsequent short decode steps always use the
+FlashAttention prefill and the paged paths must share one request cache. For an
+ordinary first prefill with more than eight tokens, append BF16 K/V to the
+paged cache and run the Day 2 FlashAttention kernel directly on the freshly
+projected K/V. Do not gather the tensors back from the cache. If chunked
+prefill already has cached history, pass page metadata to the paged BF16
+prefill kernel instead. Subsequent short decode steps always use the
 vector-oriented paged kernel. Neither path may upcast the complete Q/K/V
 tensors or change cache dtype. Keep this dispatch behind the Week 3 model so
-Week 2 remains independent.
+Week 2 remains independent. The final Week 3 model selects FlashAttention
+prefill automatically for supported `D == 128` models; `--disable-flash-attn`
+exists only for the measured paged-prefill ablation.
 
 ## Task 4: Connect It to Continuous Batching
 

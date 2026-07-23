@@ -34,7 +34,13 @@ MLX_VARIANT = Variant("mlx", "MLX", "mlx", "week2")
 COURSE_VARIANTS = (
     WEEK1_VARIANT,
     Variant("week2", "Week 2 decode", "ref", "week2"),
-    Variant("week3-paged", "Week 3 paged (Flash off)", "ref", "week3"),
+    Variant(
+        "week3-paged",
+        "Week 3 paged (Flash off)",
+        "ref",
+        "week3",
+        ("--disable-flash-attn",),
+    ),
     Variant(
         "week3-flash",
         "Week 3 paged + FlashAttention",
@@ -47,7 +53,7 @@ COURSE_VARIANTS = (
         "Week 3 paged + lab",
         "ref",
         "week3",
-        ("--enable-performance-lab",),
+        ("--disable-flash-attn", "--enable-performance-lab"),
     ),
     Variant(
         "week3-flash-lab",

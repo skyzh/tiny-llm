@@ -266,15 +266,22 @@ def test_task_3_incremental_decode_matches_week2_with_paged_attention():
         )
 
 
-def test_week3_flash_prefill_matches_paged_prefill():
+def test_week3_flash_prefill_matches_paged_prefill(monkeypatch):
     mlx_model = _fake_qwen3_mlx_model(head_dim=128)
-    paged_model = Qwen3ModelWeek3(mlx_model, page_size=4)
-    flash_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_flash_attn=True)
+    paged_model = Qwen3ModelWeek3(
+        mlx_model, page_size=4, enable_flash_attn=False
+    )
+    flash_model = Qwen3ModelWeek3(mlx_model, page_size=4)
     inputs = mx.array([[1, 5, 7, 3, 9, 11, 4, 2, 8]], dtype=mx.int32)
     paged_cache = paged_model.create_kv_cache()
     flash_cache = flash_model.create_kv_cache()
 
     paged_out = paged_model(inputs, 0, paged_cache)
+    monkeypatch.setattr(
+        TinyKvPagedCache,
+        "gather_dense",
+        lambda self: pytest.fail("ordinary FlashAttention prefill must not gather K/V"),
+    )
     flash_out = flash_model(inputs, 0, flash_cache)
     paged_out = paged_out - mx.logsumexp(paged_out, axis=-1, keepdims=True)
     flash_out = flash_out - mx.logsumexp(flash_out, axis=-1, keepdims=True)
