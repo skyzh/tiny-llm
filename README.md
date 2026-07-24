@@ -1,64 +1,90 @@
-# tiny-llm - LLM Serving in a Week
+# tiny-llm
 
 [![CI (main)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml/badge.svg)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml)
 
-A course on LLM serving using MLX for system engineers. The codebase
-is solely (almost!) based on MLX array/matrix APIs without any high-level neural network APIs, so that we
-can build the model serving infrastructure from scratch and dig into the optimizations.
+Production inference engines are difficult to learn from. They solve model
+execution, memory management, scheduling, and hardware utilization all at once.
+That is the right tradeoff for serving traffic, but the wrong place to first ask
+why a KV cache helps or when paging is worth its indirection.
 
-The goal is to learn the techniques behind efficiently serving a large language model (e.g., Qwen3 models).
+tiny-llm takes the other route. It starts with the equations that turn Qwen3
+tokens into logits, then introduces optimization and serving machinery only
+when the running model gives us a reason to need it. The code stays small enough
+to read end to end while still reaching the problems that shape real inference
+systems: memory traffic, kernel occupancy, KV-cache growth, batching, and
+request scheduling.
 
-In week 1, you will implement the necessary components in Python (only Python!) to use the Qwen3 model to generate responses (e.g., attention, RoPE, etc). In week 2, **A Step Closer to vLLM**, you will add a KV cache first, then integrate and measure course-owned Metal decode and SIMD-matrix prefill kernels until the model reaches about 75% of MLX's decode performance. In week 3, **Build a Mini vLLM**, you will turn that fast model into a serving engine with continuous batching, chunked prefill, paged attention, and FlashAttention over paged KV. The seven-day Week 4 draft then builds a coding agent through an agent loop, bounded tools, safety checks, interactive sessions, context compaction, control and recovery, and held-out evaluation. Its multi-turn workload also extends the inference framework with reusable session KV state and checkpoint-aware cache rewind.
+The course is built on MLX arrays and the MLX extension runtime, without using
+high-level neural-network layers. When a chapter teaches an operator, your
+solution implements that operator in Python, C++, or Metal rather than calling
+the corresponding optimized MLX operation. MLX remains the correctness oracle
+and performance baseline.
 
-Why MLX: nowadays it's easier to get a macOS-based local development environment than setting up an NVIDIA GPU.
+## The Learning Path
 
-Why Qwen3: it keeps the dense decoder architecture small enough for a local MLX course while adding modern details such as QK norm and bfloat16 weights. The official MLX 4-bit model files also make the setup predictable on Apple Silicon.
+Each week answers a different systems question:
 
-## Book
+- **Week 1 — How does a model generate text?** Build a readable Qwen3 model
+  from array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
+  the autoregressive loop.
+- **Week 2 — Why is the readable model slow?** Add a KV cache, establish a
+  synchronized MLX baseline, and let profiles choose the next optimization.
+  The path moves from quantized decode matvec to fused model kernels, tiled
+  prefill, and split-K where the measured Qwen shapes need it.
+- **Week 3 — What changes when requests share an engine?** Introduce continuous
+  batching and chunked admission, then make paged KV the canonical serving
+  layout. Decode attention and FlashAttention learn to read pages directly so
+  the scheduler does not rebuild dense history on every step.
+- **Week 4 — What does an application demand from the inference stack?** The
+  draft coding-agent week uses multi-turn sessions to motivate cache reuse,
+  context compaction, rewind, interruption, and evaluation.
 
-The tiny-llm book is available at [https://skyzh.github.io/tiny-llm/](https://skyzh.github.io/tiny-llm/). You can follow the guide and start building.
+Week 2 follows one loop throughout:
+
+```text
+benchmark and profile -> find the next bottleneck -> optimize -> measure again
+```
+
+This matters more than any individual kernel. An optimization stays because a
+whole-model benchmark supports it, not because it sounds useful in isolation.
+
+## Why MLX and Qwen3?
+
+Apple silicon provides a practical local environment with one shared memory
+space and direct access to Metal kernels. Students can inspect the complete
+path on one machine instead of depending on a remote CUDA setup.
+
+Qwen3-4B is large enough to expose real weight-bandwidth, attention, and cache
+costs, but small enough to iterate on locally. Its grouped-query attention,
+QK normalization, BF16 activations, and 4-bit weights also keep the exercises
+close to current model-serving work.
+
+## Start Here
+
+The book is published at
+[skyzh.github.io/tiny-llm](https://skyzh.github.io/tiny-llm/). Begin with the
+[environment setup](https://skyzh.github.io/tiny-llm/setup.html), or verify an
+existing checkout with:
+
+```bash
+pdm install -v
+pdm run check-installation
+pdm run test-refsol -- -- -k week_1
+```
+
+The `tiny_llm` package is where students implement the exercises.
+`tiny_llm_ref` contains the reference solution used by the tests and benchmark
+appendix. The detailed chapter order and current status live in the
+[book summary](book/src/SUMMARY.md).
+
+## Project Status
+
+Week 1 is the stable foundation. Weeks 2 and 3 are being revised around the
+profile-driven optimization and continuous-serving progression. Week 4 is a
+design draft and is not yet part of the rendered daily course.
 
 ## Community
 
-You may join skyzh's Discord server and study with the tiny-llm community.
+Join skyzh's Discord server to study with the tiny-llm community.
 
 [![Join skyzh's Discord Server](book/src/discord-badge.svg)](https://skyzh.dev/join/discord)
-
-## Roadmap
-
-Chapters substantially revised in this PR are marked as work in progress even
-when they build on original course material. Unchanged chapters retain their
-existing status, and all Week 4 application material remains work in progress.
-
-| Week + Chapter | Topic                                                       | Code | Test | Doc |
-| -------------- | ----------------------------------------------------------- | ---- | ---- | --- |
-| 1.1            | Attention                                                   | ✅    | ✅   | ✅  |
-| 1.2            | RoPE                                                        | ✅    | ✅   | ✅  |
-| 1.3            | Grouped Query Attention                                     | ✅    | ✅   | ✅  |
-| 1.4            | RMSNorm and MLP                                             | ✅    | ✅   | ✅  |
-| 1.5            | Load the Model                                              | ✅    | ✅   | ✅  |
-| 1.6            | Generate Responses (aka Decoding)                           | ✅    | ✅   | ✅  |
-| 1.7            | Sampling                                                    | ✅    | ✅   | ✅  |
-| 2.1            | KV Cache                                                     | ✅    | ✅   | 🚧  |
-| 2.2            | Benchmarking and the MLX Baseline                            | 🚧    | 🚧   | 🚧  |
-| 2.3            | Quantized Matvec                                             | ✅    | ✅   | 🚧  |
-| 2.4            | Fused Decode Attention                                       | 🚧    | 🚧   | 🚧  |
-| 2.5            | Fast Model Kernels                                           | 🚧    | 🚧   | 🚧  |
-| 2.6            | SIMD-Matrix Prefill                                          | ✅    | ✅   | 🚧  |
-| 3.1            | Continuous Batching                                           | ✅    | ✅   | 🚧  |
-| 3.2            | Chunked Prefill                                               | ✅    | ✅   | 🚧  |
-| 3.3            | Paged KV Cache                                                | ✅    | ✅   | 🚧  |
-| 3.4            | Direct Paged Attention                                        | ✅    | ✅   | 🚧  |
-| 3.5            | Paged FlashAttention                                          | ✅    | ✅   | 🚧  |
-| 3.6 (optional) | MoE (Mixture of Experts)                                     | ✅    | ✅   | ✅  |
-| 3.7 (optional) | Serving Performance Lab                                       | 🚧    | 🚧   | 🚧  |
-| 3.x (optional) | Speculative Decoding                                          | 🚧    | 🚧   | 🚧  |
-| 4.1            | Agent Loop                                                    | 🚧    | 🚧   | 🚧  |
-| 4.2            | Tools                                                         | 🚧    | 🚧   | 🚧  |
-| 4.3            | Safety and Validation                                         | 🚧    | 🚧   | 🚧  |
-| 4.4            | Interactive Sessions                                          | 🚧    | 🚧   | 🚧  |
-| 4.5            | Context Compaction                                            | 🚧    | 🚧   | 🚧  |
-| 4.6            | Control and Recovery                                          | 🚧    | 🚧   | 🚧  |
-| 4.7            | Evaluation                                                    | 🚧    | 🚧   | 🚧  |
-
-Other topics not covered: quantized/compressed KV cache, cross-request prefix/prompt cache, fine-tuning, and long-context techniques.
