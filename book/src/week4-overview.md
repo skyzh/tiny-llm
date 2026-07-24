@@ -82,6 +82,13 @@ The append-only event log remains the source of truth. A process restart may
 always rebuild KV state from events, so persisting K/V to disk is an optional
 optimization rather than a correctness requirement.
 
+The course Qwen3-4B context budget is 32,768 total tokens. Day 5 starts
+compaction at 24,576 input tokens and keeps the remaining 8,192 tokens for the
+next response and tool output. This limit follows the model's pretrained range,
+not the amount of unified memory available; the full derivation and long-context
+measurements are in the
+[performance appendix](./appendix-performance.md#long-context-budget-for-week-4).
+
 ## A Small Tool Surface
 
 The target agent uses four tools inspired by small coding-agent harnesses:
@@ -115,7 +122,7 @@ changing the model kernels.
 | 2 | Tools | The agent can read, edit, write, and run a bounded command. |
 | 3 | Safety and validation | Mutations are confined, reviewable, and followed by validation. |
 | 4 | Interactive sessions | Follow-up turns reuse compatible KV state, and durable work survives process exit. |
-| 5 | Compaction | Long sessions retain useful context and reconcile the cache to the compacted prompt. |
+| 5 | Compaction | Sessions compact before 24,576 input tokens and reconcile the cache to the new prompt. |
 | 6 | Control and recovery | The user can steer, interrupt, checkpoint, rewind, and undo. |
 | 7 | Evaluation | The agent fixes a small bug and passes held-out tests. |
 

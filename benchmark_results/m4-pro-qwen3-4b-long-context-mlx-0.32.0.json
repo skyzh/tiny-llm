@@ -1,0 +1,96 @@
+{
+  "benchmark": "MLX fused decode attention at Qwen3-4B shapes",
+  "qualification": "Synthetic operator stress test; not an end-to-end model-quality claim.",
+  "mlx_version": "0.32.0",
+  "device": {
+    "device_name": "Apple M4 Pro",
+    "max_recommended_working_set_size": 55662788608,
+    "memory_size": 68719476736,
+    "architecture": "applegpu_g16s",
+    "max_buffer_length": 41747087360,
+    "resource_limit": 499000
+  },
+  "shape": {
+    "batch": 1,
+    "query_tokens": 1,
+    "query_heads": 32,
+    "kv_heads": 8,
+    "head_dim": 128,
+    "layers": 36,
+    "dtype": "bfloat16"
+  },
+  "method": {
+    "warmup": 3,
+    "iterations_per_process": 15,
+    "fresh_processes": 3,
+    "statistic": "median of synchronized per-process medians"
+  },
+  "results": [
+    {
+      "context_tokens": 2048,
+      "bf16_kv_gib": 0.28125,
+      "process_medians_ms_per_layer": [
+        0.2742919896263629,
+        0.1422090281266719,
+        0.14195800758898258
+      ],
+      "median_ms_per_layer": 0.1422090281266719,
+      "attention_only_decode_ceiling_tok_s": 195.33062101398284
+    },
+    {
+      "context_tokens": 8192,
+      "bf16_kv_gib": 1.125,
+      "process_medians_ms_per_layer": [
+        0.3366250020917505,
+        0.28316600946709514,
+        0.28720797854475677
+      ],
+      "median_ms_per_layer": 0.28720797854475677,
+      "attention_only_decode_ceiling_tok_s": 96.71659512567842
+    },
+    {
+      "context_tokens": 32768,
+      "bf16_kv_gib": 4.5,
+      "process_medians_ms_per_layer": [
+        0.9342920093331486,
+        0.9174170263577253,
+        0.912457995582372
+      ],
+      "median_ms_per_layer": 0.9174170263577253,
+      "attention_only_decode_ceiling_tok_s": 30.278245312341177
+    },
+    {
+      "context_tokens": 65536,
+      "bf16_kv_gib": 9.0,
+      "process_medians_ms_per_layer": [
+        1.7089169996324927,
+        1.7831250152084976,
+        1.7279169987887144
+      ],
+      "median_ms_per_layer": 1.7279169987887144,
+      "attention_only_decode_ceiling_tok_s": 16.075875054907296
+    },
+    {
+      "context_tokens": 131072,
+      "bf16_kv_gib": 18.0,
+      "process_medians_ms_per_layer": [
+        3.5889589926227927,
+        3.664332994958386,
+        3.6509579804260284
+      ],
+      "median_ms_per_layer": 3.6509579804260284,
+      "attention_only_decode_ceiling_tok_s": 7.608353184754102
+    },
+    {
+      "context_tokens": 300000,
+      "bf16_kv_gib": 41.19873046875,
+      "process_medians_ms_per_layer": [
+        9.49462500284426,
+        9.231541014742106,
+        9.735875006299466
+      ],
+      "median_ms_per_layer": 9.49462500284426,
+      "attention_only_decode_ceiling_tok_s": 2.9256318990435664
+    }
+  ]
+}

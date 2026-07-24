@@ -49,6 +49,90 @@ The measured machine below is an Apple M4 Pro with a 20-core GPU and 64 GB of
 memory. Static Week 2 rows use two complete warmups; the continuous-serving
 rows use one. Both report the median of three fresh alternating processes.
 
+## Long-Context Budget for Week 4
+
+Context length has separate model, memory, and latency limits. For the course
+Qwen3-4B checkpoint, one token of BF16 K/V state occupies
+
+```text
+36 layers * 2 (K and V) * 8 KV heads * 128 values * 2 bytes
+    = 147,456 bytes = 144 KiB per token
+```
+
+The checkpoint declares `max_position_embeddings = 65,536`, but its
+`rope_scaling` field is empty. Qwen documents that Qwen3 was pretrained through
+[32,768 tokens](https://github.com/QwenLM/Qwen3/blob/main/docs/source/deployment/vllm.md#context-length)
+and recommends RoPE scaling for substantially longer inputs. The unmodified
+course model therefore has a 32,768-token validated limit even though its
+configuration permits a larger position experiment.
+
+Memory is not the binding limit on the measured 64 GB M4 Pro. MLX reports a
+51.84 GiB recommended GPU working set, and the quantized checkpoint occupies
+1.99 GiB. Reserving 8 GiB for activations, allocator slack, and outputs gives
+
+```text
+floor((51.84 GiB - 1.99 GiB - 8 GiB) / 144 KiB) = 304,738 tokens
+```
+
+That estimate is a capacity calculation, not permission to exceed the model's
+trained range. The course limit is the minimum of the limits:
+
+```text
+min(32,768 trained, 65,536 configured, 304,738 memory) = 32,768 tokens
+```
+
+Week 4 uses 32,768 total tokens as its hard context budget. It starts
+compaction before the rendered input exceeds 24,576 tokens, reserving 8,192
+tokens for the next model response and a large tool result. The tokenizer must
+count the complete rendered request, including system instructions and tool
+schemas.
+
+### What Becomes Slow at 300K
+
+FlashAttention removes the quadratic score-matrix allocation; it does not
+remove the work. Full-attention prefill remains quadratic in context length,
+so 300K contains about 84 times the attention work of 32K. One-token decode
+must read a linearly growing K/V history at every layer.
+
+The following synthetic operator sweep uses MLX 0.32.0, one Qwen3-4B-shaped
+BF16 decode query, three fresh processes, and the median of fifteen synchronized
+dispatches per process. The final column sums the isolated layer latency across
+36 layers and is an optimistic attention-only ceiling; a complete model must
+also run projections, normalization, sampling, and cache updates.
+
+| Context | Full-model BF16 KV | MLX SDPA per layer | Attention-only decode ceiling |
+|---:|---:|---:|---:|
+| 2,048 | 0.28 GiB | 0.14 ms | 195.33 tok/s |
+| 8,192 | 1.12 GiB | 0.29 ms | 96.72 tok/s |
+| 32,768 | 4.50 GiB | 0.92 ms | 30.28 tok/s |
+| 65,536 | 9.00 GiB | 1.73 ms | 16.08 tok/s |
+| 131,072 | 18.00 GiB | 3.65 ms | 7.61 tok/s |
+| 300,000 | 41.20 GiB | 9.49 ms | 2.93 tok/s |
+
+The 300K operator allocation runs on this M4 Pro, but an end-to-end 300K run of
+the course checkpoint would be outside its configured and pretrained range,
+would leave little working-set headroom, and would make initial prefill
+impractical. It is useful as a kernel stress test, not as a supported course
+context.
+
+MLX contains several long-context optimizations. Its fused GQA decode path
+automatically switches to a context-partitioned two-pass reduction; the
+[0.30.4 release](https://github.com/ml-explore/mlx/releases/tag/v0.30.4)
+specifically calls out faster long-context vector GQA. Multi-token attention
+uses a tiled fused path, and MLX-LM chunks prompt evaluation to bound temporary
+activations. MLX-LM also offers prompt-prefix reuse, a rotating fixed-size
+cache, and quantized KV storage. Prefix reuse helps repeated prompts; cache
+rotation changes full-attention semantics; and KV quantization trades numerical
+precision and sometimes speed for capacity. None makes the first full 300K
+prefill linear-time.
+
+Reproduce the operator sweep with:
+
+```bash
+pdm run bench-long-context-attention \
+  --json-output benchmark_results/m4-pro-qwen3-4b-long-context-mlx-0.32.0.json
+```
+
 ## Dependency Upgrade
 
 The project upgraded from MLX 0.29.1 to 0.32.0 and from the mlx-lm 0.28 series
