@@ -107,8 +107,8 @@ These values assume peak advertised bandwidth, one read of every projection
 weight, and no other traffic or work. Actual throughput is lower because the
 complete model also reads activations and KV, launches other operators, and
 does not sustain peak bandwidth continuously. The
-[performance appendix](./appendix-performance.md) records measured course and
-MLX results separately from this theoretical exercise.
+[performance appendix](./appendix-performance.md) records measured
+reference-solution and MLX results separately from this theoretical exercise.
 
 ### Why This Does Not Predict a 4× Prefill Gain
 
@@ -164,8 +164,8 @@ For each group of G consecutive values in a row:
 ```
 
 All required quantized-matmul tests use `group_size = 128` and BF16 scales,
-biases, activations, and outputs. Normalize those tensors to BF16 when loading
-the course model so every later kernel receives one model dtype.
+biases, activations, and outputs. Normalize those tensors to BF16 in your
+solution's model loader so every later kernel receives one model dtype.
 
 ### Affine Quantization
 
@@ -360,7 +360,7 @@ Day 3 implementation readable.
 
 Register quantized matrix multiplication as an MLX C++ extension. Follow the
 existing `axpby` example for array validation, lazy primitive construction,
-bindings, and Metal dispatch. The course implementation is GPU-only; its
+bindings, and Metal dispatch. Your solution is GPU-only; its
 `eval_cpu` method should raise a clear unsupported-device error.
 
 ```
@@ -399,8 +399,9 @@ src/extensions/src/quantized_matmul.cpp
 ```
 
 Write the Metal kernels and connect `eval_gpu` to them. The Python
-`quantized_matmul` wrapper always dispatches this course-owned primitive on
-GPU; the required path never routes through `mx.quantized_matmul`.
+`quantized_matmul` wrapper always dispatches the primitive you implement on
+GPU; the required path in your solution never routes through
+`mx.quantized_matmul`.
 
 Do this in two measured stages. They expose the same math but schedule
 different shapes differently:
@@ -477,7 +478,7 @@ validate the layout in the C++ primitive before encoding the kernel. Metal
 receives raw buffers rather than implicit array strides, so layout is a
 correctness condition as well as a performance condition.
 
-Use direct activation reads for the course kernel. The one-row activation is
+Use direct activation reads for your kernel. The one-row activation is
 small and cache-friendly, while staging it in threadgroup memory adds a barrier
 to every projection. If you test shared staging as an ablation, report the
 whole-model result and keep it only when reuse outweighs synchronization.
@@ -489,7 +490,7 @@ Implement both required kernel layouts in `quantized_matmul.metal`:
 - First, implement the vanilla one-thread-per-output matrix grid.
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
-- The required kernel supports `bfloat16_t` inputs and outputs. The course
+- The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
   - Iterate over groups of 128 values.
@@ -502,7 +503,7 @@ The custom kernel only needs to support `bits = 4` and `group_size = 128`. Use
 the group size to compute `groups_per_row` and the packed-weight offsets.
 Instantiate the required Metal kernel for `bfloat16_t` and select it in
 `eval_gpu`. If you retain an optional `half` specialization, keep it out of the
-course-model dispatch.
+model dispatch in your solution.
 
 ### GPU Dispatch
 
@@ -520,7 +521,7 @@ pattern:
    two-packed-word kernel with two SIMD groups.
 5. Dispatch with `dispatchThreadgroups`.
 
-You can test your implementation by running:
+You can test your solution by running:
 
 ```bash
 pdm run build-ext
@@ -561,14 +562,14 @@ Preserve the quantized layer's parameters as well. The model should pass
 `w.group_size` and `w.bits` to the extension, which should validate the course
 assumptions: `group_size = 128` and `bits = 4`.
 
-You can test your implementation by running:
+You can test your solution by running:
 
 ```bash
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint quantized-matvec --model qwen3-4b
 ```
 
-You can also benchmark throughput and compare your implementation with the reference solution:
+You can also benchmark your solution:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
@@ -576,6 +577,9 @@ pdm run bench --solution tiny_llm --loader week2 \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```
+
+Run the same command with `--solution tiny_llm_ref` to compare it with the
+reference solution.
 
 Compare this result with the Day 1 `kv-cache` row. Do not start the decode
 attention chapter until the complete model uses packed weights and the

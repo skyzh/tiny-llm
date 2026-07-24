@@ -140,13 +140,14 @@ Use these design rules:
    reserve most of a threadgroup for query rows that do not exist.
 3. For prefill, begin with a direct page-walking schedule whose address
    calculation is easy to validate.
-4. Use the readable MLX equation and dense Week 2 kernel as correctness
-   oracles for the new page-walking schedule.
+4. Use the readable equation written with `mlx.core` and the dense Week 2
+   attention kernel in your solution as correctness oracles for the new
+   page-walking schedule.
 
 Start with this dispatch plan and treat its thresholds as values to verify on
 your hardware:
 
-| Shape | Course-owned dispatch | Work decomposition |
+| Shape | Dispatch in your solution | Work decomposition |
 |---|---|---|
 | `L <= 8` | Vector paged decode | One threadgroup per query row; 32 SIMD groups stride over the context and merge partial `(max, sum, output)` states. |
 | `L > 8` | Direct paged prefill | Walk logical K/V tiles through the block table and keep the schedule deliberately inspectable. Day 5 optimizes it. |
@@ -167,7 +168,7 @@ def paged_attention(...):
     ...
 ```
 
-For this course implementation, make it a correctness-first page-walking
+In your solution, make it a correctness-first page-walking
 Metal kernel with online softmax:
 
 1. use `block_table[b]` to find the physical pages for request `b`,
@@ -291,7 +292,7 @@ Implement two correctness-first GPU dispatches:
 
 1. For `L <= 8`, partition logical context positions across SIMD groups and
    merge their partial `(max, sum, output)` states in threadgroup memory. The
-   course schedule uses 32 SIMD groups per query. Resolve the physical page
+   initial schedule uses 32 SIMD groups per query. Resolve the physical page
    once, then let group `g` visit slots `g`, `g + 32`, `g + 64`, and so on
    within that page; do not divide and reload `block_table` for every token.
 2. For longer queries, assign query rows to a direct page-walking schedule and
@@ -300,8 +301,9 @@ Implement two correctness-first GPU dispatches:
    whole tile. Favor inspectable ownership over the final tiled performance
    schedule.
 
-Compare small deterministic fixtures with the readable MLX equation and the
-dense Week 2 attention path before tuning the page-walking schedule.
+Compare small deterministic fixtures with the readable equation written with
+`mlx.core` and the dense Week 2 attention path before tuning the page-walking
+schedule.
 
 For the final Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
 four contiguous dimensions of Q, K, V, and the output. After all context
@@ -312,15 +314,15 @@ of storing one full partial vector per scalar output thread. Keep a generic
 BF16 specialization for other head dimensions so the optimization cannot
 silently reinterpret `D = 32` as `D = 128`.
 
-### Course implementation boundary
+### Your solution's boundary
 
 MLX remains the array runtime for shapes, reshapes, transposes, contiguous
 storage, dtype conversion, allocation, and custom-primitive dispatch. The
-attention implementation itself must remain course-owned: do not call
+attention implementation itself must remain in your solution: do not call
 `mx.fast.scaled_dot_product_attention`, reuse an MLX attention/Steel kernel, or
 reconstruct dense K/V and express the paged operator as MLX matmul plus
 softmax. MLX SDPA may appear only in tests and benchmarks as an external
-correctness/performance reference.
+correctness oracle and performance baseline.
 
 Both prefill and decode read page storage through this interface. Do not add a
 dense-only special case: Day 5 optimizes this same paged contract.
@@ -374,9 +376,10 @@ sides of that trade.
 
 Record three operator baselines on the same machine:
 
-1. the dense course attention path, including any required K/V gather,
+1. the dense Week 2 attention path in your solution, including any required
+   K/V gather,
 2. your direct paged-attention path,
-3. the MLX attention path as a production-library reference.
+3. the MLX attention path as a production-library baseline.
 
 ### Checkpoint 1: Establish a Correct Direct Path
 
@@ -414,10 +417,10 @@ For each change, explain which cost it targets: memory traffic, synchronization,
 address calculation, or dispatch overhead. Keep a change only when the measured
 result supports the explanation.
 
-Optimize the course path for the Qwen head dimension of 128, but keep one
-grouped-query schedule rather than duplicating the online-softmax recurrence
-for individual GQA ratios. This keeps the relationship among page traversal,
-head mapping, and reduction visible in one kernel.
+Optimize the paged path in your solution for the Qwen head dimension of 128,
+but keep one grouped-query schedule rather than duplicating the online-softmax
+recurrence for individual GQA ratios. This keeps the relationship among page
+traversal, head mapping, and reduction visible in one kernel.
 
 ### Checkpoint 3: Evaluate the Serving System
 
@@ -427,7 +430,8 @@ end-to-end workload with requests entering and leaving the batch, then report:
 - time per decode step and aggregate tokens per second,
 - peak KV-cache memory and the number of live requests admitted,
 - bytes or time spent gathering and repacking K/V,
-- paged-attention latency relative to the dense course path and MLX.
+- paged-attention latency relative to the dense Week 2 path in your solution
+  and MLX.
 
 Keep the dense path as a teaching ablation so you can measure when contiguous
 attention is faster. The completed serving route stays paged: it eliminates

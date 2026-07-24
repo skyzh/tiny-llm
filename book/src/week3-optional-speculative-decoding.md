@@ -7,10 +7,10 @@ asks the target model to verify them in one call. Accepted draft tokens reduce
 the number of target-model decode steps without changing the target
 distribution.
 
-This course checkpoint implements **greedy** speculative decoding: draft tokens
-are accepted while they match the target model's greedy tokens. Extending the
-same loop to sampling requires the probability-correct acceptance and residual
-sampling rules; simple token equality is not enough.
+This checkpoint in your solution implements **greedy** speculative decoding:
+draft tokens are accepted while they match the target model's greedy tokens.
+Extending the same loop to sampling requires the probability-correct acceptance
+and residual sampling rules; simple token equality is not enough.
 
 ## Objectives
 

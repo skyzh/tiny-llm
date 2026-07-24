@@ -91,8 +91,8 @@ The Qwen path uses 128-token pages and a 32-token K/V tile. An aligned tile is
 therefore physically contiguous even when the logical sequence as a whole is
 not. Assign each thread contiguous elements through a cooperative block loader
 so adjacent lanes issue coalesced reads. Keep a generic loader for a tile that
-crosses a page boundary. You may use MLX's low-level Steel block-loader header
-for this load primitive, while the course implementation owns the page
+crosses a page boundary. Your Metal kernel may use MLX's low-level Steel
+block-loader header for this load primitive, while your solution owns the page
 translation, tile schedule, online softmax, primitive, and dispatch. It does
 not instantiate MLX attention.
 
@@ -133,7 +133,8 @@ optimization.
 
 Use the GPU-debugging ladder from Week 2 Day 2:
 
-1. compare Day 4 page-walking attention with the readable MLX equation;
+1. compare Day 4 page-walking attention with the readable equation written
+   with `mlx.core`;
 2. compare paged FlashAttention with the Day 4 path;
 3. only then benchmark the tiled kernel.
 

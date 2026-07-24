@@ -168,8 +168,8 @@ MLX arrays are functional and lazily evaluated. Writing
 the entire page tensor; a small slice in Python does not guarantee a
 slice-sized device update.
 
-Implement `paged_cache_update` as a small course extension primitive. Its
-output aliases the existing page buffer, and its Metal grid
+Implement `paged_cache_update` as a small extension primitive in your solution.
+Its output aliases the existing page buffer, and its Metal grid
 covers only `H * new_tokens * D` elements. Page storage is request state, so
 this mutation boundary is explicit and safe as long as the cache owns its page
 and attention depends on the returned array. Full-buffer copies remain only

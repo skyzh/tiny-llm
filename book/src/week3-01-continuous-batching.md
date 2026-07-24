@@ -89,7 +89,7 @@ batched_values[i, :, (S - S_i):S, :] = values_i
 mask[i, :, 0:L, (S - S_i):S] = causal_mask(L, S_i)
 ```
 
-You can verify your implementation by running:
+You can verify your solution by running:
 
 ```bash
 pdm run test --week 3 --day 1 -- -k task_2

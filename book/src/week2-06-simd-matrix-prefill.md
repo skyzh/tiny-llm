@@ -11,10 +11,10 @@ largest cost, so today we build a separate matrix schedule for them.
 Re-run the dependency-aware kernel profile from Day 2 with
 `--case swiglu:prefill:128`. Continue only when projections dominate the
 attribution and the complete-model prefill phase moves with their latency. The
-[reference profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+[reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 shows that evidence chain. MLX remains an external performance denominator;
-the required path continues to call the course-owned C++/Metal primitive for
-every projection.
+the required path in your solution continues to call the C++/Metal primitive
+you implement for every projection.
 
 The implementation remains deliberately narrow:
 
@@ -57,9 +57,9 @@ The 40-element shared-memory stride pads the 32-value rows to avoid an
 unhelpful bank-access pattern. Tail rows and columns are zero-filled or guarded
 at the final store.
 
-Use MLX's low-level Steel `BlockLoader` and `BlockMMA` headers as Metal building
-blocks. Those helpers provide cooperative loads and matrix-fragment
-bookkeeping. The course still owns the W4A16 unpacking,
+Your Metal kernel may use MLX's low-level Steel `BlockLoader` and `BlockMMA`
+headers as building blocks. Those helpers provide cooperative loads and
+matrix-fragment bookkeeping. Your solution still owns the W4A16 unpacking,
 dequantization, tile layout, primitive, dispatch, split policy, and reduction;
 it does not call MLX's quantized-matmul operator.
 

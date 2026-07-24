@@ -23,14 +23,14 @@ prompt length from distorting the decode number.
 Choose the prefill workload before comparing implementations. Prompt scoring
 needs logits for every position, while serving needs only the final prompt
 logit. Use `--prefill-logits all` for the former and
-`--prefill-logits last` for the latter. The runner applies the choice to the
-course model and MLX alike. Never compare a final-row course run with an
+`--prefill-logits last` for the latter. The runner applies the choice to your
+solution and MLX alike. Never compare a final-row run from your solution with an
 all-row MLX run. Cached decode has `L = 1`, so `logits_to_keep=1` removes no
 decode work.
 
 Both sides of the Week 2 comparison use a KV cache: prefill the prompt
 once, then pass only the newly generated token on each decode step. Comparing a
-cached MLX baseline with a course model that recomputes the full prefix would
+cached MLX baseline with your solution recomputing the full prefix would
 measure two different algorithms and make the kernel target meaningless. Day 1
 already produced the cached readable model used as this week's starting point.
 
@@ -55,12 +55,13 @@ pdm run test --week 2 --day 2
 
 ## Debug Metal Without a CPU Twin
 
-From Day 3 onward, the course extensions are GPU-only. A second C++ CPU
-implementation would duplicate the equation without exercising the dispatch,
-memory, or synchronization behavior that makes a Metal kernel fail. Use this
-three-level validation ladder instead:
+From Day 3 onward, the extensions in your solution are GPU-only. A second C++
+CPU implementation would duplicate the equation without exercising the
+dispatch, memory, or synchronization behavior that makes a Metal kernel fail.
+Use this three-level validation ladder instead:
 
-1. Write the equation in readable Python/MLX. This is the semantic oracle.
+1. Write the equation in readable Python with `mlx.core`. This is the semantic
+   oracle.
 2. Translate it into a deliberately simple Metal kernel, usually with one
    thread responsible for one output element.
 3. Optimize the validated Metal kernel with SIMD groups, vectorized loads, or
@@ -116,8 +117,8 @@ kernels agree with the readable oracle.
 
 The isolated benchmarks use the same rule. Evaluate input setup
 before invoking the benchmark fixture so setup does not leak into the result.
-The Week 2 operator ladder compares the readable implementation, the optimized
-course implementation, and MLX at the selected model's real tensor shapes:
+The Week 2 operator ladder compares the readable equation, the optimized kernel
+in your solution, and MLX at the selected model's real tensor shapes:
 
 ```bash
 pdm run bench-week2-operators --model qwen3-4b --context 128
@@ -127,11 +128,11 @@ Choose enough warmup iterations to exclude compilation, synchronize every
 timed iteration, and repeat the run in fresh processes. Report the median with
 the exact hardware, dependency versions, model, and tensor shapes. The
 [performance appendix](./appendix-performance.md) applies this protocol to the
-course reference checkpoints and keeps the resulting machine-specific numbers
+reference-solution checkpoints and keeps the resulting machine-specific numbers
 in one place.
 
-To rank complete model work without requiring a GUI, replay the actual course
-kernel groups at Qwen3-4B shapes and dispatch counts:
+To rank complete model work without requiring a GUI, replay the actual
+reference-solution kernel groups at Qwen3-4B shapes and dispatch counts:
 
 ```bash
 pdm run profile-week2-kernels --model qwen3-4b \
@@ -151,7 +152,7 @@ materialization that a complete lazy graph may fuse, while a capture adds its
 own overhead. Use the profile to rank kernel groups, then require the ordinary
 fresh-process model benchmark to confirm the change. The
 [performance appendix](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
-contains the reference flame chart and raw-result path.
+contains the reference-solution flame chart and raw-result path.
 
 ## Attribute Time With a Real GPU Profile
 
@@ -198,8 +199,7 @@ total and the complete-model phase time move in the same direction.
 ## Record a Matched Baseline
 
 Use the same model, prompt length, output length, device, and warmup count for
-your implementation and the MLX run. Replace `tiny_llm` with `tiny_llm_ref` to
-compare against the course reference:
+your solution and MLX:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
@@ -213,6 +213,9 @@ pdm run bench --solution mlx --loader week2 --model qwen3-4b \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last
 ```
+
+Use `--solution tiny_llm_ref` with the same arguments when you want to compare
+your solution with the reference solution instead of MLX.
 
 Or run the complete cumulative ladder in fresh processes. At this point, only
 the Week 1, KV-cache, and MLX rows are course prerequisites; later rows become
@@ -237,16 +240,16 @@ denominator forward.
 The Week 2 targets are:
 
 ```plain
-reference prefill throughput / MLX prefill throughput >= 0.80
-reference decode throughput / MLX decode throughput >= 0.80
+your solution's prefill throughput / MLX prefill throughput >= 0.80
+your solution's decode throughput / MLX decode throughput >= 0.80
 ```
 
 The prefill ratio is also 0.80; both ratios use Qwen3-4B, a 128-token prompt,
 128 timed decode steps, and last-row logits. `--output-len 129` includes the
 first token produced by prefill. Reaching 80% is the acceptance threshold, not
 a promise that every educational kernel individually matches its MLX
-counterpart. MLX is the comparison baseline; the Week 2 solution must reach
-both targets with course-owned operator implementations. If either ratio
+counterpart. MLX is the comparison baseline; your solution must reach both
+targets with its own operator implementations. If either ratio
 misses, the next chapter starts from the new benchmark and profile rather than
 a predetermined optimization.
 

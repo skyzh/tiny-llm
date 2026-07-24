@@ -7,6 +7,11 @@ Qwen3 path for single-request decoding. It begins by changing the algorithm:
 prefill once, retain a dense KV cache, and decode one new token at a time. Only
 then does a matrix-vector kernel describe the workload we are optimizing.
 
+Throughout this week, **MLX** means the framework or its production operators,
+the **reference solution** means the checked-in `tiny_llm_ref` implementation,
+and **your solution** means the code you write in `tiny_llm`. These names are
+not interchangeable.
+
 Every later chapter starts from the runnable checkpoint produced by the
 previous chapter. The working loop is always:
 
@@ -24,17 +29,17 @@ Week 2 inherits Week 1's BF16 model-storage contract. Dense and quantized
 weights, activations, projections, KV-cache entries, and model-facing kernel
 outputs are BF16. Numerically sensitive reductions, dot products, and
 online-softmax state accumulate in FP32 inside readable expressions or kernel
-registers. Week 2 extensions are GPU-only: readable Python/MLX equations and
-vanilla Metal kernels provide correctness references without requiring CPU BF16
-support. This contract remains in force for Week 3, so later chapters only
-describe new storage and scheduling behavior.
+registers. Week 2 extensions are GPU-only: readable Python equations written
+with `mlx.core` and vanilla Metal kernels provide correctness oracles without
+requiring CPU BF16 support. This contract remains in force for Week 3, so later
+chapters only describe new storage and scheduling behavior.
 
 ## What We Will Cover
 
 - A dense per-request key-value cache for incremental decoding
 - Synchronized benchmarking and Metal profiling of the cached baseline
 - A readable quantized matrix product and a SIMD matrix-vector decode kernel
-- The course-owned decode-attention primitive
+- The decode-attention primitive you implement
 - Fast RMSNorm, RoPE, and SwiGLU operations
 - A BF16 SIMD-matrix quantized prefill kernel
 - A shape-aware split-K schedule for small Qwen prefill matrices
@@ -43,8 +48,8 @@ describe new storage and scheduling behavior.
   fixed Week 2 checkpoint
 
 Week 2 does **not** call MLX-provided implementations of the operators we are
-learning. The required path implements quantized matmul, decode attention,
-RMSNorm, RoPE, and SwiGLU in course-owned Python, C++, or Metal code. In
+learning. Your solution implements quantized matmul, decode attention,
+RMSNorm, RoPE, and SwiGLU in its own Python, C++, or Metal code. In
 particular, the completed checkpoint does not use `mx.quantized_matmul`,
 `mx.dequantize`, `mx.fast` operators, or
 `mx.fast.scaled_dot_product_attention` as shortcuts. The Day 1 baseline still
@@ -55,8 +60,8 @@ packed.
 We are still building on MLX as infrastructure. `mlx_lm` loads the official
 Qwen3-4B 4-bit checkpoint and tokenizer. `mlx.core` supplies arrays, lazy graph
 evaluation, memory management, device streams, and synchronization. The MLX
-extension API registers our C++ primitive and dispatches our Metal kernels.
-Those facilities are the platform on which the course implementation runs;
+extension API registers your C++ primitive and dispatches your Metal kernels.
+Those facilities are the platform on which your solution runs;
 they are not substitutes for the operator implementations themselves.
 
 The order is intentional:
@@ -65,7 +70,7 @@ The order is intentional:
    request-scoped state, and stop recomputing the prefix.
 2. **Benchmark and profile:** measure the cached model against MLX, then rank
    real GPU costs rather than guessing what should be slow. The
-   [reference attribution](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+   [reference-solution attribution](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
    records the bottleneck transition that drives the remaining days.
 3. **Quantized matvec:** the decode profile points at projection weight reads,
    so keep weights packed and integrate the SIMD matrix-vector kernel. Reprofile
@@ -136,10 +141,11 @@ Week 2's single-request interactive scope. Publish 2K and longer context sweeps
 as diagnostics too; they expose the dense-attention boundary that motivates
 Week 3, but do not silently replace the fixed acceptance denominator.
 
-The default runs the reference checkpoints. After implementing the cumulative
-selector in your model, add `--solution tiny_llm` to measure your own complete
-ladder. Preserve the named checkpoints as you work; a later implementation
-should add a new branch without changing what an earlier checkpoint executes.
+The default runs the reference-solution checkpoints. After implementing the
+cumulative selector in your solution, add `--solution tiny_llm` to measure your
+complete ladder. Preserve the named checkpoints as you work; a later
+implementation should add a new branch without changing what an earlier
+checkpoint executes.
 
 {{#include copyright.md}}
 

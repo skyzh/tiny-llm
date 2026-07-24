@@ -24,8 +24,8 @@ pdm run bench-serving-progression --offline --repeats 3 \
   --prefill-step 128 --json-output serving-qwen3-4b.json
 ```
 
-`--prefill-logits last` is a generation-serving workload: both the course and
-MLX project only the last prompt row into vocabulary logits. Use
+`--prefill-logits last` is a generation-serving workload: both the reference
+solution and MLX project only the last prompt row into vocabulary logits. Use
 `--prefill-logits all` for prompt scoring, but never compare the two modes.
 Decode throughput excludes the first generated token because that token is
 produced by prefill.
@@ -45,7 +45,7 @@ not a paging acceptance test or a long-context proof. Use a context sweep:
 default, which is another reminder that benchmark lengths are conventions, not
 universal workloads. Always publish the exact prompt and output lengths.
 
-The reference machine below is an Apple M4 Pro with a 20-core GPU and 64 GB of
+The measured machine below is an Apple M4 Pro with a 20-core GPU and 64 GB of
 memory. Static Week 2 rows use two complete warmups; the continuous-serving
 rows use one. Both report the median of three fresh alternating processes.
 
@@ -88,11 +88,12 @@ it establishes the synchronized benchmark and profile that choose Day 3.
 
 ### The Kernel Profile That Selects Each Chapter
 
-The reference profile does not replace a course operator with an MLX operator.
-It calls the same course projection, attention, pointwise, and cache paths at
-Qwen3-4B shapes and replays each group at the model's real dispatch count. The
-projection replay preserves the transformer dependency order so work from a
-later MLP cannot hide an under-filled attention projection. Each category uses
+The reference-solution profile does not replace an operator with an MLX
+operator. It calls the projection, attention, pointwise, and cache paths from
+`tiny_llm_ref` at Qwen3-4B shapes and replays each group at the model's real
+dispatch count. The projection replay preserves the transformer dependency
+order so work from a later MLP cannot hide an under-filled attention
+projection. Each category uses
 one synchronization, and the median follows five warmups and fifteen samples:
 
 ```bash
@@ -170,9 +171,10 @@ is now met for decode, so the next profile switches to prefill.
 
 ### Day 6: Use Cooperative Loads for Quantized Prefill
 
-At the Day 5 prefill checkpoint, course projections account for 1,259.90 ms of
-the 1,272.06 ms attributed profile, or 99.0%. Attention accounts for 5.94 ms
-and normalization, position, and activation together account for 6.21 ms.
+At the Day 5 prefill checkpoint, projections in the reference solution account
+for 1,259.90 ms of the 1,272.06 ms attributed profile, or 99.0%. Attention
+accounts for 5.94 ms, and normalization, position, and activation together
+account for 6.21 ms.
 This direct profile selects quantized matrix multiplication without routing any
 model operation through MLX's quantized-matmul implementation.
 
@@ -180,7 +182,7 @@ Assign contiguous activation elements to adjacent lanes and stage them with
 aligned cooperative block loads. Combined with a 32×32×32 tile, this schedule
 makes the large Qwen3-4B projections essentially match MLX:
 
-| Projection at `M=2048` | Course | MLX |
+| Projection at `M=2048` | Reference solution | MLX |
 |---|---:|---:|
 | Q, `2560 -> 4096` | 6.66 ms | 6.72 ms |
 | K, `2560 -> 1024` | 1.84 ms | 1.85 ms |
@@ -279,10 +281,10 @@ chapter does not claim a short-chunk FlashAttention speedup.
 
 The 8K static run remains a secondary kernel diagnostic, not a Week 3 headline
 or acceptance result. At that shape, paged FlashAttention raises prefill from
-384.88 to 427.01 tok/s. MLX reaches 568.74 tok/s, so the page-aware course path
-reaches 75.1%. This explains where query tiling begins to help without mixing a
-static denominator into the serving progression. One-token decode continues
-to dispatch to the Day 4 vector schedule.
+384.88 to 427.01 tok/s. MLX reaches 568.74 tok/s, so the page-aware path in the
+reference solution reaches 75.1%. This explains where query tiling begins to
+help without mixing a static denominator into the serving progression.
+One-token decode continues to dispatch to the Day 4 vector schedule.
 
 The checked-in result
 `benchmark_results/m4-pro-qwen3-4b-mlx-0.32.0.json` contains the published
@@ -310,8 +312,8 @@ by this result.
 
 ## GPU Profile and CLI Tools
 
-The synchronized course-kernel attribution used above is available without a
-GUI:
+The synchronized reference-solution kernel attribution used above is available
+without a GUI:
 
 ```bash
 pdm run profile-week2-kernels --model qwen3-4b \
@@ -339,8 +341,8 @@ xcrun xctrace record \
 xcrun xctrace export --input /tmp/tiny-llm-decode.trace --toc
 ```
 
-The stock Metal System Trace exposes queues and command buffers on the
-reference machine, but its Shader Timeline is disabled and the selected Metal
+The stock Metal System Trace exposes queues and command buffers on the measured
+M4 Pro, but its Shader Timeline is disabled and the selected Metal
 GPU counter profile is unsupported. Use a compatible custom Instruments
 template or an MLX `.gputrace` capture for shader-level counters. Never infer
 ALU or bandwidth saturation from an unavailable counter, and do not use trace

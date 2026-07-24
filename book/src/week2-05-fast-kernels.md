@@ -8,9 +8,9 @@ RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
 1 expresses them as readable `mlx.core` equations. Confirm the cluster with the
 Day 2 kernel-group replay; the
-[reference profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+[reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 shows the expected transition. Week 2 keeps those implementations intact and
-writes three course-owned Metal kernels behind a separate interface:
+asks you to write three Metal kernels behind a separate interface:
 
 ```plain
 src/tiny_llm/week2_kernels.py
@@ -18,9 +18,10 @@ src/extensions/src/week2_kernels.cpp
 src/extensions/src/week2_kernels.metal
 ```
 
-We still use MLX arrays and its extension API. MLX schedules the graph node,
-owns its buffers, and dispatches the Metal function, but the arithmetic inside
-that function is ours. The required solution does not call `mx.fast.rms_norm`,
+Your solution still uses MLX arrays and its extension API. MLX schedules the
+graph node, owns its buffers, and dispatches the Metal function, but your
+solution owns the arithmetic inside that function. Your solution does not call
+`mx.fast.rms_norm`,
 `mx.fast.rope`, or an MLX-provided SiLU implementation.
 
 ## Why a Metal Kernel Helps
@@ -35,7 +36,7 @@ root, multiplies, casts again, and applies a learned weight. A compiler may fuse
 some adjacent element-by-element work, but the row reduction is a boundary. Intermediate
 values and multiple dispatches remain possible.
 
-A course-owned Metal kernel gives us explicit control over the whole model
+A Metal kernel in your solution gives you explicit control over the whole
 operator:
 
 - one dispatch replaces several graph operations;
@@ -166,8 +167,8 @@ Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
 inside a timed iteration when measuring these lazy operations.
 
-The operator benchmark must also compare the same logical RoPE layout. The
-course kernel accepts the model-native `B, L, H, D` tensor. `mx.fast.rope`
+The operator benchmark must also compare the same logical RoPE layout. Your
+RoPE kernel accepts the model-native `B, L, H, D` tensor. `mx.fast.rope`
 expects `B, H, L, D`, so transpose into that layout before the MLX call and
 transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the

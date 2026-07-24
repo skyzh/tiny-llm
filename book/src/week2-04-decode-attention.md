@@ -11,9 +11,10 @@ softmax, and another matrix multiplication. That is readable, but it
 materializes the complete score and probability rows.
 
 First write a readable composition to preserve the equation, then replace its
-matmuls and softmax with a course-owned online-softmax Metal kernel. Measure the
-complete model before deciding whether to retain the dispatch. The kernel does
-not call `mx.matmul` or an MLX-provided scaled-dot-product-attention
+matmuls and softmax with an online-softmax Metal kernel in your solution.
+Measure the complete model before deciding whether to retain the dispatch. The
+kernel does not call `mx.matmul` or an MLX-provided
+scaled-dot-product-attention
 implementation; MLX still provides arrays, streams, buffers, and extension
 dispatch.
 
@@ -91,7 +92,7 @@ conversion in registers avoids that cost.
 Use `fast::exp` for the rescale factors and compute each
 factor once before applying it to the denominator and all value dimensions.
 These ideas also appear in production vector-attention kernels, including MLX's
-SDPA sources. The course kernel reimplements the algorithm and scheduling in
+SDPA sources. Your kernel reimplements the algorithm and scheduling in
 its own Metal code; it does not include or instantiate the MLX kernel.
 
 ### Scheduling Experiment
@@ -113,7 +114,7 @@ tests and ablations. Week 3 later combines this recurrence with paged K/V and
 SIMD-matrix tiles for FlashAttention; prefill is a different workload where
 both query and context lengths are large.
 
-Set a concrete dispatch guard: use the course kernel only when query length is
+Set a concrete dispatch guard: use your Metal kernel only when query length is
 at most eight and cached context length is at most 256. Otherwise use the
 readable grouped-attention path. Keep this condition at the model call site so
 the benchmarked operating range remains reviewable instead of becoming a
@@ -133,7 +134,7 @@ Test grouped-query head mapping, output shape, causal behavior, and explicit
 masks against the readable Week 1 implementation. Use a tolerance because the
 online softmax changes the floating-point reduction order.
 
-Run the preceding checkpoint and the model with the new dispatch under
+Run the preceding checkpoint and your solution with the new dispatch under
 otherwise identical settings:
 
 ```bash
@@ -148,10 +149,10 @@ pdm run bench --solution tiny_llm --loader week2 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```
 
-The model dispatches short-query contexts through the course kernel and falls
-back to the exact readable Week 1 composition outside the validated range.
-Reprofile the retained path. If repeated pointwise and reduction dispatches
-become the largest remaining cluster, continue to Day 5; otherwise keep tuning
-the dominant measured cost.
+Your solution dispatches short-query contexts through your Metal kernel and
+falls back to the exact readable Week 1 composition outside the validated
+range. Reprofile the retained path. If repeated pointwise and reduction
+dispatches become the largest remaining cluster, continue to Day 5; otherwise
+keep tuning the dominant measured cost.
 
 {{#include copyright.md}}

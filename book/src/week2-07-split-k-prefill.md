@@ -74,7 +74,7 @@ decrease split_k until N is divisible by split_k * 128
 use Day 6 unchanged when split_k <= 1
 ```
 
-For the Qwen3-4B course checkpoint, use a target of roughly 320 threadgroups
+For the Qwen3-4B target, use roughly 320 threadgroups
 and a cap of 16 as explicit tuning parameters. They are not universal GPU
 properties. Unlike a hard-coded prompt-length cutoff, the grid calculation
 naturally stops splitting a narrow projection once more row tiles are present,
@@ -123,7 +123,7 @@ kernel instead of paying for partial storage and reduction.
 
 Run the fixed Week 2 acceptance workload from Day 2 after the shape sweep. The
 [performance appendix](./appendix-performance.md) is the single place for the
-reference machine, dependency versions, measured checkpoint table, and final
+measured hardware, dependency versions, checkpoint table, and final
 MLX ratios.
 
 The Week 2 loop is now complete:

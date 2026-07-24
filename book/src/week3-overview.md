@@ -9,6 +9,10 @@ and the runtime metadata needed to read noncontiguous K/V directly. The final
 model uses one page-aware attention interface with separate schedules for
 one-token decode and multi-token prefill.
 
+As in Week 2, **MLX** names the framework or its production operators, the
+**reference solution** names `tiny_llm_ref`, and **your solution** names the
+code you write in `tiny_llm`.
+
 ## What We’ll Cover
 
 - Continuous batching and request-slot reuse
@@ -26,8 +30,9 @@ page table directly with a correctness-first schedule. Day 5 then tiles that
 same page-walking operation with Week 2's matrix fragments. Page translation
 is therefore introduced before it is optimized.
 
-These five days form the required path. The final model runs paged
-FlashAttention for long prefill and the paged vector kernel for short queries.
+These five days form the required path in your solution. The final model in
+your solution runs paged FlashAttention for long prefill and the paged vector
+kernel for short queries.
 Both schedules read the same page pool through the same block-table interface;
 neither rebuilds dense K/V.
 

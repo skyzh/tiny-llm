@@ -226,7 +226,7 @@ decode:  _step(model, [8], 7)  # returns 9
 ...
 ```
 
-You can test your implementation with:
+You can test your solution with:
 
 ```bash
 pdm run main --solution tiny_llm --loader week2 \
