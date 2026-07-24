@@ -1,7 +1,11 @@
-# Week 3 Day 6 (Optional): Mixture of Experts
+# Week 3 Optional Extension: Mixture of Experts
 
 In this chapter, we will implement the feed-forward shape of **Mixture of
 Experts**, or **MoE**, for the Qwen3 family.
+
+This extension is optional. It changes the model's feed-forward layers but not
+the scheduler, paged cache, or attention contract, so students can complete the
+Week 3 serving engine without it.
 
 So far, every transformer block in tiny-llm has used the same dense Qwen3 MLP:
 

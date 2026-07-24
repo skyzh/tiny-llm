@@ -372,7 +372,7 @@ instructions must be faster.
 ### Tune the SIMD Schedule
 
 Treat output width, threadgroup size, and shared-memory reuse as benchmark
-variables. The retained host dispatch is:
+variables. Use this Qwen-focused starting point:
 
 - flatten all leading activation dimensions into `M`,
 - use the custom matvec when `M <= 8`,
@@ -381,34 +381,17 @@ variables. The retained host dispatch is:
 - launch two SIMD groups, or eight output rows, per threadgroup.
 
 These thresholds are measured starting points, not mathematical requirements.
-Keep them visible in the dispatcher, then vary one choice at a time. The older
-M1 Pro experiment below first selected the two-output schedule. A later M4 Pro
-Qwen3-4B profile showed ordinary course matvecs 9-33% behind MLX and justified
-retesting the schedule against MLX's current four-output, two-packed-word qmv
-shape. The first dispatcher incorrectly kept an eight-output/eight-SIMD-group
-special case for `K >= 8192`. End-to-end profiling showed that the wide output
-dimension did not justify its extra register and threadgroup pressure, so the
-same x4/two-group schedule is now used for the vocabulary head too.
+Keep them visible in the dispatcher, then vary one choice at a time. Compare
+two, four, and eight output columns per SIMD group. More columns increase
+activation reuse, but also extend accumulator lifetimes and raise register
+pressure. Compare two, four, eight, and sixteen SIMD groups per threadgroup.
+More groups expose additional outputs, but may duplicate activation reads and
+reduce residency.
 
-An additional pointer-streaming specialization measured only a small
-end-to-end improvement while duplicating the reduction loop. It is deliberately
-not retained. The x4 kernel is the one schedule students profile, test, and
-carry into the rest of the course.
-
-For output tiling, an older four-column experiment reduced full-model decode
-from about 249 to 232 tok/s because the extra accumulators increased register
-pressure. That result is why the chapter asks for a new whole-model measurement
-after every schedule change. On the current M4 Pro and MLX 0.32 baseline, four
-columns plus two SIMD groups wins for both ordinary and vocabulary projections;
-the eight-column alternative was removed from dispatch after it regressed the
-model benchmark.
-
-Apply the affine rearrangement selectively as well. An older two-output
-projection experiment fell from about 249 to 244.5 tok/s after this change.
-Fewer arithmetic operations do not imply a faster kernel when they extend
-register lifetimes or complicate scheduling. The retained x4 implementation
-keeps it because the masked-weight and activation-reuse schedule wins as a
-whole.
+Evaluate the affine rearrangement as part of the complete schedule. Its lower
+instruction count is useful only if the longer-lived activation sum and output
+accumulators do not reduce occupancy. Select the schedule with a synchronized
+whole-model decode benchmark, not an instruction-count estimate.
 
 At the Python-to-extension boundary, make scales, biases, activations, and
 packed weights row-contiguous once with `mx.contiguous`. The C++ primitive
@@ -417,16 +400,10 @@ raw buffers and strides are not implicit, so silently accepting a noncontiguous
 view would produce either wrong addressing or a slower hidden copy in a less
 explicit layer.
 
-Do not copy the 2 KB activation vector into threadgroup memory by default. On
-the reference machine, rereading this cache-hot vector avoided a barrier and
-raised decode from roughly 238.6 to 246-249 tok/s. Verify this result by adding
-the shared-memory variant as an ablation; it is a useful demonstration that
-reuse helps only when it costs less than synchronization.
-
-Finally, compare two, four, eight, and sixteen SIMD groups per threadgroup.
-The four-output path needs only two groups to cover eight output rows. More
-groups are not automatically better when they duplicate activation loads or
-reduce threadgroup residency.
+Use direct activation reads for the course kernel. The one-row activation is
+small and cache-friendly, while staging it in threadgroup memory adds a barrier
+to every projection. If you test shared staging as an ablation, report the
+whole-model result and keep it only when reuse outweighs synchronization.
 
 ### Direct Quantized Embedding Comes on Day 6
 

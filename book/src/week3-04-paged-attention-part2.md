@@ -1,14 +1,10 @@
-# 🚧 Week 3 Day 4: Paged Attention, Part 2
+# 🚧 Week 3 Day 4: Direct Paged Attention
 
 > 🚧 This chapter is under review and may change.
 
-In this chapter, we move from **paged KV storage** to the runtime metadata and execution path needed for **real paged attention**.
-
-Part 1 introduced fixed-size pages, one model-owned physical pool per layer,
-and request-local page metadata. That change already improves the storage
-abstraction, but it does not yet remove the dense gather before attention. To
-get the full benefit, the attention path itself must understand how to read
-from pages.
+In this chapter, we will build **direct paged attention**. The scheduler passes
+request-local block tables and context lengths to a GPU kernel, which reads K/V
+from the shared layer pool without gathering a dense batch first.
 
 > **Prerequisite:** Complete Week 3 Day 3's paged storage and Week 2 Day 4's
 > online-softmax attention. The new concept here is translating logical K/V
@@ -72,7 +68,7 @@ The attention runtime does not need a fully gathered dense tensor if it already 
 
 That is exactly what `block_table` and `context_lens` encode.
 
-## The Real Attention API
+## The Paged Attention API
 
 At this point, the runtime should grow a new attention entry point:
 
@@ -99,7 +95,8 @@ block_table:    B, max_pages
 context_lens:   B
 ```
 
-Compared with the earlier dense path, the important difference is that the source length is no longer represented as one contiguous tensor dimension. It is reconstructed logically from the page table.
+The source length is no longer represented by one contiguous tensor dimension.
+The operator reconstructs it logically from the page table.
 
 In this chapter, `paged_attention` should read pages directly from a GPU
 kernel. The runtime contract is now: model code and batching code pass pages
@@ -187,9 +184,9 @@ logical key position -> logical page -> physical page id -> slot in page
 ```
 
 After that lookup, the online-softmax update is the same recurrence as Week 2
-Day 4. Keep the first page-walking schedule simple enough that block-table and
-tail-page bugs are visible. Day 5 will replace its inner matrix work with
-SIMD-matrix tiles while preserving this address calculation.
+Day 4. Keep the page-walking schedule simple enough that block-table and
+tail-page boundary errors are visible. Day 5 will tile its inner matrix work
+while preserving this address calculation.
 
 One-token decode needs a different work decomposition. A 64-row prefill tile
 would leave almost every query row idle, so dispatch short queries to a
@@ -230,16 +227,16 @@ The scheduler now needs to prepare runtime metadata instead of only dense K/V:
 
 This is where continuous batching and paged attention finally connect. On Day 1, batching worked by repacking tensors. Here, batching should work by reusing page tables and updating only the new slots.
 
-## Recommended Incremental Rollout
+## Implementation Order
 
-The safest implementation order is:
+Use this implementation order:
 
 1. paged storage
 2. `block_table` / `context_lens` plumbing
 3. correctness-first page-walking GPU attention
 4. model and batch dispatch
 
-This order matters because it gives us a clean correctness baseline at each step.
+Each step has a direct correctness check before the next abstraction is added.
 
 ## Correctness Invariants
 
@@ -278,8 +275,7 @@ Add a paged attention interface whose inputs come from the paged runtime rather
 than a dense reconstructed `S` dimension. Preserve the Week 2 precision
 contract without adding a new model dtype or conversion at the serving layer.
 
-The reference solution walks every request's block table and keeps online
-softmax state:
+Walk every request's block table while keeping online-softmax state:
 
 ```python
 running_max = max(previous_max, page_max)
@@ -295,7 +291,7 @@ Implement two correctness-first GPU dispatches:
 
 1. For `L <= 8`, partition logical context positions across SIMD groups and
    merge their partial `(max, sum, output)` states in threadgroup memory. The
-   reference schedule uses 32 SIMD groups per query. Resolve the physical page
+   course schedule uses 32 SIMD groups per query. Resolve the physical page
    once, then let group `g` visit slots `g`, `g + 32`, `g + 64`, and so on
    within that page; do not divide and reload `block_table` for every token.
 2. For longer queries, assign query rows to a direct page-walking schedule and
@@ -311,10 +307,10 @@ For the final Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
 four contiguous dimensions of Q, K, V, and the output. After all context
 positions are visited, transpose the 32 partial output vectors through one
 compact 32×32 threadgroup tile. Each SIMD group then reduces four dimensions
-with `simd_sum`. This replaces the first version's `D` scalar threads, each of
-which looped over all 32 partials, and reduces scratch from about 16.8 KiB to
-4.25 KiB. Keep a generic BF16 specialization for other head dimensions so the
-optimization cannot silently reinterpret `D = 32` as `D = 128`.
+with `simd_sum`. This organizes the reduction in 4.25 KiB of scratch instead
+of storing one full partial vector per scalar output thread. Keep a generic
+BF16 specialization for other head dimensions so the optimization cannot
+silently reinterpret `D = 32` as `D = 128`.
 
 ### Course implementation boundary
 
@@ -376,23 +372,11 @@ contiguous K/V access for flexible allocation and removes the dense repack that
 would otherwise happen before attention. Your measurements must include both
 sides of that trade.
 
-Start by recording three operator baselines on the same machine:
+Record three operator baselines on the same machine:
 
 1. the dense course attention path, including any required K/V gather,
 2. your direct paged-attention path,
 3. the MLX attention path as a production-library reference.
-
-These older M4 Pro measurements show the correctness-first path before the
-compact final reduction. Use the current appendix for retained end-to-end
-numbers; do not copy either table into your report without rerunning it:
-
-| Batch / context | Dense course attention | Course paged attention | MLX attention |
-|---|---:|---:|---:|
-| 1 / 128 | 226 µs | 219 µs | 170 µs |
-| 1 / 512 | 300 µs | 309 µs | 192 µs |
-| 1 / 2048 | 729 µs | 726 µs | 263 µs |
-| 8 / 512 | 800 µs | 626 µs | 225 µs |
-| 8 / 2048 | 1,347 µs | 1,322 µs | 460 µs |
 
 ### Checkpoint 1: Establish a Correct Direct Path
 
@@ -403,8 +387,9 @@ Implement the simplest page-walking kernel first. Verify that it:
 - matches dense attention for several page boundaries and context lengths,
 - supports grouped-query attention when `H_q != H_kv`.
 
-A correct first version may be slower than dense attention. At this checkpoint,
-the useful result is a trustworthy baseline and a working runtime interface.
+The correctness schedule may be slower than dense attention. At this
+checkpoint, the useful result is a trustworthy baseline and a working runtime
+interface.
 
 ### Checkpoint 2: Design the Decode Schedule
 
@@ -429,11 +414,10 @@ For each change, explain which cost it targets: memory traffic, synchronization,
 address calculation, or dispatch overhead. Keep a change only when the measured
 result supports the explanation.
 
-An earlier Qwen-specific kernel computed four query heads in one threadgroup.
-It improved static decode latency, but duplicated the entire online-softmax
-kernel for one GQA ratio. Static latency is not Week 3's acceptance metric, so
-the course removes that specialization and keeps the compact D=128 schedule.
-This is an explicit simplicity decision, not a claim that K/V reuse is invalid.
+Optimize the course path for the Qwen head dimension of 128, but keep one
+grouped-query schedule rather than duplicating the online-softmax recurrence
+for individual GQA ratios. This keeps the relationship among page traversal,
+head mapping, and reduction visible in one kernel.
 
 ### Checkpoint 3: Evaluate the Serving System
 

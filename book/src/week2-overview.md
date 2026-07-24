@@ -97,8 +97,8 @@ Instead, Week 2 teaches the ingredients that remain useful: Day 4 introduces
 online softmax and Day 6 introduces cooperative SIMD-matrix tiling. Week 3 adds
 page-table translation and combines all three ideas in one paged
 FlashAttention operator. A dense first-prefill fast path is a reasonable
-optional performance-lab experiment when the cache is empty, but it is not a
-required Week 2 implementation or a second model-facing attention interface.
+follow-up experiment when the cache is empty, but it is not a required Week 2
+implementation or a second model-facing attention interface.
 
 Unlike Week 1, the completed Week 2 model prefills a dense KV cache once,
 passes only the new token during decode, keeps its linear and embedding weights

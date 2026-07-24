@@ -61,8 +61,9 @@ to 0.31.3. A matched Qwen3-4B run showed:
 | 2,048 | Prefill tok/s | 816.73 | 820.85 | +0.50% |
 | 2,048 | Decode tok/s | 78.42 | 74.81 | -4.60% |
 
-The upgrade does not explain the old course prefill gap. Its important effect
-on the experiment is that the MLX denominator is versioned and remeasured.
+The small differences show why the comparison must record exact dependency
+versions: the MLX denominator is part of the experiment, even when an upgrade
+does not materially change the result.
 
 ## Week 2 Performance by Chapter
 
@@ -122,16 +123,16 @@ decode by 11.1%, fast RoPE adds 8.2%, and fused SwiGLU adds another 6.5% at
 their cumulative checkpoints. The completed day reaches 77.09 decode tok/s;
 the profile then shifts decisively to prefill matrix multiplication.
 
-### Day 6: Repair Quantized Prefill
+### Day 6: Use Cooperative Loads for Quantized Prefill
 
 At 32 prompt tokens, replacing only the course projections with
 `mx.quantized_matmul` reached 688.66 tok/s while the full MLX model reached
 729.34 tok/s. No other operator changed, so the ablation isolated quantized
 matmul rather than Python orchestration or attention.
 
-The first tiled course kernel remained slow because each thread issued scalar,
-strided activation reads. Aligned cooperative block loads and a 32×32×32 tile
-made the large Qwen3-4B projections essentially match MLX:
+Assign contiguous activation elements to adjacent lanes and stage them with
+aligned cooperative block loads. Combined with a 32×32×32 tile, this schedule
+makes the large Qwen3-4B projections essentially match MLX:
 
 | Projection at `M=2048` | Course | MLX |
 |---|---:|---:|
@@ -140,8 +141,8 @@ made the large Qwen3-4B projections essentially match MLX:
 | MLP gate, `2560 -> 9728` | 15.49 ms | 15.65 ms |
 | MLP down, `9728 -> 2560` | 15.66 ms | 15.76 ms |
 
-That repair raises prefill from 106.03 to 793.15 tok/s, a 648.0% gain, while
-leaving vector decode unchanged.
+The cooperative schedule raises prefill from 106.03 to 793.15 tok/s, a 648.0%
+gain, while leaving vector decode unchanged.
 
 ### Day 7: Split K Only Below the Crossover
 
@@ -190,8 +191,7 @@ backing capacity.
 | Day 2 | Chunked admission with dense reconstruction | 653.24 prefill; 32.77 output; 53.99 decode tok/s | Establishes the dense serving baseline. |
 | Day 3 | Paged storage with compatibility gather | 662.69 prefill; 38.38 output; 71.02 decode tok/s | +17.1% output; +31.5% decode; -50.6% copy volume. |
 | Day 4 | Direct paged decode schedule | 100.35 aggregate decode tok/s | +41.3% decode over the compatibility gather path. |
-| Day 5 | Paged FlashAttention serving schedule | 650.10 prefill tok/s | -1.9% prefill at the 128-token chunk size. |
-| Performance lab | Complete direct paged path | 45.05 output tok/s; 0.60 requests/s | +37.4% output and request throughput over dense serving. |
+| Day 5 | Complete direct paged path | 650.10 prefill; 45.05 output; 100.35 decode tok/s | +37.4% output and request throughput over dense serving. |
 
 Day 1 introduces scheduling, not a kernel speedup. Day 2 makes the hidden cost
 measurable: appending one token still reconstructs a padded dense batch. Day 3
@@ -213,9 +213,9 @@ cumulative serving endpoints are:
 | Paged storage plus dense gather | 662.69 | 38.38 | 71.02 | 0.511 | — | 103,445 |
 | Direct paged attention | 650.10 | 45.05 | 100.35 | 0.600 | 576 | 504 |
 
-The compatibility row omits peak storage because its current counter takes the
-maximum of the page pool and dense staging allocation instead of their sum.
-Reporting that lower bound as an exact peak would be misleading.
+The compatibility row omits peak storage because an exact peak must include
+both the page pool and temporary dense staging allocation. Its other counters
+remain directly comparable.
 
 Direct paged attention improves output and request throughput by 37.4%,
 aggregate decode by 85.9%, and peak KV storage by 47.4% relative to dense
@@ -255,25 +255,6 @@ The workload validates continuous batching, chunked prefill, incremental
 growth, and page reuse. Prefix sharing and speculative decoding require
 separate traces with shared prefixes or cache rewind events and are not claimed
 by this result.
-
-## Retained and Removed Optimizations
-
-The course keeps changes with a clear measured role: the x4 quantized matvec,
-cooperative prefill matmul, split-K for under-filled grids, page-slice writes,
-the compact D=128 paged reduction, and cooperative paged prefill loads.
-
-Two shape-specific duplicates were removed. A pointer-streaming matvec copied
-the complete x4 reduction loop for a small end-to-end gain. A four-query-head
-paged-decode kernel copied the complete attention recurrence to improve static
-latency, even though static latency is no longer Week 3's acceptance metric.
-The compact generic Qwen path is easier to teach and still wins decisively in
-the serving workload because it removes dense growth and repacking.
-
-Several other plausible changes had already measured poorly and remain
-removed: reducing the decode threadgroup to eight SIMD groups, pairing K/V
-cache writes in one primitive, forcing vector K/V loads, and a two-pass
-attention kernel. Each added work or synchronization without an end-to-end
-win.
 
 ## Decode Profile and CLI Tools
 

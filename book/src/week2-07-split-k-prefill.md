@@ -119,10 +119,9 @@ Week 2 model reaches about 78% of MLX prefill in the current prompt-scoring
 campaign.
 
 The final Week 2 acceptance run uses the fixed 128-token prompt and 128-token
-decode workload from Day 2. After removing the marginal pointer-streaming
-duplicate, the three-process median is 791.63 prefill tok/s and 77.45 decode
-tok/s. MLX 0.32.0 reaches 828.27 and 87.62 tok/s respectively, so the course
-path finishes at 95.6% prefill and 88.4% decode.
+decode workload from Day 2. The three-process median is 792.18 prefill tok/s
+and 77.41 decode tok/s. MLX 0.32.0 reaches 827.74 and 87.58 tok/s respectively,
+so the course path finishes at 95.7% prefill and 88.4% decode.
 
 The Week 2 loop is now complete:
 
