@@ -62,7 +62,3 @@ existing status, and all Week 4 application material remains work in progress.
 | 4.7            | Evaluation                                                    | 🚧    | 🚧   | 🚧  |
 
 Other topics not covered: quantized/compressed KV cache, cross-request prefix/prompt cache, fine-tuning, and long-context techniques.
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=skyzh/tiny-llm&type=Date)](https://www.star-history.com/#skyzh/tiny-llm&Date)
