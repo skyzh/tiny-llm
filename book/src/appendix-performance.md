@@ -125,10 +125,12 @@ the profile then shifts decisively to prefill matrix multiplication.
 
 ### Day 6: Use Cooperative Loads for Quantized Prefill
 
-At 32 prompt tokens, replacing only the course projections with
-`mx.quantized_matmul` reached 688.66 tok/s while the full MLX model reached
-729.34 tok/s. No other operator changed, so the ablation isolated quantized
-matmul rather than Python orchestration or attention.
+An instructor-only diagnostic temporarily replaced the course projections
+with `mx.quantized_matmul`. At 32 prompt tokens it reached 688.66 tok/s while
+the full MLX model reached 729.34 tok/s. No other operator changed, so this
+upper-bound experiment isolated quantized matmul rather than Python
+orchestration or attention. It is not a course checkpoint or valid solution;
+the required Day 6 path uses the course-owned C++/Metal primitive.
 
 Assign contiguous activation elements to adjacent lanes and stage them with
 aligned cooperative block loads. Combined with a 32×32×32 tile, this schedule
@@ -146,9 +148,11 @@ gain, while leaving vector decode unchanged.
 
 ### Day 7: Split K Only Below the Crossover
 
-The Day 6 shape sweep finds under-filled small K/V grids only at short `M`.
-Day 7 splits K until the result grid approaches 320 threadgroups, using at most
-16 equal, 128-aligned partitions. At the 32-token control point:
+The Day 6 shape sweep finds under-filled result grids at short `M`. Day 7
+splits K until the result grid approaches 320 threadgroups, using at most 16
+equal, 128-aligned partitions. The narrow K/V projections receive the largest
+split; Q, O, and MLP down may also split at `M=32`, while the wide gate/up grid
+is already occupied. At the 32-token control point:
 
 | Checkpoint | Prefill tok/s | Decode tok/s | Prefill / MLX |
 |---|---:|---:|---:|
@@ -157,8 +161,9 @@ Day 7 splits K until the result grid approaches 320 threadgroups, using at most
 | MLX 0.32.0 | 727.28 | 88.34 | 100% |
 
 Split-K adds 11.0% prefill at this short shape and no decode gain. At the
-128-token acceptance shape the base grid is already occupied, so Day 7 falls
-back to Day 6 and remains neutral.
+128-token acceptance shape only the narrow K/V projections retain a two-way
+split; the other major projections fall back to Day 6, and the complete-model
+result remains neutral. At 2,048 tokens every projection falls back.
 
 The completed Week 2 path reaches 95.7% of MLX prefill, 88.4% of MLX decode,
 and 89.0% of MLX end-to-end output throughput. All three exceed the 80% course

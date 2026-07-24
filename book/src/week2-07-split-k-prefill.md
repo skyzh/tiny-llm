@@ -82,6 +82,21 @@ prompt-length cutoff, the grid calculation naturally stops splitting a narrow
 projection once more row tiles are present, and stops immediately for already
 wide grids.
 
+For Qwen3-4B, the policy selects these schedules:
+
+| Projection | Base groups at `M=32` | Selected split at `M=32` | Selected split at `M=128` |
+|---|---:|---:|---:|
+| Q, `2560 -> 4096` | 128 | 2 | 1 |
+| K/V, `2560 -> 1024` | 32 | 10 | 2 |
+| O, `4096 -> 2560` | 80 | 4 | 1 |
+| MLP gate/up, `2560 -> 9728` | 304 | 1 | 1 |
+| MLP down, `9728 -> 2560` | 80 | 4 | 1 |
+
+A split of one means the dispatcher uses the Day 6 kernel unchanged. At the
+128-token acceptance shape only the narrow K/V projections remain eligible,
+with a two-way split; the other major projections already expose enough output
+tiles. At 2,048 tokens every projection uses the unsplit kernel.
+
 Expose the policy through a cumulative `split-k` checkpoint. Keep Day 6
 selectable so the benchmark always has an unsplit control.
 
@@ -113,10 +128,11 @@ tokens, two complete warmups, and the median of three fresh processes:
 | MLX | 727.61 | 88.48 | 100% |
 
 Split-K improves prefill by 10.9% and leaves decode unchanged, as it should:
-one-token decode still uses Day 3's matvec. At 2,048 prompt tokens the base
-tile grid is already large, so Day 7 falls back to Day 6 and the completed
-Week 2 model reaches about 78% of MLX prefill in the current prompt-scoring
-campaign.
+one-token decode still uses Day 3's matvec. At 128 prompt tokens the remaining
+two-way K/V split is neutral in the complete-model benchmark. At 2,048 prompt
+tokens every base tile grid is already large, so Day 7 falls back entirely to
+Day 6; the completed Week 2 model reaches about 78% of MLX prefill in the
+current prompt-scoring campaign.
 
 The final Week 2 acceptance run uses the fixed 128-token prompt and 128-token
 decode workload from Day 2. The three-process median is 792.18 prefill tok/s

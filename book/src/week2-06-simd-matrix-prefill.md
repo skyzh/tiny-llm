@@ -8,13 +8,17 @@ no longer dominate, and the Day 3 matrix-vector schedule does not reuse packed
 weights efficiently across prompt rows. Quantized projections are now the
 largest cost, so today we build a separate matrix schedule for them.
 
-Do not infer this bottleneck from the number of source lines. Prove it with a
-one-factor ablation: keep the course model unchanged, but route only prefill
-projections through `mx.quantized_matmul`. In the reference Qwen3-4B,
-32-token, last-logit run, that ablation reached 688.66 prefill tok/s while the
-complete MLX model reached 729.34 tok/s, or 94.4%. The experiment identifies
-the quantized prefill operator as almost the whole model gap; it does not make
-MLX's operator part of the solution.
+Do not infer this bottleneck from the number of source lines. Use synchronized
+operator timings to compare the course projections with MLX as an external
+baseline. The instructor reference also records one diagnostic upper bound: a
+temporary model ablation routed only prefill projections through
+`mx.quantized_matmul`. At 32 prompt tokens it reached 688.66 prefill tok/s,
+while the complete MLX model reached 729.34 tok/s, or 94.4%.
+
+That ablation is not a course checkpoint, student task, or valid solution. It
+only estimates how much of the model gap can be recovered by improving
+quantized prefill matmul. The required path below continues to call the
+course-owned C++/Metal primitive for every projection.
 
 The implementation remains deliberately narrow:
 
