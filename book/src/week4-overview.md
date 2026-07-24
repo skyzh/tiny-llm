@@ -84,7 +84,7 @@ optimization rather than a correctness requirement.
 
 The course Qwen3-4B context budget is 32,768 total tokens. Day 5 starts
 compaction at 24,576 input tokens and keeps the remaining 8,192 tokens for the
-next response and tool output. This limit follows the model's pretraining range,
+next response and tool output. This limit follows the model's training range,
 not the amount of unified memory available; the full derivation and long-context
 measurements are in the
 [performance appendix](./appendix-performance.md#long-context-budget-for-week-4).
