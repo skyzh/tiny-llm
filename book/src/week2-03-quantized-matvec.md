@@ -412,6 +412,19 @@ different shapes differently:
 2. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
    activation row and calculate several output columns together.
 
+Here, `M` is the number of activation rows after flattening every leading
+dimension. Day 3 uses this explicit dispatch:
+
+| Activation rows | Kernel | Role at this checkpoint |
+|---:|---|---|
+| `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
+| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 6 replaces it with a cooperative tiled kernel. |
+
+The cutoff does not mean the SIMD kernel expands to cover larger `M`. The two
+paths are separate schedules: Day 3 optimizes the vector-shaped decode
+bottleneck and leaves matrix-shaped prefill visible for the later profile to
+select.
+
 Keep the vanilla function callable as `quantized_matmul_vanilla`. An
 optimization is much easier to trust when it can be compared directly with
 the implementation it replaces.
@@ -454,7 +467,7 @@ Treat output width, threadgroup size, and shared-memory reuse as benchmark
 variables. Use this Qwen-focused starting point:
 
 - flatten all leading activation dimensions into `M`,
-- use the custom matvec when `M <= 8`,
+- use the custom matvec when `M <= 8` and the vanilla matmul when `M > 8`,
 - compute four output columns per SIMD group and load two adjacent packed words
   per lane,
 - launch two SIMD groups, or eight output rows, per threadgroup.
@@ -490,6 +503,8 @@ Implement both required kernel layouts in `quantized_matmul.metal`:
 - First, implement the vanilla one-thread-per-output matrix grid.
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
+- For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
+  SIMD matvec schedule; Day 6 introduces the tiled prefill schedule.
 - The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
