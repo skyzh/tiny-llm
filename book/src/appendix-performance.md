@@ -193,7 +193,12 @@ to rank work and the fresh-process checkpoint table above to accept or reject a
 change. The attributed totals follow the complete-model direction and range
 from 1.01× to 1.28× its phase time.
 
-![Flat flame chart of Week 2 kernel-time attribution](./week2-kernel-profile.svg)
+![Week 2 operator attribution by cumulative checkpoint](./week2-kernel-profile.svg)
+
+This is an operator-attribution chart, not a Metal flame graph. It ranks model
+operator families and selects the next kernel to inspect. The Shader Cost Graph
+described in [GPU Profile and CLI Tools](#gpu-profile-and-cli-tools) answers the
+next question: which function and source line inside that kernel is costly.
 
 The profile makes the progression concrete:
 
@@ -396,17 +401,31 @@ by this result.
 
 ## GPU Profile and CLI Tools
 
-The synchronized reference-solution kernel attribution used above is available
-without a GUI:
+Two profiles are useful at different levels. The synchronized
+reference-solution attribution ranks operator families without a GUI:
 
 ```bash
 pdm run profile-week2-kernels --model qwen3-4b \
   --warmup 5 --iterations 15
 ```
 
-It is a flat operator profile, not a CPU call-stack flame graph. When Shader
-Timeline export works on the target hardware, validate the same ranking with a
-full-model Metal trace.
+After it selects an operator family, capture one source-enabled shader at the
+same Qwen3-4B shape:
+
+```bash
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
+
+MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --projection q --rows 1 \
+  --output /tmp/week2-q-projection.gputrace
+```
+
+Open the trace in Xcode and profile the selected compute pipeline. Pipeline
+Statistics reports shader GPU time and time spent in ALU, memory, control flow,
+and synchronization. On M3 and newer Macs, the Shader Cost Graph is a true
+function-call flame graph with weighted source lines, executed-instruction
+counts, divergence, and instruction categories. The checked-in chart above
+does not substitute for either view.
 
 `xcrun xctrace` is available from the command line:
 
@@ -425,10 +444,15 @@ xcrun xctrace record \
 xcrun xctrace export --input /tmp/tiny-llm-decode.trace --toc
 ```
 
-The stock Metal System Trace exposes queues and command buffers on the measured
-M4 Pro, but its Shader Timeline is disabled and the selected Metal
-GPU counter profile is unsupported. Use a compatible custom Instruments
-template or an MLX `.gputrace` capture for shader-level counters. Never infer
+On the measured M4 Pro with Xcode 26.6, the CLI trace resolves the exact
+reference-solution pipelines, including
+`quantized_matvec_x4_fast_w4a16_g128_bf16`,
+`week2_decode_attention_bf16`, `week2_rms_norm_bf16`,
+`week2_swiglu_bf16`, and `week2_rope_bf16`. The selected Metal GPU counter
+profile is unsupported on this configuration, so the exported shader-sample
+and counter tables contain no rows. This result identifies the functions but
+does not establish an ALU or memory limiter. Use the `.gputrace` replay in
+Xcode for Pipeline Statistics and per-line Shader Cost Graph data. Never infer
 ALU or bandwidth saturation from an unavailable counter, and do not use trace
 wall time as a throughput result.
 

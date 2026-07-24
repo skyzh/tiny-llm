@@ -152,23 +152,77 @@ materialization that a complete lazy graph may fuse, while a capture adds its
 own overhead. Use the profile to rank kernel groups, then require the ordinary
 fresh-process model benchmark to confirm the change. The
 [performance appendix](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
-contains the reference-solution flame chart and raw-result path.
+contains the reference-solution operator-attribution chart and raw-result path.
 
-## Attribute Time With a Real GPU Profile
+## Inspect the Metal Pipeline
 
 An end-to-end benchmark tells us whether a checkpoint improved. A GPU profile
-tells us what to optimize next. Keep those jobs separate:
+tells us what to optimize next. The measurements answer different questions:
+
+| Question | Measurement |
+|---|---|
+| Did the complete model improve? | Fresh-process throughput benchmark |
+| Which operator family dominates? | Synchronized kernel-group attribution |
+| Which shader, function, and source line is expensive? | Metal Pipeline Statistics and Shader Cost Graph |
+
+The operator-attribution chart is not a flame graph. On M3 and newer Macs,
+Xcode's
+[Shader Cost Graph](https://developer.apple.com/documentation/xcode/analyzing-apple-gpu-performance-using-shader-cost-graph-a17-m3)
+is the flame graph: it ranks shader function calls and connects them to
+weighted source lines.
+[Pipeline Statistics](https://developer.apple.com/documentation/xcode/analyzing-draw-command-and-compute-dispatch-performance-with-pipeline-statistics)
+separates GPU time into ALU, memory, control-flow, and synchronization
+activity.
+
+Build the reference extension with source and line tables, then capture one
+Qwen3-4B projection at its real shape:
+
+```bash
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
+
+MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --projection q --rows 1 \
+  --output /tmp/week2-q-projection.gputrace
+
+open /tmp/week2-q-projection.gputrace
+```
+
+The capture uses synthetic buffers with the real `M=1`, `K=2560`, `N=4096`
+Qwen3-4B shape. This keeps the trace small enough to replay without embedding
+all model weights; the dispatched reference-solution kernel and its schedule
+are unchanged. The warmup and input materialization happen before capture, so
+the trace contains steady-state GPU work rather than first-use compilation.
+
+In Xcode:
+
+1. Profile the GPU trace and select the
+   `quantized_matvec_x4_fast_w4a16_g128_bf16` compute pipeline.
+2. Open Pipeline Statistics. Record GPU time and the ALU, memory, control-flow,
+   and synchronization breakdown.
+3. Open **Performance > Shaders**. Use the Shader Cost Graph to find the
+   highest-cost function call, then select it to jump to the weighted Metal
+   source lines.
+4. Record the dominant line's cost, executed-instruction count, divergence,
+   and instruction categories such as load/store, conversion, bit
+   manipulation, and arithmetic.
+
+Missing source lines mean the extension was not rebuilt with
+`MLX_METAL_DEBUG`. Missing counter samples mean the selected profiler is not
+supported on that OS, Xcode, or GPU combination; neither case justifies an
+ALU- or bandwidth-bound claim.
+
+Use the result in this order:
 
 1. Run the acceptance benchmark outside a trace and save its JSON output.
-2. Capture a short, representative request with Instruments or `xctrace`.
-3. Rank shader pipelines by total GPU duration, then inspect dispatch count and
-   duration per dispatch.
+2. Use operator attribution to select a kernel family.
+3. Capture that kernel, rank pipeline and function cost, and inspect the
+   dominant source lines.
 4. Optimize the highest measured cost whose scaling matches the target
    workload.
 5. Re-run the isolated operator, end-to-end benchmark, and profile before
    choosing the next chapter.
 
-The command-line profiler is available with Xcode:
+For a longer request, Instruments can complement the single-dispatch capture:
 
 ```bash
 xcrun xctrace list templates
@@ -182,19 +236,19 @@ xcrun xctrace record \
 xcrun xctrace export --input /tmp/week2.trace --toc
 ```
 
-The stock Metal System Trace template is useful for command-buffer and queue
-behavior. To see shader names, timelines, and counters, save a custom
-Instruments template containing the Metal Shader Timeline and the relevant
-counter set, then pass that template to `xctrace`. Xcode GPU Capture remains
-the better tool for inspecting a single dispatch in detail.
+The stock Metal System Trace is useful for command buffers, queues, and GPU
+intervals. A compatible Metal Shader Timeline or counter template can rank
+pipelines over the longer request. Use the source-enabled GPU trace for the
+per-function flame graph and per-line activity breakdown.
 
 Do not use trace-instrumented wall time as a throughput result: capture adds
-overhead. Record at least the model and tensor shape, pipeline or shader name,
-total GPU duration, dispatch count, duration per dispatch, and share of the
-captured GPU interval. If the trace does not identify a dominant kernel, do not
-invent one from the source code. Shorten the workload, add signposts, or use the
-dependency-aware kernel-group replay above, then check that its attributed
-total and the complete-model phase time move in the same direction.
+overhead and profiling may serialize commands. Record at least the tensor
+shape, pipeline name, GPU time, dispatch count, Pipeline Statistics activity,
+highest-cost function, and highest-cost source line. If the trace does not
+identify a dominant cost, do not invent one from the source code. Shorten the
+workload or return to the dependency-aware operator attribution, then check
+that its attributed total and the complete-model phase time move in the same
+direction.
 
 ## Record a Matched Baseline
 
