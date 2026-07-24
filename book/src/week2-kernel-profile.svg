@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 610" role="img" aria-labelledby="title description">
+  <title id="title">Week 2 Qwen3-4B kernel-time attribution by checkpoint</title>
+  <desc id="description">Seven stacked bars show the normalized share of synchronized kernel-group time spent in projections, attention, normalization position and activation kernels, and KV growth. Projections dominate the cached decode baseline, pointwise kernels become visible after quantized matvec, and projections dominate prefill before and after the cooperative matrix kernel.</desc>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #ffffff;
+      --foreground: #1f2328;
+      --muted: #59636e;
+      --grid: #d0d7de;
+      --projection: #4c78a8;
+      --attention: #f58518;
+      --pointwise: #54a24b;
+      --cache: #e45756;
+      --on-color: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #0d1117;
+        --foreground: #f0f6fc;
+        --muted: #9ba7b4;
+        --grid: #30363d;
+        --projection: #6b9bd1;
+        --attention: #f7a64a;
+        --pointwise: #6dbb65;
+        --cache: #eb6a67;
+        --on-color: #0d1117;
+      }
+    }
+    .background { fill: var(--background); }
+    .heading { fill: var(--foreground); font: 600 17px system-ui, sans-serif; }
+    .label { fill: var(--foreground); font: 500 14px system-ui, sans-serif; }
+    .detail { fill: var(--muted); font: 12px system-ui, sans-serif; }
+    .inside { fill: var(--on-color); font: 600 12px system-ui, sans-serif; }
+    .axis { stroke: var(--grid); stroke-width: 1; }
+    .projection { fill: var(--projection); }
+    .attention { fill: var(--attention); }
+    .pointwise { fill: var(--pointwise); }
+    .cache { fill: var(--cache); }
+  </style>
+
+  <rect class="background" width="1040" height="610" />
+
+  <g aria-label="Legend">
+    <rect class="projection" x="220" y="24" width="16" height="16" rx="2" />
+    <text class="label" x="244" y="37">Projections</text>
+    <rect class="attention" x="360" y="24" width="16" height="16" rx="2" />
+    <text class="label" x="384" y="37">Attention</text>
+    <rect class="pointwise" x="480" y="24" width="16" height="16" rx="2" />
+    <text class="label" x="504" y="37">Norm + position + activation</text>
+    <rect class="cache" x="735" y="24" width="16" height="16" rx="2" />
+    <text class="label" x="759" y="37">KV growth</text>
+  </g>
+
+  <text class="heading" x="0" y="76">Decode at a 128-token context</text>
+  <line class="axis" x1="220" y1="84" x2="830" y2="84" />
+
+  <g aria-label="Day 2 cached decode: projections 80.3 percent, attention 2.1 percent, pointwise 16.8 percent, KV growth 0.8 percent">
+    <text class="label" x="0" y="119">Day 2 · cached decode</text>
+    <rect class="projection" x="220" y="96" width="490.0" height="34" />
+    <rect class="attention" x="710.0" y="96" width="12.9" height="34" />
+    <rect class="pointwise" x="722.9" y="96" width="102.3" height="34" />
+    <rect class="cache" x="825.2" y="96" width="4.8" height="34" />
+    <text class="inside" x="230" y="118">projections 80.3%</text>
+    <text class="inside" x="731" y="118">16.8%</text>
+    <text class="detail" x="846" y="117">48.3 ms attributed</text>
+  </g>
+
+  <g aria-label="Day 3 quantized matvec decode: projections 53.8 percent, attention 5.2 percent, pointwise 39.3 percent, KV growth 1.8 percent">
+    <text class="label" x="0" y="176">Day 3 · packed matvec</text>
+    <rect class="projection" x="220" y="153" width="327.9" height="34" />
+    <rect class="attention" x="547.9" y="153" width="31.8" height="34" />
+    <rect class="pointwise" x="579.7" y="153" width="239.6" height="34" />
+    <rect class="cache" x="819.3" y="153" width="10.7" height="34" />
+    <text class="inside" x="230" y="175">projections 53.8%</text>
+    <text class="inside" x="590" y="175">pointwise 39.3%</text>
+    <text class="detail" x="846" y="174">21.6 ms attributed</text>
+  </g>
+
+  <g aria-label="Day 4 fused decode attention: projections 56.7 percent, attention 4.5 percent, pointwise 37.4 percent, KV growth 1.4 percent">
+    <text class="label" x="0" y="233">Day 4 · fused decode attention</text>
+    <rect class="projection" x="220" y="210" width="345.7" height="34" />
+    <rect class="attention" x="565.7" y="210" width="27.7" height="34" />
+    <rect class="pointwise" x="593.4" y="210" width="227.9" height="34" />
+    <rect class="cache" x="821.3" y="210" width="8.7" height="34" />
+    <text class="inside" x="230" y="232">projections 56.7%</text>
+    <text class="inside" x="604" y="232">pointwise 37.4%</text>
+    <text class="detail" x="846" y="231">20.7 ms attributed</text>
+  </g>
+
+  <g aria-label="Day 5 fused model kernels: projections 80.5 percent, attention 6.5 percent, pointwise 10.7 percent, KV growth 2.3 percent">
+    <text class="label" x="0" y="290">Day 5 · fused model kernels</text>
+    <rect class="projection" x="220" y="267" width="491.1" height="34" />
+    <rect class="attention" x="711.1" y="267" width="39.4" height="34" />
+    <rect class="pointwise" x="750.5" y="267" width="65.5" height="34" />
+    <rect class="cache" x="816.0" y="267" width="14.0" height="34" />
+    <text class="inside" x="230" y="289">projections 80.5%</text>
+    <text class="inside" x="756" y="289">10.7%</text>
+    <text class="detail" x="846" y="288">14.7 ms attributed</text>
+  </g>
+
+  <text class="heading" x="0" y="359">Prefill</text>
+  <line class="axis" x1="220" y1="367" x2="830" y2="367" />
+
+  <g aria-label="Day 5 fused model kernels prefill at 128 tokens: projections 99.0 percent, attention 0.5 percent, pointwise 0.5 percent">
+    <text class="label" x="0" y="402">Day 5 · 128-token prefill</text>
+    <rect class="projection" x="220" y="379" width="604.2" height="34" />
+    <rect class="attention" x="824.2" y="379" width="2.9" height="34" />
+    <rect class="pointwise" x="827.1" y="379" width="2.9" height="34" />
+    <text class="inside" x="230" y="401">projections 99.0%</text>
+    <text class="detail" x="846" y="400">1,272.1 ms attributed</text>
+  </g>
+
+  <g aria-label="Day 6 prefill at 128 tokens: projections 92.6 percent, attention 3.7 percent, pointwise 3.8 percent">
+    <text class="label" x="0" y="459">Day 6 · 128-token prefill</text>
+    <rect class="projection" x="220" y="436" width="564.6" height="34" />
+    <rect class="attention" x="784.6" y="436" width="22.5" height="34" />
+    <rect class="pointwise" x="807.1" y="436" width="22.9" height="34" />
+    <text class="inside" x="230" y="458">projections 92.6%</text>
+    <text class="detail" x="846" y="457">163.3 ms attributed</text>
+  </g>
+
+  <g aria-label="Day 6 prefill at 32 tokens: projections 91.8 percent, attention 3.9 percent, pointwise 4.3 percent">
+    <text class="label" x="0" y="516">Day 6 · 32-token prefill</text>
+    <rect class="projection" x="220" y="493" width="559.7" height="34" />
+    <rect class="attention" x="779.7" y="493" width="24.0" height="34" />
+    <rect class="pointwise" x="803.7" y="493" width="26.3" height="34" />
+    <text class="inside" x="230" y="515">projections 91.8%</text>
+    <text class="detail" x="846" y="514">49.1 ms attributed</text>
+  </g>
+
+  <text class="detail" x="220" y="565">Bar width is normalized within each checkpoint. Totals are synchronized kernel-group replay time, not trace-instrumented throughput.</text>
+  <text class="detail" x="220" y="586">Qwen3-4B, Apple M4 Pro 20-core GPU, MLX 0.32.0; median of 15 after 5 warmups.</text>
+</svg>

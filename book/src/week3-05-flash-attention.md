@@ -2,11 +2,11 @@
 
 > 🚧 This chapter is under review and may change.
 
-Day 4 made attention understand paged KV storage. Its first job was correctness:
-translate logical token positions through `block_table`, visit every visible
-page, and merge the result with online softmax. Today we keep that exact API and
-storage layout but replace the long-prefill schedule with tiled
-FlashAttention.
+In this chapter, we will tile page-aware attention for multi-token queries.
+The operator translates logical K/V positions through `block_table`, stages
+page-backed tiles on chip, and combines them with online softmax. Short queries
+continue to use the vector decode schedule from Day 4; long prefill chunks use
+the tiled schedule developed here.
 
 This is a required chapter. FlashAttention belongs here rather than in Week 2
 because the serving model's real K/V source is now the page pool. Building a
@@ -15,7 +15,7 @@ students to relearn its memory schedule around page translation.
 
 ## Prerequisites
 
-This chapter combines ideas already introduced earlier:
+This chapter combines four prerequisites:
 
 - Week 2 Day 4 introduced the online-softmax recurrence.
 - Week 2 Day 6 introduced the cooperative 32×32 tile built from BF16 8×8
@@ -89,12 +89,12 @@ not know whether two adjacent logical rows came from adjacent physical pages.
 
 The Qwen path uses 128-token pages and a 32-token K/V tile. An aligned tile is
 therefore physically contiguous even when the logical sequence as a whole is
-not. Give each thread contiguous elements through a cooperative block loader;
-do not repeat the scalar/strided-load bug diagnosed in Week 2 Day 6. Retain a
-generic loader for a tile that can cross a page boundary. The reference uses
-MLX's low-level Steel block-loader header for this load primitive, but owns the
-page translation, tile schedule, online softmax, primitive, and dispatch. It
-does not instantiate MLX attention.
+not. Assign each thread contiguous elements through a cooperative block loader
+so adjacent lanes issue coalesced reads. Keep a generic loader for a tile that
+crosses a page boundary. Your Metal kernel may use MLX's low-level Steel
+block-loader header for this load primitive, while your solution owns the page
+translation, tile schedule, online softmax, primitive, and dispatch. It does
+not instantiate MLX attention.
 
 Tail cases are required. A query block, K/V tile, final page, or context may be
 partially full, and physical page ids need not be consecutive.
@@ -114,10 +114,9 @@ unnormalized output accumulator per row. For each K/V tile:
 After the final visible tile, divide each output row by its running sum and
 store it using the model-facing dtype.
 
-Following the measured MLX kernel, multiply the attention scale by
-`log2(e)` once and use `fast::exp2` for online-softmax rescaling inside the hot
-tile loop. This is mathematically equivalent to natural exponentials and avoids
-repeating a more expensive base conversion.
+Multiply the attention scale by `log2(e)` once and use `fast::exp2` for
+online-softmax rescaling inside the hot tile loop. This is mathematically
+equivalent to natural exponentials and avoids repeating a base conversion.
 
 The causal offset is `context_len - L`. A key at logical position `s` is visible
 to query row `l` when:
@@ -134,7 +133,8 @@ optimization.
 
 Use the GPU-debugging ladder from Week 2 Day 2:
 
-1. compare Day 4 page-walking attention with the readable MLX equation;
+1. compare Day 4 page-walking attention with the readable equation written
+   with `mlx.core`;
 2. compare paged FlashAttention with the Day 4 path;
 3. only then benchmark the tiled kernel.
 
@@ -161,26 +161,25 @@ The Week 3 model should use the tiled paged path automatically for supported
 long prefills. Short queries continue through the vector paged-decode schedule.
 Neither path gathers a dense K/V tensor.
 
-Measure long prompts as well as the short course checkpoint. Report prompt
-length, page size, batch size, hardware, and both prefill and decode throughput:
+Measure the completed operator in the continuous-serving trace. Report prompt
+range, page size, batch size, hardware, prefill throughput, decode throughput,
+request throughput, peak KV storage, and logical KV copy volume:
 
 ```bash
-pdm run bench --solution tiny_llm --loader week3 --batch-decode \
-  --num-seqs 16 --batch-size 4 --prefill-step 128 \
-  --min-input-len 512 --max-input-len 512
+pdm run bench-serving-progression --offline --repeats 3 \
+  --model qwen3-4b --num-seqs 16 --batch-size 4 \
+  --min-input-len 128 --max-input-len 1024 \
+  --min-output-len 32 --max-output-len 128 --prefill-step 128
 ```
 
 FlashAttention is expected to matter more as prefill grows. It should not
 replace the Day 4 decode schedule: a one-token query has no query-tile reuse.
 
-On the reference Qwen3-4B 8K runs, base-2 softmax plus cooperative
-contiguous-page loads raised course prefill from the earlier 384.88 tok/s
-baseline to a 427.01 tok/s paired median. MLX measured 568.74 tok/s in the
-same alternating campaign, so the paged course path reached 75.1%. Long-context
-decode remains a separate Day 4 vector-kernel bottleneck; do not credit this
-prefill optimization with a decode gain.
-
-The serving performance lab next varies page size, chunk size, batch size, and
-request mix without changing this completed operator contract.
+Use a separate 8K static sweep as a kernel diagnostic after the serving trace.
+It shows when query tiling begins to offset page-table overhead, but it does not
+measure request turnover, page reuse, or capacity. The
+[performance appendix](./appendix-performance.md) records the matched serving
+and long-context measurements. Long-context decode remains a Day 4 vector
+kernel workload; do not credit a prefill schedule with a decode gain.
 
 {{#include copyright.md}}

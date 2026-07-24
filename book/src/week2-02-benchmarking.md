@@ -23,14 +23,14 @@ prompt length from distorting the decode number.
 Choose the prefill workload before comparing implementations. Prompt scoring
 needs logits for every position, while serving needs only the final prompt
 logit. Use `--prefill-logits all` for the former and
-`--prefill-logits last` for the latter. The runner applies the choice to the
-course model and MLX alike. Never compare a final-row course run with an
+`--prefill-logits last` for the latter. The runner applies the choice to your
+solution and MLX alike. Never compare a final-row run from your solution with an
 all-row MLX run. Cached decode has `L = 1`, so `logits_to_keep=1` removes no
 decode work.
 
 Both sides of the Week 2 comparison use a KV cache: prefill the prompt
 once, then pass only the newly generated token on each decode step. Comparing a
-cached MLX baseline with a course model that recomputes the full prefix would
+cached MLX baseline with your solution recomputing the full prefix would
 measure two different algorithms and make the kernel target meaningless. Day 1
 already produced the cached readable model used as this week's starting point.
 
@@ -55,12 +55,13 @@ pdm run test --week 2 --day 2
 
 ## Debug Metal Without a CPU Twin
 
-From Day 3 onward, the course extensions are GPU-only. A second C++ CPU
-implementation would duplicate the equation without exercising the dispatch,
-memory, or synchronization behavior that makes a Metal kernel fail. Use this
-three-level validation ladder instead:
+From Day 3 onward, the extensions in your solution are GPU-only. A second C++
+CPU implementation would duplicate the equation without exercising the
+dispatch, memory, or synchronization behavior that makes a Metal kernel fail.
+Use this three-level validation ladder instead:
 
-1. Write the equation in readable Python/MLX. This is the semantic oracle.
+1. Write the equation in readable Python with `mlx.core`. This is the semantic
+   oracle.
 2. Translate it into a deliberately simple Metal kernel, usually with one
    thread responsible for one output element.
 3. Optimize the validated Metal kernel with SIMD groups, vectorized loads, or
@@ -116,34 +117,112 @@ kernels agree with the readable oracle.
 
 The isolated benchmarks use the same rule. Evaluate input setup
 before invoking the benchmark fixture so setup does not leak into the result.
-The Week 2 operator ladder compares the readable implementation, the optimized
-course implementation, and MLX at the selected model's real tensor shapes:
+The Week 2 operator ladder compares the readable equation, the optimized kernel
+in your solution, and MLX at the selected model's real tensor shapes:
 
 ```bash
-pdm run bench-week2-operators --model qwen3-0.6b --context 128
+pdm run bench-week2-operators --model qwen3-4b --context 128
 ```
 
-For the measurements quoted later in this week, the machine was an M4 Pro with
-a 20-core GPU and 64 GB of memory. Each operator used 20 warmup iterations and
-100 synchronized timed iterations in each of three fresh processes. The
-reported result is the median process-level speedup. The matched end-to-end
-commands used two complete warmups and three fresh measured runs.
+Choose enough warmup iterations to exclude compilation, synchronize every
+timed iteration, and repeat the run in fresh processes. Report the median with
+the exact hardware, dependency versions, model, and tensor shapes. The
+[performance appendix](./appendix-performance.md) applies this protocol to the
+reference-solution checkpoints and keeps the resulting machine-specific numbers
+in one place.
 
-## Attribute Time With a Real GPU Profile
+To rank complete model work without requiring a GUI, replay the actual
+reference-solution kernel groups at Qwen3-4B shapes and dispatch counts:
+
+```bash
+pdm run profile-week2-kernels --model qwen3-4b \
+  --warmup 5 --iterations 15 \
+  --json-output week2-kernel-profile.json
+```
+
+The projection group preserves the transformer dependency order, including the
+attention projections before the output projection and the MLP after the
+attention residual. This matters for occupancy: making every layer independent
+would let unrelated work hide an under-filled kernel and produce a false
+Split-K conclusion. The runner synchronizes once per group and normalizes the
+group medians into an attribution profile.
+
+The resulting shares are not a throughput benchmark. Group boundaries force
+materialization that a complete lazy graph may fuse, while a capture adds its
+own overhead. Use the profile to rank kernel groups, then require the ordinary
+fresh-process model benchmark to confirm the change. The
+[performance appendix](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+contains the reference-solution operator-attribution chart and raw-result path.
+
+## Inspect the Metal Pipeline
 
 An end-to-end benchmark tells us whether a checkpoint improved. A GPU profile
-tells us what to optimize next. Keep those jobs separate:
+tells us what to optimize next. The measurements answer different questions:
+
+| Question | Measurement |
+|---|---|
+| Did the complete model improve? | Fresh-process throughput benchmark |
+| Which operator family dominates? | Synchronized kernel-group attribution |
+| Which shader, function, and source line is expensive? | Metal Pipeline Statistics and Shader Cost Graph |
+
+The operator-attribution chart is not a flame graph. On M3 and newer Macs,
+Xcode's
+[Shader Cost Graph](https://developer.apple.com/documentation/xcode/analyzing-apple-gpu-performance-using-shader-cost-graph-a17-m3)
+is the flame graph: it ranks shader function calls and connects them to
+weighted source lines.
+[Pipeline Statistics](https://developer.apple.com/documentation/xcode/analyzing-draw-command-and-compute-dispatch-performance-with-pipeline-statistics)
+separates GPU time into ALU, memory, control-flow, and synchronization
+activity.
+
+Build the reference extension with source and line tables, then capture one
+Qwen3-4B projection at its real shape:
+
+```bash
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
+
+MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --projection q --rows 1 \
+  --output /tmp/week2-q-projection.gputrace
+
+open /tmp/week2-q-projection.gputrace
+```
+
+The capture uses synthetic buffers with the real `M=1`, `K=2560`, `N=4096`
+Qwen3-4B shape. This keeps the trace small enough to replay without embedding
+all model weights; the dispatched reference-solution kernel and its schedule
+are unchanged. The warmup and input materialization happen before capture, so
+the trace contains steady-state GPU work rather than first-use compilation.
+
+In Xcode:
+
+1. Profile the GPU trace and select the
+   `quantized_matvec_x4_fast_w4a16_g128_bf16` compute pipeline.
+2. Open Pipeline Statistics. Record GPU time and the ALU, memory, control-flow,
+   and synchronization breakdown.
+3. Open **Performance > Shaders**. Use the Shader Cost Graph to find the
+   highest-cost function call, then select it to jump to the weighted Metal
+   source lines.
+4. Record the dominant line's cost, executed-instruction count, divergence,
+   and instruction categories such as load/store, conversion, bit
+   manipulation, and arithmetic.
+
+Missing source lines mean the extension was not rebuilt with
+`MLX_METAL_DEBUG`. Missing counter samples mean the selected profiler is not
+supported on that OS, Xcode, or GPU combination; neither case justifies an
+ALU- or bandwidth-bound claim.
+
+Use the result in this order:
 
 1. Run the acceptance benchmark outside a trace and save its JSON output.
-2. Capture a short, representative request with Instruments or `xctrace`.
-3. Rank shader pipelines by total GPU duration, then inspect dispatch count and
-   duration per dispatch.
+2. Use operator attribution to select a kernel family.
+3. Capture that kernel, rank pipeline and function cost, and inspect the
+   dominant source lines.
 4. Optimize the highest measured cost whose scaling matches the target
    workload.
 5. Re-run the isolated operator, end-to-end benchmark, and profile before
    choosing the next chapter.
 
-The command-line profiler is available with Xcode:
+For a longer request, Instruments can complement the single-dispatch capture:
 
 ```bash
 xcrun xctrace list templates
@@ -157,37 +236,40 @@ xcrun xctrace record \
 xcrun xctrace export --input /tmp/week2.trace --toc
 ```
 
-The stock Metal System Trace template is useful for command-buffer and queue
-behavior. To see shader names, timelines, and counters, save a custom
-Instruments template containing the Metal Shader Timeline and the relevant
-counter set, then pass that template to `xctrace`. Xcode GPU Capture remains
-the better tool for inspecting a single dispatch in detail.
+The stock Metal System Trace is useful for command buffers, queues, and GPU
+intervals. A compatible Metal Shader Timeline or counter template can rank
+pipelines over the longer request. Use the source-enabled GPU trace for the
+per-function flame graph and per-line activity breakdown.
 
 Do not use trace-instrumented wall time as a throughput result: capture adds
-overhead. Record at least the model and tensor shape, pipeline or shader name,
-total GPU duration, dispatch count, duration per dispatch, and share of the
-captured GPU interval. If the trace does not identify a dominant kernel, do not
-invent one from the source code; first shorten the workload, add signposts, or
-use an operator ablation that makes attribution unambiguous.
+overhead and profiling may serialize commands. Record at least the tensor
+shape, pipeline name, GPU time, dispatch count, Pipeline Statistics activity,
+highest-cost function, and highest-cost source line. If the trace does not
+identify a dominant cost, do not invent one from the source code. Shorten the
+workload or return to the dependency-aware operator attribution, then check
+that its attributed total and the complete-model phase time move in the same
+direction.
 
 ## Record a Matched Baseline
 
 Use the same model, prompt length, output length, device, and warmup count for
-your implementation and the MLX run. Replace `tiny_llm` with `tiny_llm_ref` to
-compare against the course reference:
+your solution and MLX:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-0.6b \
+  --week2-checkpoint kv-cache --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last
 
-pdm run bench --solution mlx --loader week2 --model qwen3-0.6b \
+pdm run bench --solution mlx --loader week2 --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last
 ```
+
+Use `--solution tiny_llm_ref` with the same arguments when you want to compare
+your solution with the reference solution instead of MLX.
 
 Or run the complete cumulative ladder in fresh processes. At this point, only
 the Week 1, KV-cache, and MLX rows are course prerequisites; later rows become
@@ -212,16 +294,16 @@ denominator forward.
 The Week 2 targets are:
 
 ```plain
-reference prefill throughput / MLX prefill throughput >= 0.80
-reference decode throughput / MLX decode throughput >= 0.80
+your solution's prefill throughput / MLX prefill throughput >= 0.80
+your solution's decode throughput / MLX decode throughput >= 0.80
 ```
 
 The prefill ratio is also 0.80; both ratios use Qwen3-4B, a 128-token prompt,
 128 timed decode steps, and last-row logits. `--output-len 129` includes the
 first token produced by prefill. Reaching 80% is the acceptance threshold, not
 a promise that every educational kernel individually matches its MLX
-counterpart. MLX is the comparison baseline; the Week 2 solution must reach
-both targets with course-owned operator implementations. If either ratio
+counterpart. MLX is the comparison baseline; your solution must reach both
+targets with its own operator implementations. If either ratio
 misses, the next chapter starts from the new benchmark and profile rather than
 a predetermined optimization.
 

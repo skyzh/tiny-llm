@@ -8,28 +8,28 @@ no longer dominate, and the Day 3 matrix-vector schedule does not reuse packed
 weights efficiently across prompt rows. Quantized projections are now the
 largest cost, so today we build a separate matrix schedule for them.
 
-Do not infer this bottleneck from the number of source lines. Prove it with a
-one-factor ablation: keep the course model unchanged, but route only prefill
-projections through `mx.quantized_matmul`. In the reference Qwen3-4B,
-32-token, last-logit run, that ablation reached 688.66 prefill tok/s while the
-complete MLX model reached 729.34 tok/s, or 94.4%. The experiment identifies
-the quantized prefill operator as almost the whole model gap; it does not make
-MLX's operator part of the solution.
+Re-run the dependency-aware kernel profile from Day 2 with
+`--case swiglu:prefill:128`. Continue only when projections dominate the
+attribution and the complete-model prefill phase moves with their latency. The
+[reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+shows that evidence chain. MLX remains an external performance denominator;
+the required path in your solution continues to call the C++/Metal primitive
+you implement for every projection.
 
 The implementation remains deliberately narrow:
 
 - W4A16 weights with four bits and group size 128;
 - BF16 activations, quantization parameters, and output;
-- Qwen3-4B and Qwen3-8B projection dimensions;
+- Qwen3-4B projection dimensions;
 - FP32 matrix accumulators;
 - the Day 3 SIMD matvec remains in use for `M <= 8`.
 
 ## From a Matvec to a Cooperative Tile
 
-The vanilla kernel assigns one complete dot product to one thread. The first
-matrix attempt assigned one 8×8 result to one SIMD group. Both are easy to
-validate, but they repeatedly load activations and quantized weights from
-device memory.
+The vanilla one-thread dot product and a single-group 8×8 tile are useful
+correctness oracles, but neither provides enough cooperative reuse for
+multi-row prefill. The performance schedule must share both activations and
+dequantized weights across a larger result tile.
 
 The optimized kernel assigns four SIMD groups, or 128 threads, to one
 32×32×32 tile:
@@ -57,9 +57,9 @@ The 40-element shared-memory stride pads the 32-value rows to avoid an
 unhelpful bank-access pattern. Tail rows and columns are zero-filled or guarded
 at the final store.
 
-The reference uses MLX's low-level Steel `BlockLoader` and `BlockMMA` headers
-as Metal building blocks. Those helpers provide cooperative loads and matrix
-fragment bookkeeping. The course still owns the W4A16 unpacking,
+Your Metal kernel may use MLX's low-level Steel `BlockLoader` and `BlockMMA`
+headers as building blocks. Those helpers provide cooperative loads and
+matrix-fragment bookkeeping. Your solution still owns the W4A16 unpacking,
 dequantization, tile layout, primitive, dispatch, split policy, and reduction;
 it does not call MLX's quantized-matmul operator.
 
@@ -79,26 +79,11 @@ column tiles. The result must retain the model-facing 16-bit dtype.
 
 ## Task 2: Make Device Loads Contiguous
 
-The first correct 32×32 implementation still issued several scalar,
-widely-strided activation loads per thread. A Metal trace and operator timing
-showed that the matrix arithmetic was not the limiting phase. MLX's comparable
-loader instead gives each thread an aligned contiguous vector.
-
 Use a cooperative block loader so adjacent threads and each thread's local
-reads form contiguous transactions. This is not cosmetic: at a 2,048-row
-Qwen3-4B shape, replacing the scalar activation reads made representative
-course projections effectively match MLX:
-
-| Projection | Course | MLX |
-|---|---:|---:|
-| Q, `2560 -> 4096` | 6.66 ms | 6.72 ms |
-| K, `2560 -> 1024` | 1.84 ms | 1.85 ms |
-| MLP gate, `2560 -> 9728` | 15.49 ms | 15.65 ms |
-| MLP down, `9728 -> 2560` | 15.66 ms | 15.76 ms |
-
-These are synchronized operator measurements on the reference M4 Pro. The
-important lesson is the diagnosis: increasing matrix-fragment work did not fix
-a load-transaction bottleneck; changing the load shape did.
+reads form contiguous transactions. This is a requirement of the schedule,
+not a cosmetic detail: fragment arithmetic cannot compensate for scalar,
+strided tile loads. Benchmark Q, K/V, gate/up, and down projections separately
+at their Qwen3-4B dimensions so both wide and narrow output grids are covered.
 
 ## Task 3: Hoist Quantization Parameters
 
@@ -135,10 +120,11 @@ pdm run bench-week2-progression --offline --repeats 3 \
   --prefill-logits last
 ```
 
-On the reference M4 Pro, Day 6 reached 605.80 prefill tok/s versus MLX's
-727.61 at 32 tokens, or 83.3%. The operator itself is already close to MLX for
-large `M`, but small K/V projections launch too few 32×32 result tiles to fill
-the GPU. That measured under-filled grid is Day 7's input.
+Inspect the projection sweep as well as complete-model throughput. Continue to
+Day 7 when the long-`M` projections are healthy but short, narrow K/V
+projections launch too few 32×32 result tiles to fill the GPU. If the same
+kernel remains slow at large `M`, improve its loads or matrix schedule before
+adding reduction partitions.
 
 At long `M`, the two-dimensional tile grid is already large. Do not force the
 next optimization there: additional reduction partitions would only add a
