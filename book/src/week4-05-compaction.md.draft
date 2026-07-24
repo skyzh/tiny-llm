@@ -71,6 +71,19 @@ If summary generation fails, fall back to a deterministic record of tool names,
 changed paths, command exit codes, and the last few messages. Context overflow
 must not trap the agent in a retry loop.
 
+## Reconcile the Cache After Compaction
+
+Compaction changes an older part of the rendered prompt, so the Day 4 generation
+session cannot keep every cached token. Pass the compacted messages through the
+same token-level reconciliation path used for an ordinary turn: find the common
+prefix, rewind every layer to that boundary, and prefill the new summary and
+recent tail.
+
+Do not try to summarize or edit K/V tensors directly. They are derived state,
+not semantic memory. If little prefix remains after compaction, a cold prefill
+may be simpler and just as fast. Compare both policies, but require them to
+produce the same first-token logits and greedy response.
+
 ## Working Memory Versus RAG
 
 Compaction is working memory: it preserves the state of the current task. RAG is
@@ -100,7 +113,9 @@ and one successful test. Then:
 2. compact the old prefix into a structured summary;
 3. verify that modified files, failed approaches, and validation status survive;
 4. resume the task using only the compacted context and recent tail; and
-5. compare total input tokens and task outcome against full replay.
+5. compare total input tokens and task outcome against full replay; and
+6. reconcile a warm cache to the compacted prompt and compare it with a cold
+   prefill.
 
 The compacted agent should know what it changed and which test passed without
 receiving every source excerpt again.

@@ -36,6 +36,24 @@ Keep these operations distinct:
 Branching a session does not automatically undo files. Undoing files does not
 erase the record that an earlier approach was attempted.
 
+## Conversation Checkpoints and Cache Rewind
+
+A conversation checkpoint records an event boundary. When the Day 4 generation
+session currently represents that exact event prefix, it may also record the
+corresponding cached token length. Restoring an ancestor checkpoint can then
+rewind each layer's cache before rendering and prefilling the branch's new
+suffix.
+
+The token length is only a hint tied to one live model session. If the process
+restarted, the model changed, compaction replaced the prefix, or the checkpoint
+belongs to another branch, rebuild K/V from the selected events instead. An
+optional project may serialize cache tensors with model, tokenizer, dtype, and
+shape metadata, but the event log must remain sufficient for recovery.
+
+Cache rewind and workspace undo are independent. A command that coordinates
+both should restore the workspace with conflict checks, select the conversation
+branch, and then rewind or rebuild inference state as three explicit steps.
+
 ## Interrupt
 
 Use one cancellation signal across decoding and tool execution:
@@ -94,6 +112,7 @@ Use the Day 3 fixture repository for four scenarios:
 
 Finally, branch the session before the first edit and pursue an alternative
 solution. Inspect both branches in the durable trace while keeping workspace
-mutations explicit.
+mutations explicit. Verify that restoring the live ancestor cache matches a cold
+prefill of the selected branch.
 
 {{#include copyright.md}}

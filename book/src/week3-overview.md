@@ -40,7 +40,10 @@ pools at zero capacity and turns requests over through a continuous batch. The
 [performance appendix](./appendix-performance.md) keeps static kernel
 throughput and serving usability as separate measurements.
 
-Week 4 owns application concerns such as RAG and tool calling. This separation
-keeps Week 3 focused on the reusable serving substrate.
+Week 4 owns application concerns such as RAG and tool calling. Its interactive
+session chapter will make one targeted extension to this substrate: retain and
+reconcile a request's KV state across compatible agent turns. Keeping that work
+in Week 4 lets this week finish a reusable request engine before a concrete
+multi-turn workload motivates a longer cache lifecycle.
 
 {{#include copyright.md}}

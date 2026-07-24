@@ -53,6 +53,8 @@ Report at least:
 - malformed-action and tool-error rates;
 - model turns and tool calls;
 - total input and output tokens;
+- reused, rewound, and newly prefetched tokens;
+- time to first token for cold and warm turns;
 - compaction count;
 - wall-clock time; and
 - terminal reason such as completed, budget exhausted, interrupted, or loop
@@ -100,6 +102,8 @@ Once the suite runs end to end, change one variable at a time:
 - three file tools versus the four-tool interface;
 - whole-file writes versus exact edits;
 - full session replay versus compaction;
+- fresh generation caches versus a persistent `GenerationSession`;
+- live checkpoint rewind versus rebuilding from durable events;
 - Qwen3 0.6B versus Qwen3 4B;
 - the Week 2 implementation versus MLX-LM; or
 - direct action versus an explicit plan in the working summary.
@@ -112,6 +116,7 @@ harness is another system whose behavior can be tested and optimized.
 
 After the capstone, good optional projects include:
 
+- versioned KV-cache snapshots for faster process restart;
 - a lexical repository map or vector retrieval for large documentation sets;
 - multiple concurrent agent sessions on the Week 3 scheduler;
 - stronger container or virtual-machine isolation;

@@ -20,7 +20,8 @@ The finished agent can:
 - inspect a repository without loading every file into the prompt;
 - read files in bounded chunks and make exact, reviewable edits;
 - run a narrowly scoped test command and use its output as feedback;
-- save and resume a session;
+- continue an interactive conversation and resume it after process exit;
+- reuse compatible KV-cache state instead of prefilling every turn from zero;
 - compact an overlong context while retaining task state;
 - checkpoint and undo its own file mutations;
 - accept steering messages and interrupt long-running work; and
@@ -57,6 +58,30 @@ task + session events
                       workspace
 ```
 
+## One Targeted Inference Extension
+
+The starting model boundary is deliberately stateless:
+
+```python
+Generate = Callable[[list[Message]], str]
+```
+
+For every action, `generate_response()` renders the complete conversation,
+creates a fresh cache for each model layer, prefills the entire prompt, decodes
+one response, and releases the caches. That is a useful correctness baseline,
+but an interactive agent repeatedly sends a long prompt whose prefix barely
+changes.
+
+Day 4 replaces the function with a callable `GenerationSession` that keeps the
+same agent-facing API while owning token IDs and layer caches. It compares the
+new rendered prompt with the cached token sequence, rewinds a divergent suffix,
+and prefills only the new tokens. Days 5 and 6 reuse this operation after
+compaction, steering, and session branching.
+
+The append-only event log remains the source of truth. A process restart may
+always rebuild KV state from events, so persisting K/V to disk is an optional
+optimization rather than a correctness requirement.
+
 ## A Small Tool Surface
 
 The target agent uses four tools inspired by small coding-agent harnesses:
@@ -77,10 +102,10 @@ A shell working directory is not a security sandbox. During this course, run the
 agent only in a disposable exercise workspace. A production agent would need a
 container, virtual machine, or similarly strong isolation boundary.
 
-The week then extends that loop with retrieval-augmented generation and a
-serving-oriented tool API. The WIP milestone is to move these application
-layers onto the Week 3 engine without changing the model kernels; the initial
-demo still calls the model directly.
+The initial demo calls the model through the stateless baseline. The week keeps
+the agent loop, tools, and safety work as its main arc, then uses interactive
+sessions as a focused opportunity to improve the inference framework without
+changing the model kernels.
 
 ## Seven-Day Plan
 
@@ -89,9 +114,9 @@ demo still calls the model directly.
 | 1 | Agent loop | The model alternates between actions and observations. |
 | 2 | Tools | The agent can read, edit, write, and run a bounded command. |
 | 3 | Safety and validation | Mutations are confined, reviewable, and followed by validation. |
-| 4 | Sessions | Work survives process exit and can be resumed. |
-| 5 | Compaction | Long sessions retain a small, useful working context. |
-| 6 | Control and recovery | The user can steer, interrupt, checkpoint, and undo. |
+| 4 | Interactive sessions | Follow-up turns reuse compatible KV state, and durable work survives process exit. |
+| 5 | Compaction | Long sessions retain useful context and reconcile the cache to the compacted prompt. |
+| 6 | Control and recovery | The user can steer, interrupt, checkpoint, rewind, and undo. |
 | 7 | Evaluation | The agent fixes a small bug and passes held-out tests. |
 
 ## Run the Starting Demo
@@ -108,6 +133,10 @@ use MLX-LM's optimized executor. The starting program is intentionally smaller
 than the final agent: each day replaces one shortcut with an explicit component
 that can be inspected and tested.
 
+Day 4 adds `--interactive` so a completed turn can receive a follow-up without
+starting a new conversation. Run the same scripted interaction through the cold
+and stateful adapters to verify identical output before comparing prefill work.
+
 The default Qwen3 4B model follows the structured action protocol more reliably.
 Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more
 time on malformed-action recovery.
@@ -118,6 +147,7 @@ time on malformed-action recovery.
 - **Useful:** the agent can make a precise change and run its test.
 - **Recoverable:** the session can resume, compact, and undo its own changes.
 - **Controllable:** budgets bind and the user can steer or interrupt work.
+- **Efficient:** compatible turns reuse their unchanged prompt prefix.
 - **Measurable:** a repeatable task suite distinguishes progress from anecdotes.
 
 ## Further Reading

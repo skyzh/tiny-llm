@@ -1,8 +1,10 @@
-# Day 4: Sessions and Resume
+# Day 4: Interactive Sessions and Resume
 
 So far, exiting the process loses the agent's conversation and progress. Today
 you will store an append-only session that can be inspected, resumed, and later
-compacted without treating a rendered prompt as the source of truth.
+compacted without treating a rendered prompt as the source of truth. You will
+also keep the conversation open for follow-up messages and reuse compatible KV
+state between model turns.
 
 ## Three Kinds of State
 
@@ -45,6 +47,7 @@ Support a minimal command set:
 
 ```text
 agent TASK                 start a new session
+agent --interactive TASK   continue accepting follow-up messages
 agent --continue           continue the newest session for this workspace
 agent --session SESSION_ID resume a selected session
 agent --no-session TASK    run without persistence
@@ -68,6 +71,42 @@ The context builder maps events back to chat messages:
 Rendering happens only when a model turn starts. This prevents presentation
 details from becoming the persistent data model.
 
+## Reusing KV State Between Turns
+
+The starting `Generate` callback receives semantic messages and returns model
+text, but `generate_response()` creates and releases a fresh cache on every
+call. Preserve the application boundary by replacing the function with a
+callable object:
+
+```python
+class GenerationSession:
+    def __call__(self, messages: list[Message]) -> str: ...
+    def close(self) -> None: ...
+```
+
+The object owns the rendered token IDs and one cache per model layer. Before a
+turn, tokenize the desired prompt and find its longest common prefix with the
+cached token IDs. Rewind every layer to that length, then prefill only the new
+suffix. Chat templates may replace a generation marker when an assistant turn
+is appended, so compare token IDs rather than assuming the rendered string only
+grows at the end.
+
+Keep one invariant across all layers:
+
+```text
+cache.offset == number of token IDs represented by that cache
+```
+
+Validate every layer before rewinding any of them. If the offsets disagree, the
+model changes, or reuse is otherwise unsafe, release the caches and perform a
+cold full prefill. Warm and cold execution must produce the same logits and
+greedy output.
+
+The event log remains canonical. After a process restart, rebuild the messages
+and cache from durable events. Saving K/V to disk can be an optional extension,
+but a missing or incompatible cache snapshot must never make the session
+impossible to resume.
+
 ## Project Instructions
 
 At session start, discover an `AGENTS.md` or equivalent instruction file in the
@@ -87,8 +126,9 @@ the scheduler interface narrow:
 session context -> generation request -> assistant action
 ```
 
-The serving layer should not write session files or execute tools. It may evict a
-session's KV cache while the durable event log remains resumable.
+The serving layer should not write session files or execute tools. It may evict
+a session's KV cache while the durable event log remains resumable. A later turn
+then pays for a cold prefill rather than failing.
 
 ## Exercise
 
@@ -98,8 +138,14 @@ session's KV cache while the durable event log remains resumable.
 4. Verify that `--no-session` creates no durable file.
 5. Attempt to resume a session from a different workspace.
 6. Change `AGENTS.md` between runs and make the change visible in the trace.
+7. Continue a completed turn with an interactive follow-up message.
+8. Compare cold and reused-cache logits while recording reused and prefetched
+   token counts.
+9. Restart without saved K/V and verify that event replay rebuilds the same
+   conversation.
 
 At the end of the day, a model should be able to resume the bug-fixing task from
-Day 3 without restarting the reasoning process from the original prompt.
+Day 3, accept a follow-up, and avoid prefilling an unchanged prefix while the
+process remains alive.
 
 {{#include copyright.md}}
