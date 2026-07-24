@@ -4,9 +4,9 @@
 
 Day 2's decode profile should show the same scaling before you start this
 chapter: linear projections repeatedly read far more weight data than one-token
-activations. We therefore study and implement quantized matrix multiplication.
-Quantizing weights from 16-bit floating point to 4-bit integers reduces both
-model size and the memory traffic required for each generated token.
+activations. Begin with the dense 16-bit representation and its bandwidth
+ceiling. Then introduce a smaller weight representation and implement the
+matrix-vector kernel that operates on it directly.
 
 **📚 Readings**
 
@@ -14,7 +14,7 @@ model size and the memory traffic required for each generated token.
 - [MLX Extensions Development Guide](https://ml-explore.github.io/mlx/build/html/dev/extensions.html)
 - [Quantized Matmul on GPU (Video)](https://www.youtube.com/watch?v=jYCxVirq4d0)
 
-## Why Quantization?
+## Start With Dense 16-Bit Weights
 
 The decode phase of LLM inference is typically **memory-bandwidth bound**: each
 token requires reading the model's weights but performs relatively little work
@@ -47,101 +47,47 @@ FLOPs per token: 2 × 4,022,272,000 = 8.045 GFLOPs
 The tied embedding matrix is counted once as the vocabulary projection. The
 single-row embedding lookup, normalization weights, activations, KV reads, and
 attention work are omitted. This makes the result an upper bound for linear
-layers, not a prediction of complete-model throughput.
-
-For BF16, the streamed weights occupy:
+layers, not a prediction of complete-model throughput. A dense FP16 or BF16
+weight occupies two bytes:
 
 ```plain
 4,022,272,000 weights × 2 bytes = 8.045 GB per token
 arithmetic intensity = 8.045 GFLOPs / 8.045 GB = 1.0 FLOP/byte
 ```
 
-The course uses affine W4 groups of 128 values. Packed weights need 0.5 byte
-per value, and each group stores one BF16 scale plus one BF16 bias:
+FP16 and BF16 divide their 16 bits differently: FP16 gives more bits to the
+significand, while BF16 gives more bits to the exponent. That affects numerical
+range and precision, but not this bandwidth calculation. The course uses BF16
+for activations and outputs.
 
-```plain
-bytes per W4 weight = 0.5 + (2 + 2) / 128 = 0.53125 bytes
-streamed W4 bytes   = 4,022,272,000 × 0.53125 = 2.137 GB per token
-arithmetic intensity = 8.045 GFLOPs / 2.137 GB = 3.765 FLOPs/byte
-```
-
-### Theoretical Decode Roofline Across Apple Silicon
-
-Apple publishes unified-memory bandwidth but not a directly comparable BF16
-GPU TFLOPS figure. We can therefore calculate a bandwidth roofline without
-inventing a compute ceiling:
-
-```plain
-ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
-```
-
-The table uses the highest-bandwidth configuration of each named chip. GB is
-decimal, matching Apple's specifications. These are theoretical ceilings, not
-benchmark results.
-
-| Chip | Bandwidth | BF16 roofline | W4 roofline | Ideal W4 work rate |
+| Dense weight format | Bits per weight | Bytes per weight | Streamed weight bytes per token | Weight arithmetic intensity |
 |---|---:|---:|---:|---:|
-| M1 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s | 0.75 TFLOPS |
-| M1 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s | 1.51 TFLOPS |
-| M1 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s | 3.01 TFLOPS |
-| M2 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s | 0.75 TFLOPS |
-| M2 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s | 1.51 TFLOPS |
-| M2 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s | 3.01 TFLOPS |
-| M3 Pro | 150 GB/s | 18.6 tok/s | 70.2 tok/s | 0.56 TFLOPS |
-| M3 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s | 1.51 TFLOPS |
-| M3 Ultra | 819 GB/s | 101.8 tok/s | 383.3 tok/s | 3.08 TFLOPS |
-| M4 Pro | 273 GB/s | 33.9 tok/s | 127.8 tok/s | 1.03 TFLOPS |
-| M4 Max | 546 GB/s | 67.9 tok/s | 255.5 tok/s | 2.06 TFLOPS |
+| FP16 | 16 | 2 | 8.045 GB | 1.0 FLOP/byte |
+| BF16 | 16 | 2 | 8.045 GB | 1.0 FLOP/byte |
 
-The advertised bandwidths come from Apple's specifications for
-[M1 Pro and Max](https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/),
-[M1 Ultra](https://www.apple.com/newsroom/2022/03/apple-unveils-m1-ultra-the-worlds-most-powerful-chip-for-a-personal-computer/),
-[M2 Pro and Max](https://www.apple.com/newsroom/2023/01/apple-unveils-m2-pro-and-m2-max-next-generation-chips-for-next-level-workflows/),
-[M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
-[M3 Pro and Max](https://support.apple.com/en-us/117736),
-[M3 Ultra](https://www.apple.com/mac-studio/), and
-[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's current Mac
-Studio pairs M4 Max with M3 Ultra, so there is no M4 Ultra row.
+This is the baseline to improve: both dense formats must stream roughly 8 GB of
+projection weights to generate one token.
 
-These values assume peak advertised bandwidth, one read of every projection
-weight, and no other traffic or work. Actual throughput is lower because the
-complete model also reads activations and KV, launches other operators, and
-does not sustain peak bandwidth continuously. The
-[performance appendix](./appendix-performance.md) records measured
-reference-solution and MLX results separately from this theoretical exercise.
+## Represent Weights With Fewer Bits
 
-### Why This Does Not Predict a 4× Prefill Gain
+**Quantization** represents floating-point weights with values from a small
+integer codebook plus the parameters needed to approximately reconstruct the
+original values. This course uses **weight-only 4-bit quantization**:
 
-The decode calculation has `M = 1`: each streamed weight serves one activation
-row. Prefill reuses a weight tile across many rows. Under the same one-read
-idealization, weight arithmetic intensity scales with `M`. The Day 6 tile
-guarantees reuse across 32 rows even when separate row tiles receive no cache
-reuse:
+- **W4** means that each logical weight is represented by a 4-bit code.
+- **A16** means that activations and outputs remain 16-bit floating point.
+- The resulting path is called **W4A16**. This course uses BF16 for its
+  activations, scales, biases, and outputs.
 
-| Workload | `M` | BF16 weight intensity | W4 weight intensity | Likely limit |
-|---|---:|---:|---:|---|
-| Decode | 1 | 1.0 FLOP/byte | 3.765 FLOPs/byte | Weight bandwidth |
-| One Day 6 row tile | 32 | 32 FLOPs/byte | 120.5 FLOPs/byte | Matrix schedule and dequantization |
-| Full Week 2 prefill ideal | 128 | 128 FLOPs/byte | 482 FLOPs/byte | Matrix schedule and dequantization |
+With only 16 possible codes, the reconstructed weights approximate the original
+values. The smaller representation trades some numerical precision for less
+memory traffic.
 
-Dense BF16 prefill is therefore already compute-oriented. Day 6's goal is to
-keep weights packed while recovering efficient matrix throughput, not to
-multiply prefill tokens per second by four. Measure the complete progression
-with the matched runner; do not transfer the decode roofline ratio to prefill.
+The kernel does not materialize a dense BF16 weight matrix. It unpacks each
+4-bit code, reconstructs the weight in registers, and immediately multiplies
+it by the corresponding BF16 activation.
 
-### The Solution: Quantization
-
-Compressing BF16 weights to
-4-bit integers (int4) can:
-
-- **Reduce decode weight traffic by 3.765×**: 8.045 GB → 2.137 GB per token
-- **Improve decode weight arithmetic intensity by 3.765×**: 1.0 → 3.765 FLOPs/byte
-- **Raise the bandwidth roofline for decode projections by up to 3.765×**
-
-The tradeoff is a small loss in model accuracy when the weights are quantized
-carefully.
-
-### Group-wise Quantization
+### Group-Wise Affine Quantization
 
 Instead of applying one scale to an entire weight matrix, we divide each row
 into **groups** and quantize every group independently. Local scales and biases
@@ -152,7 +98,7 @@ $G$. The Qwen3-4B MLX 4-bit checkpoint used in this course has a fixed group
 size of 128:
 
 ```plain
-Original weight matrix W: K × N (bfloat16)
+Logical weight matrix W: K × N
 
 Group size: G = 128
 Number of groups per row = N / G
@@ -160,39 +106,36 @@ Number of groups per row = N / G
 For each group of G consecutive values in a row:
   1. Find min and max values
   2. Compute scale and bias to map [min, max] → [0, 15] (4-bit range)
-  3. Quantize each value using: quantized = round((value - bias) / scale)
+  3. Quantize each value to an integer code from 0 through 15
 ```
 
-All required quantized-matmul tests use `group_size = 128` and BF16 scales,
-biases, activations, and outputs. Normalize those tensors to BF16 in your
-solution's model loader so every later kernel receives one model dtype.
+### Map a Group Into 16 Codes
 
-### Affine Quantization
-
-We use **affine (asymmetric) quantization**, which maps a floating-point range
-onto the full integer range:
+Affine quantization maps the minimum and maximum weight in each group onto the
+lowest and highest 4-bit codes. For a weight $w$, compute its code $q$ and its
+reconstructed value $\hat{w}$ as:
 
 $$
-\text{quantized} = \text{round}\left(\frac{\text{value} - \text{bias}}{\text{scale}}\right)
+q = \operatorname{clamp}\left(\operatorname{round}\left(\frac{w - b}{s}\right), 0, 15\right)
 $$
 
 $$
-\text{dequantized} = \text{quantized} \times \text{scale} + \text{bias}
+\hat{w} = q s + b
 $$
 
-For 4-bit quantization, the quantized values are in the range $[0, 15]$.
-
-Given a group with minimum value $v_{min}$ and maximum value $v_{max}$:
-
-$$
-\text{scale} = \frac{v_{max} - v_{min}}{2^{\text{bits}} - 1} = \frac{v_{max} - v_{min}}{15}
-$$
+Here $s$ is the scale and $b$ is the bias. Given a group with minimum value
+$v_{\min}$ and maximum value $v_{\max}$:
 
 $$
-\text{bias} = v_{min}
+s = \frac{v_{\max} - v_{\min}}{2^4 - 1}
+  = \frac{v_{\max} - v_{\min}}{15}
 $$
 
-**Example:**
+$$
+b = v_{\min}
+$$
+
+For example, consider a shortened group with five values:
 
 ```plain
 Group values: [-0.5, -0.3, 0.1, 0.4, 0.8]
@@ -211,18 +154,22 @@ Quantization:
 Quantized: [0, 2, 7, 10, 15] (4 bits each)
 ```
 
-### Storage Format
+All required quantized-matmul tests use `group_size = 128` and BF16 scales,
+biases, activations, and outputs. Normalize those tensors to BF16 in your
+solution's model loader so every later kernel receives one model dtype.
 
-The quantized values are packed for compact storage and efficient access:
+### Packed Storage Layout
+
+The 4-bit codes are packed for compact storage and efficient access:
 
 ```plain
-Original: K × N bfloat16 (2 bytes each) = 2KN bytes
-Quantized: K × N int4 (0.5 bytes each) = 0.5KN bytes
+Logical weight matrix: K × N
+Dense BF16 storage: K × N bfloat16 (2 bytes each) = 2KN bytes
+W4 code storage: K × N int4 (0.5 bytes each) = 0.5KN bytes
 
 Packing: 8 × 4-bit values fit in one uint32 (32 bits)
 
-Weight matrix shape: K × N
-Quantized storage shape: K × (N / 8) uint32
+Packed codes shape: K × (N / 8) uint32
 Scales shape: K × (N / G) bfloat16
 Biases shape: K × (N / G) bfloat16
 ```
@@ -240,6 +187,79 @@ Unpacking:
   ...
   h = (uint32_value >> 28) & 0xF
 ```
+
+## Revisit the Decode Roofline
+
+The packed codes are not the entire W4 representation. Each group of 128
+weights also stores one BF16 scale and one BF16 bias:
+
+```plain
+bytes per W4 weight = 0.5 + (2 + 2) / 128 = 0.53125 bytes
+streamed W4 bytes   = 4,022,272,000 × 0.53125 = 2.137 GB per token
+arithmetic intensity = 8.045 GFLOPs / 2.137 GB = 3.765 FLOPs/byte
+```
+
+Now W4 can be added to the dense comparison:
+
+| Weight format | Value bits | Metadata per 128 weights | Effective bytes per weight | Streamed weight bytes per token | Weight arithmetic intensity |
+|---|---:|---|---:|---:|---:|
+| FP16 | 16 | None | 2 | 8.045 GB | 1.0 FLOP/byte |
+| BF16 | 16 | None | 2 | 8.045 GB | 1.0 FLOP/byte |
+| W4 | 4 | One BF16 scale and one BF16 bias | 0.53125 | 2.137 GB | 3.765 FLOPs/byte |
+
+The smaller representation reduces the projection weight traffic by 3.765×.
+That ratio is a bandwidth ceiling for one-token decode, not a promise of the
+same end-to-end speedup.
+
+### Theoretical Decode Roofline Across Apple Silicon
+
+Apple publishes unified-memory bandwidth but not a directly comparable BF16
+GPU TFLOPS figure. A bandwidth roofline can therefore be calculated without
+assuming a compute ceiling:
+
+```plain
+ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
+```
+
+The table uses the highest-bandwidth configuration of each named chip. GB is
+decimal, matching Apple's specifications. These are theoretical ceilings, not
+benchmark results.
+
+| Chip | Bandwidth | FP16/BF16 roofline | W4 roofline |
+|---|---:|---:|---:|
+| M1 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s |
+| M1 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
+| M1 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s |
+| M2 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s |
+| M2 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
+| M2 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s |
+| M3 Pro | 150 GB/s | 18.6 tok/s | 70.2 tok/s |
+| M3 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
+| M3 Ultra | 819 GB/s | 101.8 tok/s | 383.3 tok/s |
+| M4 Pro | 273 GB/s | 33.9 tok/s | 127.8 tok/s |
+| M4 Max | 546 GB/s | 67.9 tok/s | 255.5 tok/s |
+
+The advertised bandwidths come from Apple's specifications for
+[M1 Pro and Max](https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/),
+[M1 Ultra](https://www.apple.com/newsroom/2022/03/apple-unveils-m1-ultra-the-worlds-most-powerful-chip-for-a-personal-computer/),
+[M2 Pro and Max](https://www.apple.com/newsroom/2023/01/apple-unveils-m2-pro-and-m2-max-next-generation-chips-for-next-level-workflows/),
+[M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
+[M3 Pro and Max](https://support.apple.com/en-us/117736),
+[M3 Ultra](https://www.apple.com/mac-studio/), and
+[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's current Mac
+Studio pairs M4 Max with M3 Ultra, so there is no M4 Ultra row.
+
+These values assume peak advertised bandwidth, one read of every projection
+weight, and no other traffic or work. Actual throughput is lower because the
+complete model also reads activations and KV, launches other operators, and
+does not sustain peak bandwidth continuously. The
+[performance appendix](./appendix-performance.md) records measured results
+separately from this theoretical exercise.
+
+This roofline describes one-token decode, where `M = 1` and each streamed
+weight serves one activation row. Prefill reuses each weight tile across many
+rows, increasing arithmetic intensity. It therefore needs a matrix schedule;
+the decode bandwidth ratio should not be treated as a prefill prediction.
 
 ## Quantized Matrix Multiplication
 
