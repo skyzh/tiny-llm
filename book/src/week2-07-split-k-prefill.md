@@ -57,12 +57,11 @@ Add `group_id.z` as the partition index. Every partition must:
 - reuse the validated Day 6 loader, dequantizer, and 32×32 tile;
 - write to its own `[M, K]` plane without atomics.
 
-The reference stores partial planes in BF16 to keep the temporary small and
-performs the final sum in FP32 before the output cast. This introduces one
-extra BF16 rounding boundary compared with the unsplit FP32 accumulator, so
-tests use a BF16-appropriate tolerance. An FP32 temporary is a valid bring-up
-oracle, but it did not justify doubling temporary traffic in the measured
-course path.
+Store partial planes in BF16 to keep the temporary small and perform the final
+sum in FP32 before the output cast. This introduces one extra BF16 rounding
+boundary compared with the unsplit FP32 accumulator, so tests use a
+BF16-appropriate tolerance. An FP32 temporary is a useful bring-up oracle, but
+it doubles the partial-buffer traffic.
 
 ## Task 3: Choose Partitions From Occupancy
 
@@ -75,11 +74,11 @@ decrease split_k until N is divisible by split_k * 128
 use Day 6 unchanged when split_k <= 1
 ```
 
-The target of roughly 320 threadgroups and cap of 16 are measured constants
-for the reference M4 Pro, not universal GPU properties. Unlike a hard-coded
-prompt-length cutoff, the grid calculation naturally stops splitting a narrow
-projection once more row tiles are present, and stops immediately for already
-wide grids.
+For the Qwen3-4B course checkpoint, use a target of roughly 320 threadgroups
+and a cap of 16 as explicit tuning parameters. They are not universal GPU
+properties. Unlike a hard-coded prompt-length cutoff, the grid calculation
+naturally stops splitting a narrow projection once more row tiles are present,
+and stops immediately for already wide grids.
 
 For Qwen3-4B, the policy selects these schedules:
 
@@ -114,29 +113,18 @@ pdm run build-ext
 pdm run test --week 2 --day 7
 ```
 
-## Reference Split-K Measurement
+## Complete the Optimization Loop
 
-This matched run used Qwen3-4B, MLX 0.32.0, mlx-lm 0.31.3, an M4 Pro with a
-20-core GPU and 64 GB memory, last-logit prefill, 32 prompt tokens, 33 output
-tokens, two complete warmups, and the median of three fresh processes:
+Compare Day 6, Day 7, and MLX at short, acceptance, and long prompt lengths.
+Split-K should help only while the unsplit output grid is under-filled. Verify
+that one-token decode remains unchanged because it still dispatches to Day 3's
+matvec, and that sufficiently large prefill shapes select the unsplit Day 6
+kernel instead of paying for partial storage and reduction.
 
-| Checkpoint | Prefill tok/s | Decode tok/s | Prefill vs MLX |
-|---|---:|---:|---:|
-| Day 6 SIMD matrix | 605.80 | 75.95 | 83.3% |
-| Day 7 split-K | 671.80 | 75.93 | 92.3% |
-| MLX | 727.61 | 88.48 | 100% |
-
-Split-K improves prefill by 10.9% and leaves decode unchanged, as it should:
-one-token decode still uses Day 3's matvec. At 128 prompt tokens the remaining
-two-way K/V split is neutral in the complete-model benchmark. At 2,048 prompt
-tokens every base tile grid is already large, so Day 7 falls back entirely to
-Day 6; the completed Week 2 model reaches about 78% of MLX prefill in the
-current prompt-scoring campaign.
-
-The final Week 2 acceptance run uses the fixed 128-token prompt and 128-token
-decode workload from Day 2. The three-process median is 792.18 prefill tok/s
-and 77.41 decode tok/s. MLX 0.32.0 reaches 827.74 and 87.58 tok/s respectively,
-so the course path finishes at 95.7% prefill and 88.4% decode.
+Run the fixed Week 2 acceptance workload from Day 2 after the shape sweep. The
+[performance appendix](./appendix-performance.md) is the single place for the
+reference machine, dependency versions, measured checkpoint table, and final
+MLX ratios.
 
 The Week 2 loop is now complete:
 

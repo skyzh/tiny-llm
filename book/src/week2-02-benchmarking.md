@@ -123,11 +123,12 @@ course implementation, and MLX at the selected model's real tensor shapes:
 pdm run bench-week2-operators --model qwen3-4b --context 128
 ```
 
-For the measurements quoted later in this week, the machine was an M4 Pro with
-a 20-core GPU and 64 GB of memory. Each operator used 20 warmup iterations and
-100 synchronized timed iterations in each of three fresh processes. The
-reported result is the median process-level speedup. The matched end-to-end
-commands used two complete warmups and three fresh measured runs.
+Choose enough warmup iterations to exclude compilation, synchronize every
+timed iteration, and repeat the run in fresh processes. Report the median with
+the exact hardware, dependency versions, model, and tensor shapes. The
+[performance appendix](./appendix-performance.md) applies this protocol to the
+course reference checkpoints and keeps the resulting machine-specific numbers
+in one place.
 
 ## Attribute Time With a Real GPU Profile
 

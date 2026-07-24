@@ -37,7 +37,7 @@ describe new storage and scheduling behavior.
 - The course-owned decode-attention primitive
 - Fast RMSNorm, RoPE, and SwiGLU operations
 - A BF16 SIMD-matrix quantized prefill kernel
-- A measured split-K schedule for small Qwen prefill matrices
+- A shape-aware split-K schedule for small Qwen prefill matrices
 - A last-token output interface for generation
 - Acceptance targets of 80% of MLX prefill and decode throughput on the
   fixed Week 2 checkpoint
@@ -86,12 +86,11 @@ A later chapter never becomes an undeclared prerequisite for an earlier one.
 
 ## Why FlashAttention Waits Until Week 3
 
-Week 2 intentionally does not add dense FlashAttention. The matched prefill
-profile identifies quantized projection matmul as the dominant cost, and the
-Day 6 kernel already brings the completed checkpoint close to MLX at the fixed
-acceptance shape. A second dense-attention schedule would not follow the
-measured bottleneck and would be replaced as soon as Week 3 makes paged K/V the
-canonical serving layout.
+Week 2 intentionally does not add dense FlashAttention. Its prefill lab first
+profiles the fixed acceptance shape and follows the largest measured cost.
+Week 3 then makes paged K/V the canonical serving layout, so a second
+dense-only attention implementation would not become the model-facing serving
+path.
 
 Instead, Week 2 teaches the ingredients that remain useful: Day 4 introduces
 online softmax and Day 6 introduces cooperative SIMD-matrix tiling. Week 3 adds
@@ -109,7 +108,7 @@ loop and Python RMSNorm, RoPE, attention, and MLP implementations.
 Week 3 imports these Week 2 interfaces rather than copying or replacing them.
 Its paged-attention chapters combine Day 4 online softmax and Day 6 matrix
 fragments only after page-table translation has been introduced, while the
-quantized projections inherit Day 7's measured dispatch. That boundary
+quantized projections inherit Day 7's shape-aware dispatch. That boundary
 lets each week's model remain understandable and runnable on its own.
 
 The cumulative ladder is executable at any time. The

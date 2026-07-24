@@ -114,10 +114,9 @@ unnormalized output accumulator per row. For each K/V tile:
 After the final visible tile, divide each output row by its running sum and
 store it using the model-facing dtype.
 
-Following the measured MLX kernel, multiply the attention scale by
-`log2(e)` once and use `fast::exp2` for online-softmax rescaling inside the hot
-tile loop. This is mathematically equivalent to natural exponentials and avoids
-repeating a more expensive base conversion.
+Multiply the attention scale by `log2(e)` once and use `fast::exp2` for
+online-softmax rescaling inside the hot tile loop. This is mathematically
+equivalent to natural exponentials and avoids repeating a base conversion.
 
 The causal offset is `context_len - L`. A key at logical position `s` is visible
 to query row `l` when:

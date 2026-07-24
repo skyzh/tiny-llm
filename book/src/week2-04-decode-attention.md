@@ -73,10 +73,10 @@ accumulator = accumulator * old_factor + score_factor * value
 After its last cached position, each group writes its partial maximum,
 denominator, and value accumulator to threadgroup memory. The first SIMD group
 computes the common maximum and rescale factors. One thread computes the final
-denominator, then the first `D` threads combine one output dimension each. This
-parallel final reduction was faster than making the first 32 lanes each reduce
-four dimensions. Subtracting the maxima gives stable softmax without storing
-all `S` scores or probabilities.
+denominator, then the first `D` threads each combine one output dimension. This
+keeps the final value reduction parallel across the head dimension.
+Subtracting the maxima gives stable softmax without storing all `S` scores or
+probabilities.
 
 This removes two large intermediates and several dispatch boundaries from the
 Week 1 graph. It is especially relevant as context grows: the avoided score and
@@ -149,10 +149,9 @@ pdm run bench --solution tiny_llm --loader week2 \
 ```
 
 The model dispatches short-query contexts through the course kernel and falls
-back to the exact readable Week 1 composition outside the measured range. This
-is the same evidence-driven decision used for tile sizes, barriers, and
-threadgroup layouts elsewhere in the course. Reprofile the retained path. Once
-the projection and attention costs shrink, the repeated pointwise and reduction
-dispatch cluster becomes visible; that measured cluster is Day 5's input.
+back to the exact readable Week 1 composition outside the validated range.
+Reprofile the retained path. If repeated pointwise and reduction dispatches
+become the largest remaining cluster, continue to Day 5; otherwise keep tuning
+the dominant measured cost.
 
 {{#include copyright.md}}

@@ -352,7 +352,7 @@ pdm run bench --solution tiny_llm --loader week3 \
 
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
 
-## What Paging Buys on a Mac
+## What Paging Changes
 
 Apple silicon's unified memory removes the discrete-device transfer boundary,
 but it does not remove allocation, fragmentation, or copying inside the

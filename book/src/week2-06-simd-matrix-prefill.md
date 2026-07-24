@@ -10,15 +10,9 @@ largest cost, so today we build a separate matrix schedule for them.
 
 Do not infer this bottleneck from the number of source lines. Use synchronized
 operator timings to compare the course projections with MLX as an external
-baseline. The instructor reference also records one diagnostic upper bound: a
-temporary model ablation routed only prefill projections through
-`mx.quantized_matmul`. At 32 prompt tokens it reached 688.66 prefill tok/s,
-while the complete MLX model reached 729.34 tok/s, or 94.4%.
-
-That ablation is not a course checkpoint, student task, or valid solution. It
-only estimates how much of the model gap can be recovered by improving
-quantized prefill matmul. The required path below continues to call the
-course-owned C++/Metal primitive for every projection.
+baseline, and confirm that their share also dominates the complete prefill
+profile. The required path continues to call the course-owned C++/Metal
+primitive for every projection.
 
 The implementation remains deliberately narrow:
 
@@ -85,19 +79,9 @@ column tiles. The result must retain the model-facing 16-bit dtype.
 
 Use a cooperative block loader so adjacent threads and each thread's local
 reads form contiguous transactions. This is a requirement of the schedule,
-not a cosmetic detail: at a 2,048-row Qwen3-4B shape, representative course
-projections effectively match MLX:
-
-| Projection | Course | MLX |
-|---|---:|---:|
-| Q, `2560 -> 4096` | 6.66 ms | 6.72 ms |
-| K, `2560 -> 1024` | 1.84 ms | 1.85 ms |
-| MLP gate, `2560 -> 9728` | 15.49 ms | 15.65 ms |
-| MLP down, `9728 -> 2560` | 15.66 ms | 15.76 ms |
-
-These are synchronized operator measurements on the reference M4 Pro. They
-show that memory transaction shape is part of the matrix schedule: fragment
-arithmetic cannot compensate for scalar, strided tile loads.
+not a cosmetic detail: fragment arithmetic cannot compensate for scalar,
+strided tile loads. Benchmark Q, K/V, gate/up, and down projections separately
+at their Qwen3-4B dimensions so both wide and narrow output grids are covered.
 
 ## Task 3: Hoist Quantization Parameters
 
@@ -134,10 +118,11 @@ pdm run bench-week2-progression --offline --repeats 3 \
   --prefill-logits last
 ```
 
-On the reference M4 Pro, Day 6 reached 605.80 prefill tok/s versus MLX's
-727.61 at 32 tokens, or 83.3%. The operator itself is already close to MLX for
-large `M`, but small K/V projections launch too few 32×32 result tiles to fill
-the GPU. That measured under-filled grid is Day 7's input.
+Inspect the projection sweep as well as complete-model throughput. Continue to
+Day 7 when the long-`M` projections are healthy but short, narrow K/V
+projections launch too few 32×32 result tiles to fill the GPU. If the same
+kernel remains slow at large `M`, improve its loads or matrix schedule before
+adding reduction partitions.
 
 At long `M`, the two-dimensional tile grid is already large. Do not force the
 next optimization there: additional reduction partitions would only add a

@@ -70,9 +70,9 @@ Qwen3-4B end-to-end correctness test.
 
 The C++ primitive validates shape and dtype, allocates the output through MLX,
 binds the buffers and scalar constants, allocates eight float partial sums, and
-launches one 256-thread group per row. The two-level reduction was the largest
-small-operator improvement in the measured stack; a single SIMD group left too
-little parallel work available.
+launches one 256-thread group per row. Compare this two-level reduction with a
+single-SIMD-group control to determine whether the extra parallelism offsets
+the threadgroup reduction on the target machine.
 
 Integrate `FastRMSNorm` into every Week 2 norm immediately, run the RMSNorm
 tests, and record the cumulative model result before writing RoPE:

@@ -65,7 +65,7 @@ streamed W4 bytes   = 4,022,272,000 × 0.53125 = 2.137 GB per token
 arithmetic intensity = 8.045 GFLOPs / 2.137 GB = 3.765 FLOPs/byte
 ```
 
-### Decode Roofline Across Apple Silicon
+### Theoretical Decode Roofline Across Apple Silicon
 
 Apple publishes unified-memory bandwidth but not a directly comparable BF16
 GPU TFLOPS figure. We can therefore calculate a bandwidth roofline without
@@ -76,7 +76,8 @@ ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
 ```
 
 The table uses the highest-bandwidth configuration of each named chip. GB is
-decimal, matching Apple's specifications.
+decimal, matching Apple's specifications. These are theoretical ceilings, not
+benchmark results.
 
 | Chip | Bandwidth | BF16 roofline | W4 roofline | Ideal W4 work rate |
 |---|---:|---:|---:|---:|
@@ -103,9 +104,11 @@ The advertised bandwidths come from Apple's specifications for
 Studio pairs M4 Max with M3 Ultra, so there is no M4 Ultra row.
 
 These values assume peak advertised bandwidth, one read of every projection
-weight, and no other traffic or work. Actual throughput is lower. On the
-reference M4 Pro, MLX reaches 87.58 decode tok/s and the completed course model
-reaches 77.41 tok/s, compared with the ideal W4 roofline of 127.8 tok/s.
+weight, and no other traffic or work. Actual throughput is lower because the
+complete model also reads activations and KV, launches other operators, and
+does not sustain peak bandwidth continuously. The
+[performance appendix](./appendix-performance.md) records measured course and
+MLX results separately from this theoretical exercise.
 
 ### Why This Does Not Predict a 4× Prefill Gain
 
@@ -121,10 +124,10 @@ reuse:
 | One Day 6 row tile | 32 | 32 FLOPs/byte | 120.5 FLOPs/byte | Matrix schedule and dequantization |
 | Full Week 2 prefill ideal | 128 | 128 FLOPs/byte | 482 FLOPs/byte | Matrix schedule and dequantization |
 
-Day 2's dense BF16 prefill is therefore already compute-oriented. Day 6's goal
-is to keep weights packed while recovering that efficient matrix throughput,
-not to multiply prefill tokens per second by four. The measured progression is
-726.25 tok/s on Day 2 and 792.18 tok/s after Day 7, a 9.1% gain.
+Dense BF16 prefill is therefore already compute-oriented. Day 6's goal is to
+keep weights packed while recovering efficient matrix throughput, not to
+multiply prefill tokens per second by four. Measure the complete progression
+with the matched runner; do not transfer the decode roofline ratio to prefill.
 
 ### The Solution: Quantization
 
@@ -430,9 +433,9 @@ format, dispatcher, and synchronized benchmark.
 Decode normally has `M = 1`; an 8×8 matrix tile would leave most rows empty.
 Instead, one SIMD group reduces the input dimension and uses `simd_sum` to
 combine lane-local partial sums. Start with two output columns per group as an
-inspectable schedule. The Qwen3-4B profile then motivates a faster
-path: each lane loads two adjacent packed words, or 16 activations, and reuses
-them across four output columns.
+inspectable schedule. For the Qwen3-4B checkpoint, then evaluate a four-column
+path in which each lane loads two adjacent packed words, or 16 activations, and
+reuses them across the four outputs.
 
 The optimized path also uses the affine identity
 
@@ -470,12 +473,11 @@ instruction count is useful only if the longer-lived activation sum and output
 accumulators do not reduce occupancy. Select the schedule with a synchronized
 whole-model decode benchmark, not an instruction-count estimate.
 
-At the Python-to-extension boundary, make scales, biases, activations, and
-packed weights row-contiguous once with `mx.contiguous`. The C++ primitive
-validates that contract before encoding the kernel. A Metal kernel receives
-raw buffers and strides are not implicit, so silently accepting a noncontiguous
-view would produce either wrong addressing or a slower hidden copy in a less
-explicit layer.
+Define a row-contiguous Python-to-extension contract for scales, biases,
+activations, and packed weights. Call `mx.contiguous` once at that boundary and
+validate the layout in the C++ primitive before encoding the kernel. Metal
+receives raw buffers rather than implicit array strides, so layout is a
+correctness condition as well as a performance condition.
 
 Use direct activation reads for the course kernel. The one-row activation is
 small and cache-friendly, while staging it in threadgroup memory adds a barrier
