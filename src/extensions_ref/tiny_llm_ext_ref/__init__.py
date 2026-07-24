@@ -8,6 +8,6 @@ try:
     from ._ext import *
 
     current_path = Path(__file__).parent
-    load_library(mx.gpu, str(current_path))
+    load_library(str(current_path))
 except ImportError:
     print("Failed to load C++/Metal extension")

@@ -89,6 +89,9 @@ class TinyKvPagedCache(TinyKvCache):
     ) -> PagedKvMetadata:
         pass
 
+    def materialize(self):
+        pass
+
     def rewind(self, n: int):
         pass
 

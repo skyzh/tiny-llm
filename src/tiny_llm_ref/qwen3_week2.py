@@ -24,6 +24,7 @@ WEEK2_CHECKPOINTS = (
     "rope",
     "swiglu",
     "simd-matmul",
+    "split-k",
 )
 
 
@@ -239,7 +240,7 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
-    def __init__(self, mlx_model: Any, checkpoint: str = "simd-matmul"):
+    def __init__(self, mlx_model: Any, checkpoint: str = "split-k"):
         if checkpoint not in WEEK2_CHECKPOINTS:
             raise ValueError(
                 f"unknown Week 2 checkpoint {checkpoint!r}; "
@@ -259,6 +260,7 @@ class Qwen3ModelWeek2:
         use_simdgroup_matmul = checkpoint_index >= WEEK2_CHECKPOINTS.index(
             "simd-matmul"
         )
+        use_split_k_matmul = checkpoint_index >= WEEK2_CHECKPOINTS.index("split-k")
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.use_fast_rope = use_fast_rope
         self.hidden_size = mlx_model.args.hidden_size
@@ -269,7 +271,9 @@ class Qwen3ModelWeek2:
         def model_weight(layer: Any) -> mx.array | QuantizedWeights:
             if use_quantized_weights:
                 return QuantizedWeights.from_mlx_layer(
-                    layer, use_simdgroup_matmul=use_simdgroup_matmul
+                    layer,
+                    use_simdgroup_matmul=use_simdgroup_matmul,
+                    use_split_k_matmul=use_split_k_matmul,
                 )
             return dequantize_linear(layer).astype(mx.bfloat16)
 

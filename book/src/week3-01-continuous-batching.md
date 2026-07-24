@@ -161,9 +161,11 @@ prompt tokens per call.
 
 Materialize the KV cache between chunks. MLX evaluates lazily, so repeatedly
 extending an unevaluated cache creates an increasingly long computation graph
-and allows memory usage to grow. Calling `mx.eval` on every layer's key and
-value tensors after each chunk stores the current cache and truncates that
-graph.
+and allows memory usage to grow. Give each cache a `materialize()` lifecycle
+hook: dense caches evaluate their key/value tuple, while paged caches evaluate
+their backing page tensors directly. Do not read a paged cache through a dense
+compatibility property merely to evaluate it; that silently adds a gather and
+defeats the storage layout.
 
 You can test your implementation by running:
 

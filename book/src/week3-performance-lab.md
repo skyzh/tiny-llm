@@ -2,110 +2,110 @@
 
 > 🚧 This chapter is under review and may change.
 
-Week 2 optimized the model operators. Week 3 added request scheduling and paged
-KV ownership. This lab measures the serving system as a system: batch size,
-prefill chunk size, page size, request mix, allocator reuse, and fairness. It
-does not introduce another matrix kernel or change the model dtype.
+Week 2 optimized one dense-cache request and has its own static 80%-of-MLX
+acceptance gate. Week 3 changes the storage and scheduler. Its primary
+benchmark must therefore exercise request turnover, incremental unknown-size
+growth, dense repacking, page reuse, and fragmentation. It is acceptable for a
+single static paged request to regress because page-table indirection is real.
 
-## Start from the Completed Interfaces
+## Keep Static and Serving Questions Separate
 
-The following boundaries are prerequisites, not tasks for this lab:
-
-- Week 2 quantized linear dispatches SIMD matvec for decode and SIMD-matrix
-  matmul for prefill.
-- Week 3 paged FlashAttention handles long prefill.
-- Generation requests only the final logit row.
-- Week 3 continuous batching owns request admission and slot reuse.
-- Week 3 paged caches own physical K/V pages and expose page metadata to
-  paged attention.
-
-If one of those paths is missing, return to its chapter. Do not hide an
-incomplete prerequisite behind a benchmark-only workaround.
-
-## Choose Serving Metrics
-
-One number cannot describe a serving engine. Record at least:
-
-| Metric | What it reveals |
-| --- | --- |
-| Time to first token | prompt admission and prefill delay |
-| Time between tokens | decode latency and scheduler stalls |
-| Aggregate decode tok/s | useful work across active requests |
-| Request throughput | admission, completion, and slot reuse |
-| Peak KV pages | cache capacity and fragmentation |
-| P50/P95 latency | average behavior and tail fairness |
-
-Keep the workload fixed while varying one scheduling choice. Record model,
-MLX version, hardware, prompt/output distribution, warmup, and repeat count.
-
-## Experiment 1: Prefill Chunk Size
-
-Run the same mixture of long prompts and active decoders with several
-`prefill_max_step` values. A smaller chunk bounds scheduler stalls but adds more
-model calls and cache updates. Compare aggregate throughput and P95
-time-between-tokens; neither metric alone is sufficient.
+A static run answers whether one attention implementation is faster for one
+already-allocated request. It remains a useful kernel diagnostic:
 
 ```bash
-pdm run bench --solution tiny_llm_ref --loader week3 --batch-decode \
-  --num-seqs 16 --batch-size 4 --prefill-step 32 --model qwen3-0.6b
-
-pdm run bench --solution tiny_llm_ref --loader week3 --batch-decode \
-  --num-seqs 16 --batch-size 4 --prefill-step 128 --model qwen3-0.6b
+pdm run bench-course-progression --offline --repeats 3 \
+  --variant week2 --variant week3 --variant mlx \
+  --model qwen3-4b --input-len 2048 --output-len 129 \
+  --prefill-logits last
 ```
 
-## Experiment 2: Batch Size and Request Turnover
+That command does not test continuous admission, cache growth, fragmentation,
+or page reuse. Do not use it as the Week 3 acceptance result.
 
-Increase active batch size while keeping the queued request set fixed. Verify
-that finished requests release their pages and that newly admitted requests
-reuse capacity. Report aggregate throughput together with per-request latency;
-a larger batch can improve the former while worsening the latter.
+## Run the Serving Progression
 
-## Experiment 3: Page Size
+The paired runner generates a deterministic mixture of prompt and output
+lengths, keeps four decode slots active, admits a chunked prefill alongside
+them, and replaces finished requests until the queue is empty:
 
-Compare several page sizes with the same sequence-length distribution. Small
-pages reduce unused tail capacity but lengthen block tables and increase page
-management. Large pages shorten metadata but waste more space at request tails.
+```bash
+pdm run bench-serving-progression --offline --repeats 3 \
+  --model qwen3-4b --num-seqs 16 --batch-size 4 \
+  --min-input-len 128 --max-input-len 1024 \
+  --min-output-len 32 --max-output-len 128 \
+  --prefill-step 128 --warmup 1 \
+  --json-output serving-qwen3-4b.json
+```
 
-Measure page count, unused tail slots, and attention latency. Do not call a page
-size better merely because one isolated kernel becomes faster.
+Dense and paged paths run in fresh alternating processes. The warmup compiles a
+complete workload. The benchmark then synchronizes and resets every page pool,
+so the measured paged process starts with zero page capacity. No global maximum
+context length is passed to the cache. Each request still has a generated-token
+limit so the finite benchmark can complete.
 
-## Experiment 4: Dense and Paged Attention
+The runner reports:
 
-Use the dense-gather compatibility path from Day 3 as an ablation against the
-direct paged path from Day 4. They must run the same requests and reuse the same
-Week 2 model operators. Attribute differences to gather/repack work, page-table
-indirection, and cache reuse rather than to unrelated prefill kernels.
+| Metric | What it reveals |
+|---|---|
+| Output tok/s and requests/s | complete scheduler throughput |
+| Aggregate decode tok/s | useful work while decode slots are active |
+| Peak KV bytes | dense request plus staging storage, or reserved page pools |
+| Dense growth-copy bytes | old request K/V copied by concatenation |
+| Dense staging-copy bytes | live K/V copied into padded batch tensors |
+| Paged growth-copy bytes | old physical pages copied when a pool grows |
+| Live/capacity pages | allocator occupancy and free-page reserve |
+| Tail-waste slots | internal fragmentation in final live pages |
+| Reused allocations | turnover served from the free list |
 
-Long prefill should run Week 3 paged FlashAttention directly from page storage.
-A later chunk with cached history uses paged prefill. Short decode uses the
-paged vector schedule. Measure these shapes separately before combining them in
-one serving workload.
+Copy volume is a logical count of requested data movement, not a hardware DRAM
+counter. It is nevertheless matched and deterministic, and it exposes the
+algorithmic copying that a static throughput number hides.
 
-## Preserve an Optimization Ledger
+## Reference Result
 
-For each experiment record:
+On an M4 Pro with a 20-core GPU, 64 GB memory, MLX 0.32.0, and mlx-lm 0.31.3,
+the median of three fresh processes was:
 
-1. the hypothesis;
-2. the single changed variable;
-3. correctness status;
-4. synchronized measurements;
-5. the keep or reject decision and its tradeoff.
+| Storage path | Output tok/s | Decode tok/s | Requests/s | Peak KV MiB | Avoidable KV copy MiB |
+|---|---:|---:|---:|---:|---:|
+| Week 2 dense KV | 35.87 | 58.65 | 0.48 | 1,096 | 209,532 |
+| Week 3 paged KV | 46.70 | 104.19 | 0.62 | 576 | 504 |
 
-Fewer graph nodes, fewer page-table entries, or more active requests are
-hypotheses. Only matched measurements reveal their effect on latency,
-throughput, memory, and fairness.
+Paging improves output and request throughput by 30.2%, aggregate decode by
+77.7%, and lowers peak KV storage by 47.4%. Avoidable logical copy volume falls
+99.8%. The paged run reaches 1,116 live pages out of 1,152 reserved, reuses
+2,196 allocations, and records 15,840 unused tail slots across the layer
+caches. Those are the claims this workload supports.
+
+It does not yet test prefix sharing or speculative decoding. Add a trace with
+two requests referencing the same physical prefix to measure sharing, and a
+trace with accept/reject plus `rewind` events to measure speculative cache
+lifecycle. Do not infer either result from the turnover benchmark.
+
+## Continue the Measurement Loop
+
+Vary one scheduler input at a time:
+
+1. Change `--prefill-step` to measure throughput versus decode stalls.
+2. Change `--batch-size` while keeping the queued request set fixed.
+3. Expose page size as an experiment and compare tail waste with metadata cost.
+4. Add per-request timestamps before making P50/P95 latency claims.
+
+For every experiment record the hypothesis, changed variable, correctness
+status, synchronized measurements, and keep/reject decision. A new kernel does
+not belong in the course unless this loop identifies a remaining bottleneck
+and its gain justifies the added teaching surface.
 
 ## Validate Before Measuring
-
-Run the completed serving tests before collecting a performance result:
 
 ```bash
 pdm run test --week 3 --day 4
 pdm run test --week 3 --day 5
 ```
 
-The [performance appendix](./appendix-performance.md) contains representative
-results and the retained optimization ledger. Use it as a reasonableness check,
-not as a substitute for measuring your machine.
+The [performance appendix](./appendix-performance.md) contains the raw command,
+result interpretation, and simplification ledger. Use it as a reasonableness
+check, not as a substitute for measuring your machine.
 
 {{#include copyright.md}}

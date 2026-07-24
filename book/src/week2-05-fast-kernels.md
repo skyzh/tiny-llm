@@ -2,9 +2,13 @@
 
 > 🚧 This chapter is under review and may change.
 
-Week 1 expresses RMSNorm, RoPE, and SiLU as readable `mlx.core` equations.
-Week 2 keeps those implementations intact and writes three course-owned Metal
-kernels behind a separate interface:
+The Day 4 profile should now show many smaller pointwise and reduction
+dispatches behind the optimized projections and short-context attention.
+RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
+GPU duration—not an imagined single slow call—makes them the next target. Week
+1 expresses them as readable `mlx.core` equations. Week 2 keeps those
+implementations intact and writes three course-owned Metal kernels behind a
+separate interface:
 
 ```plain
 src/tiny_llm/week2_kernels.py
@@ -153,7 +157,9 @@ pdm run test --week 2 --day 5
 Day 6 changes workload shape rather than replacing another element-wise or
 reduction operator: it introduces SIMD-matrix fragments for quantized prefill.
 Keep today's `swiglu` checkpoint intact so that prefill tiling has a clean
-before-and-after comparison.
+before-and-after comparison. Switch the profile from one-token decode to a
+multi-row prefill request before starting Day 6; quantized projections should
+then dominate and the Day 3 matvec schedule should no longer fit the shape.
 
 Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`

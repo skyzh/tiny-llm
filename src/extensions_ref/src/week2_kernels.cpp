@@ -108,7 +108,7 @@ void Week2RMSNorm::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx
     out.set_data(mx::allocator::malloc(out.nbytes()));
     auto &d = mx::metal::device(stream().device);
     auto kernel = d.get_kernel(std::string("week2_rms_norm_") + dtype_suffix(out), d.get_library("tiny_llm_ext_ref"));
-    auto &encoder = d.get_command_encoder(stream().index);
+    auto &encoder = mx::metal::get_command_encoder(stream());
     encoder.set_compute_pipeline_state(kernel);
     encoder.set_input_array(x, 0);
     encoder.set_input_array(weight, 1);
@@ -131,7 +131,7 @@ void Week2RoPE::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::a
     out.set_data(mx::allocator::malloc(out.nbytes()));
     auto &d = mx::metal::device(stream().device);
     auto kernel = d.get_kernel(std::string("week2_rope_") + dtype_suffix(out), d.get_library("tiny_llm_ext_ref"));
-    auto &encoder = d.get_command_encoder(stream().index);
+    auto &encoder = mx::metal::get_command_encoder(stream());
     encoder.set_compute_pipeline_state(kernel);
     encoder.set_input_array(x, 0);
     encoder.set_input_array(offsets, 1);
@@ -162,7 +162,7 @@ void Week2SwiGLU::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx:
     out.set_data(mx::allocator::malloc(out.nbytes()));
     auto &d = mx::metal::device(stream().device);
     auto kernel = d.get_kernel(std::string("week2_swiglu_") + dtype_suffix(out), d.get_library("tiny_llm_ext_ref"));
-    auto &encoder = d.get_command_encoder(stream().index);
+    auto &encoder = mx::metal::get_command_encoder(stream());
     encoder.set_compute_pipeline_state(kernel);
     encoder.set_input_array(gate, 0);
     encoder.set_input_array(up, 1);
@@ -183,7 +183,7 @@ void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &inputs, std::v
     auto &d = mx::metal::device(stream().device);
     auto kernel =
         d.get_kernel(std::string("week2_decode_attention_") + dtype_suffix(out), d.get_library("tiny_llm_ext_ref"));
-    auto &encoder = d.get_command_encoder(stream().index);
+    auto &encoder = mx::metal::get_command_encoder(stream());
     encoder.set_compute_pipeline_state(kernel);
     encoder.set_input_array(q, 0);
     encoder.set_input_array(k, 1);

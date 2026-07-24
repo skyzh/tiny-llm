@@ -37,6 +37,10 @@ class TinyKvCache(ABC):
         """
         return None
 
+    def materialize(self):
+        """Evaluate owned K/V storage without changing its logical layout."""
+        return None
+
     def update_and_fetch_paged(
         self,
         key: mx.array,
@@ -64,11 +68,13 @@ class TinyKvCache(ABC):
 
 
 class BatchingKvCache(TinyKvCache):
-    def __init__(self, max_active_requests: int, max_seq_len: int):
+    def __init__(self, max_active_requests: int, max_seq_len: int | None = None):
         self.max_active_requests = max_active_requests
         self.max_seq_len = max_seq_len
         self.kv_caches: list[TinyKvCache] = [None] * max_active_requests
         self.HD = None
+        self.last_batch_bytes = 0
+        self.staging_copy_bytes = 0
 
     def update_and_fetch(
         self,
@@ -79,7 +85,8 @@ class BatchingKvCache(TinyKvCache):
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
         B, H, S, D = keys.shape
         assert keys.shape == values.shape
-        assert S <= self.max_seq_len
+        if self.max_seq_len is not None:
+            assert S <= self.max_seq_len
         if self.HD is None:
             self.HD = (H, D)
         else:
@@ -117,6 +124,7 @@ class BatchingKvCache(TinyKvCache):
             if data[b] is None:
                 continue
             key, value, S, mask = data[b]
+            self.staging_copy_bytes += key.nbytes + value.nbytes
             keys[b, :, seq_len - S : seq_len, :] = key
             values[b, :, seq_len - S : seq_len, :] = value
             if mask is None or mask == "causal":
@@ -127,6 +135,7 @@ class BatchingKvCache(TinyKvCache):
                 masks[b, :, seq_len - S : seq_len] = mask
             else:
                 raise NotImplementedError
+        self.last_batch_bytes = keys.nbytes + values.nbytes
         return keys, values, None, masks.reshape(B, 1, mask_length, seq_len)
 
     def update_and_fetch_paged(
@@ -140,7 +149,8 @@ class BatchingKvCache(TinyKvCache):
 
         B, H, S, D = keys.shape
         assert keys.shape == values.shape
-        assert S <= self.max_seq_len
+        if self.max_seq_len is not None:
+            assert S <= self.max_seq_len
         if self.HD is None:
             self.HD = (H, D)
         else:
@@ -172,6 +182,8 @@ class BatchingKvCache(TinyKvCache):
 
         if pool is None:
             raise ValueError("Cannot build paged metadata without active requests")
+
+        self.last_batch_bytes = 0
 
         rows = []
         for cache in self.kv_caches:
@@ -213,6 +225,7 @@ class TinyKvFullCache(TinyKvCache):
     def __init__(self):
         self.key_values = None
         self.offset = 0
+        self.growth_copy_bytes = 0
 
     def update_and_fetch(
         self,
@@ -233,11 +246,16 @@ class TinyKvFullCache(TinyKvCache):
             prev_keys, prev_values = self.key_values
             assert prev_keys.shape == (B, H, self.offset, D)
             assert prev_values.shape == (B, H, self.offset, D)
+            self.growth_copy_bytes += prev_keys.nbytes + prev_values.nbytes
             new_keys = mx.concat([prev_keys, key], axis=2)
             new_values = mx.concat([prev_values, value], axis=2)
             self.key_values = (new_keys, new_values)
             self.offset += S
             return new_keys, new_values, self.offset, mask
+
+    def materialize(self):
+        if self.key_values is not None:
+            mx.eval(*self.key_values)
 
     def rewind(self, n: int):
         self.offset -= n

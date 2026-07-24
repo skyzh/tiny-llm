@@ -21,8 +21,10 @@ earlier positions in its own chunk.
 ## Materialize Between Chunks
 
 MLX is lazy. Extending an unevaluated cache repeatedly creates a long graph and
-can grow memory usage. Evaluate every layer's key and value tensors after each
-chunk so the next scheduler iteration starts from materialized state.
+can grow memory usage. Call each layer cache's `materialize()` hook after every
+chunk so the next scheduler iteration starts from materialized state. A dense
+cache evaluates its key/value tuple; a paged cache evaluates the page pool
+storage without first gathering it into a dense tensor.
 
 ## Task: Bound Prefill Work
 

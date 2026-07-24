@@ -1,6 +1,9 @@
 #include <metal_stdlib>
 #include <metal_simdgroup_matrix>
 #include "mlx/backend/metal/kernels/utils.h"
+#include "mlx/backend/metal/kernels/complex.h"
+#include "mlx/backend/metal/kernels/steel/gemm/loader.h"
+#include "mlx/backend/metal/kernels/steel/gemm/mma.h"
 
 template <typename T>
 [[kernel]] void quantized_matmul_vanilla_w4a16_g128(
@@ -85,10 +88,143 @@ template <typename T, typename IndexT>
     out[index] = static_cast<T>(quantized * scale + bias);
 }
 
-// Prefill is a matrix-matrix workload. One SIMD group computes an 8x8
-// output tile and advances through the reduction dimension in 8-wide tiles.
-// The packed weights are dequantized directly into the matrix fragment, so
-// no full-precision weight matrix is ever materialized.
+// Prefill uses a 32x32 threadgroup tile. Four SIMD groups cooperatively load
+// one activation tile and dequantize one weight tile into threadgroup memory;
+// each group then computes a 16x16 quadrant with four 8x8 matrix fragments.
+// This reuses each device-memory load across 32 output values without ever
+// materializing a full dequantized weight matrix.
+template <typename T, typename OutT>
+inline void quantized_matmul_block_w4a16_g128(
+    device const T* scales,
+    device const T* biases,
+    device const T* a,
+    device const uint32_t* b,
+    device OutT* out,
+    const int M,
+    const int N,
+    const int K,
+    const int reduction_start,
+    const int reduction_end,
+    const int output_offset,
+    threadgroup T* activation_tile,
+    threadgroup T* weight_tile,
+    threadgroup T* quantization_parameters,
+    uint3 group_id,
+    uint thread_id,
+    uint simdgroup,
+    uint lane) {
+    constexpr int output_block_size = 32;
+    constexpr int reduction_block_size = 32;
+    constexpr int padded_reduction_size = 40;
+    constexpr int group_size = 128;
+    constexpr int packs_per_item = 8;
+    constexpr uint32_t mask = 0xf;
+    const int row_base = group_id.y * output_block_size;
+    const int column_base = group_id.x * output_block_size;
+    const int packed_cols = N / packs_per_item;
+    const int groups_per_row = N / group_size;
+
+    using block_mma = mlx::steel::BlockMMA<
+        T, OutT, output_block_size, output_block_size,
+        reduction_block_size, 2, 2, false, true,
+        padded_reduction_size, padded_reduction_size>;
+    using activation_loader = mlx::steel::BlockLoader<
+        T, output_block_size, reduction_block_size,
+        padded_reduction_size, 1, 128>;
+    block_mma mma(simdgroup, lane);
+    activation_loader load_activation(
+        a + row_base * N + reduction_start,
+        N,
+        activation_tile,
+        simdgroup,
+        lane);
+
+    const int weight_output = thread_id / 4;
+    const int weight_pack = thread_id % 4;
+    const int output_column = column_base + weight_output;
+    const bool valid_output = output_column < K;
+    device const uint32_t* weight_source = valid_output
+        ? b + output_column * packed_cols + reduction_start / packs_per_item +
+            weight_pack
+        : b;
+    threadgroup T* weight_destination =
+        weight_tile + weight_output * padded_reduction_size +
+        weight_pack * packs_per_item;
+    int quantization_group_step = 0;
+
+    // One thread loads the scale and bias for each output column. The four
+    // threads that unpack that column's 32 weights then reuse the values from
+    // threadgroup memory for all four reduction tiles in the quantization
+    // group.
+    if (thread_id < output_block_size) {
+        const int parameter_output = column_base + thread_id;
+        const bool valid_parameter = parameter_output < K;
+        const int parameter_index =
+            parameter_output * groups_per_row + reduction_start / group_size;
+        quantization_parameters[thread_id] =
+            valid_parameter ? scales[parameter_index] : T(0);
+        quantization_parameters[output_block_size + thread_id] =
+            valid_parameter ? biases[parameter_index] : T(0);
+    }
+
+    for (int reduction_base = reduction_start;
+         reduction_base < reduction_end;
+         reduction_base += reduction_block_size) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        if (row_base + output_block_size <= M) {
+            load_activation.load_unsafe();
+        } else {
+            load_activation.load_safe(short2(
+                reduction_block_size,
+                max(0, M - row_base)));
+        }
+
+        const uint32_t packed = valid_output ? *weight_source : 0;
+        const float scale =
+            static_cast<float>(quantization_parameters[weight_output]);
+        const float bias = static_cast<float>(
+            quantization_parameters[output_block_size + weight_output]);
+        #pragma clang loop unroll(full)
+        for (int value = 0; value < packs_per_item; ++value) {
+            const float quantized =
+                static_cast<float>((packed >> (value * 4)) & mask);
+            weight_destination[value] =
+                static_cast<T>(quantized * scale + bias);
+        }
+
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        mma.mma(activation_tile, weight_tile);
+
+        load_activation.next();
+        weight_source += reduction_block_size / packs_per_item;
+        quantization_group_step += reduction_block_size;
+        if (quantization_group_step == group_size) {
+            quantization_group_step = 0;
+            const int next_reduction_base =
+                reduction_base + reduction_block_size;
+            if (next_reduction_base < reduction_end &&
+                thread_id < output_block_size) {
+                const int parameter_output = column_base + thread_id;
+                const bool valid_parameter = parameter_output < K;
+                const int parameter_index = parameter_output * groups_per_row +
+                    next_reduction_base / group_size;
+                quantization_parameters[thread_id] =
+                    valid_parameter ? scales[parameter_index] : T(0);
+                quantization_parameters[output_block_size + thread_id] =
+                    valid_parameter ? biases[parameter_index] : T(0);
+            }
+        }
+    }
+
+    const short valid_rows = min(output_block_size, M - row_base);
+    const short valid_columns = min(output_block_size, K - column_base);
+    mma.store_result_safe(
+        out + output_offset + row_base * K + column_base,
+        K,
+        short2(valid_columns, valid_rows));
+}
+
 template <typename T>
 [[kernel]] void quantized_matmul_simdgroup_w4a16_g128(
     device const T* scales [[buffer(0)]],
@@ -99,116 +235,61 @@ template <typename T>
     device const int &M [[buffer(5)]],
     device const int &N [[buffer(6)]],
     device const int &K [[buffer(7)]],
-    uint group_id [[threadgroup_position_in_grid]],
+    uint3 group_id [[threadgroup_position_in_grid]],
+    uint thread_id [[thread_index_in_threadgroup]],
     uint simdgroup [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
-    constexpr int tile_size = 8;
-    constexpr int bits = 4;
-    constexpr int group_size = 128;
-    constexpr int packs_per_item = 32 / bits;
-    constexpr int simdgroups_per_threadgroup = 8;
-    constexpr uint32_t mask = (1 << bits) - 1;
+    threadgroup T activation_tile[32 * 40];
+    threadgroup T weight_tile[32 * 40];
+    threadgroup T quantization_parameters[2 * 32];
+    quantized_matmul_block_w4a16_g128(
+        scales, biases, a, b, out, M, N, K, 0, N, 0,
+        activation_tile, weight_tile, quantization_parameters,
+        group_id, thread_id, simdgroup, lane);
+}
 
-    const int row_tiles = (M + tile_size - 1) / tile_size;
-    const int column_tiles = (K + tile_size - 1) / tile_size;
-    const int tile = group_id * simdgroups_per_threadgroup + simdgroup;
-    if (tile >= row_tiles * column_tiles) {
+template <typename T>
+[[kernel]] void quantized_matmul_simdgroup_splitk_w4a16_g128(
+    device const T* scales [[buffer(0)]],
+    device const T* biases [[buffer(1)]],
+    device const T* a [[buffer(2)]],
+    device const uint32_t* b [[buffer(3)]],
+    device T* partials [[buffer(4)]],
+    device const int &M [[buffer(5)]],
+    device const int &N [[buffer(6)]],
+    device const int &K [[buffer(7)]],
+    device const int &partition_size [[buffer(8)]],
+    device const int &partition_stride [[buffer(9)]],
+    uint3 group_id [[threadgroup_position_in_grid]],
+    uint thread_id [[thread_index_in_threadgroup]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    threadgroup T activation_tile[32 * 40];
+    threadgroup T weight_tile[32 * 40];
+    threadgroup T quantization_parameters[2 * 32];
+    const int reduction_start = group_id.z * partition_size;
+    quantized_matmul_block_w4a16_g128(
+        scales, biases, a, b, partials, M, N, K,
+        reduction_start, reduction_start + partition_size,
+        group_id.z * partition_stride, activation_tile, weight_tile,
+        quantization_parameters, group_id, thread_id, simdgroup, lane);
+}
+
+template <typename T>
+[[kernel]] void quantized_matmul_splitk_reduce(
+    device const T* partials [[buffer(0)]],
+    device T* out [[buffer(1)]],
+    device const int &elements [[buffer(2)]],
+    device const int &split_k [[buffer(3)]],
+    uint index [[thread_position_in_grid]]) {
+    if (index >= static_cast<uint>(elements)) {
         return;
     }
-    const int tile_row = tile / column_tiles;
-    const int tile_column = tile - tile_row * column_tiles;
-    const int row_base = tile_row * tile_size;
-    const int column_base = tile_column * tile_size;
-
-    // In an 8x8 simdgroup matrix, every lane owns two adjacent elements.
-    // This coordinate mapping is part of the Metal SIMD matrix layout.
-    const int quad = lane / 4;
-    const int fragment_row = (quad & 4) + ((lane / 2) % 4);
-    const int fragment_column = (quad & 2) * 2 + (lane % 2) * 2;
-
-    // Keep the matrix operands in the model dtype, but accumulate in float.
-    // A 16-bit accumulator looks acceptable in a single loose-tolerance
-    // kernel test yet compounds visible logit error across all model layers.
-    simdgroup_matrix<float, tile_size, tile_size> accumulator;
-    #pragma clang loop unroll(full)
-    for (int element = 0; element < 2; ++element) {
-        accumulator.thread_elements()[element] = 0.0f;
+    float sum = 0.0f;
+    for (int partition = 0; partition < split_k; ++partition) {
+        sum += static_cast<float>(partials[partition * elements + index]);
     }
-
-    const int packed_cols = N / packs_per_item;
-    const int groups_per_row = N / group_size;
-    for (int group_base = 0; group_base < N; group_base += group_size) {
-        float weight_scales[2];
-        float weight_biases[2];
-        #pragma clang loop unroll(full)
-        for (int element = 0; element < 2; ++element) {
-            const int output_column = column_base + fragment_column + element;
-            if (output_column < K) {
-                const int parameter =
-                    output_column * groups_per_row + group_base / group_size;
-                weight_scales[element] = static_cast<float>(scales[parameter]);
-                weight_biases[element] = static_cast<float>(biases[parameter]);
-            } else {
-                weight_scales[element] = 0.0f;
-                weight_biases[element] = 0.0f;
-            }
-        }
-
-        for (int reduction_base = group_base;
-             reduction_base < group_base + group_size;
-             reduction_base += tile_size) {
-            simdgroup_matrix<T, tile_size, tile_size> activation_fragment;
-            simdgroup_matrix<T, tile_size, tile_size> weight_fragment;
-            simdgroup_matrix<float, tile_size, tile_size> next_accumulator;
-
-            #pragma clang loop unroll(full)
-            for (int element = 0; element < 2; ++element) {
-                const int activation_row = row_base + fragment_row;
-                const int reduction_column =
-                    reduction_base + fragment_column + element;
-                activation_fragment.thread_elements()[element] =
-                    activation_row < M
-                        ? a[activation_row * N + reduction_column]
-                        : T(0);
-
-                // The matrix fragment is N x K, while the packed weights are
-                // stored as K x N. Transpose while unpacking and dequantizing.
-                const int reduction_row = reduction_base + fragment_row;
-                const int output_column =
-                    column_base + fragment_column + element;
-                if (output_column < K) {
-                    const int packed_column = reduction_row / packs_per_item;
-                    const int shift =
-                        (reduction_row % packs_per_item) * bits;
-                    const uint32_t packed =
-                        b[output_column * packed_cols + packed_column];
-                    const float quantized =
-                        static_cast<float>((packed >> shift) & mask);
-                    weight_fragment.thread_elements()[element] = static_cast<T>(
-                        quantized * weight_scales[element] +
-                        weight_biases[element]);
-                } else {
-                    weight_fragment.thread_elements()[element] = T(0);
-                }
-            }
-            simdgroup_multiply_accumulate(
-                next_accumulator,
-                activation_fragment,
-                weight_fragment,
-                accumulator);
-            accumulator = next_accumulator;
-        }
-    }
-
-    #pragma clang loop unroll(full)
-    for (int element = 0; element < 2; ++element) {
-        const int output_row = row_base + fragment_row;
-        const int output_column = column_base + fragment_column + element;
-        if (output_row < M && output_column < K) {
-            out[output_row * K + output_column] =
-                static_cast<T>(accumulator.thread_elements()[element]);
-        }
-    }
+    out[index] = static_cast<T>(sum);
 }
 
 // Decode is a matrix-vector workload: M is usually one and every output row
@@ -353,10 +434,117 @@ template <typename T>
         scales, biases, a, b, out, M, N, K, output_tile, simdgroup, lane);
 }
 
+// Qwen's ordinary decode projections use the same four-output, two-packed-word
+// schedule as the measured MLX qmv shape. Loading 16 adjacent activation
+// values once and reusing them across four weight rows cuts SIMD-group and
+// activation-load work without changing the course W4A16 arithmetic.
+template <typename T>
+[[kernel]] void quantized_matvec_x4_fast_w4a16_g128(
+    device const T* scales [[buffer(0)]],
+    device const T* biases [[buffer(1)]],
+    device const T* a [[buffer(2)]],
+    device const uint32_t* b [[buffer(3)]],
+    device T* out [[buffer(4)]],
+    device const int &M [[buffer(5)]],
+    device const int &N [[buffer(6)]],
+    device const int &K [[buffer(7)]],
+    uint output_tile [[threadgroup_position_in_grid]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    constexpr int group_size = 128;
+    constexpr int packs_per_item = 8;
+    constexpr int packs_per_lane = 2;
+    constexpr int values_per_lane = packs_per_item * packs_per_lane;
+    constexpr int outputs_per_simdgroup = 4;
+    constexpr int simdgroups_per_threadgroup = 2;
+    constexpr int outputs_per_threadgroup =
+        outputs_per_simdgroup * simdgroups_per_threadgroup;
+
+    const int column_tiles =
+        (K + outputs_per_threadgroup - 1) / outputs_per_threadgroup;
+    const int row = output_tile / column_tiles;
+    const int column_base =
+        (output_tile - row * column_tiles) * outputs_per_threadgroup +
+        simdgroup * outputs_per_simdgroup;
+    if (row >= M || column_base >= K) return;
+
+    const int packed_cols = N / packs_per_item;
+    const int groups_per_row = N / group_size;
+    const int activation_base = row * N;
+    float sums[outputs_per_simdgroup] = {0.0f};
+
+    for (int packed_col = lane * packs_per_lane;
+         packed_col < packed_cols;
+         packed_col += 32 * packs_per_lane) {
+        const int group = packed_col / (group_size / packs_per_item);
+        float scaled_activations[values_per_lane];
+        float activation_sum = 0.0f;
+        #pragma clang loop unroll(full)
+        for (int pack = 0; pack < packs_per_lane; ++pack) {
+            const int activation_offset =
+                activation_base + (packed_col + pack) * packs_per_item;
+            #pragma clang loop unroll(full)
+            for (int value = 0; value < packs_per_item; ++value) {
+                const int local = pack * packs_per_item + value;
+                const float activation =
+                    static_cast<float>(a[activation_offset + value]);
+                activation_sum += activation;
+                // Four adjacent W4 values occupy one uint16. Scale the
+                // activations once so the hot loop can use masks directly
+                // instead of shifting every weight for every output row.
+                scaled_activations[local] = activation /
+                    static_cast<float>(1 << ((value & 3) * 4));
+            }
+        }
+
+        #pragma clang loop unroll(full)
+        for (int output = 0; output < outputs_per_simdgroup; ++output) {
+            const int column = column_base + output;
+            if (column >= K) continue;
+            const int parameter_index = column * groups_per_row + group;
+            const float scale = static_cast<float>(scales[parameter_index]);
+            const float bias = static_cast<float>(biases[parameter_index]);
+            const device uint16_t* packed =
+                reinterpret_cast<const device uint16_t*>(
+                    b + column * packed_cols + packed_col);
+            float quantized_dot = 0.0f;
+            #pragma clang loop unroll(full)
+            for (int group = 0; group < values_per_lane / 4; ++group) {
+                const uint16_t weights = packed[group];
+                const int local = group * 4;
+                quantized_dot +=
+                    scaled_activations[local] * (weights & 0x000f) +
+                    scaled_activations[local + 1] * (weights & 0x00f0) +
+                    scaled_activations[local + 2] * (weights & 0x0f00) +
+                    scaled_activations[local + 3] * (weights & 0xf000);
+            }
+            sums[output] += scale * quantized_dot + bias * activation_sum;
+        }
+    }
+
+    #pragma clang loop unroll(full)
+    for (int output = 0; output < outputs_per_simdgroup; ++output) {
+        sums[output] = simd_sum(sums[output]);
+    }
+    if (lane == 0) {
+        #pragma clang loop unroll(full)
+        for (int output = 0; output < outputs_per_simdgroup; ++output) {
+            const int column = column_base + output;
+            if (column < K) {
+                out[row * K + column] = static_cast<T>(sums[output]);
+            }
+        }
+    }
+}
+
 instantiate_kernel("quantized_matmul_vanilla_w4a16_g128_f16", quantized_matmul_vanilla_w4a16_g128, half);
 instantiate_kernel("quantized_matmul_vanilla_w4a16_g128_bf16", quantized_matmul_vanilla_w4a16_g128, bfloat16_t);
 instantiate_kernel("quantized_matmul_simdgroup_w4a16_g128_f16", quantized_matmul_simdgroup_w4a16_g128, half);
 instantiate_kernel("quantized_matmul_simdgroup_w4a16_g128_bf16", quantized_matmul_simdgroup_w4a16_g128, bfloat16_t);
+instantiate_kernel("quantized_matmul_simdgroup_splitk_w4a16_g128_f16", quantized_matmul_simdgroup_splitk_w4a16_g128, half);
+instantiate_kernel("quantized_matmul_simdgroup_splitk_w4a16_g128_bf16", quantized_matmul_simdgroup_splitk_w4a16_g128, bfloat16_t);
+instantiate_kernel("quantized_matmul_splitk_reduce_f16", quantized_matmul_splitk_reduce, half);
+instantiate_kernel("quantized_matmul_splitk_reduce_bf16", quantized_matmul_splitk_reduce, bfloat16_t);
 instantiate_kernel("quantized_embedding_w4a16_g128_f16_i32", quantized_embedding_w4a16_g128, half, int32_t);
 instantiate_kernel("quantized_embedding_w4a16_g128_bf16_i32", quantized_embedding_w4a16_g128, bfloat16_t, int32_t);
 instantiate_kernel("quantized_embedding_w4a16_g128_f16_u32", quantized_embedding_w4a16_g128, half, uint32_t);
@@ -365,3 +553,5 @@ instantiate_kernel("quantized_matvec_x2_w4a16_g128_f16", quantized_matvec_x2_w4a
 instantiate_kernel("quantized_matvec_x2_w4a16_g128_bf16", quantized_matvec_x2_w4a16_g128, bfloat16_t);
 instantiate_kernel("quantized_matvec_x8_w4a16_g128_f16", quantized_matvec_x8_w4a16_g128, half);
 instantiate_kernel("quantized_matvec_x8_w4a16_g128_bf16", quantized_matvec_x8_w4a16_g128, bfloat16_t);
+instantiate_kernel("quantized_matvec_x4_fast_w4a16_g128_f16", quantized_matvec_x4_fast_w4a16_g128, half);
+instantiate_kernel("quantized_matvec_x4_fast_w4a16_g128_bf16", quantized_matvec_x4_fast_w4a16_g128, bfloat16_t);

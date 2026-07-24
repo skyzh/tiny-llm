@@ -236,7 +236,11 @@ class Qwen3ModelWeek3:
         self.precision = precision
 
         def week3_weights(layer: Any) -> QuantizedWeights:
-            return QuantizedWeights.from_mlx_layer(layer, use_simdgroup_matmul=True)
+            return QuantizedWeights.from_mlx_layer(
+                layer,
+                use_simdgroup_matmul=True,
+                use_split_k_matmul=True,
+            )
 
         self.embedding = QuantizedEmbedding(
             vocab_size=self.vocab_size,

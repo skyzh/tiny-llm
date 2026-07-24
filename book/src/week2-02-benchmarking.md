@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 2: Benchmark Decode
+# 🚧 Week 2 Day 2: Benchmark and Profile
 
 > 🚧 This chapter is under review and may change.
 
@@ -20,11 +20,13 @@ phase while hurting the other, so `bench.py` reports both:
 The first generated token belongs to prefill. Excluding it from decode prevents
 prompt length from distorting the decode number.
 
-For a matched prefill comparison, all implementations compute logits for every
-prompt position. The generation path may request only the final logit row, but
-using that shortcut for the course model while MLX projects all rows would make
-the prefill columns incomparable. Cached decode has `L = 1`, so
-`logits_to_keep=1` removes no decode work.
+Choose the prefill workload before comparing implementations. Prompt scoring
+needs logits for every position, while serving needs only the final prompt
+logit. Use `--prefill-logits all` for the former and
+`--prefill-logits last` for the latter. The runner applies the choice to the
+course model and MLX alike. Never compare a final-row course run with an
+all-row MLX run. Cached decode has `L = 1`, so `logits_to_keep=1` removes no
+decode work.
 
 Both sides of the Week 2 comparison use a KV cache: prefill the prompt
 once, then pass only the newly generated token on each decode step. Comparing a
@@ -112,7 +114,7 @@ resource problems, but they supplement this ladder rather than replace its
 small deterministic comparisons. Only profile after the vanilla and optimized
 kernels agree with the readable oracle.
 
-The isolated benchmarks in `benches/` use the same rule. Evaluate input setup
+The isolated benchmarks use the same rule. Evaluate input setup
 before invoking the benchmark fixture so setup does not leak into the result.
 The Week 2 operator ladder compares the readable implementation, the optimized
 course implementation, and MLX at the selected model's real tensor shapes:
@@ -127,6 +129,47 @@ a 20-core GPU and 64 GB of memory. Each operator used 20 warmup iterations and
 reported result is the median process-level speedup. The matched end-to-end
 commands used two complete warmups and three fresh measured runs.
 
+## Attribute Time With a Real GPU Profile
+
+An end-to-end benchmark tells us whether a checkpoint improved. A GPU profile
+tells us what to optimize next. Keep those jobs separate:
+
+1. Run the acceptance benchmark outside a trace and save its JSON output.
+2. Capture a short, representative request with Instruments or `xctrace`.
+3. Rank shader pipelines by total GPU duration, then inspect dispatch count and
+   duration per dispatch.
+4. Optimize the highest measured cost whose scaling matches the target
+   workload.
+5. Re-run the isolated operator, end-to-end benchmark, and profile before
+   choosing the next chapter.
+
+The command-line profiler is available with Xcode:
+
+```bash
+xcrun xctrace list templates
+
+xcrun xctrace record \
+  --template /path/to/TinyLLMMetal.tracetemplate \
+  --output /tmp/week2.trace \
+  --launch -- pdm run bench-week2-operators \
+    --model qwen3-4b --context 32 --prefill-projection k
+
+xcrun xctrace export --input /tmp/week2.trace --toc
+```
+
+The stock Metal System Trace template is useful for command-buffer and queue
+behavior. To see shader names, timelines, and counters, save a custom
+Instruments template containing the Metal Shader Timeline and the relevant
+counter set, then pass that template to `xctrace`. Xcode GPU Capture remains
+the better tool for inspecting a single dispatch in detail.
+
+Do not use trace-instrumented wall time as a throughput result: capture adds
+overhead. Record at least the model and tensor shape, pipeline or shader name,
+total GPU duration, dispatch count, duration per dispatch, and share of the
+captured GPU interval. If the trace does not identify a dominant kernel, do not
+invent one from the source code; first shorten the workload, add signposts, or
+use an operator ablation that makes attribution unambiguous.
+
 ## Record a Matched Baseline
 
 Use the same model, prompt length, output length, device, and warmup count for
@@ -137,11 +180,13 @@ compare against the course reference:
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint kv-cache --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+  --min-output-len 65 --max-output-len 65 --warmup 2 \
+  --prefill-logits last
 
 pdm run bench --solution mlx --loader week2 --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+  --min-output-len 65 --max-output-len 65 --warmup 2 \
+  --prefill-logits last
 ```
 
 Or run the complete cumulative ladder in fresh processes. At this point, only
@@ -150,25 +195,39 @@ meaningful as you complete their chapters.
 
 ```bash
 pdm run bench-week2-progression --offline --repeats 3 \
-  --model qwen3-0.6b --input-len 128 --output-len 65 --warmup 2
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last --json-output week2-baseline.json
 ```
 
 Benchmark on an otherwise idle machine: stop other CPU- and GPU-intensive
 workloads, keep power mode and ambient conditions fixed, and let the machine
 return to a stable temperature before comparing runs. Run each command several
-times, report the median, and include the hardware with the result.
+times, report the median, and include the hardware, MLX and mlx-lm versions,
+prefill-logit mode, and exact model with the result. A dependency upgrade
+changes the comparison baseline, so remeasure MLX rather than carrying an old
+denominator forward.
 
 ## Acceptance Target
 
-The Week 2 target is:
+The Week 2 targets are:
 
 ```plain
-reference decode throughput / MLX decode throughput >= 0.70
+reference prefill throughput / MLX prefill throughput >= 0.80
+reference decode throughput / MLX decode throughput >= 0.80
 ```
 
-Reaching 70% is the acceptance threshold, not a promise that every educational
-kernel individually matches its MLX counterpart. MLX is the comparison
-baseline; the Week 2 solution must reach the target with course-owned operator
-implementations.
+The prefill ratio is also 0.80; both ratios use Qwen3-4B, a 128-token prompt,
+128 timed decode steps, and last-row logits. `--output-len 129` includes the
+first token produced by prefill. Reaching 80% is the acceptance threshold, not
+a promise that every educational kernel individually matches its MLX
+counterpart. MLX is the comparison baseline; the Week 2 solution must reach
+both targets with course-owned operator implementations. If either ratio
+misses, the next chapter starts from the new benchmark and profile rather than
+a predetermined optimization.
+
+Keep a 2K context run in the report as a stress diagnostic. It is useful for
+showing when attention overtakes fixed-shape projections, but changing context
+also changes the problem. Do not move the acceptance shape after seeing a
+result.
 
 {{#include copyright.md}}

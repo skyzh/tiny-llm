@@ -2,170 +2,146 @@
 
 > 🚧 This chapter is under review and may change.
 
-Day 3 optimized the one-to-eight-row matrix-vector shape used during decode.
-Prefill is a different workload: it projects tens or hundreds of token rows at
-once. Today we add a second quantized-linear schedule for that larger `M`
-dimension and introduce Metal's 8×8 SIMD-matrix fragments. Week 3 will reuse
-the same fragment API after paged KV addressing is established.
+Day 5 ends by switching the profile from one-token decode to multi-token
+prefill. The measured bottleneck changes with the workload: pointwise kernels
+no longer dominate, and the Day 3 matrix-vector schedule does not reuse packed
+weights efficiently across prompt rows. Quantized projections are now the
+largest cost, so today we build a separate matrix schedule for them.
 
-This chapter assumes the packed W4A16 format and dispatch interface from Day 3,
-the synchronized prefill benchmark from Day 2, and the BF16 model contract from
-the Week 2 overview. No quantization format changes today.
+Do not infer this bottleneck from the number of source lines. Prove it with a
+one-factor ablation: keep the course model unchanged, but route only prefill
+projections through `mx.quantized_matmul`. In the reference Qwen3-4B,
+32-token, last-logit run, that ablation reached 688.66 prefill tok/s while the
+complete MLX model reached 729.34 tok/s, or 94.4%. The experiment identifies
+the quantized prefill operator as almost the whole model gap; it does not make
+MLX's operator part of the solution.
 
-## From SIMD Reduction to SIMD-Matrix Fragments
+The implementation remains deliberately narrow:
 
-The Day 3 decode kernel gives a SIMD group several output columns and reduces
-each dot product across its 32 lanes. That schedule fits a very small number of
-activation rows. During prefill, the same weight row is reused across many
-activation rows, so it is better to tile both output dimensions.
+- W4A16 weights with four bits and group size 128;
+- BF16 activations, quantization parameters, and output;
+- Qwen3-4B and Qwen3-8B projection dimensions;
+- FP32 matrix accumulators;
+- the Day 3 SIMD matvec remains in use for `M <= 8`.
 
-Metal exposes an 8×8 `simdgroup_matrix` fragment. A fragment is a register-held
-matrix tile distributed across the 32 lanes of one SIMD group; it is not an
-ordinary thread-local array. The public matrix-multiply-accumulate operation
-computes:
+## From a Matvec to a Cooperative Tile
+
+The vanilla kernel assigns one complete dot product to one thread. The first
+matrix attempt assigned one 8×8 result to one SIMD group. Both are easy to
+validate, but they repeatedly load activations and quantized weights from
+device memory.
+
+The optimized kernel assigns four SIMD groups, or 128 threads, to one
+32×32×32 tile:
 
 ```plain
-C[8, 8] += A[8, 8] × B[8, 8]
+                  32 output columns
+               +--------------------+
+32 prompt rows |  four 16x16 SIMD   |
+               |  output quadrants  |
+               +--------------------+
+                         ^
+                         |
+             shared 32-value K step
 ```
 
-Each SIMD group owns one 8×8 output tile. It advances through the reduction
-dimension eight values at a time, loading one activation fragment and one
-dequantized weight fragment before issuing the multiply-accumulate.
+For each 32-value reduction step, the threadgroup:
 
-```plain
-activation rows M
-        |
-        v
-  +-----------+     reduction N in 8-value steps
-  | A 8 x 8   |  ×  | B 8 x 8 |  --->  C 8 x 8
-  +-----------+                         one SIMD group
-        |
-        +---- next 8 activation rows
+1. loads one 32×32 activation tile into padded threadgroup memory;
+2. unpacks and dequantizes one 32×32 weight tile there;
+3. lets four SIMD groups reuse both tiles;
+4. accumulates four 16×16 quadrants from Metal 8×8 matrix fragments;
+5. advances to the next reduction tile.
 
-output columns K are covered by independent 8-column tiles
-```
+The 40-element shared-memory stride pads the 32-value rows to avoid an
+unhelpful bank-access pattern. Tail rows and columns are zero-filled or guarded
+at the final store.
 
-This is the first use of SIMD-matrix fragments in the course. Keep the scalar
-Day 3 kernel as the correctness oracle while bringing up the tiled path.
+The reference uses MLX's low-level Steel `BlockLoader` and `BlockMMA` headers
+as Metal building blocks. Those helpers provide cooperative loads and matrix
+fragment bookkeeping. The course still owns the W4A16 unpacking,
+dequantization, tile layout, primitive, dispatch, split policy, and reduction;
+it does not call MLX's quantized-matmul operator.
 
-## Mixed-Precision Boundary
+## Task 1: Preserve the Workload Dispatch
 
-The completed course model stores activations, scales, biases, and outputs in
-BF16. Unpack each 4-bit weight and combine it with its BF16 scale and bias, but
-accumulate the matrix product in FP32 fragments. Cast only once when storing the
-final BF16 output tile.
-
-This distinction applies for the rest of the course:
-
-| Location | Dtype |
-| --- | --- |
-| Model activations and KV storage | BF16 |
-| Quantization scale and bias storage | BF16 |
-| Matrix operands loaded by the kernel | BF16 |
-| Dot-product and online-softmax accumulators | FP32 |
-| Model-facing kernel output | BF16 |
-
-BF16 is the model-storage contract; FP32 is an internal arithmetic choice. A
-correct result with an FP32 output still violates the model contract.
-
-## Task 1: Add Shape-Based Dispatch
-
-Keep the Day 3 matrix-vector path for `M <= 8`. For larger `M`, dispatch a new
-SIMD-matrix kernel:
+Keep the Day 3 decode schedule and add the matrix schedule behind the same
+quantized-linear interface:
 
 ```plain
 M <= 8  -> quantized SIMD matvec
-M > 8   -> quantized SIMD-matrix matmul
+M > 8   -> 32x32x32 quantized SIMD-matrix kernel
 ```
 
-Expose the prefill path through `QuantizedWeights.use_simdgroup_matmul` while
-you compare checkpoints. The dispatch must preserve the same function
-signature, packed weights, output shape, and BF16 dtype as Day 3.
+Expose the new path through the cumulative `simd-matmul` checkpoint. Test the
+vanilla, tiled, and MLX results on an aligned shape and on partial row and
+column tiles. The result must retain the model-facing 16-bit dtype.
 
-## Task 2: Implement the 8×8 Kernel
+## Task 2: Make Device Loads Contiguous
 
-Use one SIMD group per 8×8 output tile. For every eight-wide reduction step:
+The first correct 32×32 implementation still issued several scalar,
+widely-strided activation loads per thread. A Metal trace and operator timing
+showed that the matrix arithmetic was not the limiting phase. MLX's comparable
+loader instead gives each thread an aligned contiguous vector.
 
-1. Load the activation fragment cooperatively.
-2. Unpack the matching 4-bit weights.
-3. Apply the group scale and bias while forming the weight fragment.
-4. Issue `simdgroup_multiply_accumulate` into an FP32 accumulator fragment.
-5. After the complete reduction, store only valid rows and columns as BF16.
+Use a cooperative block loader so adjacent threads and each thread's local
+reads form contiguous transactions. This is not cosmetic: at a 2,048-row
+Qwen3-4B shape, replacing the scalar activation reads made representative
+course projections effectively match MLX:
 
-Zero-fill partial input fragments. Guard partial output tiles at the final
-store. A prefill length such as ten tokens must exercise both a complete tile
-and a two-row tail without changing the accumulation dtype.
+| Projection | Course | MLX |
+|---|---:|---:|
+| Q, `2560 -> 4096` | 6.66 ms | 6.72 ms |
+| K, `2560 -> 1024` | 1.84 ms | 1.85 ms |
+| MLP gate, `2560 -> 9728` | 15.49 ms | 15.65 ms |
+| MLP down, `9728 -> 2560` | 15.66 ms | 15.76 ms |
+
+These are synchronized operator measurements on the reference M4 Pro. The
+important lesson is the diagnosis: increasing matrix-fragment work did not fix
+a load-transaction bottleneck; changing the load shape did.
 
 ## Task 3: Hoist Quantization Parameters
 
-One scale and bias cover 128 reduction elements, or sixteen consecutive
-eight-wide matrix steps. Loading them inside every step repeats address
-calculation and device reads.
+One scale and bias apply to 128 reduction values. Loading them for every
+32-value tile repeats the same device access four times. Have one thread load
+the scale and bias for each of the 32 output columns into threadgroup memory,
+then let the four weight-unpack threads for that column reuse them for the next
+four reduction tiles.
 
-Loop over quantization groups first. Load the scale and bias values needed by
-the output fragment into registers, then reuse them for all sixteen steps:
+Keep the scale, bias, and unpacked operands in BF16 storage, while the matrix
+accumulator remains FP32. Cast once when writing the final model output.
 
-```plain
-for each 128-value quantization group:
-    load scale and bias for this output fragment
-    for each of its sixteen 8-value reduction tiles:
-        unpack and dequantize weights
-        matrix-multiply-accumulate into FP32
-```
+## Task 4: Remove Non-Matmul Prefill Waste
 
-Measure this change independently. More reuse is only a hypothesis until a
-synchronized benchmark shows that its register cost is worthwhile.
+Two smaller fixes belong in this checkpoint because the prefill profile shows
+them adjacent to the projection work:
 
-## Task 4: Fuse Quantized Embedding Lookup
+- fuse token lookup and W4A16 dequantization in a direct embedding kernel;
+- accept `logits_to_keep=1` and apply the vocabulary projection only to the
+  final prompt row during generation.
 
-Prompt tokens do not need a matrix multiplication. They select rows from the
-quantized embedding table and dequantize only those rows. The readable Day 3
-path expresses gather, int4 unpacking, scale, and bias as separate array
-operations. Add a direct Metal kernel that fuses those steps into one dispatch.
+The benchmark applies the same last-logit workload to MLX. Prompt-scoring
+callers can still request every logit row.
 
-Map one thread to one requested embedding element. Accept both int32 prompt IDs
-and uint32 sampled IDs so generation does not insert a token-cast graph node.
-This kernel reuses the W4A16 unpacking equation from Day 3; the only new idea is
-fusing row selection with dequantization.
-
-## Task 5: Keep Only Needed Logits
-
-Prefill computes hidden states for the whole prompt, but generation samples only
-from the final position. Preserve an optional `logits_to_keep` model argument
-and slice hidden states before the final norm and vocabulary projection:
-
-```python
-if logits_to_keep is not None:
-    h = h[:, -logits_to_keep:, :]
-```
-
-Generation requests one row. Correctness tests and prompt-scoring callers can
-still pass `None` to obtain every position. This is a model-interface
-optimization, not a change to attention or sampling.
-
-## Task 6: Integrate the Prefill Checkpoint
-
-Add a cumulative `simd-matmul` checkpoint after `swiglu`. It enables
-`use_simdgroup_matmul` for every quantized projection and the direct embedding
-kernel while retaining the Day 3 matvec for decode. Update generation to request
-only the final logit row. Run:
+## Task 5: Verify, Benchmark, and Name the Next Bottleneck
 
 ```bash
+pdm run build-ext
 pdm run test --week 2 --day 6
 
 pdm run bench-week2-progression --offline --repeats 3 \
-  --model qwen3-0.6b --input-len 128 --output-len 65 --warmup 2
+  --variant week2-simd-matmul --variant mlx \
+  --model qwen3-4b --input-len 32 --output-len 33 --warmup 2 \
+  --prefill-logits last
 ```
 
-Report prefill and decode separately. The new schedule should improve prefill;
-it should not change the one-token decode path.
+On the reference M4 Pro, Day 6 reached 605.80 prefill tok/s versus MLX's
+727.61 at 32 tokens, or 83.3%. The operator itself is already close to MLX for
+large `M`, but small K/V projections launch too few 32×32 result tiles to fill
+the GPU. That measured under-filled grid is Day 7's input.
 
-## Prepare for Paged FlashAttention
-
-Day 4 introduced online softmax, and this chapter introduced BF16
-SIMD-matrix fragments. Week 3 first adds page-table translation, then combines
-these established ideas in paged FlashAttention:
-one SIMD-matrix product forms score tiles, online softmax updates the running
-state, and a second SIMD-matrix product applies probabilities to value tiles.
+At long `M`, the two-dimensional tile grid is already large. Do not force the
+next optimization there: additional reduction partitions would only add a
+temporary buffer and another launch.
 
 {{#include copyright.md}}

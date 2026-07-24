@@ -7,7 +7,7 @@ namespace mx = mlx::core;
 
 namespace tiny_llm_ext_ref {
 
-void load_library(mx::Device d, const char *path);
+void load_library(const char *path);
 
 mx::array quantized_matmul(const mx::array &scales,  // Input array scales
                            const mx::array &biases,  // Input array biases
@@ -16,13 +16,14 @@ mx::array quantized_matmul(const mx::array &scales,  // Input array scales
                            const mx::array &a,       // Input array a (not quantized)
                            const mx::array &b,       // Input array b (quantized)
                            const bool transpose_b,   // Whether to transpose b
-                           const bool use_simdgroup = true,
+                           const bool use_simdgroup = true, const bool use_split_k = false,
                            mx::StreamOrDevice s = {}  // Stream on which to schedule the operation
 );
 
 class QuantizedMatmul : public mx::Primitive {
 public:
-    QuantizedMatmul(mx::Stream stream, bool use_simdgroup) : mx::Primitive(stream), use_simdgroup_(use_simdgroup) {};
+    QuantizedMatmul(mx::Stream stream, bool use_simdgroup, bool use_split_k)
+        : mx::Primitive(stream), use_simdgroup_(use_simdgroup), use_split_k_(use_split_k) {};
 
     void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
     void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
@@ -36,6 +37,7 @@ public:
 
 private:
     bool use_simdgroup_;
+    bool use_split_k_;
 };
 
 mx::array quantized_embedding(const mx::array &indices, const mx::array &scales, const mx::array &biases,
@@ -134,6 +136,26 @@ private:
 mx::array paged_attention(const mx::array &q, const mx::array &key_pages, const mx::array &value_pages,
                           const mx::array &block_table, const mx::array &context_lens, const float scale,
                           const bool is_causal, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s = {});
+
+mx::array paged_cache_update(const mx::array &pages, const mx::array &values, int page_id, int start,
+                             mx::StreamOrDevice s = {});
+
+class PagedCacheUpdate : public mx::Primitive {
+public:
+    PagedCacheUpdate(mx::Stream stream, int page_id, int start)
+        : mx::Primitive(stream), page_id_(page_id), start_(start) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("PagedCacheUpdate has no vmap implementation.");
+    }
+    const char *name() const override { return "PagedCacheUpdate"; }
+
+private:
+    int page_id_;
+    int start_;
+};
 
 class PagedAttention : public mx::Primitive {
 public:

@@ -7,6 +7,6 @@ namespace mx = mlx::core;
 
 namespace tiny_llm_ext {
 
-void load_library(mx::Device d, const char *path);
+void load_library(const char *path);
 
 }  // namespace tiny_llm_ext

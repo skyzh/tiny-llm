@@ -295,14 +295,26 @@ Implement two correctness-first GPU dispatches:
 
 1. For `L <= 8`, partition logical context positions across SIMD groups and
    merge their partial `(max, sum, output)` states in threadgroup memory. The
-   reference schedule uses 32 SIMD groups per query so group `g` visits
-   positions `g`, `g + 32`, `g + 64`, and so on.
+   reference schedule uses 32 SIMD groups per query. Resolve the physical page
+   once, then let group `g` visit slots `g`, `g + 32`, `g + 64`, and so on
+   within that page; do not divide and reload `block_table` for every token.
 2. For longer queries, assign query rows to a direct page-walking schedule and
-   resolve every K/V tile through `block_table`. Favor inspectable ownership
-   over the final tiled performance schedule.
+   resolve every K/V tile through `block_table`. When a tile is aligned and
+   cannot cross a page boundary, share its one physical page id across the
+   whole tile. Favor inspectable ownership over the final tiled performance
+   schedule.
 
 Compare small deterministic fixtures with the readable MLX equation and the
 dense Week 2 attention path before tuning the page-walking schedule.
+
+For the final Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
+four contiguous dimensions of Q, K, V, and the output. After all context
+positions are visited, transpose the 32 partial output vectors through one
+compact 32×32 threadgroup tile. Each SIMD group then reduces four dimensions
+with `simd_sum`. This replaces the first version's `D` scalar threads, each of
+which looped over all 32 partials, and reduces scratch from about 16.8 KiB to
+4.25 KiB. Keep a generic BF16 specialization for other head dimensions so the
+optimization cannot silently reinterpret `D = 32` as `D = 128`.
 
 ### Course implementation boundary
 
@@ -370,8 +382,9 @@ Start by recording three operator baselines on the same machine:
 2. your direct paged-attention path,
 3. the MLX attention path as a production-library reference.
 
-These M4 Pro measurements are reference points, not target values to copy into
-your report:
+These older M4 Pro measurements show the correctness-first path before the
+compact final reduction. Use the current appendix for retained end-to-end
+numbers; do not copy either table into your report without rerunning it:
 
 | Batch / context | Dense course attention | Course paged attention | MLX attention |
 |---|---:|---:|---:|
@@ -409,9 +422,18 @@ one:
 6. prepare the batch's page metadata once per scheduler step rather than once
    per layer or attention head.
 
+Also benchmark the write path separately. A fast page-reading kernel cannot
+recover time lost to a functional whole-cache update before every layer.
+
 For each change, explain which cost it targets: memory traffic, synchronization,
 address calculation, or dispatch overhead. Keep a change only when the measured
 result supports the explanation.
+
+An earlier Qwen-specific kernel computed four query heads in one threadgroup.
+It improved static decode latency, but duplicated the entire online-softmax
+kernel for one GQA ratio. Static latency is not Week 3's acceptance metric, so
+the course removes that specialization and keeps the compact D=128 schedule.
+This is an explicit simplicity decision, not a claim that K/V reuse is invalid.
 
 ### Checkpoint 3: Evaluate the Serving System
 
@@ -428,6 +450,19 @@ attention is faster. The completed serving route stays paged: it eliminates
 repacks, reuses pages across scheduler steps, and can admit more concurrent
 requests. Day 5 optimizes its long-prefill schedule rather than routing around
 the page-table contract.
+
+Use the paired serving runner rather than a preallocated static request:
+
+```bash
+pdm run bench-serving-progression --offline --repeats 3 \
+  --model qwen3-4b --num-seqs 16 --batch-size 4 \
+  --min-input-len 128 --max-input-len 1024 \
+  --min-output-len 32 --max-output-len 128 --prefill-step 128
+```
+
+It compares the Week 2 dense batch reconstruction with the Week 3 direct paged
+path, resets page capacity after warmup, and reports throughput, peak KV bytes,
+copy volume, page reuse, and tail fragmentation.
 
 ```bash
 pdm run test --week 3 --day 4

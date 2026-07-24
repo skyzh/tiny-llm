@@ -18,7 +18,8 @@ students to relearn its memory schedule around page translation.
 This chapter combines ideas already introduced earlier:
 
 - Week 2 Day 4 introduced the online-softmax recurrence.
-- Week 2 Day 6 introduced BF16 8×8 SIMD-matrix fragments and partial tiles.
+- Week 2 Day 6 introduced the cooperative 32×32 tile built from BF16 8×8
+  SIMD-matrix fragments.
 - Week 3 Day 3 introduced physical pages and block tables.
 - Week 3 Day 4 introduced direct page-walking attention and the decode
   schedule.
@@ -86,6 +87,15 @@ address          = pages[physical_page, kv_head, slot, :]
 Resolve the physical page while staging the tile. The matrix multiply should
 not know whether two adjacent logical rows came from adjacent physical pages.
 
+The Qwen path uses 128-token pages and a 32-token K/V tile. An aligned tile is
+therefore physically contiguous even when the logical sequence as a whole is
+not. Give each thread contiguous elements through a cooperative block loader;
+do not repeat the scalar/strided-load bug diagnosed in Week 2 Day 6. Retain a
+generic loader for a tile that can cross a page boundary. The reference uses
+MLX's low-level Steel block-loader header for this load primitive, but owns the
+page translation, tile schedule, online softmax, primitive, and dispatch. It
+does not instantiate MLX attention.
+
 Tail cases are required. A query block, K/V tile, final page, or context may be
 partially full, and physical page ids need not be consecutive.
 
@@ -103,6 +113,11 @@ unnormalized output accumulator per row. For each K/V tile:
 
 After the final visible tile, divide each output row by its running sum and
 store it using the model-facing dtype.
+
+Following the measured MLX kernel, multiply the attention scale by
+`log2(e)` once and use `fast::exp2` for online-softmax rescaling inside the hot
+tile loop. This is mathematically equivalent to natural exponentials and avoids
+repeating a more expensive base conversion.
 
 The causal offset is `context_len - L`. A key at logical position `s` is visible
 to query row `l` when:
@@ -157,6 +172,13 @@ pdm run bench --solution tiny_llm --loader week3 --batch-decode \
 
 FlashAttention is expected to matter more as prefill grows. It should not
 replace the Day 4 decode schedule: a one-token query has no query-tile reuse.
+
+On the reference Qwen3-4B 8K runs, base-2 softmax plus cooperative
+contiguous-page loads raised course prefill from the earlier 384.88 tok/s
+baseline to a 427.01 tok/s paired median. MLX measured 568.74 tok/s in the
+same alternating campaign, so the paged course path reached 75.1%. Long-context
+decode remains a separate Day 4 vector-kernel bottleneck; do not credit this
+prefill optimization with a decode gain.
 
 The serving performance lab next varies page size, chunk size, batch size, and
 request mix without changing this completed operator contract.

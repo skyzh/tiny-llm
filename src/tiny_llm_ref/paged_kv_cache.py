@@ -3,6 +3,8 @@ from typing import Optional
 
 import mlx.core as mx
 
+from extensions_ref import tiny_llm_ext_ref
+
 from .kv_cache import TinyKvCache
 
 
@@ -32,6 +34,10 @@ class TinyKvPagedPool:
         self.free_page_ids: list[int] = []
         self.used_page_ids: set[int] = set()
         self.num_allocated_pages = 0
+        self.reused_page_allocations = 0
+        self.storage_growths = 0
+        self.copied_pages_on_growth = 0
+        self.copied_bytes_on_growth = 0
 
     @property
     def key_pages(self) -> mx.array | None:
@@ -59,6 +65,12 @@ class TinyKvPagedPool:
     def num_free_pages(self) -> int:
         return len(self.free_page_ids)
 
+    @property
+    def storage_nbytes(self) -> int:
+        if self._key_pages is None or self._value_pages is None:
+            return 0
+        return self._key_pages.nbytes + self._value_pages.nbytes
+
     def _check_page_chunk(self, x: mx.array) -> None:
         B, H, S, D = x.shape
         assert 0 < S <= self.page_size
@@ -68,6 +80,7 @@ class TinyKvPagedPool:
         # version, a layer cache owns the page until release/rewind returns it.
         if self.free_page_ids:
             page_id = self.free_page_ids.pop()
+            self.reused_page_allocations += 1
         else:
             page_id = self.num_pages
             self.num_allocated_pages += 1
@@ -101,12 +114,30 @@ class TinyKvPagedPool:
         new_value_pages = mx.zeros(
             (new_capacity, H, self.page_size, D), dtype=value.dtype
         )
+        self.storage_growths += 1
         if self._key_pages is not None and self._value_pages is not None:
             old_pages = self.num_pages - 1
+            self.copied_pages_on_growth += old_pages
+            self.copied_bytes_on_growth += (
+                self._key_pages[:old_pages].nbytes
+                + self._value_pages[:old_pages].nbytes
+            )
             new_key_pages[:old_pages, :, :, :] = self._key_pages[:old_pages]
             new_value_pages[:old_pages, :, :, :] = self._value_pages[:old_pages]
         self._key_pages = new_key_pages
         self._value_pages = new_value_pages
+
+    def reset(self) -> None:
+        if self.used_page_ids:
+            raise ValueError("Cannot reset a page pool with live requests")
+        self._key_pages = None
+        self._value_pages = None
+        self.free_page_ids.clear()
+        self.num_allocated_pages = 0
+        self.reused_page_allocations = 0
+        self.storage_growths = 0
+        self.copied_pages_on_growth = 0
+        self.copied_bytes_on_growth = 0
 
     def write_page_slice(
         self,
@@ -131,8 +162,18 @@ class TinyKvPagedPool:
         assert 0 <= start <= capacity
         assert end <= self.page_size
 
-        self._key_pages[page_id, :, start:end, :] = key[0]
-        self._value_pages[page_id, :, start:end, :] = value[0]
+        self._key_pages = tiny_llm_ext_ref.paged_cache_update(
+            self._key_pages,
+            mx.contiguous(key),
+            page_id,
+            start,
+        )
+        self._value_pages = tiny_llm_ext_ref.paged_cache_update(
+            self._value_pages,
+            mx.contiguous(value),
+            page_id,
+            start,
+        )
 
     def free_page(self, page_id: int) -> None:
         if page_id not in self.used_page_ids:
@@ -156,6 +197,8 @@ class TinyKvPagedCache(TinyKvCache):
         self.page_ids: list[int] = []
         self.page_lens: list[int] = []
         self.offset = 0
+        self._cached_block_table: mx.array | None = None
+        self._cached_block_table_key: tuple[tuple[int, ...], int] | None = None
 
     @property
     def num_pages(self) -> int:
@@ -238,8 +281,16 @@ class TinyKvPagedCache(TinyKvCache):
         if max_pages is None:
             max_pages = self.num_pages
         assert max_pages >= self.num_pages
+        cache_key = (tuple(self.page_ids), max_pages)
+        if (
+            self._cached_block_table is not None
+            and self._cached_block_table_key == cache_key
+        ):
+            return self._cached_block_table
         page_ids = self.page_ids + [-1] * (max_pages - self.num_pages)
-        return mx.array([page_ids], dtype=mx.int32)
+        self._cached_block_table = mx.array([page_ids], dtype=mx.int32)
+        self._cached_block_table_key = cache_key
+        return self._cached_block_table
 
     def context_lens(self) -> mx.array:
         return mx.array([self.offset], dtype=mx.int32)
@@ -270,6 +321,12 @@ class TinyKvPagedCache(TinyKvCache):
         assert key.shape == value.shape
         self._append_chunk(key, value)
         return self.paged_metadata(mask=mask)
+
+    def materialize(self):
+        key_pages = self.pool.key_pages
+        value_pages = self.pool.value_pages
+        if key_pages is not None and value_pages is not None:
+            mx.eval(key_pages, value_pages)
 
     def rewind(self, n: int):
         assert 0 <= n <= self.offset

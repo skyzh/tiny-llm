@@ -165,6 +165,64 @@ def test_task_1_paged_pool_grows_storage_geometrically():
     assert pool.capacity == 8
     assert pool.key_pages.shape[0] == pool.num_pages
     assert pool.value_pages.shape[0] == pool.num_pages
+    assert pool.storage_growths == 2
+    assert pool.copied_pages_on_growth == 4
+    assert pool.copied_bytes_on_growth == 1024
+
+
+def test_task_1_paged_pool_reset_removes_warmup_capacity_and_counters():
+    pool = TinyKvPagedPool(page_size=4)
+    cache = TinyKvPagedCache(pool=pool)
+    cache.update_and_fetch_paged(*_random_chunk(17))
+    cache.release()
+
+    assert pool.capacity == 8
+    assert pool.num_free_pages == 5
+    pool.reset()
+
+    assert pool.capacity == 0
+    assert pool.num_pages == 0
+    assert pool.num_free_pages == 0
+    assert pool.storage_nbytes == 0
+    assert pool.storage_growths == 0
+    assert pool.copied_pages_on_growth == 0
+    assert pool.copied_bytes_on_growth == 0
+
+
+def test_task_1_reuses_block_table_until_page_ids_change():
+    cache = TinyKvPagedCache(pool=TinyKvPagedPool(page_size=4))
+    cache.update_and_fetch_paged(*_random_chunk(3))
+
+    first = cache.block_table()
+    assert cache.block_table() is first
+
+    # Filling the same tail page changes only context_lens.
+    cache.update_and_fetch_paged(*_random_chunk(1))
+    assert cache.block_table() is first
+
+    # Allocating a new physical page changes the table and invalidates it.
+    cache.update_and_fetch_paged(*_random_chunk(1))
+    assert cache.block_table() is not first
+
+
+def test_task_1_materializes_page_storage_without_dense_gather(monkeypatch):
+    pool = TinyKvPagedPool(page_size=4)
+    cache = TinyKvPagedCache(pool=pool)
+    cache.update_and_fetch_paged(*_random_chunk(5))
+
+    def fail_dense_gather():
+        raise AssertionError("materializing paged storage must not gather dense K/V")
+
+    eval_calls = []
+    cache.gather_dense = fail_dense_gather
+    monkeypatch.setattr(mx, "eval", lambda *arrays: eval_calls.append(arrays))
+
+    cache.materialize()
+
+    assert len(eval_calls) == 1
+    key_pages, value_pages = eval_calls[0]
+    assert key_pages.shape == pool.key_pages.shape
+    assert value_pages.shape == pool.value_pages.shape
 
 
 def test_task_1_paged_cache_rewind():

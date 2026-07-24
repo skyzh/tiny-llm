@@ -2,11 +2,13 @@
 
 > 🚧 This chapter is under review and may change.
 
-This chapter starts from the quantized-matvec checkpoint. During
-single-request decode, query length is normally one while the cached
-key/value sequence grows by one token at a time. Week 1 expresses attention as
-matrix multiplication, masking, softmax, and another matrix multiplication.
-That is readable, but it materializes the complete score and probability rows.
+This chapter starts only after profiling the quantized-matvec checkpoint across
+cached contexts. Linear projections remain important, but the attention walk
+grows with context while their shapes stay fixed. During single-request decode,
+query length is normally one while the cached key/value sequence grows by one
+token at a time. Week 1 expresses attention as matrix multiplication, masking,
+softmax, and another matrix multiplication. That is readable, but it
+materializes the complete score and probability rows.
 
 First write a readable composition to preserve the equation, then replace its
 matmuls and softmax with a course-owned online-softmax Metal kernel. Measure the
@@ -149,6 +151,8 @@ pdm run bench --solution tiny_llm --loader week2 \
 The model dispatches short-query contexts through the course kernel and falls
 back to the exact readable Week 1 composition outside the measured range. This
 is the same evidence-driven decision used for tile sizes, barriers, and
-threadgroup layouts elsewhere in the course.
+threadgroup layouts elsewhere in the course. Reprofile the retained path. Once
+the projection and attention costs shrink, the repeated pointwise and reduction
+dispatch cluster becomes visible; that measured cluster is Day 5's input.
 
 {{#include copyright.md}}
