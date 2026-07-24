@@ -120,7 +120,7 @@ The Week 2 operator ladder compares the readable implementation, the optimized
 course implementation, and MLX at the selected model's real tensor shapes:
 
 ```bash
-pdm run bench-week2-operators --model qwen3-0.6b --context 128
+pdm run bench-week2-operators --model qwen3-4b --context 128
 ```
 
 For the measurements quoted later in this week, the machine was an M4 Pro with
@@ -178,12 +178,12 @@ compare against the course reference:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-0.6b \
+  --week2-checkpoint kv-cache --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last
 
-pdm run bench --solution mlx --loader week2 --model qwen3-0.6b \
+pdm run bench --solution mlx --loader week2 --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last

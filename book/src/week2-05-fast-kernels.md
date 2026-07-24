@@ -47,7 +47,7 @@ purpose-built kernel versus a graph of several general-purpose kernels.
 
 ## Task 1: RMSNorm
 
-Begin with one SIMD group per input row, then profile it. A 1024-element hidden
+Begin with one SIMD group per input row, then profile it. A 2,560-element hidden
 row gives 32 lanes too much serial work. The optimized kernel launches 256
 threads, or eight SIMD groups, per row. Each group reduces its portion with
 `simd_sum`; lane zero writes eight partial sums to threadgroup memory; the first
@@ -81,7 +81,7 @@ tests, and record the cumulative model result before writing RoPE:
 pdm run build-ext
 pdm run test --week 2 --day 5 -- -k rms
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rmsnorm --model qwen3-0.6b
+  --week2-checkpoint rmsnorm --model qwen3-4b
 ```
 
 ## Task 2: RoPE
@@ -117,7 +117,7 @@ that cumulative checkpoint before implementing SwiGLU:
 ```bash
 pdm run test --week 2 --day 5 -- -k rope
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rope --model qwen3-0.6b
+  --week2-checkpoint rope --model qwen3-4b
 ```
 
 ## Task 3: SwiGLU
@@ -139,7 +139,7 @@ Integrate the fused expression immediately and record the third checkpoint:
 ```bash
 pdm run test --week 2 --day 5 -- -k swiglu
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint swiglu --model qwen3-0.6b
+  --week2-checkpoint swiglu --model qwen3-4b
 ```
 
 ## Task 4: Verify the Cumulative Model

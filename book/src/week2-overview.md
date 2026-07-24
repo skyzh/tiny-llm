@@ -53,7 +53,7 @@ dense weights; Day 3 replaces that loading path as part of keeping weights
 packed.
 
 We are still building on MLX as infrastructure. `mlx_lm` loads the official
-Qwen3 4-bit checkpoint and tokenizer. `mlx.core` supplies arrays, lazy graph
+Qwen3-4B 4-bit checkpoint and tokenizer. `mlx.core` supplies arrays, lazy graph
 evaluation, memory management, device streams, and synchronization. The MLX
 extension API registers our C++ primitive and dispatches our Metal kernels.
 Those facilities are the platform on which the course implementation runs;

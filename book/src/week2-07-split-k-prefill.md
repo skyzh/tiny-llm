@@ -13,7 +13,6 @@ actually run:
 | Model | Reduction `N` | Q output `K` | K/V output `K` |
 |---|---:|---:|---:|
 | Qwen3-4B | 2,560 | 4,096 | 1,024 |
-| Qwen3-8B | 4,096 | 4,096 | 1,024 |
 
 ## Why Split the Reduction Dimension?
 

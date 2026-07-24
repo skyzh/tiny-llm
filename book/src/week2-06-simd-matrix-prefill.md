@@ -24,7 +24,7 @@ The implementation remains deliberately narrow:
 
 - W4A16 weights with four bits and group size 128;
 - BF16 activations, quantization parameters, and output;
-- Qwen3-4B and Qwen3-8B projection dimensions;
+- Qwen3-4B projection dimensions;
 - FP32 matrix accumulators;
 - the Day 3 SIMD matvec remains in use for `M <= 8`.
 

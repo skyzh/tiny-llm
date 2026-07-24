@@ -18,45 +18,122 @@ model size and the memory traffic required for each generated token.
 
 The decode phase of LLM inference is typically **memory-bandwidth bound**: each
 token requires reading the model's weights but performs relatively little work
-with them. The following rough calculation illustrates this for Qwen3-0.6B:
+with them. Use the dimensions in the official
+[Qwen3-4B configuration](https://huggingface.co/Qwen/Qwen3-4B/blob/main/config.json)
+to calculate the ideal bound:
 
 ```plain
-Per-token linear layers in decode phase:
-- Input: 1 token × 1024 dimensions = 1024 bfloat16 values = 2 KB
-- MLP weights: 1024 × 3072 × 3 matrices × 2 bytes = ~19 MB per layer
-- Attention weights:
-  - q_proj / o_proj: 1024 × 2048 × 2 matrices × 2 bytes = ~8 MB per layer
-  - k_proj / v_proj: 1024 × 1024 × 2 matrices × 2 bytes = ~4 MB per layer
-- Total weights per layer: ~31 MB
-- Total for 28 layers: ~880 MB
+Qwen3-4B dimensions:
+  hidden size        h = 2,560
+  MLP size           i = 9,728
+  query width        q = 4,096
+  key/value width   kv = 1,024
+  layers             L = 36
+  vocabulary         V = 151,936
 
-FLOPs (2 per multiply-accumulate):
-- MLP per layer: 2 × 3 × 1024 × 3072 ≈ 19M
-- Attention projections per layer: 2 × (1024 × 2048 × 2 + 1024 × 1024 × 2) ≈ 13M
-- 28 layers: ~880 million per token
+Projection weights per layer:
+  Q and O: 2 × h × q       =  20,971,520
+  K and V: 2 × h × kv      =   5,242,880
+  MLP:     3 × h × i       =  74,711,040
+  total per layer          = 100,925,440
 
-Memory access: ~880 MB
-Arithmetic intensity: 880M FLOPs / 880 MB ≈ 1.0 FLOPs/Byte
+All transformer layers: L × 100,925,440 = 3,633,315,840
+Tied vocabulary head:    V × h           =   388,956,160
+Total streamed weights:                    4,022,272,000
+
+FLOPs per token: 2 × 4,022,272,000 = 8.045 GFLOPs
 ```
 
-With M3 Max's 400 GB/s memory bandwidth and ~10 TFLOPS compute:
+The tied embedding matrix is counted once as the vocabulary projection. The
+single-row embedding lookup, normalization weights, activations, KV reads, and
+attention work are omitted. This makes the result an upper bound for linear
+layers, not a prediction of complete-model throughput.
+
+For BF16, the streamed weights occupy:
 
 ```plain
-Memory-bound throughput: 400 GB/s × 1.0 FLOPs/Byte = 400 GFLOPS
-Compute-bound throughput: 10 TFLOPS
+4,022,272,000 weights × 2 bytes = 8.045 GB per token
+arithmetic intensity = 8.045 GFLOPs / 8.045 GB = 1.0 FLOP/byte
 ```
 
-This workload can use only about 4% of the available compute before exhausting
-memory bandwidth.
+The course uses affine W4 groups of 128 values. Packed weights need 0.5 byte
+per value, and each group stores one BF16 scale plus one BF16 bias:
+
+```plain
+bytes per W4 weight = 0.5 + (2 + 2) / 128 = 0.53125 bytes
+streamed W4 bytes   = 4,022,272,000 × 0.53125 = 2.137 GB per token
+arithmetic intensity = 8.045 GFLOPs / 2.137 GB = 3.765 FLOPs/byte
+```
+
+### Decode Roofline Across Apple Silicon
+
+Apple publishes unified-memory bandwidth but not a directly comparable BF16
+GPU TFLOPS figure. We can therefore calculate a bandwidth roofline without
+inventing a compute ceiling:
+
+```plain
+ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
+```
+
+The table uses the highest-bandwidth configuration of each named chip. GB is
+decimal, matching Apple's specifications.
+
+| Chip | Bandwidth | BF16 roofline | W4 roofline | Ideal W4 work rate |
+|---|---:|---:|---:|---:|
+| M1 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s | 0.75 TFLOPS |
+| M1 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s | 1.51 TFLOPS |
+| M1 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s | 3.01 TFLOPS |
+| M2 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s | 0.75 TFLOPS |
+| M2 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s | 1.51 TFLOPS |
+| M2 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s | 3.01 TFLOPS |
+| M3 Pro | 150 GB/s | 18.6 tok/s | 70.2 tok/s | 0.56 TFLOPS |
+| M3 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s | 1.51 TFLOPS |
+| M3 Ultra | 819 GB/s | 101.8 tok/s | 383.3 tok/s | 3.08 TFLOPS |
+| M4 Pro | 273 GB/s | 33.9 tok/s | 127.8 tok/s | 1.03 TFLOPS |
+| M4 Max | 546 GB/s | 67.9 tok/s | 255.5 tok/s | 2.06 TFLOPS |
+
+The advertised bandwidths come from Apple's specifications for
+[M1 Pro and Max](https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/),
+[M1 Ultra](https://www.apple.com/newsroom/2022/03/apple-unveils-m1-ultra-the-worlds-most-powerful-chip-for-a-personal-computer/),
+[M2 Pro and Max](https://www.apple.com/newsroom/2023/01/apple-unveils-m2-pro-and-m2-max-next-generation-chips-for-next-level-workflows/),
+[M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
+[M3 Pro and Max](https://support.apple.com/en-us/117736),
+[M3 Ultra](https://www.apple.com/mac-studio/), and
+[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's current Mac
+Studio pairs M4 Max with M3 Ultra, so there is no M4 Ultra row.
+
+These values assume peak advertised bandwidth, one read of every projection
+weight, and no other traffic or work. Actual throughput is lower. On the
+reference M4 Pro, MLX reaches 87.58 decode tok/s and the completed course model
+reaches 77.41 tok/s, compared with the ideal W4 roofline of 127.8 tok/s.
+
+### Why This Does Not Predict a 4× Prefill Gain
+
+The decode calculation has `M = 1`: each streamed weight serves one activation
+row. Prefill reuses a weight tile across many rows. Under the same one-read
+idealization, weight arithmetic intensity scales with `M`. The Day 6 tile
+guarantees reuse across 32 rows even when separate row tiles receive no cache
+reuse:
+
+| Workload | `M` | BF16 weight intensity | W4 weight intensity | Likely limit |
+|---|---:|---:|---:|---|
+| Decode | 1 | 1.0 FLOP/byte | 3.765 FLOPs/byte | Weight bandwidth |
+| One Day 6 row tile | 32 | 32 FLOPs/byte | 120.5 FLOPs/byte | Matrix schedule and dequantization |
+| Full Week 2 prefill ideal | 128 | 128 FLOPs/byte | 482 FLOPs/byte | Matrix schedule and dequantization |
+
+Day 2's dense BF16 prefill is therefore already compute-oriented. Day 6's goal
+is to keep weights packed while recovering that efficient matrix throughput,
+not to multiply prefill tokens per second by four. The measured progression is
+726.25 tok/s on Day 2 and 792.18 tok/s after Day 7, a 9.1% gain.
 
 ### The Solution: Quantization
 
 Compressing BF16 weights to
 4-bit integers (int4) can:
 
-- **Reduce memory traffic by 4×**: 880 MB → ~220 MB per token
-- **Improve arithmetic intensity by 4×**: 1.0 → ~4.0 FLOPs/Byte
-- **Increase throughput by ~4×**: 400 GFLOPS → ~1.6 TFLOPS
+- **Reduce decode weight traffic by 3.765×**: 8.045 GB → 2.137 GB per token
+- **Improve decode weight arithmetic intensity by 3.765×**: 1.0 → 3.765 FLOPs/byte
+- **Raise the bandwidth roofline for decode projections by up to 3.765×**
 
 The tradeoff is a small loss in model accuracy when the weights are quantized
 carefully.
@@ -68,8 +145,8 @@ into **groups** and quantize every group independently. Local scales and biases
 preserve more information about each group's weight distribution.
 
 For a weight matrix $W$ of shape $(K, N)$, divide each row into groups of size
-$G$. The Qwen3 MLX 4-bit checkpoints used in this course have a fixed group size
-of 128:
+$G$. The Qwen3-4B MLX 4-bit checkpoint used in this course has a fixed group
+size of 128:
 
 ```plain
 Original weight matrix W: K × N (bfloat16)
@@ -353,7 +430,7 @@ format, dispatcher, and synchronized benchmark.
 Decode normally has `M = 1`; an 8×8 matrix tile would leave most rows empty.
 Instead, one SIMD group reduces the input dimension and uses `simd_sum` to
 combine lane-local partial sums. Start with two output columns per group as an
-inspectable schedule. The current Qwen3-4B/8B profile then motivates a faster
+inspectable schedule. The Qwen3-4B profile then motivates a faster
 path: each lane loads two adjacent packed words, or 16 activations, and reuses
 them across four output columns.
 
@@ -494,14 +571,14 @@ You can test your implementation by running:
 
 ```bash
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b
+  --week2-checkpoint quantized-matvec --model qwen3-4b
 ```
 
 You can also benchmark throughput and compare your implementation with the reference solution:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
+  --week2-checkpoint quantized-matvec --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```

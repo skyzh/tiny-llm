@@ -96,12 +96,12 @@ its own Metal code; it does not include or instantiate the MLX kernel.
 
 ### Scheduling Experiment
 
-Compare eight, sixteen, and thirty-two SIMD groups while holding the model and
-context fixed. The number of groups is a workload parameter, not a universal
-constant: more groups expose parallel score work but consume more threads and
-threadgroup memory. On the reference M1 Pro run, the three schedules reached
-about 215, 232, and 238-239 decode tok/s respectively. Record your own result
-and repeat the experiment when context length or head dimension changes.
+Compare eight, sixteen, and thirty-two SIMD groups with Qwen3-4B while holding
+the context fixed. The number of groups is a workload parameter, not a
+universal constant: more groups expose parallel score work but consume more
+threads and threadgroup memory. Record the synchronized operator and
+complete-model result for each schedule, then repeat the experiment when
+context length changes.
 
 ## Task 3: Integrate and Measure
 
@@ -138,12 +138,12 @@ otherwise identical settings:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
+  --week2-checkpoint quantized-matvec --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint decode-attention --model qwen3-0.6b \
+  --week2-checkpoint decode-attention --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```
