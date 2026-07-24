@@ -64,13 +64,16 @@ The order is intentional:
 1. **KV cache:** copy the readable Week 1 operators into a Week 2 model, add
    request-scoped state, and stop recomputing the prefix.
 2. **Benchmark and profile:** measure the cached model against MLX, then rank
-   real GPU costs rather than guessing what should be slow.
+   real GPU costs rather than guessing what should be slow. The
+   [reference attribution](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+   records the bottleneck transition that drives the remaining days.
 3. **Quantized matvec:** the decode profile points at projection weight reads,
    so keep weights packed and integrate the SIMD matrix-vector kernel. Reprofile
    to expose the next context-dependent cost.
 4. **Decode attention:** the context sweep shows attention growing, so replace
    the readable score/softmax/value composition with online softmax and measure
-   its retained range.
+   its retained range. At the fixed short context this is intentionally a small
+   contribution, not the headline decode gain.
 5. **Fast kernels:** after the large decode kernels shrink, the profile exposes
    repeated RMSNorm, RoPE, and SwiGLU launches. Fuse them one at a time and
    remeasure after each checkpoint.

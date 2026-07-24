@@ -130,6 +130,29 @@ the exact hardware, dependency versions, model, and tensor shapes. The
 course reference checkpoints and keeps the resulting machine-specific numbers
 in one place.
 
+To rank complete model work without requiring a GUI, replay the actual course
+kernel groups at Qwen3-4B shapes and dispatch counts:
+
+```bash
+pdm run profile-week2-kernels --model qwen3-4b \
+  --warmup 5 --iterations 15 \
+  --json-output week2-kernel-profile.json
+```
+
+The projection group preserves the transformer dependency order, including the
+attention projections before the output projection and the MLP after the
+attention residual. This matters for occupancy: making every layer independent
+would let unrelated work hide an under-filled kernel and produce a false
+Split-K conclusion. The runner synchronizes once per group and normalizes the
+group medians into an attribution profile.
+
+The resulting shares are not a throughput benchmark. Group boundaries force
+materialization that a complete lazy graph may fuse, while a capture adds its
+own overhead. Use the profile to rank kernel groups, then require the ordinary
+fresh-process model benchmark to confirm the change. The
+[performance appendix](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+contains the reference flame chart and raw-result path.
+
 ## Attribute Time With a Real GPU Profile
 
 An end-to-end benchmark tells us whether a checkpoint improved. A GPU profile
@@ -168,8 +191,9 @@ Do not use trace-instrumented wall time as a throughput result: capture adds
 overhead. Record at least the model and tensor shape, pipeline or shader name,
 total GPU duration, dispatch count, duration per dispatch, and share of the
 captured GPU interval. If the trace does not identify a dominant kernel, do not
-invent one from the source code; first shorten the workload, add signposts, or
-use an operator ablation that makes attribution unambiguous.
+invent one from the source code. Shorten the workload, add signposts, or use the
+dependency-aware kernel-group replay above, then check that its attributed
+total and the complete-model phase time move in the same direction.
 
 ## Record a Matched Baseline
 

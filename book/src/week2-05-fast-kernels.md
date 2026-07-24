@@ -6,9 +6,11 @@ The Day 4 profile should now show many smaller pointwise and reduction
 dispatches behind the optimized projections and short-context attention.
 RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
-1 expresses them as readable `mlx.core` equations. Week 2 keeps those
-implementations intact and writes three course-owned Metal kernels behind a
-separate interface:
+1 expresses them as readable `mlx.core` equations. Confirm the cluster with the
+Day 2 kernel-group replay; the
+[reference profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+shows the expected transition. Week 2 keeps those implementations intact and
+writes three course-owned Metal kernels behind a separate interface:
 
 ```plain
 src/tiny_llm/week2_kernels.py

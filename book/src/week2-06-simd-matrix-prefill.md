@@ -8,11 +8,13 @@ no longer dominate, and the Day 3 matrix-vector schedule does not reuse packed
 weights efficiently across prompt rows. Quantized projections are now the
 largest cost, so today we build a separate matrix schedule for them.
 
-Do not infer this bottleneck from the number of source lines. Use synchronized
-operator timings to compare the course projections with MLX as an external
-baseline, and confirm that their share also dominates the complete prefill
-profile. The required path continues to call the course-owned C++/Metal
-primitive for every projection.
+Re-run the dependency-aware kernel profile from Day 2 with
+`--case swiglu:prefill:128`. Continue only when projections dominate the
+attribution and the complete-model prefill phase moves with their latency. The
+[reference profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+shows that evidence chain. MLX remains an external performance denominator;
+the required path continues to call the course-owned C++/Metal primitive for
+every projection.
 
 The implementation remains deliberately narrow:
 

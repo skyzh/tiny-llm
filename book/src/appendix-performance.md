@@ -86,6 +86,49 @@ it establishes the synchronized benchmark and profile that choose Day 3.
 | Day 7 | Split-K prefill | 792.18 | 77.41 | 71.05 | Fill the GPU only for under-occupied short projections. |
 | Baseline | MLX 0.32.0 | 827.74 | 87.58 | 79.81 | External denominator. |
 
+### The Kernel Profile That Selects Each Chapter
+
+The reference profile does not replace a course operator with an MLX operator.
+It calls the same course projection, attention, pointwise, and cache paths at
+Qwen3-4B shapes and replays each group at the model's real dispatch count. The
+projection replay preserves the transformer dependency order so work from a
+later MLP cannot hide an under-filled attention projection. Each category uses
+one synchronization, and the median follows five warmups and fifteen samples:
+
+```bash
+pdm run profile-week2-kernels --model qwen3-4b \
+  --warmup 5 --iterations 15 \
+  --json-output week2-kernel-profile.json
+```
+
+The bar widths below are normalized within a checkpoint. The time at the right
+is the sum of the synchronized category medians, not a throughput measurement.
+Forcing category boundaries prevents some whole-graph fusion, so use the shares
+to rank work and the fresh-process checkpoint table above to accept or reject a
+change. The attributed totals follow the complete-model direction and range
+from 1.01× to 1.28× its phase time.
+
+![Flat flame chart of Week 2 kernel-time attribution](./week2-kernel-profile.svg)
+
+The profile makes the progression concrete:
+
+- Cached decode spends 80.3% of attributed time in dense projections. Day 3
+  therefore changes weight storage and the decode projection schedule first.
+- After packed matvec, the pointwise group is 39.3% while attention is only
+  5.2% at the 128-token acceptance context. Day 4 is a deliberately scoped
+  online-softmax and context-scaling lesson, not the main short-context gain.
+  Its follow-up profile leaves the 37.4% pointwise group for Day 5.
+- After Day 5, decode clears the course target. Changing the workload to
+  128-token prefill makes the readable quantized projection path 99.0% of
+  attributed time, which selects the cooperative matrix kernel in Day 6.
+- After Day 6, projections remain most of the inherent prefill work, but the
+  long-shape operator comparison is already close to MLX. The 32-token shape
+  sweep then isolates under-occupied Qwen projections and selects Split-K only
+  below their measured crossover.
+
+The checked-in raw profile is
+`benchmark_results/m4-pro-qwen3-4b-week2-kernel-profile-mlx-0.32.0.json`.
+
 ### Day 1: Cache the Prefix
 
 The dense cache makes prefill a one-time cost, but every decode projection
@@ -96,9 +139,9 @@ profile.
 ### Day 2: Measure Before Optimizing
 
 Day 2 changes the measurement discipline rather than the model. Synchronized
-operator timings and a Metal trace identify projection weight reads as the
-largest actionable decode cost. That evidence selects packed quantized matvec
-for Day 3; the CLI profiling workflow is recorded later in this appendix.
+kernel-group timings attribute 80.3% of the cached decode profile to dense
+projections. That evidence selects packed quantized matvec for Day 3; the CLI
+trace workflow remains useful when a compatible Shader Timeline is available.
 
 ### Day 3: Keep Weights Packed
 
@@ -111,26 +154,27 @@ cost.
 
 ### Day 4: Follow Attention as Context Grows
 
-At the fixed short context, online-softmax decode attention raises decode by
-only 1.8%. Context sweeps justify retaining it because its share grows with the
-cache length. The small acceptance gain also prevents the course from
+At the fixed short context, attention is 5.2% of the attributed Day 3 profile.
+The online-softmax kernel reduces its measured group time from 1.12 to 0.94 ms,
+and complete-model decode rises by only 1.8%. Context sweeps determine its
+retained dispatch range. The small acceptance gain prevents the course from
 incorrectly presenting attention as the main short-context bottleneck.
 
 ### Day 5: Optimize the Newly Exposed Launches
 
 Day 5 applies three independently measurable changes. Fast RMSNorm raises
 decode by 11.1%, fast RoPE adds 8.2%, and fused SwiGLU adds another 6.5% at
-their cumulative checkpoints. The completed day reaches 77.09 decode tok/s;
-the profile then shifts decisively to prefill matrix multiplication.
+their cumulative checkpoints. The pointwise group falls from 37.4% after Day 4
+to 10.7%, and the completed day reaches 77.09 decode tok/s. The course target
+is now met for decode, so the next profile switches to prefill.
 
 ### Day 6: Use Cooperative Loads for Quantized Prefill
 
-An instructor-only diagnostic temporarily replaced the course projections
-with `mx.quantized_matmul`. At 32 prompt tokens it reached 688.66 tok/s while
-the full MLX model reached 729.34 tok/s. No other operator changed, so this
-upper-bound experiment isolated quantized matmul rather than Python
-orchestration or attention. It is not a course checkpoint or valid solution;
-the required Day 6 path uses the course-owned C++/Metal primitive.
+At the Day 5 prefill checkpoint, course projections account for 1,259.90 ms of
+the 1,272.06 ms attributed profile, or 99.0%. Attention accounts for 5.94 ms
+and normalization, position, and activation together account for 6.21 ms.
+This direct profile selects quantized matrix multiplication without routing any
+model operation through MLX's quantized-matmul implementation.
 
 Assign contiguous activation elements to adjacent lanes and stage them with
 aligned cooperative block loads. Combined with a 32×32×32 tile, this schedule
@@ -156,14 +200,17 @@ is already occupied. At the 32-token control point:
 
 | Checkpoint | Prefill tok/s | Decode tok/s | Prefill / MLX |
 |---|---:|---:|---:|
-| Day 6 cooperative matmul | 602.25 | 82.09 | 82.8% |
-| Day 7 split-K | 668.66 | 82.04 | 91.9% |
-| MLX 0.32.0 | 727.28 | 88.34 | 100% |
+| Day 6 cooperative matmul | 586.12 | 78.03 | 83.3% |
+| Day 7 split-K | 650.69 | 77.89 | 92.5% |
+| MLX 0.32.0 | 703.58 | 84.69 | 100% |
 
 Split-K adds 11.0% prefill at this short shape and no decode gain. At the
 128-token acceptance shape only the narrow K/V projections retain a two-way
 split; the other major projections fall back to Day 6, and the complete-model
 result remains neutral. At 2,048 tokens every projection falls back.
+
+The fresh-process samples for this control point are checked in at
+`benchmark_results/m4-pro-qwen3-4b-week2-32-mlx-0.32.0.json`.
 
 The completed Week 2 path reaches 95.7% of MLX prefill, 88.4% of MLX decode,
 and 89.0% of MLX end-to-end output throughput. All three exceed the 80% course
@@ -261,7 +308,19 @@ growth, and page reuse. Prefix sharing and speculative decoding require
 separate traces with shared prefixes or cache rewind events and are not claimed
 by this result.
 
-## Decode Profile and CLI Tools
+## GPU Profile and CLI Tools
+
+The synchronized course-kernel attribution used above is available without a
+GUI:
+
+```bash
+pdm run profile-week2-kernels --model qwen3-4b \
+  --warmup 5 --iterations 15
+```
+
+It is a flat operator profile, not a CPU call-stack flame graph. When Shader
+Timeline export works on the target hardware, validate the same ranking with a
+full-model Metal trace.
 
 `xcrun xctrace` is available from the command line:
 
