@@ -36,28 +36,43 @@
     "command": "pdm run bench-serving-progression --offline --model qwen3-4b --num-seqs 16 --batch-size 4 --min-input-len 128 --max-input-len 1024 --min-output-len 32 --max-output-len 128 --prefill-step 128 --warmup 1 --repeats 3",
     "samples": {
       "dense": [
-        {"output_tokens_per_second": 35.8844, "decode_tokens_per_second": 58.5767, "requests_per_second": 0.4781},
-        {"output_tokens_per_second": 35.8670, "decode_tokens_per_second": 58.6746, "requests_per_second": 0.4778},
-        {"output_tokens_per_second": 35.7607, "decode_tokens_per_second": 58.6454, "requests_per_second": 0.4764}
+        {"prefill_tokens_per_second": 717.8491, "output_tokens_per_second": 34.7278, "decode_tokens_per_second": 56.0252, "requests_per_second": 0.4627},
+        {"prefill_tokens_per_second": 651.4499, "output_tokens_per_second": 32.6163, "decode_tokens_per_second": 53.6813, "requests_per_second": 0.4345},
+        {"prefill_tokens_per_second": 653.2370, "output_tokens_per_second": 32.7741, "decode_tokens_per_second": 53.9913, "requests_per_second": 0.4366}
+      ],
+      "paged-gather": [
+        {"prefill_tokens_per_second": 694.1639, "output_tokens_per_second": 41.3293, "decode_tokens_per_second": 78.3435, "requests_per_second": 0.5506},
+        {"prefill_tokens_per_second": 660.3812, "output_tokens_per_second": 38.3700, "decode_tokens_per_second": 71.0221, "requests_per_second": 0.5112},
+        {"prefill_tokens_per_second": 662.6911, "output_tokens_per_second": 38.3801, "decode_tokens_per_second": 70.8381, "requests_per_second": 0.5113}
       ],
       "paged": [
-        {"output_tokens_per_second": 46.0799, "decode_tokens_per_second": 104.1245, "requests_per_second": 0.6139},
-        {"output_tokens_per_second": 46.6991, "decode_tokens_per_second": 104.1914, "requests_per_second": 0.6221},
-        {"output_tokens_per_second": 46.9755, "decode_tokens_per_second": 104.2764, "requests_per_second": 0.6258}
+        {"prefill_tokens_per_second": 662.7073, "output_tokens_per_second": 46.2556, "decode_tokens_per_second": 104.1508, "requests_per_second": 0.6162},
+        {"prefill_tokens_per_second": 650.0965, "output_tokens_per_second": 45.0450, "decode_tokens_per_second": 100.3458, "requests_per_second": 0.6001},
+        {"prefill_tokens_per_second": 619.3668, "output_tokens_per_second": 42.7601, "decode_tokens_per_second": 94.7661, "requests_per_second": 0.5697}
       ]
     },
     "median": {
       "dense": {
-        "output_tokens_per_second": 35.8670,
-        "decode_tokens_per_second": 58.6454,
-        "requests_per_second": 0.4778,
+        "prefill_tokens_per_second": 653.2370,
+        "output_tokens_per_second": 32.7741,
+        "decode_tokens_per_second": 53.9913,
+        "requests_per_second": 0.4366,
         "peak_kv_bytes": 1149272064,
         "avoidable_kv_copy_bytes": 219710472192
       },
+      "paged-gather": {
+        "prefill_tokens_per_second": 662.6911,
+        "output_tokens_per_second": 38.3801,
+        "decode_tokens_per_second": 71.0221,
+        "requests_per_second": 0.5113,
+        "peak_kv_bytes_lower_bound": 632291328,
+        "avoidable_kv_copy_bytes": 108470403072
+      },
       "paged": {
-        "output_tokens_per_second": 46.6991,
-        "decode_tokens_per_second": 104.1914,
-        "requests_per_second": 0.6221,
+        "prefill_tokens_per_second": 650.0965,
+        "output_tokens_per_second": 45.0450,
+        "decode_tokens_per_second": 100.3458,
+        "requests_per_second": 0.6001,
         "peak_kv_bytes": 603979776,
         "avoidable_kv_copy_bytes": 528482304,
         "peak_live_pages": 1116,
