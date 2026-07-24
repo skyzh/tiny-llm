@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from bench_course_progression import collect_host_metadata
+from benches.bench_course_progression import collect_host_metadata
 
 
 @dataclass(frozen=True)
@@ -97,7 +97,8 @@ def run_variant(
 ) -> ServingResult:
     command = [
         sys.executable,
-        str(root / "bench.py"),
+        "-m",
+        "benches.bench",
         "--solution",
         args.solution,
         "--loader",
@@ -203,7 +204,7 @@ def print_table(
 
 def main() -> None:
     args = parse_args()
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     variants = (
         [VARIANTS_BY_KEY[key] for key in args.variant]
         if args.variant
