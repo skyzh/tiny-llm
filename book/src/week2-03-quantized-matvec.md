@@ -353,6 +353,9 @@ wrapper with two call patterns:
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
+Day 6 briefly revisits row lookup as an optional one-dispatch fusion; keep the
+Day 3 implementation readable.
+
 ## Task 2: Register a GPU-Only Primitive
 
 Register quantized matrix multiplication as an MLX C++ extension. Follow the
@@ -420,13 +423,8 @@ Each thread walks all `N` input values, unpacks eight int4 weights from each
 float32. This kernel repeats activation loads and does not share work, but its
 control flow mirrors the equation and is a useful debugging oracle.
 
-### Prefill Tiling Comes on Day 6
-
-Prefill has many activation rows and benefits from a different matrix-matrix
-schedule. Keep the vanilla kernel for that shape today so Day 3 stays focused
-on decode. Day 6 replaces it with a cooperative 32×32 tile built from 8×8
-`simdgroup_matrix` fragments after the course has established the packed
-format, dispatcher, and synchronized benchmark.
+Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 6
+revisits that workload with cooperative tiling.
 
 ### Stage 2: SIMD Matvec
 
@@ -483,12 +481,6 @@ Use direct activation reads for the course kernel. The one-row activation is
 small and cache-friendly, while staging it in threadgroup memory adds a barrier
 to every projection. If you test shared staging as an ablation, report the
 whole-model result and keep it only when reuse outweighs synchronization.
-
-### Direct Quantized Embedding Comes on Day 6
-
-Week 2 performs row lookup and dequantization with basic `mlx.core` array
-operations at this checkpoint. Day 6 optionally fuses row gather, int4
-unpacking, and affine dequantization into one Metal dispatch.
 
 ### Kernel Requirements
 
