@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 5: Fast Kernels
+# 🚧 Week 2 Day 5: Fused Model Kernels
 
 > 🚧 This chapter is under review and may change.
 

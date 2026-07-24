@@ -77,8 +77,8 @@
     <text class="detail" x="846" y="174">21.6 ms attributed</text>
   </g>
 
-  <g aria-label="Day 4 decode attention: projections 56.7 percent, attention 4.5 percent, pointwise 37.4 percent, KV growth 1.4 percent">
-    <text class="label" x="0" y="233">Day 4 · decode attention</text>
+  <g aria-label="Day 4 fused decode attention: projections 56.7 percent, attention 4.5 percent, pointwise 37.4 percent, KV growth 1.4 percent">
+    <text class="label" x="0" y="233">Day 4 · fused decode attention</text>
     <rect class="projection" x="220" y="210" width="345.7" height="34" />
     <rect class="attention" x="565.7" y="210" width="27.7" height="34" />
     <rect class="pointwise" x="593.4" y="210" width="227.9" height="34" />
@@ -88,8 +88,8 @@
     <text class="detail" x="846" y="231">20.7 ms attributed</text>
   </g>
 
-  <g aria-label="Day 5 fused decode: projections 80.5 percent, attention 6.5 percent, pointwise 10.7 percent, KV growth 2.3 percent">
-    <text class="label" x="0" y="290">Day 5 · fused decode</text>
+  <g aria-label="Day 5 fused model kernels: projections 80.5 percent, attention 6.5 percent, pointwise 10.7 percent, KV growth 2.3 percent">
+    <text class="label" x="0" y="290">Day 5 · fused model kernels</text>
     <rect class="projection" x="220" y="267" width="491.1" height="34" />
     <rect class="attention" x="711.1" y="267" width="39.4" height="34" />
     <rect class="pointwise" x="750.5" y="267" width="65.5" height="34" />
@@ -102,7 +102,7 @@
   <text class="heading" x="0" y="359">Prefill</text>
   <line class="axis" x1="220" y1="367" x2="830" y2="367" />
 
-  <g aria-label="Day 5 prefill at 128 tokens: projections 99.0 percent, attention 0.5 percent, pointwise 0.5 percent">
+  <g aria-label="Day 5 fused model kernels prefill at 128 tokens: projections 99.0 percent, attention 0.5 percent, pointwise 0.5 percent">
     <text class="label" x="0" y="402">Day 5 · 128-token prefill</text>
     <rect class="projection" x="220" y="379" width="604.2" height="34" />
     <rect class="attention" x="824.2" y="379" width="2.9" height="34" />

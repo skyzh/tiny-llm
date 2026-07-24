@@ -80,8 +80,8 @@ it establishes the synchronized benchmark and profile that choose Day 3.
 | Day 1 | Dense request KV cache | 726.25 | 24.51 | 23.89 | Stop full-prefix decode recomputation. |
 | Day 2 | Benchmark and profile | 726.25 | 24.51 | 23.89 | Measure packed projection weight traffic. |
 | Day 3 | Quantized matvec | 104.82 | 59.17 | 38.10 | Keep weights packed and add the x4 decode kernel. |
-| Day 4 | Decode attention | 104.51 | 60.23 | 38.50 | Replace growing score/softmax/value work. |
-| Day 5 | RMSNorm, RoPE, and SwiGLU | 106.03 | 77.09 | 44.98 | Remove the newly exposed repeated graph launches. |
+| Day 4 | Fused decode attention | 104.51 | 60.23 | 38.50 | Replace growing score/softmax/value work. |
+| Day 5 | Fused model kernels | 106.03 | 77.09 | 44.98 | Remove the newly exposed repeated graph launches. |
 | Day 6 | SIMD-matrix prefill | 793.15 | 76.98 | 70.69 | Fix the quantized matrix path exposed by Day 3. |
 | Day 7 | Split-K prefill | 792.18 | 77.41 | 71.05 | Fill the GPU only for under-occupied short projections. |
 | Baseline | MLX 0.32.0 | 827.74 | 87.58 | 79.81 | External denominator. |
@@ -153,7 +153,7 @@ quantized kernel. This is not hidden as a temporary implementation detail: the
 new prefill profile makes quantized matrix multiplication the next dominant
 cost.
 
-### Day 4: Follow Attention as Context Grows
+### Day 4: Fused Decode Attention
 
 At the fixed short context, attention is 5.2% of the attributed Day 3 profile.
 The online-softmax kernel reduces its measured group time from 1.12 to 0.94 ms,
@@ -161,7 +161,7 @@ and complete-model decode rises by only 1.8%. Context sweeps determine its
 retained dispatch range. The small acceptance gain prevents the course from
 incorrectly presenting attention as the main short-context bottleneck.
 
-### Day 5: Optimize the Newly Exposed Launches
+### Day 5: Fused Model Kernels
 
 Day 5 applies three independently measurable changes. Fast RMSNorm raises
 decode by 11.1%, fast RoPE adds 8.2%, and fused SwiGLU adds another 6.5% at

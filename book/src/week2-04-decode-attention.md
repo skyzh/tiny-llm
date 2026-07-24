@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 4: Decode Attention
+# 🚧 Week 2 Day 4: Fused Decode Attention
 
 > 🚧 This chapter is under review and may change.
 

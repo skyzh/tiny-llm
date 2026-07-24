@@ -42,7 +42,7 @@ existing status, and all Week 4 application material remains work in progress.
 | 2.1            | KV Cache                                                     | ✅    | ✅   | 🚧  |
 | 2.2            | Benchmarking and the MLX Baseline                            | 🚧    | 🚧   | 🚧  |
 | 2.3            | Quantized Matvec                                             | ✅    | ✅   | 🚧  |
-| 2.4            | Decode Attention                                             | 🚧    | 🚧   | 🚧  |
+| 2.4            | Fused Decode Attention                                       | 🚧    | 🚧   | 🚧  |
 | 2.5            | Fast Model Kernels                                           | 🚧    | 🚧   | 🚧  |
 | 2.6            | SIMD-Matrix Prefill                                          | ✅    | ✅   | 🚧  |
 | 3.1            | Continuous Batching                                           | ✅    | ✅   | 🚧  |
