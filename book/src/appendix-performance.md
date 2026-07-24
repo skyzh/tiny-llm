@@ -187,11 +187,11 @@ backing capacity.
 | Chapter | Measured checkpoint | Primary result | Change from the preceding comparable path |
 |---|---|---|---|
 | Day 1 | Continuous scheduler | Defines request turnover and active-batch throughput. | Establishes the serving workload. |
-| Day 2 | Chunked admission with dense reconstruction | 35.87 output tok/s; 58.65 decode tok/s | Establishes the dense serving baseline. |
-| Day 3 | Paged storage with compatibility gather | 41.60 output tok/s; 79.19 decode tok/s | +16.0% output; +35.0% decode; -50.6% copy volume. |
-| Day 4 | Direct paged decode | 104.19 aggregate decode tok/s | +31.6% decode over the compatibility gather path. |
-| Day 5 | Paged FlashAttention at 8K | 427.01 prefill tok/s | +10.9% over the earlier page-walking prefill. |
-| Performance lab | Complete direct paged path | 46.70 output tok/s; 0.62 requests/s | +30.2% output and request throughput over dense serving. |
+| Day 2 | Chunked admission with dense reconstruction | 653.24 prefill; 32.77 output; 53.99 decode tok/s | Establishes the dense serving baseline. |
+| Day 3 | Paged storage with compatibility gather | 662.69 prefill; 38.38 output; 71.02 decode tok/s | +17.1% output; +31.5% decode; -50.6% copy volume. |
+| Day 4 | Direct paged decode schedule | 100.35 aggregate decode tok/s | +41.3% decode over the compatibility gather path. |
+| Day 5 | Paged FlashAttention serving schedule | 650.10 prefill tok/s | -1.9% prefill at the 128-token chunk size. |
+| Performance lab | Complete direct paged path | 45.05 output tok/s; 0.60 requests/s | +37.4% output and request throughput over dense serving. |
 
 Day 1 introduces scheduling, not a kernel speedup. Day 2 makes the hidden cost
 measurable: appending one token still reconstructs a padded dense batch. Day 3
@@ -199,28 +199,38 @@ makes pages canonical but retains `gather_dense()` as a compatibility
 checkpoint. Days 4 and 5 then remove that compatibility movement for decode
 and long-query prefill respectively.
 
-The cumulative serving endpoints on the same workload are:
+Days 4 and 5 share the final direct-paged process: queries with `L <= 8`
+dispatch to the Day 4 decode schedule, while longer chunks dispatch to the Day
+5 tiled schedule. The phase timers report their decode and prefill throughput
+inside the same request trace; they are not results from different workloads.
 
-| Storage and attention path | Output tok/s | Decode tok/s | Requests/s | Peak KV MiB | Avoidable KV copy MiB |
-|---|---:|---:|---:|---:|---:|
-| Dense growth and reconstruction | 35.87 | 58.65 | 0.478 | 1,096 | 209,532 |
-| Paged storage plus dense gather | 41.60 | 79.19 | 0.554 | — | 103,445 |
-| Direct paged attention | 46.70 | 104.19 | 0.622 | 576 | 504 |
+Every headline number above comes from the same continuous-batch campaign. The
+cumulative serving endpoints are:
+
+| Storage and attention path | Prefill tok/s | Output tok/s | Decode tok/s | Requests/s | Peak KV MiB | Avoidable KV copy MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| Dense growth and reconstruction | 653.24 | 32.77 | 53.99 | 0.437 | 1,096 | 209,532 |
+| Paged storage plus dense gather | 662.69 | 38.38 | 71.02 | 0.511 | — | 103,445 |
+| Direct paged attention | 650.10 | 45.05 | 100.35 | 0.600 | 576 | 504 |
 
 The compatibility row omits peak storage because its current counter takes the
 maximum of the page pool and dense staging allocation instead of their sum.
 Reporting that lower bound as an exact peak would be misleading.
 
-Direct paged attention improves output and request throughput by 30.2%,
-aggregate decode by 77.7%, and peak KV storage by 47.4% relative to dense
+Direct paged attention improves output and request throughput by 37.4%,
+aggregate decode by 85.9%, and peak KV storage by 47.4% relative to dense
 serving. Avoidable logical copy volume falls by 99.8%. Relative to paged
-storage plus gather, the direct operator adds 12.3% output throughput, 31.6%
-decode throughput, and removes 99.5% of the remaining copy volume.
+storage plus gather, the direct operator adds 17.4% output throughput, 41.3%
+decode throughput, and removes 99.5% of the remaining copy volume. Prefill is
+0.5% below dense and 1.9% below gather at the 128-token serving chunk, so the
+chapter does not claim a short-chunk FlashAttention speedup.
 
-Day 5 is evaluated separately at the shape where query tiling matters. On the
-8K Qwen3-4B run, paged FlashAttention raises prefill from 384.88 to 427.01
-tok/s. MLX reaches 568.74 tok/s, so the page-aware course path reaches 75.1%.
-One-token decode continues to dispatch to the Day 4 vector schedule.
+The 8K static run remains a secondary kernel diagnostic, not a Week 3 headline
+or acceptance result. At that shape, paged FlashAttention raises prefill from
+384.88 to 427.01 tok/s. MLX reaches 568.74 tok/s, so the page-aware course path
+reaches 75.1%. This explains where query tiling begins to help without mixing a
+static denominator into the serving progression. One-token decode continues
+to dispatch to the Day 4 vector schedule.
 
 The checked-in result
 `benchmark_results/m4-pro-qwen3-4b-mlx-0.32.0.json` contains the published

@@ -460,9 +460,10 @@ pdm run bench-serving-progression --offline --repeats 3 \
   --min-output-len 32 --max-output-len 128 --prefill-step 128
 ```
 
-It compares the Week 2 dense batch reconstruction with the Week 3 direct paged
-path, resets page capacity after warmup, and reports throughput, peak KV bytes,
-copy volume, page reuse, and tail fragmentation.
+It compares Week 2 dense batch reconstruction, Week 3 paged storage with the
+dense-gather compatibility path, and Week 3 direct paged attention. It resets
+page capacity after warmup and reports prefill, output, and decode throughput
+alongside peak KV bytes, copy volume, page reuse, and tail fragmentation.
 
 ```bash
 pdm run test --week 3 --day 4
