@@ -26,10 +26,10 @@ The implementation remains deliberately narrow:
 
 ## From a Matvec to a Cooperative Tile
 
-The vanilla kernel assigns one complete dot product to one thread. The first
-matrix attempt assigned one 8×8 result to one SIMD group. Both are easy to
-validate, but they repeatedly load activations and quantized weights from
-device memory.
+The vanilla one-thread dot product and a single-group 8×8 tile are useful
+correctness oracles, but neither provides enough cooperative reuse for
+multi-row prefill. The performance schedule must share both activations and
+dequantized weights across a larger result tile.
 
 The optimized kernel assigns four SIMD groups, or 128 threads, to one
 32×32×32 tile:
@@ -57,9 +57,9 @@ The 40-element shared-memory stride pads the 32-value rows to avoid an
 unhelpful bank-access pattern. Tail rows and columns are zero-filled or guarded
 at the final store.
 
-The reference uses MLX's low-level Steel `BlockLoader` and `BlockMMA` headers
-as Metal building blocks. Those helpers provide cooperative loads and matrix
-fragment bookkeeping. The course still owns the W4A16 unpacking,
+Use MLX's low-level Steel `BlockLoader` and `BlockMMA` headers as Metal building
+blocks. Those helpers provide cooperative loads and matrix-fragment
+bookkeeping. The course still owns the W4A16 unpacking,
 dequantization, tile layout, primitive, dispatch, split policy, and reduction;
 it does not call MLX's quantized-matmul operator.
 
@@ -79,15 +79,10 @@ column tiles. The result must retain the model-facing 16-bit dtype.
 
 ## Task 2: Make Device Loads Contiguous
 
-The first correct 32×32 implementation still issued several scalar,
-widely-strided activation loads per thread. A Metal trace and operator timing
-showed that the matrix arithmetic was not the limiting phase. MLX's comparable
-loader instead gives each thread an aligned contiguous vector.
-
 Use a cooperative block loader so adjacent threads and each thread's local
-reads form contiguous transactions. This is not cosmetic: at a 2,048-row
-Qwen3-4B shape, replacing the scalar activation reads made representative
-course projections effectively match MLX:
+reads form contiguous transactions. This is a requirement of the schedule,
+not a cosmetic detail: at a 2,048-row Qwen3-4B shape, representative course
+projections effectively match MLX:
 
 | Projection | Course | MLX |
 |---|---:|---:|
@@ -96,9 +91,9 @@ course projections effectively match MLX:
 | MLP gate, `2560 -> 9728` | 15.49 ms | 15.65 ms |
 | MLP down, `9728 -> 2560` | 15.66 ms | 15.76 ms |
 
-These are synchronized operator measurements on the reference M4 Pro. The
-important lesson is the diagnosis: increasing matrix-fragment work did not fix
-a load-transaction bottleneck; changing the load shape did.
+These are synchronized operator measurements on the reference M4 Pro. They
+show that memory transaction shape is part of the matrix schedule: fragment
+arithmetic cannot compensate for scalar, strided tile loads.
 
 ## Task 3: Hoist Quantization Parameters
 

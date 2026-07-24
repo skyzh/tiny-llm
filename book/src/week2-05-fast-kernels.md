@@ -144,10 +144,9 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 ## Task 4: Verify the Cumulative Model
 
-At this point all three kernels have already been exposed through C++ MLX
-primitives, integrated, and measured. Run the complete test file now to verify
-their composition. `qwen3_week1.py` must still use its readable operators, and
-Week 3 should import the Week 2 interfaces so the serving model does not regress.
+After exposing all three kernels through C++ MLX primitives, run the complete
+test file to verify their composition. Keep `qwen3_week1.py` on its readable
+operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
