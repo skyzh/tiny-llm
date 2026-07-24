@@ -3,7 +3,7 @@
 import mlx.core as mx
 import pytest
 
-import bench
+from benches import bench
 
 
 class TrackingCache:

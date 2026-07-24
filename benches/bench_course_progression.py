@@ -219,7 +219,8 @@ def run_variant(
 ) -> Throughput:
     command = [
         sys.executable,
-        str(root / "bench.py"),
+        "-m",
+        "benches.bench",
         "--solution",
         args.solution if variant.solution == "ref" else variant.solution,
         "--loader",
@@ -363,7 +364,7 @@ def print_table(
 
 def main() -> None:
     args = parse_args()
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     host = collect_host_metadata()
     variants = (
         [VARIANTS_BY_KEY[key] for key in args.variant]

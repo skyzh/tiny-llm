@@ -11,7 +11,7 @@ timed iteration, and record a baseline that later changes must beat.
 Prefill processes many prompt tokens at once, so its matrix multiplications have
 a larger row dimension. Decode usually processes one token per request and is
 dominated by repeatedly reading quantized weights. A change can improve one
-phase while hurting the other, so `bench.py` reports both:
+phase while hurting the other, so `benches/bench.py` reports both:
 
 - prefill tokens per second: prompt tokens divided by prefill time;
 - decode tokens per second: generated tokens after the first token divided by
