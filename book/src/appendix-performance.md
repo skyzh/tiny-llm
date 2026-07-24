@@ -60,7 +60,7 @@ Qwen3-4B checkpoint, one token of BF16 K/V state occupies
 ```
 
 The checkpoint declares `max_position_embeddings = 65,536`, but its
-`rope_scaling` field is empty. Qwen documents that Qwen3 was pretrained through
+`rope_scaling` field is empty. Qwen documents that Qwen3 pretraining covers
 [32,768 tokens](https://github.com/QwenLM/Qwen3/blob/main/docs/source/deployment/vllm.md#context-length)
 and recommends RoPE scaling for substantially longer inputs. The unmodified
 course model therefore has a 32,768-token validated limit even though its
@@ -110,7 +110,7 @@ also run projections, normalization, sampling, and cache updates.
 | 300,000 | 41.20 GiB | 9.49 ms | 2.93 tok/s |
 
 The 300K operator allocation runs on this M4 Pro, but an end-to-end 300K run of
-the course checkpoint would be outside its configured and pretrained range,
+the course checkpoint would be outside its configured and pretraining ranges,
 would leave little working-set headroom, and would make initial prefill
 impractical. It is useful as a kernel stress test, not as a supported course
 context.

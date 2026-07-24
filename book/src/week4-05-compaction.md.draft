@@ -10,7 +10,7 @@ Use 32,768 total tokens for the course Qwen3-4B model. Start compaction before
 the rendered input exceeds 24,576 tokens, leaving 8,192 tokens for the next
 model response and a large tool result. The
 [performance appendix](./appendix-performance.md#long-context-budget-for-week-4)
-derives this limit from the model's pretrained range, checkpoint configuration,
+derives this limit from the model's pretraining range, checkpoint configuration,
 KV-cache size, and the measured M4 Pro working set.
 
 Count the tokenized system instructions, tool schemas, messages, and tool
