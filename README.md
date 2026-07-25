@@ -77,11 +77,45 @@ The `tiny_llm` package is where students implement the exercises.
 appendix. The detailed chapter order and current status live in the
 [book summary](book/src/SUMMARY.md).
 
-## Project Status
+## Roadmap
 
-Week 1 is the stable foundation. Weeks 2 and 3 are being revised around the
-profile-driven optimization and continuous-serving progression. Week 4 is a
-design draft and is not yet part of the rendered daily course.
+The status columns track whether each chapter's code, tests, and documentation
+are ready. Week 4 remains a design draft and is not yet part of the rendered
+daily course.
+
+| Week + Chapter | Topic | Code | Test | Doc |
+|---|---|---|---|---|
+| 1.1 | Attention | ✅ | ✅ | ✅ |
+| 1.2 | RoPE | ✅ | ✅ | ✅ |
+| 1.3 | Grouped Query Attention | ✅ | ✅ | ✅ |
+| 1.4 | RMSNorm and MLP | ✅ | ✅ | ✅ |
+| 1.5 | Load the Model | ✅ | ✅ | ✅ |
+| 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ |
+| 1.7 | Sampling | ✅ | ✅ | ✅ |
+| 2.1 | KV Cache | ✅ | ✅ | 🚧 |
+| 2.2 | Benchmark and Profile | 🚧 | 🚧 | 🚧 |
+| 2.3 | Quantized Matvec | ✅ | ✅ | 🚧 |
+| 2.4 | Fused Decode Attention | 🚧 | 🚧 | 🚧 |
+| 2.5 | Fused Model Kernels | 🚧 | 🚧 | 🚧 |
+| 2.6 | SIMD-Matrix Prefill | ✅ | ✅ | 🚧 |
+| 2.7 | Split-K Prefill | ✅ | ✅ | 🚧 |
+| 3.1 | Continuous Batching | ✅ | ✅ | 🚧 |
+| 3.2 | Chunked Prefill | ✅ | ✅ | 🚧 |
+| 3.3 | Paged KV Cache | ✅ | ✅ | 🚧 |
+| 3.4 | Direct Paged Attention | ✅ | ✅ | 🚧 |
+| 3.5 | Paged FlashAttention | ✅ | ✅ | 🚧 |
+| 3.6 (optional) | Speculative Decoding | 🚧 | 🚧 | 🚧 |
+| 3.x (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ |
+| 4.1 | Agent Loop | 🚧 | 🚧 | 🚧 |
+| 4.2 | Tools | 🚧 | 🚧 | 🚧 |
+| 4.3 | Safety and Validation | 🚧 | 🚧 | 🚧 |
+| 4.4 | Interactive Sessions | 🚧 | 🚧 | 🚧 |
+| 4.5 | Context Compaction | 🚧 | 🚧 | 🚧 |
+| 4.6 | Control and Recovery | 🚧 | 🚧 | 🚧 |
+| 4.7 | Evaluation | 🚧 | 🚧 | 🚧 |
+
+Other topics not covered include quantized or compressed KV caches,
+cross-request prefix caching, fine-tuning, and long-context techniques.
 
 ## Community
 
