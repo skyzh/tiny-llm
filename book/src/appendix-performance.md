@@ -417,15 +417,15 @@ CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
 
 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --projection q --rows 1 \
+  --iterations 10 \
   --output /tmp/week2-q-projection.gputrace
 ```
 
 Open the trace in Xcode and profile the selected compute pipeline. Pipeline
-Statistics reports shader GPU time and time spent in ALU, memory, control flow,
-and synchronization. On M3 and newer Macs, the Shader Cost Graph is a true
-function-call flame graph with weighted source lines, executed-instruction
-counts, divergence, and instruction categories. The checked-in chart above
-does not substitute for either view.
+Statistics reports shader GPU time together with instruction, ALU, cache, MMU,
+control-flow, register, and spill evidence. On M3 and newer Macs, the Shader
+Cost Graph is a true function-call flame graph with weighted source lines. The
+checked-in chart above does not substitute for either view.
 
 `xcrun xctrace` is available from the command line:
 
@@ -444,17 +444,100 @@ xcrun xctrace record \
 xcrun xctrace export --input /tmp/tiny-llm-decode.trace --toc
 ```
 
-On the measured M4 Pro with Xcode 26.6, the CLI trace resolves the exact
+On the measured M4 Pro, the CLI system trace resolves the exact
 reference-solution pipelines, including
 `quantized_matvec_x4_fast_w4a16_g128_bf16`,
 `week2_decode_attention_bf16`, `week2_rms_norm_bf16`,
-`week2_swiglu_bf16`, and `week2_rope_bf16`. The selected Metal GPU counter
-profile is unsupported on this configuration, so the exported shader-sample
-and counter tables contain no rows. This result identifies the functions but
-does not establish an ALU or memory limiter. Use the `.gputrace` replay in
-Xcode for Pipeline Statistics and per-line Shader Cost Graph data. Never infer
-ALU or bandwidth saturation from an unavailable counter, and do not use trace
-wall time as a throughput result.
+`week2_swiglu_bf16`, and `week2_rope_bf16`. Its exported shader-sample and
+counter tables contain no rows on this configuration, so it identifies
+functions but cannot establish an ALU or memory limiter. The source-enabled
+`.gputrace` replay below supplies that evidence. Never infer a limiter from an
+empty counter table, and do not use trace wall time as a throughput result.
+
+### M4 Pro Decode-Matvec Pipeline Profile
+
+This capture uses an Apple M4 Pro with a 20-core GPU, macOS 26.5.2, Xcode 26.6,
+MLX 0.32.0, and the Qwen3-4B query projection at `M=1`, `K=2560`, `N=4096`.
+Ten requested evaluations produced nine compute dispatches and one final
+synchronization-only command buffer. Xcode measured 331.58 us of GPU time, or
+36.84 us per recorded dispatch; the median after excluding the first dispatch
+was 35.22 us. The Performance State was Medium, so these timings describe the
+profile replay rather than an acceptance benchmark.
+
+The trace occupies 161 MiB because it snapshots buffers, the debug metallib,
+and source line tables. Size alone is not validation: the replay was accepted
+only after Xcode showed the exact target pipeline, nine compute encoders, nine
+dispatch calls, nonzero GPU time, and populated counter rows.
+
+The Shaders view attributes 100% of captured shader cost to
+`quantized_matvec_x4_fast_w4a16_g128_bf16`. Xcode reports 91 allocated
+registers, a high-water mark of 91, and zero spilled bytes. The following
+medians exclude the first dispatch. Xcode's limiter values are comparable
+scores within the same replay, not percentages of wall time.
+
+| Pipeline statistic | Steady-state median |
+|---|---:|
+| Occupancy manager target | 55.99% |
+| Instruction-throughput limiter | 46.78% |
+| Integer-and-complex limiter | 45.44% |
+| F32 limiter | 32.07% |
+| ALU utilization | 27.75% |
+| MMU limiter | 6.84% |
+| Last-level-cache limiter | 6.40% |
+| Control-flow limiter | 3.94% |
+
+![Xcode instruction, ALU, and F32 counters for the decode matvec](./week2-xcode-arithmetic-counters.png)
+
+![Xcode MMU and last-level-cache counters for the same dispatches](./week2-xcode-memory-counters.png)
+
+The limiter scores alone do not mean that weight traffic is free. The same
+steady-state dispatches report the following memory behavior:
+
+| Memory statistic | Steady-state median |
+|---|---:|
+| Device-memory bandwidth | 191.59 GiB/s |
+| Bytes read from device memory | 5.33 MiB/dispatch |
+| Last-level-cache bandwidth | 201.64 GiB/s |
+| Last-level-cache miss rate | 95.2% |
+
+![Xcode device-memory bandwidth counters for the repeated quantized projection](./week2-xcode-bandwidth-counters.png)
+
+The projection is still a streaming kernel: almost every packed weight byte
+comes from device memory, and the high cache miss rate is expected because each
+output row is consumed once. Quantization has already reduced that unavoidable
+traffic. At this schedule, however, the instruction and arithmetic limiter
+scores are about seven times the MMU and last-level-cache limiter scores, while
+the source-cost graph places most of the work on masked products rather than
+the load. The profile therefore identifies arithmetic and code generation as
+the incremental headroom above a substantial bandwidth floor.
+
+The Shader Cost Graph locates the cost more precisely:
+
+| Metal source | Shader cost |
+|---|---:|
+| Line 516, first masked weight product | 22.44% |
+| Line 517, second masked weight product | 20.38% |
+| Line 518, third masked weight product | 16.20% |
+| Line 519, fourth masked weight product | 12.83% |
+| **Four-line masked dot product** | **71.85%** |
+
+![Xcode source costs for the four masked W4 dot-product terms](./week2-xcode-matvec-hot-lines.png)
+
+This makes the next experiment narrow. Keep the packed W4A16 layout and the
+four-output, two-SIMD-group schedule, but reduce instruction and register
+pressure inside the masked dot product. One small candidate is an eight-value
+staged variant that shortens the lifetime of the 16-element activation array;
+another is a `float4` dot formulation that lets the compiler schedule the four
+masked products together. Re-profile allocated registers, the four source
+lines, isolated projection time, and full-model decode after each variant, and
+drop the change unless all relevant measurements improve.
+
+This is an optional follow-up, not another required Week 2 chapter. MLX's
+[`qmv_fast_impl`](https://github.com/ml-explore/mlx/blob/v0.32.0/mlx/backend/metal/kernels/quantized.h)
+uses the same affine rearrangement and four-output, two-SIMD-group structure,
+so restating that formula is not a new optimization. The profile selects a
+compiler-scheduling experiment; it does not claim that the experiment has
+already won.
 
 ## Optimization Map
 

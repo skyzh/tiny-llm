@@ -171,8 +171,8 @@ Xcode's
 is the flame graph: it ranks shader function calls and connects them to
 weighted source lines.
 [Pipeline Statistics](https://developer.apple.com/documentation/xcode/analyzing-draw-command-and-compute-dispatch-performance-with-pipeline-statistics)
-separates GPU time into ALU, memory, control-flow, and synchronization
-activity.
+provides instruction, ALU, cache, MMU, control-flow, register, and spill
+evidence for the selected pipeline.
 
 Build the reference extension with source and line tables, then capture one
 Qwen3-4B projection at its real shape:
@@ -182,29 +182,48 @@ CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
 
 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --projection q --rows 1 \
+  --iterations 10 \
   --output /tmp/week2-q-projection.gputrace
 
 open /tmp/week2-q-projection.gputrace
 ```
 
 The capture uses synthetic buffers with the real `M=1`, `K=2560`, `N=4096`
-Qwen3-4B shape. This keeps the trace small enough to replay without embedding
-all model weights; the dispatched reference-solution kernel and its schedule
-are unchanged. The warmup and input materialization happen before capture, so
-the trace contains steady-state GPU work rather than first-use compilation.
+Qwen3-4B shape. This avoids embedding all model weights; the dispatched
+reference-solution kernel and its schedule are unchanged. The warmup and input
+materialization happen before capture, and repeated evaluations give Xcode
+enough steady-state dispatches to profile.
+
+Do not validate a trace by file size. Debug line tables and captured buffers can
+make an unusable trace large. After replay, require all three of these checks:
+
+- the exact `quantized_matvec_x4_fast_w4a16_g128_bf16` pipeline appears;
+- Xcode reports at least one compute encoder and dispatch;
+- profiling produces nonzero GPU time and counter rows.
+
+`--iterations` names requested evaluations, not promised dispatches. MLX may
+materialize or synchronize the graph differently, so use Xcode's replay summary
+as the dispatch count.
 
 In Xcode:
 
-1. Profile the GPU trace and select the
-   `quantized_matvec_x4_fast_w4a16_g128_bf16` compute pipeline.
-2. Open Pipeline Statistics. Record GPU time and the ALU, memory, control-flow,
-   and synchronization breakdown.
-3. Open **Performance > Shaders**. Use the Shader Cost Graph to find the
-   highest-cost function call, then select it to jump to the weighted Metal
-   source lines.
-4. Record the dominant line's cost, executed-instruction count, divergence,
-   and instruction categories such as load/store, conversion, bit
-   manipulation, and arithmetic.
+1. Profile the GPU trace and expand one compute encoder until the
+   `quantized_matvec_x4_fast_w4a16_g128_bf16` pipeline appears.
+2. Open **Performance > Counters > Performance Limiters**. Compare instruction
+   and ALU counters with MMU, last-level-cache, control-flow, and synchronization
+   counters.
+3. Open **Performance > Shaders**. Record allocated registers and spills, then
+   double-click the pipeline-state cell.
+4. Open **Cost Graph**. Follow the highest-cost function to its weighted Metal
+   source lines and record the dominant lines.
+
+![Xcode Shader Cost Graph for the masked W4 dot product](./week2-xcode-matvec-hot-lines.png)
+
+The source-cost view is the useful endpoint: it connects a pipeline limiter to
+the code that can change. Treat the percentages above as an example of the
+workflow, not a target for another machine. The
+[performance appendix](./appendix-performance.md#m4-pro-decode-matvec-pipeline-profile)
+records the corresponding reference measurement and interpretation.
 
 Missing source lines mean the extension was not rebuilt with
 `MLX_METAL_DEBUG`. Missing counter samples mean the selected profiler is not
