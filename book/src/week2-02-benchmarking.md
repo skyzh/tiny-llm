@@ -205,25 +205,63 @@ make an unusable trace large. After replay, require all three of these checks:
 materialize or synchronize the graph differently, so use Xcode's replay summary
 as the dispatch count.
 
-In Xcode:
+### Capture the Counter Tables
 
-1. Profile the GPU trace and expand one compute encoder until the
-   `quantized_matvec_x4_fast_w4a16_g128_bf16` pipeline appears.
-2. Open **Performance > Counters > Performance Limiters**. Compare instruction
-   and ALU counters with MMU, last-level-cache, control-flow, and synchronization
-   counters.
-3. Open **Performance > Shaders**. Record allocated registers and spills, then
-   double-click the pipeline-state cell.
-4. Open **Cost Graph**. Follow the highest-cost function to its weighted Metal
-   source lines and record the dominant lines.
+Open the trace in Xcode and click the profiling gauge. Wait for replay to
+finish before reading any counter. Then:
+
+1. Open **Counters**, select **Encoders**, and use the encoder filter to keep
+   the repeated compute encoders in view.
+2. Select **Performance Limiters**. Use **Edit Counters...** or horizontal
+   scrolling to expose occupancy, instruction throughput, integer and complex,
+   F32, ALU, MMU, last-level-cache, and control-flow columns. Xcode versions may
+   arrange the columns differently.
+3. Confirm that every recorded row belongs to the target compute pipeline. Do
+   not combine rows from different shaders just because they share an encoder.
+4. For this lab, treat the first recorded dispatch as replay warmup and report
+   the median of the remaining rows. Keep the same exclusion rule for every
+   before-and-after capture.
+
+![Xcode Performance Limiters table for repeated decode-matvec dispatches](./week2-xcode-arithmetic-counters.png)
+
+Switch from **Performance Limiters** to **Memory** without changing the encoder
+selection. Record device-memory bandwidth, GPU read bandwidth, bytes read from
+device memory, last-level-cache bandwidth, and cache miss rate. Bandwidth and
+bytes answer different questions: high bandwidth describes the transfer rate,
+while bytes per dispatch describes how much traffic the algorithm requires.
+
+![Xcode Memory table for the same repeated dispatches](./week2-xcode-bandwidth-counters.png)
+
+Preserve the column headers and several dispatch rows when capturing either
+table. On macOS, press **Shift-Command-4**, drag over the Xcode table, and save
+the resulting PNG with the benchmark record. A crop containing only numbers is
+not reproducible because it loses the counter names and selected view. Record
+the raw row values as well; the screenshot is supporting evidence, not a data
+format.
+
+### Capture the Shader Cost Graph
+
+The limiter table selects a kind of work. The Shader Cost Graph locates that
+work in the program:
+
+1. Open **Shaders** and find
+   `quantized_matvec_x4_fast_w4a16_g128_bf16`. Record its GPU time, allocated
+   registers, register high-water mark, and spilled bytes.
+2. Double-click the pipeline-state cell, then open **Cost Graph**.
+3. Follow the highest-cost function node. In **Source Files**, select the Metal
+   source file and leave the source metric set to **Cost**.
+4. Record the highest-cost lines and their percentages. Keep the pipeline name,
+   source filename, line numbers, and cost labels visible in the screenshot.
 
 ![Xcode Shader Cost Graph for the masked W4 dot product](./week2-xcode-matvec-hot-lines.png)
 
 The source-cost view is the useful endpoint: it connects a pipeline limiter to
-the code that can change. Treat the percentages above as an example of the
-workflow, not a target for another machine. The
+the code that can change. Counter and source-cost percentages are comparable
+within one replay; they are not percentages of end-to-end model time. Treat the
+values in these screenshots as examples of the workflow, not targets for
+another machine. The
 [performance appendix](./appendix-performance.md#m4-pro-decode-matvec-pipeline-profile)
-records the corresponding reference measurement and interpretation.
+shows how the recorded rows become median tables and an interpretation.
 
 Missing source lines mean the extension was not rebuilt with
 `MLX_METAL_DEBUG`. Missing counter samples mean the selected profiler is not
