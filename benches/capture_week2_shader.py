@@ -34,10 +34,18 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="input rows for the vector schedule (default: 1, maximum: 8)",
     )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=10,
+        help="number of target evaluations to record (default: 10)",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not 1 <= args.rows <= 8:
         parser.error("--rows must be between 1 and 8")
+    if args.iterations < 1:
+        parser.error("--iterations must be at least 1")
     if args.output.exists():
         parser.error(f"refusing to overwrite GPU trace: {args.output}")
     if os.environ.get("MTL_CAPTURE_ENABLED") != "1":
@@ -77,14 +85,16 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     mx.metal.start_capture(str(args.output.resolve()))
     try:
-        mx.eval(quantized_linear(capture_x, weights))
+        for _ in range(args.iterations):
+            mx.eval(quantized_linear(capture_x, weights))
         mx.synchronize()
     finally:
         mx.metal.stop_capture()
 
     print(
         f"Captured Qwen3-4B {args.projection} projection "
-        f"M={args.rows}, K={input_dim}, N={output_dim}: {args.output}"
+        f"M={args.rows}, K={input_dim}, N={output_dim}, "
+        f"iterations={args.iterations}: {args.output}"
     )
 
 
