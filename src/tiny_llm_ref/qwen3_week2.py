@@ -19,10 +19,10 @@ from .week2_kernels import (
 WEEK2_CHECKPOINTS = (
     "kv-cache",
     "quantized-matvec",
-    "decode-attention",
     "rmsnorm",
     "rope",
     "swiglu",
+    "decode-attention",
     "simd-matmul",
     "split-k",
 )

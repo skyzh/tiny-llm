@@ -9,7 +9,7 @@ weights efficiently across prompt rows. Quantized projections are now the
 largest cost, so today we build a separate matrix schedule for them.
 
 Re-run the dependency-aware kernel profile from Day 2 with
-`--case swiglu:prefill:128`. Continue only when projections dominate the
+`--case decode-attention:prefill:128`. Continue only when projections dominate the
 attribution and the complete-model prefill phase moves with their latency. The
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 shows that evidence chain. MLX remains an external performance denominator;

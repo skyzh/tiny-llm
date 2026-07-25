@@ -73,15 +73,15 @@ The order is intentional:
    [reference-solution attribution](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
    records the bottleneck transition that drives the remaining days.
 3. **Quantized matvec:** the decode profile points at projection weight reads,
-   so keep weights packed and integrate the SIMD matrix-vector kernel. Reprofile
-   to expose the next context-dependent cost.
-4. **Decode attention:** the context sweep shows attention growing, so replace
-   the readable score/softmax/value composition with online softmax and measure
-   its retained range. At the fixed short context this is intentionally a small
-   contribution, not the headline decode gain.
-5. **Fast kernels:** after the large decode kernels shrink, the profile exposes
-   repeated RMSNorm, RoPE, and SwiGLU launches. Fuse them one at a time and
-   remeasure after each checkpoint.
+   so keep weights packed and integrate the SIMD matrix-vector kernel. Compare
+   the optimized projections with MLX, then reprofile the remaining model work.
+4. **Fused model kernels:** once projection latency is close to the external
+   denominator, the removable decode gap moves to repeated RMSNorm, RoPE, and
+   SwiGLU work. Fuse the measured cluster one operator at a time.
+5. **Decode attention:** after the pointwise cluster shrinks, sweep cached
+   context and measure score, softmax, and value work. Introduce online softmax,
+   retain it only over its measured winning range, and reprofile before changing
+   the workload.
 6. **SIMD-matrix prefill:** switch to the prefill profile, where quantized
    matrix multiplication dominates. Introduce 8×8 matrix fragments with FP32
    accumulation and benchmark real Qwen projection shapes.
@@ -100,7 +100,7 @@ Week 3 then makes paged K/V the canonical serving layout, so a second
 dense-only attention implementation would not become the model-facing serving
 path.
 
-Instead, Week 2 teaches the ingredients that remain useful: Day 4 introduces
+Instead, Week 2 teaches the ingredients that remain useful: Day 5 introduces
 online softmax and Day 6 introduces cooperative SIMD-matrix tiling. Week 3 adds
 page-table translation and combines all three ideas in one paged
 FlashAttention operator. A dense first-prefill fast path is a reasonable
@@ -114,7 +114,7 @@ quantized, dispatches separate decode and prefill matrix schedules, and imports 
 loop and Python RMSNorm, RoPE, attention, and MLP implementations.
 
 Week 3 imports these Week 2 interfaces rather than copying or replacing them.
-Its paged-attention chapters combine Day 4 online softmax and Day 6 matrix
+Its paged-attention chapters combine Day 5 online softmax and Day 6 matrix
 fragments only after page-table translation has been introduced, while the
 quantized projections inherit Day 7's shape-aware dispatch. That boundary
 lets each week's model remain understandable and runnable on its own.

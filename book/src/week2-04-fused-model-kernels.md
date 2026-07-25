@@ -1,9 +1,9 @@
-# 🚧 Week 2 Day 5: Fused Model Kernels
+# 🚧 Week 2 Day 4: Fused Model Kernels
 
 > 🚧 This chapter is under review and may change.
 
-The Day 4 profile should now show many smaller pointwise and reduction
-dispatches behind the optimized projections and short-context attention.
+The Day 3 profile should now show many smaller pointwise and reduction
+dispatches behind the optimized projections.
 RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
 1 expresses them as readable `mlx.core` equations. Confirm the cluster with the
@@ -82,7 +82,7 @@ tests, and record the cumulative model result before writing RoPE:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5 -- -k rms
+pdm run test --week 2 --day 4 -- -k rms
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint rmsnorm --model qwen3-4b
 ```
@@ -118,7 +118,7 @@ Replace the readable RoPE in the already optimized model, then test and measure
 that cumulative checkpoint before implementing SwiGLU:
 
 ```bash
-pdm run test --week 2 --day 5 -- -k rope
+pdm run test --week 2 --day 4 -- -k rope
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint rope --model qwen3-4b
 ```
@@ -140,7 +140,7 @@ The fused kernel removes those intermediate tensors and dispatch boundaries.
 Integrate the fused expression immediately and record the third checkpoint:
 
 ```bash
-pdm run test --week 2 --day 5 -- -k swiglu
+pdm run test --week 2 --day 4 -- -k swiglu
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint swiglu --model qwen3-4b
 ```
@@ -153,15 +153,16 @@ operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 4
 ```
 
-Day 6 changes workload shape rather than replacing another element-wise or
-reduction operator: it introduces SIMD-matrix fragments for quantized prefill.
-Keep today's `swiglu` checkpoint intact so that prefill tiling has a clean
-before-and-after comparison. Switch the profile from one-token decode to a
-multi-row prefill request before starting Day 6; quantized projections should
-then dominate and the Day 3 matvec schedule should no longer fit the shape.
+Keep today's `swiglu` checkpoint intact so fused attention has a clean
+before-and-after comparison. Reprofile one-token decode across cached context
+lengths before starting Day 5. Continue when the pointwise cluster has shrunk,
+the projection kernels are already close to their operator denominator, and
+attention is the next measured context-dependent gap. If attention does not
+move the complete-model benchmark, keep the readable composition instead of
+retaining a lesson-only dispatch.
 
 Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`

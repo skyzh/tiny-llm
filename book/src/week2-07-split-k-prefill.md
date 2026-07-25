@@ -129,7 +129,7 @@ MLX ratios.
 The Week 2 loop is now complete:
 
 ```plain
-optimize matvec -> profile decode -> optimize attention and small kernels
+optimize matvec -> profile decode -> optimize small kernels and attention
 -> profile prefill -> optimize cooperative matmul -> profile tile occupancy
 -> optimize split-K -> benchmark the complete checkpoint
 ```

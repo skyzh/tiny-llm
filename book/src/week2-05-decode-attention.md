@@ -1,14 +1,15 @@
-# 🚧 Week 2 Day 4: Fused Decode Attention
+# 🚧 Week 2 Day 5: Fused Decode Attention
 
 > 🚧 This chapter is under review and may change.
 
-This chapter starts only after profiling the quantized-matvec checkpoint across
-cached contexts. Linear projections remain important, but the attention walk
-grows with context while their shapes stay fixed. During single-request decode,
-query length is normally one while the cached key/value sequence grows by one
-token at a time. Week 1 expresses attention as matrix multiplication, masking,
-softmax, and another matrix multiplication. That is readable, but it
-materializes the complete score and probability rows.
+This chapter starts only after the Day 4 profile has verified that the fused
+model kernels reduced the repeated pointwise cluster. Linear projections remain
+important, but their operator latency is already close to the external
+denominator, while the attention walk grows with cached context. During
+single-request decode, query length is normally one while the cached key/value
+sequence grows by one token at a time. Week 1 expresses attention as matrix
+multiplication, masking, softmax, and another matrix multiplication. That is
+readable, but it materializes the complete score and probability rows.
 
 First write a readable composition to preserve the equation, then replace its
 matmuls and softmax with an online-softmax Metal kernel in your solution.
@@ -127,7 +128,7 @@ attention metadata instead of complicating this focused decode kernel.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 5
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit
@@ -139,7 +140,7 @@ otherwise identical settings:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b \
+  --week2-checkpoint swiglu --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 
@@ -151,8 +152,10 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 Your solution dispatches short-query contexts through your Metal kernel and
 falls back to the exact readable Week 1 composition outside the validated
-range. Reprofile the retained path. If repeated pointwise and reduction
-dispatches become the largest remaining cluster, continue to Day 5; otherwise
-keep tuning the dominant measured cost.
+range. Reprofile the retained path and reject the dispatch if its isolated and
+complete-model measurements do not establish a winning range. Once decode
+clears the course target, switch the profile to a multi-row prefill request.
+Continue to Day 6 only when quantized projections dominate that new workload;
+otherwise keep tuning the measured decode gap.
 
 {{#include copyright.md}}
