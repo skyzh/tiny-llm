@@ -22,37 +22,27 @@ and performance baseline.
 
 ## The Learning Path
 
-Each week answers a different systems question:
+The course follows a four-week learning path:
 
-- **Week 1 — How does a model generate text?** Build a readable Qwen3 model
+- **Week 1: From Matmul to Text.** Build a readable Qwen3 model
   from array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
-- **Week 2 — Why is the readable model slow?** Add a KV cache, establish a
+- **Week 2: A Step Closer to vLLM.** Add a KV cache, establish a
   synchronized MLX baseline, and let profiles choose the next optimization.
   The path moves from quantized decode matvec to fused model kernels, tiled
   prefill, and split-K where the measured Qwen shapes need it.
-- **Week 3 — What changes when requests share an engine?** Introduce continuous
+- **Week 3: Build a Mini vLLM.** Introduce continuous
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
   the scheduler does not rebuild dense history on every step.
-- **Week 4 — What does an application demand from the inference stack?** The
-  draft coding-agent week uses multi-turn sessions to motivate cache reuse,
-  context compaction, rewind, interruption, and evaluation.
-
-Week 2 follows one loop throughout:
-
-```text
-benchmark and profile -> find the next bottleneck -> optimize -> measure again
-```
-
-This matters more than any individual kernel. An optimization stays because a
-whole-model benchmark supports it, not because it sounds useful in isolation.
+- **Week 4: Build a Coding Agent.** Use multi-turn sessions to motivate cache
+  reuse, context compaction, rewind, interruption, and evaluation.
 
 ## Why MLX and Qwen3?
 
 Apple silicon provides a practical local environment with one shared memory
 space and direct access to Metal kernels. Students can inspect the complete
-path on one machine instead of depending on a remote CUDA setup.
+path on one machine instead of depending on an expensive CUDA GPU setup.
 
 Qwen3-4B is large enough to expose real weight-bandwidth, attention, and cache
 costs, but small enough to iterate on locally. Its grouped-query attention,

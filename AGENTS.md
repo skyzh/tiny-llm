@@ -79,9 +79,6 @@ pdm run build-ext
 - Use `--` before pytest args (`-k`, `-q`, `--collect-only`, etc.).
 - `pdm run test --week X --day Y` auto-copies `tests_refsol/test_week_X_day_Y.py` into `tests/`.
 - Model-dependent tests (0.5B/1.5B/7B) skip when models are not downloaded locally.
-- Before every push, run `npx --yes cspell "book/**/*.md"` and fix every
-  reported spelling issue.
-
 ## GitHub CLI
 
 - The `gh` CLI is installed, authenticated, and expected to work in this
