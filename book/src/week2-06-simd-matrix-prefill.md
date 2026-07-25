@@ -114,7 +114,7 @@ callers can still request every logit row.
 pdm run build-ext
 pdm run test --week 2 --day 6
 
-pdm run bench-week2-progression --offline --repeats 3 \
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
   --variant week2-simd-matmul --variant mlx \
   --model qwen3-4b --input-len 32 --output-len 33 --warmup 2 \
   --prefill-logits last
@@ -129,5 +129,35 @@ adding reduction partitions.
 At long `M`, the two-dimensional tile grid is already large. Do not force the
 next optimization there: additional reduction partitions would only add a
 temporary buffer and another launch.
+
+## Benchmark Analysis: Select Day 7
+
+Compare the matrix kernel at both an occupied control shape and the short K/V
+shape, then profile the latter without enabling Split-K:
+
+```bash
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section prefill-projections --context 32 \
+  --prefill-projection k --prefill-projection q
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case simd-matmul:prefill:128 --case simd-matmul:prefill:32 \
+  --warmup 5 --iterations 15
+
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
+MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm --projection k --rows 32 --schedule simd-matmul \
+  --iterations 10 --output /tmp/week2-k-m32-unsplit.gputrace
+```
+
+Do not select Split-K merely because projections still occupy most of prefill.
+First require the long or wide controls to approach MLX, while the short,
+narrow K/V projection remains disproportionately slow. In the Xcode capture,
+confirm that the unsplit result grid has too few independent threadgroups; if
+the kernel instead shows costly loads or arithmetic inside each tile, repair
+Day 6 before multiplying the grid.
+
+The [reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
+shows the long-shape control and the short-shape handoff separately.
 
 {{#include copyright.md}}

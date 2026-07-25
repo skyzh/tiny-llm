@@ -156,14 +156,6 @@ pdm run build-ext
 pdm run test --week 2 --day 4
 ```
 
-Keep today's `swiglu` checkpoint intact so fused attention has a clean
-before-and-after comparison. Reprofile one-token decode across cached context
-lengths before starting Day 5. Continue when the pointwise cluster has shrunk,
-the projection kernels are already close to their operator denominator, and
-attention is the next measured context-dependent gap. If attention does not
-move the complete-model benchmark, keep the readable composition instead of
-retaining a lesson-only dispatch.
-
 Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
 inside a timed iteration when measuring these lazy operations.
@@ -174,5 +166,35 @@ expects `B, H, L, D`, so transpose into that layout before the MLX call and
 transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
 timing no longer measures an equivalent operation.
+
+## Benchmark Analysis: Select Day 5
+
+Keep the three cumulative checkpoints separate so a regression cannot hide
+inside their combined gain:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-quantized-matvec \
+  --variant week2-rmsnorm --variant week2-rope --variant week2-swiglu \
+  --variant mlx --model qwen3-4b \
+  --input-len 128 --output-len 129 --warmup 2 --prefill-logits last
+
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section model-kernels --context 128
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case swiglu:decode:128 --case swiglu:decode:512 \
+  --case swiglu:decode:2048 --warmup 5 --iterations 15
+```
+
+Retain RMSNorm, RoPE, and SwiGLU independently only when their operator and
+cumulative model rows agree. After the pointwise cluster shrinks, sweep cached
+context rather than assuming attention is next. Continue to Day 5 when
+attention is the next context-dependent gap and the projection operators are
+already close to their denominator. Day 5 must still prove that its replacement
+moves the complete model; a growing share alone is not acceptance.
+
+The [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
+shows the pointwise cluster shrinking before attention is introduced.
 
 {{#include copyright.md}}

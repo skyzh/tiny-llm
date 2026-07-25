@@ -44,7 +44,13 @@ def parse_args() -> argparse.Namespace:
         "--rows",
         type=int,
         default=1,
-        help="input rows for the vector schedule (default: 1, maximum: 8)",
+        help="input rows in the captured projection (default: 1)",
+    )
+    parser.add_argument(
+        "--schedule",
+        choices=("matvec", "simd-matmul", "split-k"),
+        default="matvec",
+        help="Week 2 projection schedule to capture (default: matvec)",
     )
     parser.add_argument(
         "--iterations",
@@ -54,8 +60,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if not 1 <= args.rows <= 8:
-        parser.error("--rows must be between 1 and 8")
+    if args.rows < 1:
+        parser.error("--rows must be positive")
+    if args.schedule == "matvec" and args.rows > 8:
+        parser.error("the matvec schedule requires --rows <= 8")
+    if args.schedule != "matvec" and args.rows <= 8:
+        parser.error("matrix schedules require --rows > 8")
     if args.iterations < 1:
         parser.error("--iterations must be at least 1")
     if args.output.exists():
@@ -66,7 +76,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def make_projection(
-    rows: int, input_dim: int, output_dim: int, weights_type: Any
+    rows: int,
+    input_dim: int,
+    output_dim: int,
+    weights_type: Any,
+    schedule: str,
 ) -> tuple[mx.array, Any]:
     group_size = 128
     bits = 4
@@ -77,6 +91,9 @@ def make_projection(
         group_size=group_size,
         bits=bits,
         weight=mx.zeros((output_dim, input_dim // values_per_word), dtype=mx.uint32),
+        use_simdgroup_matvec=schedule == "matvec",
+        use_simdgroup_matmul=schedule != "matvec",
+        use_split_k_matmul=schedule == "split-k",
     )
     x = mx.full((rows, input_dim), 2, dtype=mx.bfloat16)
     mx.eval(x, weights.weight, weights.scales, weights.biases)
@@ -90,7 +107,11 @@ def main() -> None:
     input_dim, output_dim = PROJECTION_SHAPES[args.projection]
 
     warmup_x, weights = make_projection(
-        args.rows, input_dim, output_dim, quantize.QuantizedWeights
+        args.rows,
+        input_dim,
+        output_dim,
+        quantize.QuantizedWeights,
+        args.schedule,
     )
     mx.eval(quantized_linear(warmup_x, weights))
 
@@ -110,7 +131,7 @@ def main() -> None:
     print(
         f"Captured {args.solution} Qwen3-4B {args.projection} projection "
         f"M={args.rows}, K={input_dim}, N={output_dim}, "
-        f"iterations={args.iterations}: {args.output}"
+        f"schedule={args.schedule}, iterations={args.iterations}: {args.output}"
     )
 
 

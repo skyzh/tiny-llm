@@ -335,12 +335,14 @@ pdm run bench --solution mlx --loader week2 --model qwen3-4b \
 Use `--solution tiny_llm_ref` with the same arguments when you want to compare
 your solution with the reference solution instead of MLX.
 
-Or run the complete cumulative ladder in fresh processes. At this point, only
-the Week 1, KV-cache, and MLX rows are course prerequisites; later rows become
-meaningful as you complete their chapters.
+Or run the cumulative ladder in fresh processes. At this point, compare your
+Day 1 KV-cache checkpoint with MLX; later rows become meaningful as you
+complete their chapters.
 
 ```bash
-pdm run bench-week2-progression --offline --repeats 3 \
+pdm run bench-week2-progression --offline --repeats 4 \
+  --solution tiny_llm \
+  --variant week2-kv-cache --variant mlx \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last --json-output week2-baseline.json
 ```
@@ -375,5 +377,26 @@ Keep a 2K context run in the report as a stress diagnostic. It is useful for
 showing when attention overtakes fixed-shape projections, but changing context
 also changes the problem. Do not move the acceptance shape after seeing a
 result.
+
+## Benchmark Analysis: Select Day 3
+
+Profile only the checkpoint you have completed:
+
+```bash
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case kv-cache:decode:128 --warmup 5 --iterations 15 \
+  --json-output day2-profile.json
+```
+
+Read the fresh-process benchmark and attribution together. The benchmark says
+how far decode is from MLX; the profile says which operator family owns the
+current implementation's time. Continue to Day 3 when projection work is the
+largest removable cost and its dense weight traffic scales with the roofline
+calculation. If another family dominates your profile, inspect that family
+before copying the reference solution's next step.
+
+The [reference checkpoint](./appendix-performance.md#day-2-measure-before-optimizing)
+shows the same decision for the checked-in solution while keeping its
+machine-specific values out of this chapter.
 
 {{#include copyright.md}}

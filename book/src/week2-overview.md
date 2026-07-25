@@ -123,7 +123,7 @@ The cumulative ladder is executable at any time. The
 [performance appendix](./appendix-performance.md) records the matched results:
 
 ```bash
-pdm run bench-week2-progression --offline --repeats 3 \
+pdm run bench-week2-progression --offline --repeats 4 \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last
 ```

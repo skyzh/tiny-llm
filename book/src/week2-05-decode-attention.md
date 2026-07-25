@@ -152,10 +152,35 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 Your solution dispatches short-query contexts through your Metal kernel and
 falls back to the exact readable Week 1 composition outside the validated
-range. Reprofile the retained path and reject the dispatch if its isolated and
-complete-model measurements do not establish a winning range. Once decode
-clears the course target, switch the profile to a multi-row prefill request.
-Continue to Day 6 only when quantized projections dominate that new workload;
-otherwise keep tuning the measured decode gap.
+range.
+
+## Benchmark Analysis: Select Day 6
+
+Measure the attention operator and the cumulative checkpoint separately, then
+change the profile workload only after decode clears its target:
+
+```bash
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section attention --context 128
+
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-swiglu --variant week2-decode-attention --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case decode-attention:decode:128 \
+  --case decode-attention:prefill:128 --warmup 5 --iterations 15
+```
+
+Reject the custom dispatch if repeated fresh-process model runs do not improve
+over `swiglu`, even when the isolated kernel looks faster. If it wins only over
+a limited context range, encode that measured crossover in the dispatch guard.
+Once decode reaches 80% of MLX, read the prefill attribution as a new workload.
+Continue to Day 6 only when quantized matrix-shaped projections dominate it.
+
+The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
+records both the retained decode gain and the prefill profile that selects the
+matrix kernel.
 
 {{#include copyright.md}}

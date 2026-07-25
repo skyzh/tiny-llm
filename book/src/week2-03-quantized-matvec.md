@@ -616,14 +616,36 @@ pdm run bench --solution tiny_llm --loader week2 \
 Run the same command with `--solution tiny_llm_ref` to compare it with the
 reference solution.
 
-Compare this result with the Day 1 `kv-cache` row. Do not start the fused model
-kernels until the complete model uses packed weights and the end-to-end number
-has been recorded. The vanilla matrix product remains callable as a correctness
-oracle, but only the SIMD matvec is integrated into decode. Reprofile the
-quantized checkpoint and compare each optimized projection with MLX at the same
-Qwen3-4B shape. When projection latency is close to that external denominator
-but normalization, position, and activation still account for the largest
-removable gap, continue to Day 4. Otherwise keep tuning the measured matvec
-bottleneck.
+The vanilla matrix product remains callable as a correctness oracle, but only
+the SIMD matvec is integrated into decode.
+
+## Benchmark Analysis: Select Day 4
+
+Measure the cumulative model, the real projection shapes, and the updated
+operator attribution:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-kv-cache --variant week2-quantized-matvec --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last
+
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section decode-projections --context 128
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case quantized-matvec:decode:128 --warmup 5 --iterations 15
+```
+
+First require a clear complete-model decode gain over `kv-cache`. Then compare
+each projection with MLX at the identical shape. Projections may remain the
+largest absolute category because the model inherently performs them in every
+layer; once their operator latency is close to MLX, that bar is no longer the
+largest removable gap. Continue to Day 4 when normalization, position, and
+activation work now account for that gap. If the projection comparison is
+still far behind, keep tuning the matvec instead.
+
+The [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
+records the corresponding handoff and the temporary prefill regression.
 
 {{#include copyright.md}}
