@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import mlx.core as mx
 from .tiny_llm_base import (
     BatchingKvCache,
+    QuantizedEmbedding,
+    QuantizedWeights,
     Qwen3ModelWeek2,
     Qwen3ModelWeek3,
     TinyKvPagedCache,
@@ -263,6 +265,22 @@ def test_task_3_incremental_decode_matches_week2_with_paged_attention():
             rtol=1e-3,
             atol=1e-3,
         )
+
+
+def test_week3_custom_embedding_matches_readable_path():
+    weight = mx.random.normal((17, 256)).astype(mx.bfloat16)
+    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+    quantized = QuantizedWeights(scales, biases, 128, 4, packed)
+    readable = QuantizedEmbedding(17, 256, quantized)
+    custom = QuantizedEmbedding(17, 256, quantized, use_custom_kernel=True)
+    indices = mx.array([[1, 4, 9]], dtype=mx.int32)
+    assert_allclose(
+        custom(indices),
+        readable(indices),
+        precision=mx.bfloat16,
+        atol=2e-2,
+        rtol=2e-2,
+    )
 
 
 def test_week3_default_inherits_week2_prefill_kernels():

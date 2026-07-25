@@ -118,7 +118,7 @@ class Qwen3MultiHeadAttention:
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        if self.use_decode_attention and L <= 8 and projection_k.shape[-2] <= 256:
+        if self.use_decode_attention and L <= 8 and projection_k.shape[-2] <= 128:
             x = decode_attention_custom(
                 projection_q,
                 projection_k,
@@ -283,7 +283,6 @@ class Qwen3ModelWeek2:
                 vocab_size=self.vocab_size,
                 embedding_dim=self.hidden_size,
                 weight=embedding_weight,
-                use_custom_kernel=use_simdgroup_matmul,
             )
         else:
             self.embedding = Embedding(

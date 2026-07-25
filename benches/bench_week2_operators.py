@@ -3,6 +3,7 @@ import importlib
 import importlib.metadata
 import sys
 from dataclasses import dataclass
+from itertools import permutations
 from pathlib import Path
 from statistics import median
 from time import perf_counter
@@ -93,8 +94,8 @@ def parse_args() -> argparse.Namespace:
         help="operator family to run; repeat as needed (default: all)",
     )
     parser.add_argument("--context", type=int, default=128)
-    parser.add_argument("--warmup", type=int, default=10)
-    parser.add_argument("--iterations", type=int, default=50)
+    parser.add_argument("--warmup", type=int, default=12)
+    parser.add_argument("--iterations", type=int, default=60)
     parser.add_argument(
         "--prefill-projection",
         action="append",
@@ -109,15 +110,24 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def benchmark(function: Callable[[], mx.array], warmup: int, iterations: int) -> float:
-    for _ in range(warmup):
-        mx.eval(function())
-    timings = []
-    for _ in range(iterations):
-        start = perf_counter()
-        mx.eval(function())
-        timings.append(perf_counter() - start)
-    return median(timings) * 1_000_000
+def benchmark_comparison(
+    functions: list[tuple[str, Callable[[], mx.array]]],
+    warmup: int,
+    iterations: int,
+) -> dict[str, float]:
+    orders = list(permutations(functions))
+    for round_index in range(warmup):
+        for _, function in orders[round_index % len(orders)]:
+            mx.eval(function())
+
+    timings = {name: [] for name, _ in functions}
+    for round_index in range(iterations):
+        order = orders[(warmup + round_index) % len(orders)]
+        for name, function in order:
+            start = perf_counter()
+            mx.eval(function())
+            timings[name].append(perf_counter() - start)
+    return {name: median(samples) * 1_000_000 for name, samples in timings.items()}
 
 
 def report(name: str, course_us: float, mlx_us: float) -> None:
@@ -169,13 +179,20 @@ def benchmark_embedding(
     )
     token = mx.array([[42]], dtype=mx.int32)
     mx.eval(dense_embedding.weight)
+    timings = benchmark_comparison(
+        [
+            ("readable", lambda: dense_embedding(token)),
+            ("optimized", lambda: embedding(token)),
+            ("mlx", lambda: model.model.embed_tokens(token)),
+        ],
+        args.warmup,
+        args.iterations,
+    )
     report_progression(
         "quantized embedding",
-        benchmark(lambda: dense_embedding(token), args.warmup, args.iterations),
-        benchmark(lambda: embedding(token), args.warmup, args.iterations),
-        benchmark(
-            lambda: model.model.embed_tokens(token), args.warmup, args.iterations
-        ),
+        timings["readable"],
+        timings["optimized"],
+        timings["mlx"],
     )
 
 
@@ -201,38 +218,46 @@ def benchmark_decode_projections(
         weights = ops.quantized_weights_type.from_mlx_layer(mlx_layer)
         x = mx.random.normal((1, 1, input_dim)).astype(precision)
         mx.eval(x, weights.weight, weights.scales, weights.biases)
-        course_us = benchmark(
-            lambda x=x, weights=weights: ops.quantized_linear(x, weights),
+        timings = benchmark_comparison(
+            [
+                (
+                    "readable",
+                    lambda x=x, weights=weights: ops.quantized_matmul_vanilla(
+                        weights.scales,
+                        weights.biases,
+                        weights.group_size,
+                        weights.bits,
+                        x,
+                        weights.weight,
+                        True,
+                    ),
+                ),
+                (
+                    "optimized",
+                    lambda x=x, weights=weights: ops.quantized_linear(x, weights),
+                ),
+                (
+                    "mlx",
+                    lambda x=x, weights=weights: mx.quantized_matmul(
+                        x,
+                        weights.weight,
+                        weights.scales,
+                        weights.biases,
+                        transpose=True,
+                        group_size=weights.group_size,
+                        bits=weights.bits,
+                    ),
+                ),
+            ],
             args.warmup,
             args.iterations,
         )
-        mlx_us = benchmark(
-            lambda x=x, weights=weights: mx.quantized_matmul(
-                x,
-                weights.weight,
-                weights.scales,
-                weights.biases,
-                transpose=True,
-                group_size=weights.group_size,
-                bits=weights.bits,
-            ),
-            args.warmup,
-            args.iterations,
+        report_progression(
+            name,
+            timings["readable"],
+            timings["optimized"],
+            timings["mlx"],
         )
-        readable_us = benchmark(
-            lambda x=x, weights=weights: ops.quantized_matmul_vanilla(
-                weights.scales,
-                weights.biases,
-                weights.group_size,
-                weights.bits,
-                x,
-                weights.weight,
-                True,
-            ),
-            args.warmup,
-            args.iterations,
-        )
-        report_progression(name, readable_us, course_us, mlx_us)
 
 
 def benchmark_prefill_projections(
@@ -257,53 +282,60 @@ def benchmark_prefill_projections(
         weights = ops.quantized_weights_type.from_mlx_layer(mlx_layer)
         x = mx.random.normal((args.context, input_dim)).astype(precision)
         mx.eval(x)
-        simdgroup_us = benchmark(
-            lambda: ops.quantized_matmul(
-                weights.scales,
-                weights.biases,
-                weights.group_size,
-                weights.bits,
-                x,
-                weights.weight,
-                True,
-                use_simdgroup=True,
+        functions = [
+            (
+                "simd",
+                lambda: ops.quantized_matmul(
+                    weights.scales,
+                    weights.biases,
+                    weights.group_size,
+                    weights.bits,
+                    x,
+                    weights.weight,
+                    True,
+                    use_simdgroup=True,
+                ),
             ),
-            args.warmup,
-            args.iterations,
-        )
-        mlx_us = benchmark(
-            lambda: mx.quantized_matmul(
-                x,
-                weights.weight,
-                weights.scales,
-                weights.biases,
-                transpose=True,
-                group_size=weights.group_size,
-                bits=weights.bits,
+            (
+                "mlx",
+                lambda: mx.quantized_matmul(
+                    x,
+                    weights.weight,
+                    weights.scales,
+                    weights.biases,
+                    transpose=True,
+                    group_size=weights.group_size,
+                    bits=weights.bits,
+                ),
             ),
+        ]
+        if args.include_split_k:
+            functions.append(
+                (
+                    "split-k",
+                    lambda: ops.quantized_matmul(
+                        weights.scales,
+                        weights.biases,
+                        weights.group_size,
+                        weights.bits,
+                        x,
+                        weights.weight,
+                        True,
+                        use_simdgroup=True,
+                        use_split_k=True,
+                    ),
+                )
+            )
+        timings = benchmark_comparison(
+            functions,
             args.warmup,
             args.iterations,
         )
         name = f"prefill {projection} matmul"
-        if not args.include_split_k:
-            report(name, simdgroup_us, mlx_us)
-            continue
-        split_k_us = benchmark(
-            lambda: ops.quantized_matmul(
-                weights.scales,
-                weights.biases,
-                weights.group_size,
-                weights.bits,
-                x,
-                weights.weight,
-                True,
-                use_simdgroup=True,
-                use_split_k=True,
-            ),
-            args.warmup,
-            args.iterations,
-        )
-        report_split_k(name, simdgroup_us, split_k_us, mlx_us)
+        if args.include_split_k:
+            report_split_k(name, timings["simd"], timings["split-k"], timings["mlx"])
+        else:
+            report(name, timings["simd"], timings["mlx"])
 
 
 def benchmark_model_kernels(
@@ -323,17 +355,25 @@ def benchmark_model_kernels(
         hidden_size, layer.input_layernorm.weight, eps=model.args.rms_norm_eps
     )
     mx.eval(x_norm)
+    timings = benchmark_comparison(
+        [
+            ("readable", lambda: readable_rms(x_norm)),
+            ("optimized", lambda: rms(x_norm)),
+            (
+                "mlx",
+                lambda: mx.fast.rms_norm(
+                    x_norm, layer.input_layernorm.weight, model.args.rms_norm_eps
+                ),
+            ),
+        ],
+        args.warmup,
+        args.iterations,
+    )
     report_progression(
         "RMSNorm",
-        benchmark(lambda: readable_rms(x_norm), args.warmup, args.iterations),
-        benchmark(lambda: rms(x_norm), args.warmup, args.iterations),
-        benchmark(
-            lambda: mx.fast.rms_norm(
-                x_norm, layer.input_layernorm.weight, model.args.rms_norm_eps
-            ),
-            args.warmup,
-            args.iterations,
-        ),
+        timings["readable"],
+        timings["optimized"],
+        timings["mlx"],
     )
 
     x_rope = mx.random.normal((1, 1, num_heads, head_dim)).astype(precision)
@@ -346,40 +386,49 @@ def benchmark_model_kernels(
     x_rope_mlx = x_rope.transpose(0, 2, 1, 3)
     mx.eval(x_rope, x_rope_mlx)
     mx.eval(readable_rope.cos_freqs, readable_rope.sin_freqs)
+    timings = benchmark_comparison(
+        [
+            ("readable", lambda: readable_rope(x_rope, slice(17, 18))),
+            ("optimized", lambda: rope(x_rope, 17)),
+            (
+                "mlx",
+                lambda: mx.fast.rope(
+                    x_rope_mlx,
+                    head_dim,
+                    traditional=False,
+                    base=model.args.rope_theta,
+                    scale=1.0,
+                    offset=17,
+                ).transpose(0, 2, 1, 3),
+            ),
+        ],
+        args.warmup,
+        args.iterations,
+    )
     report_progression(
         "RoPE",
-        benchmark(
-            lambda: readable_rope(x_rope, slice(17, 18)),
-            args.warmup,
-            args.iterations,
-        ),
-        benchmark(lambda: rope(x_rope, 17), args.warmup, args.iterations),
-        benchmark(
-            lambda: mx.fast.rope(
-                x_rope_mlx,
-                head_dim,
-                traditional=False,
-                base=model.args.rope_theta,
-                scale=1.0,
-                offset=17,
-            ).transpose(0, 2, 1, 3),
-            args.warmup,
-            args.iterations,
-        ),
+        timings["readable"],
+        timings["optimized"],
+        timings["mlx"],
     )
 
     gate = mx.random.normal((1, 1, model.args.intermediate_size)).astype(precision)
     up = mx.random.normal(gate.shape).astype(precision)
     mx.eval(gate, up)
+    timings = benchmark_comparison(
+        [
+            ("readable", lambda: ops.silu(gate) * up),
+            ("optimized", lambda: ops.swiglu(gate, up)),
+            ("mlx", lambda: gate * mx.sigmoid(gate) * up),
+        ],
+        args.warmup,
+        args.iterations,
+    )
     report_progression(
         "SwiGLU",
-        benchmark(lambda: ops.silu(gate) * up, args.warmup, args.iterations),
-        benchmark(lambda: ops.swiglu(gate, up), args.warmup, args.iterations),
-        benchmark(
-            lambda: gate * mx.sigmoid(gate) * up,
-            args.warmup,
-            args.iterations,
-        ),
+        timings["readable"],
+        timings["optimized"],
+        timings["mlx"],
     )
 
 
@@ -395,24 +444,38 @@ def benchmark_attention(
     value = mx.random.normal(key.shape).astype(precision)
     scale = head_dim**-0.5
     mx.eval(query, key, value)
-    readable_us = benchmark(
-        lambda: ops.readable_attention(query, key, value, scale, None),
+    timings = benchmark_comparison(
+        [
+            (
+                "readable",
+                lambda: ops.readable_attention(
+                    query.astype(mx.float32),
+                    key.astype(mx.float32),
+                    value.astype(mx.float32),
+                    scale,
+                    None,
+                ).astype(precision),
+            ),
+            (
+                "optimized",
+                lambda: ops.decode_attention(query, key, value, scale, None),
+            ),
+            (
+                "mlx",
+                lambda: mx.fast.scaled_dot_product_attention(
+                    query, key, value, scale=scale, mask=None
+                ),
+            ),
+        ],
         args.warmup,
         args.iterations,
     )
-    optimized_us = benchmark(
-        lambda: ops.decode_attention(query, key, value, scale, None),
-        args.warmup,
-        args.iterations,
+    report_progression(
+        "decode attention",
+        timings["readable"],
+        timings["optimized"],
+        timings["mlx"],
     )
-    mlx_us = benchmark(
-        lambda: mx.fast.scaled_dot_product_attention(
-            query, key, value, scale=scale, mask=None
-        ),
-        args.warmup,
-        args.iterations,
-    )
-    report_progression("decode attention", readable_us, optimized_us, mlx_us)
 
 
 def main() -> None:
@@ -429,7 +492,10 @@ def main() -> None:
         f"MLX={importlib.metadata.version('mlx')} "
         f"mlx-lm={importlib.metadata.version('mlx-lm')}"
     )
-    print("Median synchronized latency; lower is better.")
+    print(
+        "Median synchronized latency with rotated implementation order; "
+        "lower is better."
+    )
     selected = set(args.section or SECTIONS)
     runners = {
         "embedding": benchmark_embedding,

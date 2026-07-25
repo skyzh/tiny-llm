@@ -4,8 +4,6 @@ import mlx.core as mx
 import pytest
 
 from .tiny_llm_base import (
-    QuantizedEmbedding,
-    QuantizedWeights,
     Qwen3ModelWeek2,
     quantized_matmul,
     quantized_matmul_vanilla,
@@ -24,7 +22,7 @@ def test_simd_matmul_checkpoint_is_completed_week2_model():
     model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
     layer = model.layers_inner[0]
 
-    assert model.embedding.use_custom_kernel
+    assert not model.embedding.use_custom_kernel
     assert model.embedding.weight.use_simdgroup_matmul
     assert layer.self_attn.wq.use_simdgroup_matmul
 
@@ -72,22 +70,6 @@ def test_task_2_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
         assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
-def test_task_4_custom_embedding_matches_readable_path():
-    weight = mx.random.normal((17, 256)).astype(mx.bfloat16)
-    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-    quantized = QuantizedWeights(scales, biases, 128, 4, packed)
-    readable = QuantizedEmbedding(17, 256, quantized)
-    custom = QuantizedEmbedding(17, 256, quantized, use_custom_kernel=True)
-    indices = mx.array([[1, 4, 9]], dtype=mx.int32)
-    assert_allclose(
-        custom(indices),
-        readable(indices),
-        mx.bfloat16,
-        atol=2e-2,
-        rtol=2e-2,
-    )
-
-
 @pytest.mark.skipif(
     not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
@@ -110,7 +92,7 @@ def test_utils_qwen3_1_7b():
 def helper_test_task_6(model_name: str, iters: int = 10):
     mlx_model, tokenizer = load(model_name)
     model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
-    assert model.embedding.use_custom_kernel
+    assert not model.embedding.use_custom_kernel
     assert model.embedding.weight.use_simdgroup_matmul
     assert all(layer.self_attn.wq.use_simdgroup_matmul for layer in model.layers_inner)
     for iteration in range(iters):

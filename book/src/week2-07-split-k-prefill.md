@@ -139,16 +139,19 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
 ```
 
 Repeat both comparisons at the 128-token acceptance shape and at a long control
-such as 2,048 tokens. Retain Split-K only below the measured crossover: it must
-improve the under-filled projection, preserve one-token decode, and fall back
-exactly to Day 6 when the ordinary result grid is already occupied. The final
+such as 2,048 tokens. Attach the three end-to-end comparisons and the
+per-projection SIMD/Split-K/MLX table at each crossover candidate. Retain
+Split-K only below the measured crossover: it must improve the under-filled
+projection, preserve one-token decode, and fall back exactly to Day 6 when the
+ordinary result grid is already occupied. A second Xcode trace is optional when
+the measured dispatch and the operator table already agree. The final
 acceptance run must still reach 80% of MLX in both phases.
 
 The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
-records the short-shape gain separately from the neutral acceptance and long
-controls. Week 3 then changes the benchmark itself: request turnover and dense
-KV reconstruction, rather than another static projection, become the measured
-serving bottleneck.
+pairs the short-shape operator gains with the end-to-end result and keeps the
+neutral acceptance and long controls separate. Week 3 then changes the
+benchmark itself: request turnover and dense KV reconstruction, rather than
+another static projection, become the measured serving bottleneck.
 
 The Week 2 loop is now complete:
 

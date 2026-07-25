@@ -116,7 +116,7 @@ SIMD-matrix tiles for FlashAttention; prefill is a different workload where
 both query and context lengths are large.
 
 Set a concrete dispatch guard: use your Metal kernel only when query length is
-at most eight and cached context length is at most 256. Otherwise use the
+at most eight and cached context length is at most 128. Otherwise use the
 readable grouped-attention path. Keep this condition at the model call site so
 the benchmarked operating range remains reviewable instead of becoming a
 hidden performance policy inside the Metal kernel.
@@ -170,17 +170,23 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case decode-attention:decode:128 \
-  --case decode-attention:prefill:128 --warmup 5 --iterations 15
+  --case decode-attention:prefill:128 --warmup 4 --iterations 12
 ```
 
-Reject the custom dispatch if repeated fresh-process model runs do not improve
-over `swiglu`, even when the isolated kernel looks faster. If it wins only over
-a limited context range, encode that measured crossover in the dispatch guard.
+Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
+attach that context sweep beside the `swiglu`/`decode-attention` model rows.
+The intermediate points reveal whether the custom kernel has a useful measured
+crossover rather than assuming that an endpoint applies to every context. Also
+attach the decode and prefill kernel-group results. Reject the custom dispatch
+if repeated fresh-process model runs do not improve, even when the isolated
+kernel looks faster. If the operator wins only over a limited context range,
+encode that measured crossover in the dispatch guard; use an Xcode trace only
+when the operator and model results still disagree.
+
 Once decode reaches 80% of MLX, read the prefill attribution as a new workload.
 Continue to Day 6 only when quantized matrix-shaped projections dominate it.
-
 The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
-records both the retained decode gain and the prefill profile that selects the
-matrix kernel.
+pairs the context microbenchmarks, model delta, and prefill attribution that
+select the matrix kernel.
 
 {{#include copyright.md}}

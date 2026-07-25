@@ -96,16 +96,11 @@ four reduction tiles.
 Keep the scale, bias, and unpacked operands in BF16 storage, while the matrix
 accumulator remains FP32. Cast once when writing the final model output.
 
-## Task 4: Remove Non-Matmul Prefill Waste
+## Task 4: Project Only Required Logits
 
-Two smaller fixes belong in this checkpoint because the prefill profile shows
-them adjacent to the projection work:
-
-- fuse token lookup and W4A16 dequantization in a direct embedding kernel;
-- accept `logits_to_keep=1` and apply the vocabulary projection only to the
-  final prompt row during generation.
-
-The benchmark applies the same last-logit workload to MLX. Prompt-scoring
+Generation needs only the final prompt row to produce the first sampled token.
+Accept `logits_to_keep=1` and apply the vocabulary projection only to that row.
+The benchmark applies the same last-logit workload to MLX, while prompt-scoring
 callers can still request every logit row.
 
 ## Task 5: Verify, Benchmark, and Name the Next Bottleneck
@@ -142,7 +137,7 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case simd-matmul:prefill:128 --case simd-matmul:prefill:32 \
-  --warmup 5 --iterations 15
+  --warmup 4 --iterations 12
 
 CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
@@ -150,14 +145,18 @@ MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --iterations 10 --output /tmp/week2-k-m32-unsplit.gputrace
 ```
 
-Do not select Split-K merely because projections still occupy most of prefill.
-First require the long or wide controls to approach MLX, while the short,
-narrow K/V projection remains disproportionately slow. In the Xcode capture,
-confirm that the unsplit result grid has too few independent threadgroups; if
-the kernel instead shows costly loads or arithmetic inside each tile, repair
-Day 6 before multiplying the grid.
+Attach the complete-model prefill delta, per-projection tables at 32, 128, and
+2,048 rows, the 32/128-row attribution, and the unsplit 32-row Xcode dispatch
+geometry. Do not select Split-K merely because projections still occupy most
+of prefill. First require the long or wide controls to approach MLX, while the
+short, narrow projection remains disproportionately slow.
 
-The [reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
-shows the long-shape control and the short-shape handoff separately.
+In the Xcode capture, confirm that the unsplit result grid has too few
+independent threadgroups; if Pipeline Statistics or the Shader Cost Graph
+instead shows costly work inside each tile, repair Day 6 before multiplying the
+grid. The
+[reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
+pairs the prefill gain with long and short operator controls and the dispatch
+geometry that motivates Split-K.
 
 {{#include copyright.md}}

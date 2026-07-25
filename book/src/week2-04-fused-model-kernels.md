@@ -184,17 +184,22 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case swiglu:decode:128 --case swiglu:decode:512 \
-  --case swiglu:decode:2048 --warmup 5 --iterations 15
+  --case swiglu:decode:2048 --warmup 4 --iterations 12
 ```
 
-Retain RMSNorm, RoPE, and SwiGLU independently only when their operator and
-cumulative model rows agree. After the pointwise cluster shrinks, sweep cached
-context rather than assuming attention is next. Continue to Day 5 when
-attention is the next context-dependent gap and the projection operators are
-already close to their denominator. Day 5 must still prove that its replacement
-moves the complete model; a growing share alone is not acceptance.
+Attach each cumulative model row, the three readable/optimized/MLX operator
+rows, and the post-SwiGLU kernel-group profile. Retain RMSNorm, RoPE, and SwiGLU
+independently only when their operator and cumulative model results agree. A
+trace is optional here: use it only when one fused operator regresses or its
+microbenchmark and model delta disagree.
 
-The [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
-shows the pointwise cluster shrinking before attention is introduced.
+After the pointwise cluster shrinks, sweep cached context rather than assuming
+attention is next. Continue to Day 5 when attention is the next
+context-dependent gap and the projection operators are already close to their
+denominator. Day 5 must still prove that its replacement moves the complete
+model; a growing share alone is not acceptance. The
+[reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
+pairs the cumulative gains with all three operator microbenchmarks and the
+updated attribution.
 
 {{#include copyright.md}}

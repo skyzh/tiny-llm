@@ -634,18 +634,23 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --section decode-projections --context 128
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case quantized-matvec:decode:128 --warmup 5 --iterations 15
+  --case quantized-matvec:decode:128 --warmup 4 --iterations 12
 ```
 
-First require a clear complete-model decode gain over `kv-cache`. Then compare
-each projection with MLX at the identical shape. Projections may remain the
-largest absolute category because the model inherently performs them in every
-layer; once their operator latency is close to MLX, that bar is no longer the
-largest removable gap. Continue to Day 4 when normalization, position, and
-activation work now account for that gap. If the projection comparison is
-still far behind, keep tuning the matvec instead.
+Attach the complete-model before/after rows, the per-projection latency table,
+and the new kernel-group profile. First require a clear decode gain over
+`kv-cache`. Then compare each projection with MLX at the identical shape.
+Projections may remain the largest absolute category because the model performs
+them in every layer; once their operator latency is close to MLX, that bar is
+no longer the largest removable gap.
 
-The [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
-records the corresponding handoff and the temporary prefill regression.
+Capture the matvec in Xcode only if the operator table still leaves a material
+gap or you are doing the optional kernel-tuning exercise. Continue to Day 4
+when normalization, position, and activation account for the largest removable
+gap. If the projection comparison is still far behind, keep tuning the matvec
+instead. The
+[reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
+pairs the model delta, projection microbenchmarks, attribution, and the
+source-enabled matvec trace.
 
 {{#include copyright.md}}

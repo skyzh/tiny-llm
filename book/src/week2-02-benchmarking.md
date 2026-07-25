@@ -125,9 +125,11 @@ pdm run bench-week2-operators --solution tiny_llm \
   --model qwen3-4b --context 128 --section decode-projections
 ```
 
-Choose enough warmup iterations to exclude compilation, synchronize every
-timed iteration, and repeat the run in fresh processes. Report the median with
-the exact hardware, dependency versions, model, and tensor shapes. The
+The runner rotates through every implementation order so thermal or GPU
+performance-state drift does not consistently favor one path. Choose enough
+warmup iterations to exclude compilation, synchronize every timed iteration,
+and repeat the run in fresh processes. Report the median with the exact
+hardware, dependency versions, model, and tensor shapes. The
 [performance appendix](./appendix-performance.md) applies this protocol to the
 reference-solution checkpoints and keeps the resulting machine-specific numbers
 in one place.
@@ -137,7 +139,7 @@ kernel groups at Qwen3-4B shapes and dispatch counts:
 
 ```bash
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --warmup 5 --iterations 15 \
+  --warmup 4 --iterations 12 \
   --json-output week2-kernel-profile.json
 ```
 
@@ -145,8 +147,8 @@ The projection group preserves the transformer dependency order, including the
 attention projections before the output projection and the MLP after the
 attention residual. This matters for occupancy: making every layer independent
 would let unrelated work hide an under-filled kernel and produce a false
-Split-K conclusion. The runner synchronizes once per group and normalizes the
-group medians into an attribution profile.
+Split-K conclusion. Each measured round rotates the group order, synchronizes
+once per group, and normalizes the group medians into an attribution profile.
 
 The resulting shares are not a throughput benchmark. Group boundaries force
 materialization that a complete lazy graph may fuse, while a capture adds its
@@ -384,19 +386,23 @@ Profile only the checkpoint you have completed:
 
 ```bash
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case kv-cache:decode:128 --warmup 5 --iterations 15 \
+  --case kv-cache:decode:128 --warmup 4 --iterations 12 \
   --json-output day2-profile.json
 ```
 
-Read the fresh-process benchmark and attribution together. The benchmark says
-how far decode is from MLX; the profile says which operator family owns the
-current implementation's time. Continue to Day 3 when projection work is the
-largest removable cost and its dense weight traffic scales with the roofline
-calculation. If another family dominates your profile, inspect that family
-before copying the reference solution's next step.
+Attach two results to the checkpoint report: the fresh-process JSON with your
+solution and MLX, and the kernel-group JSON with absolute times as well as
+shares. The first says how far decode is from MLX; the second says which
+operator family owns the current implementation's time. A GPU trace is not
+required to choose the family. Attach one only after the selected work reaches
+a course-owned shader and the trace passes the replay checks above.
 
-The [reference checkpoint](./appendix-performance.md#day-2-measure-before-optimizing)
-shows the same decision for the checked-in solution while keeping its
+Continue to Day 3 when projection work is the largest removable cost and its
+dense weight traffic scales with the roofline calculation. If another family
+dominates your profile, inspect that family before copying the reference
+solution's next step. The
+[reference checkpoint](./appendix-performance.md#day-2-measure-before-optimizing)
+pairs its end-to-end result with the synchronized attribution while keeping
 machine-specific values out of this chapter.
 
 {{#include copyright.md}}

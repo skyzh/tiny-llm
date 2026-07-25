@@ -117,8 +117,8 @@ def parse_args() -> argparse.Namespace:
             "(default: the Week 2 bottleneck progression)"
         ),
     )
-    parser.add_argument("--warmup", type=int, default=2)
-    parser.add_argument("--iterations", type=int, default=5)
+    parser.add_argument("--warmup", type=int, default=4)
+    parser.add_argument("--iterations", type=int, default=12)
     parser.add_argument("--json-output", type=Path)
     args = parser.parse_args()
     if args.warmup < 0 or args.iterations <= 0:
@@ -132,17 +132,24 @@ def evaluate(outputs: list[mx.array]) -> None:
     mx.eval(*outputs)
 
 
-def benchmark_group(
-    build: Callable[[], list[mx.array]], warmup: int, iterations: int
-) -> float:
-    for _ in range(warmup):
-        evaluate(build())
-    timings = []
-    for _ in range(iterations):
-        start = perf_counter()
-        evaluate(build())
-        timings.append(perf_counter() - start)
-    return median(timings) * 1_000_000
+def benchmark_groups(
+    builders: tuple[tuple[str, Callable[[], list[mx.array]]], ...],
+    warmup: int,
+    iterations: int,
+) -> dict[str, float]:
+    orders = [builders[offset:] + builders[:offset] for offset in range(len(builders))]
+    for round_index in range(warmup):
+        for _, build in orders[round_index % len(orders)]:
+            evaluate(build())
+
+    timings = {name: [] for name, _ in builders}
+    for round_index in range(iterations):
+        order = orders[(warmup + round_index) % len(orders)]
+        for name, build in order:
+            start = perf_counter()
+            evaluate(build())
+            timings[name].append(perf_counter() - start)
+    return {name: median(samples) * 1_000_000 for name, samples in timings.items()}
 
 
 def project(implementation: KernelImplementation, x: mx.array, weight: Any) -> mx.array:
@@ -243,7 +250,7 @@ class KernelReplay:
             if (
                 attention.use_decode_attention
                 and self.rows <= 8
-                and self.context <= 256
+                and self.context <= 128
             ):
                 output = self.implementation.decode_attention(
                     self.query,
@@ -324,10 +331,8 @@ def profile_case(
     )
     if case.phase == "decode":
         builders += (("KV growth", replay.cache),)
-    measured = []
-    for name, build in builders:
-        value = benchmark_group(build, warmup, iterations)
-        measured.append((name, value))
+    timings = benchmark_groups(builders, warmup, iterations)
+    measured = [(name, timings[name]) for name, _ in builders]
     total = sum(value for _, value in measured)
     categories = [
         CategoryResult(name, value, value / total) for name, value in measured
