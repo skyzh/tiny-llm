@@ -226,11 +226,9 @@ decode:  _step(model, [8], 7)  # returns 9
 ...
 ```
 
-You can test your implementation with:
+You can test your solution with:
 
 ```bash
-pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-0.6b
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint kv-cache --model qwen3-4b
 ```
@@ -239,7 +237,7 @@ You can also run the same loop with the reference solution:
 
 ```bash
 pdm run main --solution tiny_llm_ref --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-0.6b
+  --week2-checkpoint kv-cache --model qwen3-4b
 ```
 
 ## Integrate and Measure
@@ -248,7 +246,7 @@ Run the cached readable checkpoint end to end before changing any operator:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-0.6b \
+  --week2-checkpoint kv-cache --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```

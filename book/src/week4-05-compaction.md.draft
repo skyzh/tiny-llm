@@ -4,6 +4,20 @@ An append-only session grows forever, but a model has a finite context window.
 Today you will build a context policy that keeps the working set small without
 discarding the complete session trace.
 
+## Set the Token Budget
+
+Use 32,768 total tokens for the course Qwen3-4B model. Start compaction before
+the rendered input exceeds 24,576 tokens, leaving 8,192 tokens for the next
+model response and a large tool result. The
+[performance appendix](./appendix-performance.md#long-context-budget-for-week-4)
+derives this limit from the model's training range, checkpoint configuration,
+KV-cache size, and the measured M4 Pro working set.
+
+Count the tokenized system instructions, tool schemas, messages, and tool
+results. Characters are not a stable token estimate, and counting only chat
+messages omits context that the model still receives. If one tool result cannot
+fit inside the reserve, bound that result before asking the model to compact.
+
 ## Measure Before Compacting
 
 Record for every model turn:
@@ -59,8 +73,7 @@ behavior with and without compaction.
 
 A simple policy is sufficient:
 
-1. estimate tokens for the system instructions, tool schemas, and selected
-   events;
+1. count tokens for the system instructions, tool schemas, and selected events;
 2. reserve space for the next model response and one large tool result;
 3. when the remaining budget is too small, select an old event prefix;
 4. ask the model for the structured summary using a dedicated prompt;

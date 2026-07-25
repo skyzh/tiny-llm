@@ -7,10 +7,10 @@ asks the target model to verify them in one call. Accepted draft tokens reduce
 the number of target-model decode steps without changing the target
 distribution.
 
-This course checkpoint implements **greedy** speculative decoding: draft tokens
-are accepted while they match the target model's greedy tokens. Extending the
-same loop to sampling requires the probability-correct acceptance and residual
-sampling rules; simple token equality is not enough.
+This checkpoint in your solution implements **greedy** speculative decoding:
+draft tokens are accepted while they match the target model's greedy tokens.
+Extending the same loop to sampling requires the probability-correct acceptance
+and residual sampling rules; simple token equality is not enough.
 
 ## Objectives
 
@@ -25,9 +25,15 @@ By the end of this chapter, you should be able to:
 ## Prerequisites
 
 - Complete Week 2 cached generation for both the draft and target models.
-- Complete Week 3 paged-cache lifecycle support before using the Week 3 loader.
+- Complete the Week 3 paged cache and page-aware attention path.
 - Use compatible tokenizers for the two models. A shared token id must represent
   the same text in both vocabularies.
+
+This extension comes after paged attention for two concrete reasons. Rejected
+draft tokens must release pages and repair the valid tail length, and verifying
+several proposed tokens at once is a long-query attention call over the paged
+prefix. The paged-cache lifecycle and page-aware long-query operator therefore
+form the stable interface on which speculative decoding is built.
 
 ## Task 1: Make Cache Rewind a Contract
 

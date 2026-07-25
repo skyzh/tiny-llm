@@ -1,0 +1,114 @@
+{
+  "host": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.12.13",
+    "mlx_version": "0.32.0",
+    "hardware": {
+      "machine_name": "Mac mini",
+      "machine_model": "Mac16,11",
+      "chip_type": "Apple M4 Pro",
+      "cpu_cores": "proc 14:10:4:0",
+      "gpu_model": "Apple M4 Pro",
+      "gpu_cores": "20",
+      "physical_memory": "64 GB"
+    }
+  },
+  "configuration": {
+    "model": "qwen3-4b",
+    "solution": "ref",
+    "suite": "week2",
+    "device": "gpu",
+    "input_len": 32,
+    "output_len": 33,
+    "warmup": 2,
+    "repeats": 3,
+    "seed": 0,
+    "prefill_logits": "last",
+    "offline": true,
+    "cooldown_seconds": 0.0,
+    "variants": [
+      "week2-simd-matmul",
+      "week2-split-k",
+      "mlx"
+    ]
+  },
+  "results": {
+    "week2-simd-matmul": {
+      "label": "2.6 SIMD matrix prefill",
+      "samples": [
+        {
+          "prefill": 587.67,
+          "decode": 77.68,
+          "output": 70.7
+        },
+        {
+          "prefill": 586.12,
+          "decode": 78.21,
+          "output": 71.1
+        },
+        {
+          "prefill": 584.59,
+          "decode": 78.03,
+          "output": 70.93
+        }
+      ],
+      "median": {
+        "prefill": 586.12,
+        "decode": 78.03,
+        "output": 70.93
+      }
+    },
+    "week2-split-k": {
+      "label": "2.7 Split-K prefill",
+      "samples": [
+        {
+          "prefill": 644.86,
+          "decode": 77.66,
+          "output": 71.42
+        },
+        {
+          "prefill": 653.03,
+          "decode": 78.15,
+          "output": 71.92
+        },
+        {
+          "prefill": 650.69,
+          "decode": 77.89,
+          "output": 71.68
+        }
+      ],
+      "median": {
+        "prefill": 650.69,
+        "decode": 77.89,
+        "output": 71.68
+      }
+    },
+    "mlx": {
+      "label": "MLX",
+      "samples": [
+        {
+          "prefill": 702.63,
+          "decode": 84.94,
+          "output": 78.08
+        },
+        {
+          "prefill": 708.68,
+          "decode": 84.69,
+          "output": 77.95
+        },
+        {
+          "prefill": 703.58,
+          "decode": 84.42,
+          "output": 77.65
+        }
+      ],
+      "median": {
+        "prefill": 703.58,
+        "decode": 84.69,
+        "output": 77.95
+      }
+    }
+  }
+}

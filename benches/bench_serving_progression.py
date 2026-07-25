@@ -17,12 +17,14 @@ class ServingVariant:
     key: str
     label: str
     loader: str
+    extra_args: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class ServingResult:
     output_tokens_per_second: float
     total_tokens_per_second: float
+    prefill_tokens_per_second: float
     decode_tokens_per_second: float
     requests_per_second: float
     peak_kv_bytes: float
@@ -39,8 +41,14 @@ class ServingResult:
 
 
 VARIANTS = (
-    ServingVariant("dense", "Week 2 dense KV", "week2"),
-    ServingVariant("paged", "Week 3 paged KV", "week3"),
+    ServingVariant("dense", "Dense KV reconstruction", "week2"),
+    ServingVariant(
+        "paged-gather",
+        "Paged KV + dense gather",
+        "week3",
+        ("--disable-paged-attention",),
+    ),
+    ServingVariant("paged", "Direct paged attention", "week3"),
 )
 VARIANTS_BY_KEY = {variant.key: variant for variant in VARIANTS}
 
@@ -68,7 +76,7 @@ def parse_args() -> argparse.Namespace:
         "--variant",
         action="append",
         choices=tuple(VARIANTS_BY_KEY),
-        help="run only this storage path; repeat to select both",
+        help="run only this serving checkpoint; repeat to select several",
     )
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--cooldown-seconds", type=float, default=0.0)
@@ -126,6 +134,7 @@ def run_variant(
         str(args.seed),
         "--json-output",
         str(result_path),
+        *variant.extra_args,
     ]
     environment = os.environ.copy()
     source_path = str(root / "src")
@@ -167,27 +176,42 @@ def format_mib(value: float) -> str:
     return f"{value / (1024 * 1024):.1f}"
 
 
+def avoidable_copy_bytes(result: ServingResult) -> float:
+    return (
+        result.paged_growth_copy_bytes
+        + result.dense_growth_copy_bytes
+        + result.dense_staging_copy_bytes
+    )
+
+
 def print_table(
     variants: list[ServingVariant], medians: dict[str, ServingResult]
 ) -> None:
     print()
     print(
-        "| Storage path | Output tok/s | Decode tok/s | Requests/s | "
+        "| Storage path | Prefill tok/s | Output tok/s | Decode tok/s | Requests/s | "
         "Peak KV MiB | Avoidable KV copy MiB |"
     )
-    print("|---|---:|---:|---:|---:|---:|")
+    print("|---|---:|---:|---:|---:|---:|---:|")
     for variant in variants:
         result = medians[variant.key]
-        copied_bytes = (
-            result.dense_growth_copy_bytes + result.dense_staging_copy_bytes
-            if variant.key == "dense"
-            else result.paged_growth_copy_bytes
+        peak_kv = (
+            "n/a*"
+            if variant.key == "paged-gather"
+            else format_mib(result.peak_kv_bytes)
         )
         print(
-            f"| {variant.label} | {result.output_tokens_per_second:.2f} | "
+            f"| {variant.label} | {result.prefill_tokens_per_second:.2f} | "
+            f"{result.output_tokens_per_second:.2f} | "
             f"{result.decode_tokens_per_second:.2f} | "
             f"{result.requests_per_second:.2f} | "
-            f"{format_mib(result.peak_kv_bytes)} | {format_mib(copied_bytes)} |"
+            f"{peak_kv} | {format_mib(avoidable_copy_bytes(result))} |"
+        )
+    if any(variant.key == "paged-gather" for variant in variants):
+        print()
+        print(
+            "* The compatibility path overlaps paged storage with dense staging; "
+            "its current peak counter is a lower bound."
         )
     paged = medians.get("paged")
     if paged:

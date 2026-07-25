@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 4: Decode Attention
+# 🚧 Week 2 Day 4: Fused Decode Attention
 
 > 🚧 This chapter is under review and may change.
 
@@ -11,9 +11,10 @@ softmax, and another matrix multiplication. That is readable, but it
 materializes the complete score and probability rows.
 
 First write a readable composition to preserve the equation, then replace its
-matmuls and softmax with a course-owned online-softmax Metal kernel. Measure the
-complete model before deciding whether to retain the dispatch. The kernel does
-not call `mx.matmul` or an MLX-provided scaled-dot-product-attention
+matmuls and softmax with an online-softmax Metal kernel in your solution.
+Measure the complete model before deciding whether to retain the dispatch. The
+kernel does not call `mx.matmul` or an MLX-provided
+scaled-dot-product-attention
 implementation; MLX still provides arrays, streams, buffers, and extension
 dispatch.
 
@@ -73,10 +74,10 @@ accumulator = accumulator * old_factor + score_factor * value
 After its last cached position, each group writes its partial maximum,
 denominator, and value accumulator to threadgroup memory. The first SIMD group
 computes the common maximum and rescale factors. One thread computes the final
-denominator, then the first `D` threads combine one output dimension each. This
-parallel final reduction was faster than making the first 32 lanes each reduce
-four dimensions. Subtracting the maxima gives stable softmax without storing
-all `S` scores or probabilities.
+denominator, then the first `D` threads each combine one output dimension. This
+keeps the final value reduction parallel across the head dimension.
+Subtracting the maxima gives stable softmax without storing all `S` scores or
+probabilities.
 
 This removes two large intermediates and several dispatch boundaries from the
 Week 1 graph. It is especially relevant as context grows: the avoided score and
@@ -91,17 +92,17 @@ conversion in registers avoids that cost.
 Use `fast::exp` for the rescale factors and compute each
 factor once before applying it to the denominator and all value dimensions.
 These ideas also appear in production vector-attention kernels, including MLX's
-SDPA sources. The course kernel reimplements the algorithm and scheduling in
+SDPA sources. Your kernel reimplements the algorithm and scheduling in
 its own Metal code; it does not include or instantiate the MLX kernel.
 
 ### Scheduling Experiment
 
-Compare eight, sixteen, and thirty-two SIMD groups while holding the model and
-context fixed. The number of groups is a workload parameter, not a universal
-constant: more groups expose parallel score work but consume more threads and
-threadgroup memory. On the reference M1 Pro run, the three schedules reached
-about 215, 232, and 238-239 decode tok/s respectively. Record your own result
-and repeat the experiment when context length or head dimension changes.
+Compare eight, sixteen, and thirty-two SIMD groups with Qwen3-4B while holding
+the context fixed. The number of groups is a workload parameter, not a
+universal constant: more groups expose parallel score work but consume more
+threads and threadgroup memory. Record the synchronized operator and
+complete-model result for each schedule, then repeat the experiment when
+context length changes.
 
 ## Task 3: Integrate and Measure
 
@@ -113,7 +114,7 @@ tests and ablations. Week 3 later combines this recurrence with paged K/V and
 SIMD-matrix tiles for FlashAttention; prefill is a different workload where
 both query and context lengths are large.
 
-Set a concrete dispatch guard: use the course kernel only when query length is
+Set a concrete dispatch guard: use your Metal kernel only when query length is
 at most eight and cached context length is at most 256. Otherwise use the
 readable grouped-attention path. Keep this condition at the model call site so
 the benchmarked operating range remains reviewable instead of becoming a
@@ -133,26 +134,25 @@ Test grouped-query head mapping, output shape, causal behavior, and explicit
 masks against the readable Week 1 implementation. Use a tolerance because the
 online softmax changes the floating-point reduction order.
 
-Run the preceding checkpoint and the model with the new dispatch under
+Run the preceding checkpoint and your solution with the new dispatch under
 otherwise identical settings:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
+  --week2-checkpoint quantized-matvec --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint decode-attention --model qwen3-0.6b \
+  --week2-checkpoint decode-attention --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```
 
-The model dispatches short-query contexts through the course kernel and falls
-back to the exact readable Week 1 composition outside the measured range. This
-is the same evidence-driven decision used for tile sizes, barriers, and
-threadgroup layouts elsewhere in the course. Reprofile the retained path. Once
-the projection and attention costs shrink, the repeated pointwise and reduction
-dispatch cluster becomes visible; that measured cluster is Day 5's input.
+Your solution dispatches short-query contexts through your Metal kernel and
+falls back to the exact readable Week 1 composition outside the validated
+range. Reprofile the retained path. If repeated pointwise and reduction
+dispatches become the largest remaining cluster, continue to Day 5; otherwise
+keep tuning the dominant measured cost.
 
 {{#include copyright.md}}

@@ -4,9 +4,9 @@
 
 Day 2's decode profile should show the same scaling before you start this
 chapter: linear projections repeatedly read far more weight data than one-token
-activations. We therefore study and implement quantized matrix multiplication.
-Quantizing weights from 16-bit floating point to 4-bit integers reduces both
-model size and the memory traffic required for each generated token.
+activations. Begin with the dense 16-bit representation and its bandwidth
+ceiling. Then introduce a smaller weight representation and implement the
+matrix-vector kernel that operates on it directly.
 
 **📚 Readings**
 
@@ -14,65 +14,91 @@ model size and the memory traffic required for each generated token.
 - [MLX Extensions Development Guide](https://ml-explore.github.io/mlx/build/html/dev/extensions.html)
 - [Quantized Matmul on GPU (Video)](https://www.youtube.com/watch?v=jYCxVirq4d0)
 
-## Why Quantization?
+## Start With Dense 16-Bit Weights
 
 The decode phase of LLM inference is typically **memory-bandwidth bound**: each
 token requires reading the model's weights but performs relatively little work
-with them. The following rough calculation illustrates this for Qwen3-0.6B:
+with them. Use the dimensions in the official
+[Qwen3-4B configuration](https://huggingface.co/Qwen/Qwen3-4B/blob/main/config.json)
+to calculate the ideal bound:
 
 ```plain
-Per-token linear layers in decode phase:
-- Input: 1 token × 1024 dimensions = 1024 bfloat16 values = 2 KB
-- MLP weights: 1024 × 3072 × 3 matrices × 2 bytes = ~19 MB per layer
-- Attention weights:
-  - q_proj / o_proj: 1024 × 2048 × 2 matrices × 2 bytes = ~8 MB per layer
-  - k_proj / v_proj: 1024 × 1024 × 2 matrices × 2 bytes = ~4 MB per layer
-- Total weights per layer: ~31 MB
-- Total for 28 layers: ~880 MB
+Qwen3-4B dimensions:
+  hidden size        h = 2,560
+  MLP size           i = 9,728
+  query width        q = 4,096
+  key/value width   kv = 1,024
+  layers             L = 36
+  vocabulary         V = 151,936
 
-FLOPs (2 per multiply-accumulate):
-- MLP per layer: 2 × 3 × 1024 × 3072 ≈ 19M
-- Attention projections per layer: 2 × (1024 × 2048 × 2 + 1024 × 1024 × 2) ≈ 13M
-- 28 layers: ~880 million per token
+Projection weights per layer:
+  Q and O: 2 × h × q       =  20,971,520
+  K and V: 2 × h × kv      =   5,242,880
+  MLP:     3 × h × i       =  74,711,040
+  total per layer          = 100,925,440
 
-Memory access: ~880 MB
-Arithmetic intensity: 880M FLOPs / 880 MB ≈ 1.0 FLOPs/Byte
+All transformer layers: L × 100,925,440 = 3,633,315,840
+Tied vocabulary head:    V × h           =   388,956,160
+Total streamed weights:                    4,022,272,000
+
+FLOPs per token: 2 × 4,022,272,000 = 8.045 GFLOPs
 ```
 
-With M3 Max's 400 GB/s memory bandwidth and ~10 TFLOPS compute:
+The tied embedding matrix is counted once as the vocabulary projection. The
+single-row embedding lookup, normalization weights, activations, KV reads, and
+attention work are omitted. This makes the result an upper bound for linear
+layers, not a prediction of complete-model throughput. A dense FP16 or BF16
+weight occupies two bytes:
 
 ```plain
-Memory-bound throughput: 400 GB/s × 1.0 FLOPs/Byte = 400 GFLOPS
-Compute-bound throughput: 10 TFLOPS
+4,022,272,000 weights × 2 bytes = 8.045 GB per token
+arithmetic intensity = 8.045 GFLOPs / 8.045 GB = 1.0 FLOP/byte
 ```
 
-This workload can use only about 4% of the available compute before exhausting
-memory bandwidth.
+FP16 and BF16 divide their 16 bits differently: FP16 gives more bits to the
+significand, while BF16 gives more bits to the exponent. That affects numerical
+range and precision, but not this bandwidth calculation. The course uses BF16
+for activations and outputs.
 
-### The Solution: Quantization
+| Dense weight format | Bits per weight | Bytes per weight | Streamed weight bytes per token | Weight arithmetic intensity |
+|---|---:|---:|---:|---:|
+| FP16 | 16 | 2 | 8.045 GB | 1.0 FLOP/byte |
+| BF16 | 16 | 2 | 8.045 GB | 1.0 FLOP/byte |
 
-Compressing BF16 weights to
-4-bit integers (int4) can:
+This is the baseline to improve: both dense formats must stream roughly 8 GB of
+projection weights to generate one token.
 
-- **Reduce memory traffic by 4×**: 880 MB → ~220 MB per token
-- **Improve arithmetic intensity by 4×**: 1.0 → ~4.0 FLOPs/Byte
-- **Increase throughput by ~4×**: 400 GFLOPS → ~1.6 TFLOPS
+## Represent Weights With Fewer Bits
 
-The tradeoff is a small loss in model accuracy when the weights are quantized
-carefully.
+**Quantization** represents floating-point weights with values from a small
+integer codebook plus the parameters needed to approximately reconstruct the
+original values. This course uses **weight-only 4-bit quantization**:
 
-### Group-wise Quantization
+- **W4** means that each logical weight is represented by a 4-bit code.
+- **A16** means that activations and outputs remain 16-bit floating point.
+- The resulting path is called **W4A16**. This course uses BF16 for its
+  activations, scales, biases, and outputs.
+
+With only 16 possible codes, the reconstructed weights approximate the original
+values. The smaller representation trades some numerical precision for less
+memory traffic.
+
+The kernel does not materialize a dense BF16 weight matrix. It unpacks each
+4-bit code, reconstructs the weight in registers, and immediately multiplies
+it by the corresponding BF16 activation.
+
+### Group-Wise Affine Quantization
 
 Instead of applying one scale to an entire weight matrix, we divide each row
 into **groups** and quantize every group independently. Local scales and biases
 preserve more information about each group's weight distribution.
 
 For a weight matrix $W$ of shape $(K, N)$, divide each row into groups of size
-$G$. The Qwen3 MLX 4-bit checkpoints used in this course have a fixed group size
-of 128:
+$G$. The Qwen3-4B MLX 4-bit checkpoint used in this course has a fixed group
+size of 128:
 
 ```plain
-Original weight matrix W: K × N (bfloat16)
+Logical weight matrix W: K × N
 
 Group size: G = 128
 Number of groups per row = N / G
@@ -80,39 +106,36 @@ Number of groups per row = N / G
 For each group of G consecutive values in a row:
   1. Find min and max values
   2. Compute scale and bias to map [min, max] → [0, 15] (4-bit range)
-  3. Quantize each value using: quantized = round((value - bias) / scale)
+  3. Quantize each value to an integer code from 0 through 15
 ```
 
-All required quantized-matmul tests use `group_size = 128` and BF16 scales,
-biases, activations, and outputs. Normalize those tensors to BF16 when loading
-the course model so every later kernel receives one model dtype.
+### Map a Group Into 16 Codes
 
-### Affine Quantization
-
-We use **affine (asymmetric) quantization**, which maps a floating-point range
-onto the full integer range:
+Affine quantization maps the minimum and maximum weight in each group onto the
+lowest and highest 4-bit codes. For a weight $w$, compute its code $q$ and its
+reconstructed value $\hat{w}$ as:
 
 $$
-\text{quantized} = \text{round}\left(\frac{\text{value} - \text{bias}}{\text{scale}}\right)
+q = \operatorname{clamp}\left(\operatorname{round}\left(\frac{w - b}{s}\right), 0, 15\right)
 $$
 
 $$
-\text{dequantized} = \text{quantized} \times \text{scale} + \text{bias}
+\hat{w} = q s + b
 $$
 
-For 4-bit quantization, the quantized values are in the range $[0, 15]$.
-
-Given a group with minimum value $v_{min}$ and maximum value $v_{max}$:
-
-$$
-\text{scale} = \frac{v_{max} - v_{min}}{2^{\text{bits}} - 1} = \frac{v_{max} - v_{min}}{15}
-$$
+Here $s$ is the scale and $b$ is the bias. Given a group with minimum value
+$v_{\min}$ and maximum value $v_{\max}$:
 
 $$
-\text{bias} = v_{min}
+s = \frac{v_{\max} - v_{\min}}{2^4 - 1}
+  = \frac{v_{\max} - v_{\min}}{15}
 $$
 
-**Example:**
+$$
+b = v_{\min}
+$$
+
+For example, consider a shortened group with five values:
 
 ```plain
 Group values: [-0.5, -0.3, 0.1, 0.4, 0.8]
@@ -131,18 +154,22 @@ Quantization:
 Quantized: [0, 2, 7, 10, 15] (4 bits each)
 ```
 
-### Storage Format
+All required quantized-matmul tests use `group_size = 128` and BF16 scales,
+biases, activations, and outputs. Normalize those tensors to BF16 in your
+solution's model loader so every later kernel receives one model dtype.
 
-The quantized values are packed for compact storage and efficient access:
+### Packed Storage Layout
+
+The 4-bit codes are packed for compact storage and efficient access:
 
 ```plain
-Original: K × N bfloat16 (2 bytes each) = 2KN bytes
-Quantized: K × N int4 (0.5 bytes each) = 0.5KN bytes
+Logical weight matrix: K × N
+Dense BF16 storage: K × N bfloat16 (2 bytes each) = 2KN bytes
+W4 code storage: K × N int4 (0.5 bytes each) = 0.5KN bytes
 
 Packing: 8 × 4-bit values fit in one uint32 (32 bits)
 
-Weight matrix shape: K × N
-Quantized storage shape: K × (N / 8) uint32
+Packed codes shape: K × (N / 8) uint32
 Scales shape: K × (N / G) bfloat16
 Biases shape: K × (N / G) bfloat16
 ```
@@ -160,6 +187,79 @@ Unpacking:
   ...
   h = (uint32_value >> 28) & 0xF
 ```
+
+## Revisit the Decode Roofline
+
+The packed codes are not the entire W4 representation. Each group of 128
+weights also stores one BF16 scale and one BF16 bias:
+
+```plain
+bytes per W4 weight = 0.5 + (2 + 2) / 128 = 0.53125 bytes
+streamed W4 bytes   = 4,022,272,000 × 0.53125 = 2.137 GB per token
+arithmetic intensity = 8.045 GFLOPs / 2.137 GB = 3.765 FLOPs/byte
+```
+
+Now W4 can be added to the dense comparison:
+
+| Weight format | Value bits | Metadata per 128 weights | Effective bytes per weight | Streamed weight bytes per token | Weight arithmetic intensity |
+|---|---:|---|---:|---:|---:|
+| FP16 | 16 | None | 2 | 8.045 GB | 1.0 FLOP/byte |
+| BF16 | 16 | None | 2 | 8.045 GB | 1.0 FLOP/byte |
+| W4 | 4 | One BF16 scale and one BF16 bias | 0.53125 | 2.137 GB | 3.765 FLOPs/byte |
+
+The smaller representation reduces the projection weight traffic by 3.765×.
+That ratio is a bandwidth ceiling for one-token decode, not a promise of the
+same end-to-end speedup.
+
+### Theoretical Decode Roofline Across Apple Silicon
+
+Apple publishes unified-memory bandwidth but not a directly comparable BF16
+GPU TFLOPS figure. A bandwidth roofline can therefore be calculated without
+assuming a compute ceiling:
+
+```plain
+ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
+```
+
+The table uses the highest-bandwidth configuration of each named chip. GB is
+decimal, matching Apple's specifications. These are theoretical ceilings, not
+benchmark results.
+
+| Chip | Bandwidth | FP16/BF16 roofline | W4 roofline |
+|---|---:|---:|---:|
+| M1 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s |
+| M1 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
+| M1 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s |
+| M2 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s |
+| M2 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
+| M2 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s |
+| M3 Pro | 150 GB/s | 18.6 tok/s | 70.2 tok/s |
+| M3 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
+| M3 Ultra | 819 GB/s | 101.8 tok/s | 383.3 tok/s |
+| M4 Pro | 273 GB/s | 33.9 tok/s | 127.8 tok/s |
+| M4 Max | 546 GB/s | 67.9 tok/s | 255.5 tok/s |
+
+The advertised bandwidths come from Apple's specifications for
+[M1 Pro and Max](https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/),
+[M1 Ultra](https://www.apple.com/newsroom/2022/03/apple-unveils-m1-ultra-the-worlds-most-powerful-chip-for-a-personal-computer/),
+[M2 Pro and Max](https://www.apple.com/newsroom/2023/01/apple-unveils-m2-pro-and-m2-max-next-generation-chips-for-next-level-workflows/),
+[M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
+[M3 Pro and Max](https://support.apple.com/en-us/117736),
+[M3 Ultra](https://www.apple.com/mac-studio/), and
+[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's current Mac
+Studio pairs M4 Max with M3 Ultra, so there is no M4 Ultra row.
+
+These values assume peak advertised bandwidth, one read of every projection
+weight, and no other traffic or work. Actual throughput is lower because the
+complete model also reads activations and KV, launches other operators, and
+does not sustain peak bandwidth continuously. The
+[performance appendix](./appendix-performance.md) records measured results
+separately from this theoretical exercise.
+
+This roofline describes one-token decode, where `M = 1` and each streamed
+weight serves one activation row. Prefill reuses each weight tile across many
+rows, increasing arithmetic intensity. It therefore needs a matrix schedule;
+the decode bandwidth ratio should not be treated as a prefill prediction.
 
 ## Quantized Matrix Multiplication
 
@@ -273,11 +373,14 @@ wrapper with two call patterns:
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
+Day 6 briefly revisits row lookup as an optional one-dispatch fusion; keep the
+Day 3 implementation readable.
+
 ## Task 2: Register a GPU-Only Primitive
 
 Register quantized matrix multiplication as an MLX C++ extension. Follow the
 existing `axpby` example for array validation, lazy primitive construction,
-bindings, and Metal dispatch. The course implementation is GPU-only; its
+bindings, and Metal dispatch. Your solution is GPU-only; its
 `eval_cpu` method should raise a clear unsupported-device error.
 
 ```
@@ -316,8 +419,9 @@ src/extensions/src/quantized_matmul.cpp
 ```
 
 Write the Metal kernels and connect `eval_gpu` to them. The Python
-`quantized_matmul` wrapper always dispatches this course-owned primitive on
-GPU; the required path never routes through `mx.quantized_matmul`.
+`quantized_matmul` wrapper always dispatches the primitive you implement on
+GPU; the required path in your solution never routes through
+`mx.quantized_matmul`.
 
 Do this in two measured stages. They expose the same math but schedule
 different shapes differently:
@@ -327,6 +431,19 @@ different shapes differently:
    baseline.
 2. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
    activation row and calculate several output columns together.
+
+Here, `M` is the number of activation rows after flattening every leading
+dimension. Day 3 uses this explicit dispatch:
+
+| Activation rows | Kernel | Role at this checkpoint |
+|---:|---|---|
+| `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
+| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 6 replaces it with a cooperative tiled kernel. |
+
+The cutoff does not mean the SIMD kernel expands to cover larger `M`. The two
+paths are separate schedules: Day 3 optimizes the vector-shaped decode
+bottleneck and leaves matrix-shaped prefill visible for the later profile to
+select.
 
 Keep the vanilla function callable as `quantized_matmul_vanilla`. An
 optimization is much easier to trust when it can be compared directly with
@@ -340,22 +457,17 @@ Each thread walks all `N` input values, unpacks eight int4 weights from each
 float32. This kernel repeats activation loads and does not share work, but its
 control flow mirrors the equation and is a useful debugging oracle.
 
-### Prefill Tiling Comes on Day 6
-
-Prefill has many activation rows and benefits from a different matrix-matrix
-schedule. Keep the vanilla kernel for that shape today so Day 3 stays focused
-on decode. Day 6 replaces it with a cooperative 32×32 tile built from 8×8
-`simdgroup_matrix` fragments after the course has established the packed
-format, dispatcher, and synchronized benchmark.
+Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 6
+revisits that workload with cooperative tiling.
 
 ### Stage 2: SIMD Matvec
 
 Decode normally has `M = 1`; an 8×8 matrix tile would leave most rows empty.
 Instead, one SIMD group reduces the input dimension and uses `simd_sum` to
 combine lane-local partial sums. Start with two output columns per group as an
-inspectable schedule. The current Qwen3-4B/8B profile then motivates a faster
-path: each lane loads two adjacent packed words, or 16 activations, and reuses
-them across four output columns.
+inspectable schedule. For the Qwen3-4B checkpoint, then evaluate a four-column
+path in which each lane loads two adjacent packed words, or 16 activations, and
+reuses them across the four outputs.
 
 The optimized path also uses the affine identity
 
@@ -372,67 +484,37 @@ instructions must be faster.
 ### Tune the SIMD Schedule
 
 Treat output width, threadgroup size, and shared-memory reuse as benchmark
-variables. The retained host dispatch is:
+variables. Use this Qwen-focused starting point:
 
 - flatten all leading activation dimensions into `M`,
-- use the custom matvec when `M <= 8`,
+- use the custom matvec when `M <= 8` and the vanilla matmul when `M > 8`,
 - compute four output columns per SIMD group and load two adjacent packed words
   per lane,
 - launch two SIMD groups, or eight output rows, per threadgroup.
 
 These thresholds are measured starting points, not mathematical requirements.
-Keep them visible in the dispatcher, then vary one choice at a time. The older
-M1 Pro experiment below first selected the two-output schedule. A later M4 Pro
-Qwen3-4B profile showed ordinary course matvecs 9-33% behind MLX and justified
-retesting the schedule against MLX's current four-output, two-packed-word qmv
-shape. The first dispatcher incorrectly kept an eight-output/eight-SIMD-group
-special case for `K >= 8192`. End-to-end profiling showed that the wide output
-dimension did not justify its extra register and threadgroup pressure, so the
-same x4/two-group schedule is now used for the vocabulary head too.
+Keep them visible in the dispatcher, then vary one choice at a time. Compare
+two, four, and eight output columns per SIMD group. More columns increase
+activation reuse, but also extend accumulator lifetimes and raise register
+pressure. Compare two, four, eight, and sixteen SIMD groups per threadgroup.
+More groups expose additional outputs, but may duplicate activation reads and
+reduce residency.
 
-An additional pointer-streaming specialization measured only a small
-end-to-end improvement while duplicating the reduction loop. It is deliberately
-not retained. The x4 kernel is the one schedule students profile, test, and
-carry into the rest of the course.
+Evaluate the affine rearrangement as part of the complete schedule. Its lower
+instruction count is useful only if the longer-lived activation sum and output
+accumulators do not reduce occupancy. Select the schedule with a synchronized
+whole-model decode benchmark, not an instruction-count estimate.
 
-For output tiling, an older four-column experiment reduced full-model decode
-from about 249 to 232 tok/s because the extra accumulators increased register
-pressure. That result is why the chapter asks for a new whole-model measurement
-after every schedule change. On the current M4 Pro and MLX 0.32 baseline, four
-columns plus two SIMD groups wins for both ordinary and vocabulary projections;
-the eight-column alternative was removed from dispatch after it regressed the
-model benchmark.
+Define a row-contiguous Python-to-extension contract for scales, biases,
+activations, and packed weights. Call `mx.contiguous` once at that boundary and
+validate the layout in the C++ primitive before encoding the kernel. Metal
+receives raw buffers rather than implicit array strides, so layout is a
+correctness condition as well as a performance condition.
 
-Apply the affine rearrangement selectively as well. An older two-output
-projection experiment fell from about 249 to 244.5 tok/s after this change.
-Fewer arithmetic operations do not imply a faster kernel when they extend
-register lifetimes or complicate scheduling. The retained x4 implementation
-keeps it because the masked-weight and activation-reuse schedule wins as a
-whole.
-
-At the Python-to-extension boundary, make scales, biases, activations, and
-packed weights row-contiguous once with `mx.contiguous`. The C++ primitive
-validates that contract before encoding the kernel. A Metal kernel receives
-raw buffers and strides are not implicit, so silently accepting a noncontiguous
-view would produce either wrong addressing or a slower hidden copy in a less
-explicit layer.
-
-Do not copy the 2 KB activation vector into threadgroup memory by default. On
-the reference machine, rereading this cache-hot vector avoided a barrier and
-raised decode from roughly 238.6 to 246-249 tok/s. Verify this result by adding
-the shared-memory variant as an ablation; it is a useful demonstration that
-reuse helps only when it costs less than synchronization.
-
-Finally, compare two, four, eight, and sixteen SIMD groups per threadgroup.
-The four-output path needs only two groups to cover eight output rows. More
-groups are not automatically better when they duplicate activation loads or
-reduce threadgroup residency.
-
-### Direct Quantized Embedding Comes on Day 6
-
-Week 2 performs row lookup and dequantization with basic `mlx.core` array
-operations at this checkpoint. Day 6 optionally fuses row gather, int4
-unpacking, and affine dequantization into one Metal dispatch.
+Use direct activation reads for your kernel. The one-row activation is
+small and cache-friendly, while staging it in threadgroup memory adds a barrier
+to every projection. If you test shared staging as an ablation, report the
+whole-model result and keep it only when reuse outweighs synchronization.
 
 ### Kernel Requirements
 
@@ -441,7 +523,9 @@ Implement both required kernel layouts in `quantized_matmul.metal`:
 - First, implement the vanilla one-thread-per-output matrix grid.
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
-- The required kernel supports `bfloat16_t` inputs and outputs. The course
+- For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
+  SIMD matvec schedule; Day 6 introduces the tiled prefill schedule.
+- The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
   - Iterate over groups of 128 values.
@@ -454,7 +538,7 @@ The custom kernel only needs to support `bits = 4` and `group_size = 128`. Use
 the group size to compute `groups_per_row` and the packed-weight offsets.
 Instantiate the required Metal kernel for `bfloat16_t` and select it in
 `eval_gpu`. If you retain an optional `half` specialization, keep it out of the
-course-model dispatch.
+model dispatch in your solution.
 
 ### GPU Dispatch
 
@@ -472,7 +556,7 @@ pattern:
    two-packed-word kernel with two SIMD groups.
 5. Dispatch with `dispatchThreadgroups`.
 
-You can test your implementation by running:
+You can test your solution by running:
 
 ```bash
 pdm run build-ext
@@ -513,21 +597,24 @@ Preserve the quantized layer's parameters as well. The model should pass
 `w.group_size` and `w.bits` to the extension, which should validate the course
 assumptions: `group_size = 128` and `bits = 4`.
 
-You can test your implementation by running:
+You can test your solution by running:
 
 ```bash
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b
+  --week2-checkpoint quantized-matvec --model qwen3-4b
 ```
 
-You can also benchmark throughput and compare your implementation with the reference solution:
+You can also benchmark your solution:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
+  --week2-checkpoint quantized-matvec --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```
+
+Run the same command with `--solution tiny_llm_ref` to compare it with the
+reference solution.
 
 Compare this result with the Day 1 `kv-cache` row. Do not start the decode
 attention chapter until the complete model uses packed weights and the

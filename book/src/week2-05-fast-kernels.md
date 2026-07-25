@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 5: Fast Kernels
+# 🚧 Week 2 Day 5: Fused Model Kernels
 
 > 🚧 This chapter is under review and may change.
 
@@ -6,9 +6,11 @@ The Day 4 profile should now show many smaller pointwise and reduction
 dispatches behind the optimized projections and short-context attention.
 RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
-1 expresses them as readable `mlx.core` equations. Week 2 keeps those
-implementations intact and writes three course-owned Metal kernels behind a
-separate interface:
+1 expresses them as readable `mlx.core` equations. Confirm the cluster with the
+Day 2 kernel-group replay; the
+[reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+shows the expected transition. Week 2 keeps those implementations intact and
+asks you to write three Metal kernels behind a separate interface:
 
 ```plain
 src/tiny_llm/week2_kernels.py
@@ -16,9 +18,10 @@ src/extensions/src/week2_kernels.cpp
 src/extensions/src/week2_kernels.metal
 ```
 
-We still use MLX arrays and its extension API. MLX schedules the graph node,
-owns its buffers, and dispatches the Metal function, but the arithmetic inside
-that function is ours. The required solution does not call `mx.fast.rms_norm`,
+Your solution still uses MLX arrays and its extension API. MLX schedules the
+graph node, owns its buffers, and dispatches the Metal function, but your
+solution owns the arithmetic inside that function. Your solution does not call
+`mx.fast.rms_norm`,
 `mx.fast.rope`, or an MLX-provided SiLU implementation.
 
 ## Why a Metal Kernel Helps
@@ -33,7 +36,7 @@ root, multiplies, casts again, and applies a learned weight. A compiler may fuse
 some adjacent element-by-element work, but the row reduction is a boundary. Intermediate
 values and multiple dispatches remain possible.
 
-A course-owned Metal kernel gives us explicit control over the whole model
+A Metal kernel in your solution gives you explicit control over the whole
 operator:
 
 - one dispatch replaces several graph operations;
@@ -47,7 +50,7 @@ purpose-built kernel versus a graph of several general-purpose kernels.
 
 ## Task 1: RMSNorm
 
-Begin with one SIMD group per input row, then profile it. A 1024-element hidden
+Begin with one SIMD group per input row, then profile it. A 2,560-element hidden
 row gives 32 lanes too much serial work. The optimized kernel launches 256
 threads, or eight SIMD groups, per row. Each group reduces its portion with
 `simd_sum`; lane zero writes eight partial sums to threadgroup memory; the first
@@ -70,9 +73,9 @@ Qwen3-4B end-to-end correctness test.
 
 The C++ primitive validates shape and dtype, allocates the output through MLX,
 binds the buffers and scalar constants, allocates eight float partial sums, and
-launches one 256-thread group per row. The two-level reduction was the largest
-small-operator improvement in the measured stack; a single SIMD group left too
-little parallel work available.
+launches one 256-thread group per row. Compare this two-level reduction with a
+single-SIMD-group control to determine whether the extra parallelism offsets
+the threadgroup reduction on the target machine.
 
 Integrate `FastRMSNorm` into every Week 2 norm immediately, run the RMSNorm
 tests, and record the cumulative model result before writing RoPE:
@@ -81,7 +84,7 @@ tests, and record the cumulative model result before writing RoPE:
 pdm run build-ext
 pdm run test --week 2 --day 5 -- -k rms
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rmsnorm --model qwen3-0.6b
+  --week2-checkpoint rmsnorm --model qwen3-4b
 ```
 
 ## Task 2: RoPE
@@ -117,7 +120,7 @@ that cumulative checkpoint before implementing SwiGLU:
 ```bash
 pdm run test --week 2 --day 5 -- -k rope
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rope --model qwen3-0.6b
+  --week2-checkpoint rope --model qwen3-4b
 ```
 
 ## Task 3: SwiGLU
@@ -139,15 +142,14 @@ Integrate the fused expression immediately and record the third checkpoint:
 ```bash
 pdm run test --week 2 --day 5 -- -k swiglu
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint swiglu --model qwen3-0.6b
+  --week2-checkpoint swiglu --model qwen3-4b
 ```
 
 ## Task 4: Verify the Cumulative Model
 
-At this point all three kernels have already been exposed through C++ MLX
-primitives, integrated, and measured. Run the complete test file now to verify
-their composition. `qwen3_week1.py` must still use its readable operators, and
-Week 3 should import the Week 2 interfaces so the serving model does not regress.
+After exposing all three kernels through C++ MLX primitives, run the complete
+test file to verify their composition. Keep `qwen3_week1.py` on its readable
+operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
@@ -165,8 +167,8 @@ Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
 inside a timed iteration when measuring these lazy operations.
 
-The operator benchmark must also compare the same logical RoPE layout. The
-course kernel accepts the model-native `B, L, H, D` tensor. `mx.fast.rope`
+The operator benchmark must also compare the same logical RoPE layout. Your
+RoPE kernel accepts the model-native `B, L, H, D` tensor. `mx.fast.rope`
 expects `B, H, L, D`, so transpose into that layout before the MLX call and
 transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
