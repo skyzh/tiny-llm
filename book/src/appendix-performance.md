@@ -181,7 +181,7 @@ projection. Each category uses
 one synchronization, and the median follows five warmups and fifteen samples:
 
 ```bash
-pdm run profile-week2-kernels --model qwen3-4b \
+pdm run profile-week2-kernels --solution tiny_llm_ref --model qwen3-4b \
   --warmup 5 --iterations 15 \
   --json-output week2-kernel-profile.json
 ```
@@ -405,7 +405,7 @@ Two profiles are useful at different levels. The synchronized
 reference-solution attribution ranks operator families without a GUI:
 
 ```bash
-pdm run profile-week2-kernels --model qwen3-4b \
+pdm run profile-week2-kernels --solution tiny_llm_ref --model qwen3-4b \
   --warmup 5 --iterations 15
 ```
 
@@ -416,6 +416,7 @@ same Qwen3-4B shape:
 CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
 
 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm_ref \
   --projection q --rows 1 \
   --iterations 10 \
   --output /tmp/week2-q-projection.gputrace

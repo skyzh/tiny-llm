@@ -121,7 +121,8 @@ The Week 2 operator ladder compares the readable equation, the optimized kernel
 in your solution, and MLX at the selected model's real tensor shapes:
 
 ```bash
-pdm run bench-week2-operators --model qwen3-4b --context 128
+pdm run bench-week2-operators --solution tiny_llm \
+  --model qwen3-4b --context 128 --section decode-projections
 ```
 
 Choose enough warmup iterations to exclude compilation, synchronize every
@@ -131,11 +132,11 @@ the exact hardware, dependency versions, model, and tensor shapes. The
 reference-solution checkpoints and keeps the resulting machine-specific numbers
 in one place.
 
-To rank complete model work without requiring a GUI, replay the actual
-reference-solution kernel groups at Qwen3-4B shapes and dispatch counts:
+To rank complete model work without requiring a GUI, replay your current
+kernel groups at Qwen3-4B shapes and dispatch counts:
 
 ```bash
-pdm run profile-week2-kernels --model qwen3-4b \
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --warmup 5 --iterations 15 \
   --json-output week2-kernel-profile.json
 ```
@@ -174,13 +175,14 @@ weighted source lines.
 provides instruction, ALU, cache, MMU, control-flow, register, and spill
 evidence for the selected pipeline.
 
-Build the reference extension with source and line tables, then capture one
-Qwen3-4B projection at its real shape:
+Build your extension with source and line tables, then capture one Qwen3-4B
+projection at its real shape:
 
 ```bash
-CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 
 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm \
   --projection q --rows 1 \
   --iterations 10 \
   --output /tmp/week2-q-projection.gputrace
@@ -190,9 +192,13 @@ open /tmp/week2-q-projection.gputrace
 
 The capture uses synthetic buffers with the real `M=1`, `K=2560`, `N=4096`
 Qwen3-4B shape. This avoids embedding all model weights; the dispatched
-reference-solution kernel and its schedule are unchanged. The warmup and input
+kernel and its schedule are unchanged. The warmup and input
 materialization happen before capture, and repeated evaluations give Xcode
 enough steady-state dispatches to profile.
+
+Use `--solution tiny_llm_ref` with `build-ext-ref` only when reproducing the
+appendix's reference-solution capture. Do not profile the reference solution
+and use its bottleneck as proof about your implementation.
 
 Do not validate a trace by file size. Debug line tables and captured buffers can
 make an unusable trace large. After replay, require all three of these checks:
@@ -288,7 +294,8 @@ xcrun xctrace record \
   --template /path/to/TinyLLMMetal.tracetemplate \
   --output /tmp/week2.trace \
   --launch -- pdm run bench-week2-operators \
-    --model qwen3-4b --context 32 --prefill-projection k
+    --solution tiny_llm --model qwen3-4b \
+    --section prefill-projections --context 32 --prefill-projection k
 
 xcrun xctrace export --input /tmp/week2.trace --toc
 ```

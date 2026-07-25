@@ -1,32 +1,35 @@
 import argparse
+import importlib
 import importlib.metadata
 import json
 import platform
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import median
 from time import perf_counter
-from typing import Callable
+from typing import Any, Callable
 
 import mlx.core as mx
 from mlx_lm import load
 
 from model_names import shortcut_name_to_full_name
-from tiny_llm_ref.attention import scaled_dot_product_attention_grouped
-from tiny_llm_ref.basics import linear, silu
-from tiny_llm_ref.qwen3_week2 import Qwen3ModelWeek2, WEEK2_CHECKPOINTS
-from tiny_llm_ref.quantize import QuantizedWeights, quantized_linear
-from tiny_llm_ref.week2_kernels import decode_attention_custom, swiglu
+
+
+SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 
 DEFAULT_CASES = (
     "kv-cache:decode:128",
     "quantized-matvec:decode:128",
-    "decode-attention:decode:128",
     "swiglu:decode:128",
-    "swiglu:prefill:128",
+    "decode-attention:decode:128",
+    "decode-attention:prefill:128",
     "simd-matmul:prefill:128",
     "simd-matmul:prefill:32",
+    "split-k:prefill:32",
 )
 
 
@@ -44,14 +47,46 @@ class CategoryResult:
     share: float
 
 
+@dataclass(frozen=True)
+class KernelImplementation:
+    name: str
+    model_type: Any
+    checkpoints: tuple[str, ...]
+    quantized_weights_type: Any
+    grouped_attention: Callable[..., mx.array]
+    linear: Callable[..., mx.array]
+    silu: Callable[[mx.array], mx.array]
+    quantized_linear: Callable[..., mx.array]
+    decode_attention: Callable[..., mx.array]
+    swiglu: Callable[[mx.array, mx.array], mx.array]
+
+
+def load_implementation(name: str) -> KernelImplementation:
+    attention = importlib.import_module(f"{name}.attention")
+    basics = importlib.import_module(f"{name}.basics")
+    model = importlib.import_module(f"{name}.qwen3_week2")
+    quantize = importlib.import_module(f"{name}.quantize")
+    kernels = importlib.import_module(f"{name}.week2_kernels")
+    return KernelImplementation(
+        name=name,
+        model_type=model.Qwen3ModelWeek2,
+        checkpoints=tuple(model.WEEK2_CHECKPOINTS),
+        quantized_weights_type=quantize.QuantizedWeights,
+        grouped_attention=attention.scaled_dot_product_attention_grouped,
+        linear=basics.linear,
+        silu=basics.silu,
+        quantized_linear=quantize.quantized_linear,
+        decode_attention=kernels.decode_attention_custom,
+        swiglu=kernels.swiglu,
+    )
+
+
 def parse_case(value: str) -> ProfileCase:
     try:
         checkpoint, phase, raw_tokens = value.split(":")
         tokens = int(raw_tokens)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("cases use CHECKPOINT:PHASE:TOKENS") from exc
-    if checkpoint not in WEEK2_CHECKPOINTS:
-        raise argparse.ArgumentTypeError(f"unknown Week 2 checkpoint: {checkpoint}")
     if phase not in ("decode", "prefill"):
         raise argparse.ArgumentTypeError("phase must be decode or prefill")
     if tokens <= 0:
@@ -67,6 +102,12 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--model", default="qwen3-4b")
+    parser.add_argument(
+        "--solution",
+        choices=("tiny_llm", "tiny_llm_ref"),
+        default="tiny_llm_ref",
+        help="implementation to profile (default: tiny_llm_ref)",
+    )
     parser.add_argument(
         "--case",
         action="append",
@@ -104,14 +145,21 @@ def benchmark_group(
     return median(timings) * 1_000_000
 
 
-def project(x: mx.array, weight: mx.array | QuantizedWeights) -> mx.array:
-    if isinstance(weight, QuantizedWeights):
-        return quantized_linear(x, weight)
-    return linear(x, weight)
+def project(implementation: KernelImplementation, x: mx.array, weight: Any) -> mx.array:
+    if isinstance(weight, implementation.quantized_weights_type):
+        return implementation.quantized_linear(x, weight)
+    return implementation.linear(x, weight)
 
 
 class KernelReplay:
-    def __init__(self, model: Qwen3ModelWeek2, phase: str, tokens: int):
+    def __init__(
+        self,
+        implementation: KernelImplementation,
+        model: Any,
+        phase: str,
+        tokens: int,
+    ):
+        self.implementation = implementation
         self.model = model
         self.phase = phase
         self.rows = 1 if phase == "decode" else tokens
@@ -162,23 +210,27 @@ class KernelReplay:
         hidden = self.hidden
         for layer in self.model.layers_inner:
             attention = layer.self_attn
-            query = project(hidden, attention.wq)
-            key = project(hidden, attention.wk)
-            value = project(hidden, attention.wv)
+            query = project(self.implementation, hidden, attention.wq)
+            key = project(self.implementation, hidden, attention.wk)
+            value = project(self.implementation, hidden, attention.wv)
             attention_input = mx.concatenate(
                 (key, value, query[..., key.shape[-1] + value.shape[-1] :]),
                 axis=-1,
             )
-            attention_output = project(attention_input, attention.wo)
+            attention_output = project(
+                self.implementation, attention_input, attention.wo
+            )
             mlp_input = hidden + attention_output
-            gate = project(mlp_input, layer.mlp.w_gate)
-            up = project(mlp_input, layer.mlp.w_up)
-            mlp_output = project(gate + up, layer.mlp.w_down)
+            gate = project(self.implementation, mlp_input, layer.mlp.w_gate)
+            up = project(self.implementation, mlp_input, layer.mlp.w_up)
+            mlp_output = project(self.implementation, gate + up, layer.mlp.w_down)
             hidden = mlp_input + mlp_output
             outputs.extend((key, value))
         final_hidden = hidden[:, -1:, :]
         if self.model.w_lm_head is not None:
-            outputs.append(project(final_hidden, self.model.w_lm_head))
+            outputs.append(
+                project(self.implementation, final_hidden, self.model.w_lm_head)
+            )
         else:
             outputs.append(self.model.embedding.as_linear(final_hidden))
         return outputs
@@ -193,7 +245,7 @@ class KernelReplay:
                 and self.rows <= 8
                 and self.context <= 256
             ):
-                output = decode_attention_custom(
+                output = self.implementation.decode_attention(
                     self.query,
                     self.key,
                     self.value,
@@ -201,7 +253,7 @@ class KernelReplay:
                     mask=mask,
                 )
             else:
-                output = scaled_dot_product_attention_grouped(
+                output = self.implementation.grouped_attention(
                     self.query.astype(mx.float32),
                     self.key.astype(mx.float32),
                     self.value.astype(mx.float32),
@@ -231,9 +283,9 @@ class KernelReplay:
                 )
             )
             if layer.mlp.use_fast_swiglu:
-                outputs.append(swiglu(self.gate, self.up))
+                outputs.append(self.implementation.swiglu(self.gate, self.up))
             else:
-                outputs.append(silu(self.gate) * self.up)
+                outputs.append(self.implementation.silu(self.gate) * self.up)
             outputs.extend((self.hidden + self.hidden, self.hidden + self.hidden))
         outputs.append(self.model.norm(self.hidden[:, -1:, :]))
         return outputs
@@ -257,10 +309,14 @@ class KernelReplay:
 
 
 def profile_case(
-    mlx_model: object, case: ProfileCase, warmup: int, iterations: int
+    implementation: KernelImplementation,
+    mlx_model: object,
+    case: ProfileCase,
+    warmup: int,
+    iterations: int,
 ) -> dict[str, object]:
-    model = Qwen3ModelWeek2(mlx_model, checkpoint=case.checkpoint)
-    replay = KernelReplay(model, case.phase, case.tokens)
+    model = implementation.model_type(mlx_model, checkpoint=case.checkpoint)
+    replay = KernelReplay(implementation, model, case.phase, case.tokens)
     builders = (
         ("projections", replay.projections),
         ("attention", replay.attention),
@@ -293,10 +349,19 @@ def profile_case(
 
 def main() -> None:
     args = parse_args()
+    implementation = load_implementation(args.solution)
+    unknown = [
+        case.checkpoint
+        for case in args.case
+        if case.checkpoint not in implementation.checkpoints
+    ]
+    if unknown:
+        raise ValueError(f"unknown Week 2 checkpoint for {args.solution}: {unknown[0]}")
     model_name = shortcut_name_to_full_name(args.model)
     mlx_model, _ = load(model_name)
     print(
-        f"Model={model_name} MLX={importlib.metadata.version('mlx')} "
+        f"Solution={implementation.name} Model={model_name} "
+        f"MLX={importlib.metadata.version('mlx')} "
         f"mlx-lm={importlib.metadata.version('mlx-lm')}"
     )
     print(
@@ -304,11 +369,12 @@ def main() -> None:
         "the measured groups."
     )
     profiles = [
-        profile_case(mlx_model, case, args.warmup, args.iterations)
+        profile_case(implementation, mlx_model, case, args.warmup, args.iterations)
         for case in args.case
     ]
     result = {
         "schema_version": 1,
+        "solution": implementation.name,
         "model": model_name,
         "mlx_version": importlib.metadata.version("mlx"),
         "mlx_lm_version": importlib.metadata.version("mlx-lm"),
