@@ -2,17 +2,17 @@
 
 [![CI (main)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml/badge.svg)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml)
 
-Production inference engines are difficult to learn from. They solve model
-execution, memory management, scheduling, and hardware utilization all at once.
-That is the right tradeoff for serving traffic, but the wrong place to first ask
-why a KV cache helps or when paging is worth its indirection.
+tiny-llm is a hands-on course for systems engineers who want to understand LLM
+inference end to end. You can think of it as an LLM-serving counterpart to
+CMU's [Needle](https://github.com/dlsyscourse/hw1/tree/main/python/needle)
+project: build the path that loads a Qwen3 model, turns tokens into logits, and
+generates text.
 
-tiny-llm takes the other route. It starts with the equations that turn Qwen3
-tokens into logits, then introduces optimization and serving machinery only
-when the running model gives us a reason to need it. The code stays small enough
-to read end to end while still reaching the problems that shape real inference
-systems: memory traffic, kernel occupancy, KV-cache growth, batching, and
-request scheduling.
+The course begins with array and matrix operations, then introduces kernels and
+serving machinery as the running model needs them. Keeping the implementation
+small enough to read end to end makes it possible to connect the equations to
+memory traffic, kernel occupancy, KV-cache growth, batching, and request
+scheduling.
 
 The course is built on MLX arrays and the MLX extension runtime, without using
 high-level neural-network layers. When a chapter teaches an operator, your
