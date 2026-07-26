@@ -19,8 +19,6 @@ jobs:
       - run: cargo install mdbook-toc
       - run: cargo install mdbook-katex --version 0.10.0-alpha
       - uses: taiki-e/install-action@mdbook
-      - name: patch for gh-pages build
-        run: mv book/theme/head.hbs._ book/theme/head.hbs
       - name: build book
         run: cd book && mdbook build
       - uses: actions/upload-pages-artifact@v3
