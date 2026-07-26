@@ -24,8 +24,6 @@ jobs:
       - uses: taiki-e/install-action@mdbook
       - name: install sitemap generator
         run: npm install --global static-sitemap-cli@2.2.7
-      - name: patch for gh-pages build
-        run: mv book/theme/head.hbs._ book/theme/head.hbs
       - name: build book and check sitemap
         run: book/sitemap.sh --check
       - uses: actions/upload-pages-artifact@v3
