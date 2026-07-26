@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 5: Fused Decode Attention
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 This chapter starts only after the Day 4 profile has verified that the fused
 model kernels reduced the repeated pointwise cluster. Linear projections remain
@@ -121,10 +123,13 @@ readable grouped-attention path. Keep this condition at the model call site so
 the benchmarked operating range remains reviewable instead of becoming a
 hidden performance policy inside the Metal kernel.
 
-Keep arbitrary dense, per-request masks on the readable compatibility path.
-They appear in the first continuous-batching exercise, while the normal Week 2
-decode path uses no explicit mask. Week 3 replaces dense batch masks with paged
-attention metadata instead of complicating this focused decode kernel.
+Keep arbitrary dense, per-request masks on the readable model path. The
+primitive still accepts explicit masks so its arithmetic contract can be
+tested, but the Week 2 dispatch guard selects the custom kernel only for
+`None` or `"causal"`. Explicit masks appear in the first continuous-batching
+exercise, while normal single-request decode uses no mask. Week 3 replaces
+dense batch masks with paged-attention metadata instead of making them a hidden
+performance policy in this focused model path.
 
 ```bash
 pdm run build-ext
@@ -132,8 +137,35 @@ pdm run test --week 2 --day 5
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit
-masks against the readable Week 1 implementation. Use a tolerance because the
-online softmax changes the floating-point reduction order.
+masks against the readable Week 1 implementation. The reference suite uses
+Qwen's `D = 128`, query lengths 1 and 8, GQA ratios 1 and 4, and cached contexts
+`1, 31, 32, 127, 128, 129, 255, 256`. It also checks both sides of the model's
+`L <= 8` and `S <= 128` dispatch guard. Use a tolerance because online softmax
+changes the floating-point reduction order.
+
+Correctness over that grid does not prove that a fixed 32-SIMD-group schedule
+is efficient. At contexts 1, 8, and 31, many of its 1,024 threads have no score
+position to process. Run the same real-shape operator sweep on each target
+machine before retaining the schedule:
+
+```bash
+for context in 1 31 32 127 128 129 255 256; do
+  pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+    --section attention --context "${context}" \
+    --query-length 1 --gqa-ratio 4 --attention-mask none
+done
+
+for context in 8 31 32 127 128 129 255 256; do
+  pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+    --section attention --context "${context}" \
+    --query-length 8 --gqa-ratio 4 --attention-mask causal
+done
+```
+
+Repeat representative points with `--gqa-ratio 1` and
+`--attention-mask explicit`. Keep M1 and M4 results as separate records; a
+correctness run on the M1 CI runner is not evidence that the M4 crossover
+applies there.
 
 Run the preceding checkpoint and your solution with the new dispatch under
 otherwise identical settings:

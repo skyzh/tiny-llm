@@ -118,7 +118,12 @@ class Qwen3MultiHeadAttention:
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        if self.use_decode_attention and L <= 8 and projection_k.shape[-2] <= 128:
+        if (
+            self.use_decode_attention
+            and L <= 8
+            and projection_k.shape[-2] <= 128
+            and not isinstance(mask, mx.array)
+        ):
             x = decode_attention_custom(
                 projection_q,
                 projection_k,

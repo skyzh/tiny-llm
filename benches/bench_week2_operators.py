@@ -94,6 +94,26 @@ def parse_args() -> argparse.Namespace:
         help="operator family to run; repeat as needed (default: all)",
     )
     parser.add_argument("--context", type=int, default=128)
+    parser.add_argument(
+        "--query-length",
+        type=int,
+        default=1,
+        help="query rows for the attention section (default: 1)",
+    )
+    parser.add_argument(
+        "--gqa-ratio",
+        type=int,
+        help=(
+            "query heads per KV head for the attention section "
+            "(default: model configuration)"
+        ),
+    )
+    parser.add_argument(
+        "--attention-mask",
+        choices=("none", "causal", "explicit"),
+        default="none",
+        help="mask contract for the attention section (default: none)",
+    )
     parser.add_argument("--warmup", type=int, default=12)
     parser.add_argument("--iterations", type=int, default=60)
     parser.add_argument(
@@ -438,12 +458,33 @@ def benchmark_attention(
     precision = model.model.embed_tokens.scales.dtype
     head_dim = model.args.head_dim
     num_heads = model.args.num_attention_heads
-    num_kv_heads = model.args.num_key_value_heads
-    query = mx.random.normal((1, num_heads, 1, head_dim)).astype(precision)
+    gqa_ratio = args.gqa_ratio or num_heads // model.args.num_key_value_heads
+    if num_heads % gqa_ratio != 0:
+        raise ValueError(
+            f"gqa-ratio {gqa_ratio} must divide the model's {num_heads} query heads"
+        )
+    if args.attention_mask == "causal" and args.context < args.query_length:
+        raise ValueError("causal attention requires context >= query-length")
+    num_kv_heads = num_heads // gqa_ratio
+    query = mx.random.normal((1, num_heads, args.query_length, head_dim)).astype(
+        precision
+    )
     key = mx.random.normal((1, num_kv_heads, args.context, head_dim)).astype(precision)
     value = mx.random.normal(key.shape).astype(precision)
     scale = head_dim**-0.5
-    mx.eval(query, key, value)
+    mask: mx.array | str | None = None
+    if args.attention_mask == "causal":
+        mask = "causal"
+    elif args.attention_mask == "explicit":
+        mask = mx.where(
+            mx.arange(args.context) % 5 == 0,
+            mx.array(-2.0, dtype=precision),
+            mx.array(0.0, dtype=precision),
+        ).reshape(1, 1, 1, args.context)
+    arrays = [query, key, value]
+    if isinstance(mask, mx.array):
+        arrays.append(mask)
+    mx.eval(*arrays)
     timings = benchmark_comparison(
         [
             (
@@ -453,17 +494,17 @@ def benchmark_attention(
                     key.astype(mx.float32),
                     value.astype(mx.float32),
                     scale,
-                    None,
+                    mask,
                 ).astype(precision),
             ),
             (
                 "optimized",
-                lambda: ops.decode_attention(query, key, value, scale, None),
+                lambda: ops.decode_attention(query, key, value, scale, mask),
             ),
             (
                 "mlx",
                 lambda: mx.fast.scaled_dot_product_attention(
-                    query, key, value, scale=scale, mask=None
+                    query, key, value, scale=scale, mask=mask
                 ),
             ),
         ],
@@ -480,15 +521,25 @@ def benchmark_attention(
 
 def main() -> None:
     args = parse_args()
-    if args.context <= 0 or args.warmup < 0 or args.iterations <= 0:
+    if (
+        args.context <= 0
+        or args.query_length <= 0
+        or args.warmup < 0
+        or args.iterations <= 0
+        or (args.gqa_ratio is not None and args.gqa_ratio <= 0)
+    ):
         raise ValueError(
-            "context and iterations must be positive; warmup cannot be negative"
+            "context, query-length, gqa-ratio, and iterations must be positive; "
+            "warmup cannot be negative"
         )
     ops = load_implementation(args.solution)
     model_name = shortcut_name_to_full_name(args.model)
     model, _ = load(model_name)
     print(
         f"Solution={ops.name} Model={model_name} context={args.context} "
+        f"query_length={args.query_length} "
+        f"gqa_ratio={args.gqa_ratio or 'model'} "
+        f"attention_mask={args.attention_mask} "
         f"MLX={importlib.metadata.version('mlx')} "
         f"mlx-lm={importlib.metadata.version('mlx-lm')}"
     )

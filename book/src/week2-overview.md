@@ -1,6 +1,8 @@
 # 🚧 Week 2: A Step Closer to vLLM
 
-> 🚧 This overview and all Week 2 chapters are under review and may change.
+> **Status: Experimental.** Use the verification matrix below to distinguish
+> continuously tested behavior from locally measured performance and work that
+> still needs maintainer review.
 
 Week 2 keeps the readable Week 1 model intact and builds a separate optimized
 Qwen3 path for single-request decoding. It begins by changing the algorithm:
@@ -34,6 +36,44 @@ with `mlx.core` and vanilla Metal kernels provide correctness oracles without
 requiring CPU BF16 support. This contract remains in force for Week 3, so later
 chapters only describe new storage and scheduling behavior.
 
+## Verification Status
+
+Week 2 is an AI-assisted curriculum and systems prototype. The status of one
+kind of evidence must not be used as a claim about another:
+
+| Area | Current status | Evidence and limit |
+|---|---|---|
+| Curriculum sequence | Author reviewed | The checkpoint order follows the balanced measurements in the performance ledger, but the course may still be shortened. |
+| Reference correctness | Continuously tested | ARM64 macOS CI builds the extensions and runs the full reference suite with Qwen3-0.6B available locally. |
+| Decode-attention boundaries | Continuously tested | The suite covers Qwen head dimension 128, query lengths 1 and 8, contexts around 32 and 128, GQA ratios 1 and 4, causal masks, and explicit masks. |
+| Qwen3-1.7B and Qwen3-4B integration | Optional local tests | These tests skip unless the corresponding model is already downloaded; ordinary CI does not certify them. |
+| Qwen3-4B performance | One-machine evidence | Checked-in results were measured on one M4 Pro. They are research evidence, not a cross-device performance guarantee. |
+| Benchmark methodology | Experimental | Implementations are interleaved in balanced order and checkpoints run in fresh processes, but the results still need reproduction on more machines. |
+| Maintainer kernel ownership | Incomplete | Every retained kernel still needs a maintainer pass over its invariants, winning and losing shapes, fallback, and benchmark failure modes. |
+
+The macOS runner is a correctness gate, not a performance gate. In particular,
+passing Qwen3-0.6B integration tests does not validate the Qwen3-4B throughput
+story. Raw machine-specific measurements, rejected experiments, and retained
+dispatch choices live in the
+[performance evidence ledger](./appendix-performance.md).
+
+## Choose a Completion Track
+
+The full reference solution is a small performance-engineering project, not a
+reasonable one-week requirement for every student. Use one of two explicit
+tracks:
+
+| Track | Required work | Provided infrastructure | Optional work |
+|---|---|---|---|
+| Core course | Days 1–5: cached model integration, matched benchmarking, packed W4 projections, fused model kernels, and a bounded decode-attention implementation | Model loading, extension build system, benchmark/profile runners, correctness tests, and the readable/reference implementations | Xcode counter capture, schedule searches, and hardware-specific retuning |
+| Performance lab | Core course plus Days 6–7: SIMD-matrix prefill and shape-aware Split-K | Balanced operator comparisons, fresh-process progression runner, and checked-in M4 Pro evidence | Rejected experiments, alternative schedules, cross-device sweeps, and the 80%-of-MLX target |
+
+The tests define API and correctness contracts; they do not require a student
+to rediscover the reference schedule. If you are teaching the core course,
+stop after Day 5 with a correct bounded kernel and treat the remaining
+checkpoints as stretch work. The 80%-of-MLX acceptance target applies only to
+the performance-lab track on a measured machine.
+
 ## What We Will Cover
 
 - A dense per-request key-value cache for incremental decoding
@@ -44,8 +84,8 @@ chapters only describe new storage and scheduling behavior.
 - A BF16 SIMD-matrix quantized prefill kernel
 - A shape-aware split-K schedule for small Qwen prefill matrices
 - A last-token output interface for generation
-- Acceptance targets of 80% of MLX prefill and decode throughput on the
-  fixed Week 2 checkpoint
+- An optional performance-lab target of 80% of MLX prefill and decode
+  throughput on the fixed Week 2 checkpoint
 
 Week 2 does **not** call MLX-provided implementations of the operators we are
 learning. Your solution implements quantized matmul, decode attention,
