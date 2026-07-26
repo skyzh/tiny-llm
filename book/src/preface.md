@@ -1,4 +1,4 @@
-# Preface
+# Learn LLM Serving
 
 This course is designed for systems engineers who want to understand how large language models (LLMs) work.
 
