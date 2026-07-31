@@ -1,6 +1,6 @@
 # LLM Serving in a Week
 
-[Preface](./preface.md)
+[Learn LLM Serving](./preface.md)
 [Setting Up the Environment](./setup.md)
 
 ---

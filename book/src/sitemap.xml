@@ -2,22 +2,92 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
         <loc>https://skyzh.github.io/tiny-llm</loc>
-        <lastmod>2025-04-26T03:38:02.503Z</lastmod>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/appendix-performance</loc>
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/glossary</loc>
-        <lastmod>2025-04-26T03:38:02.504Z</lastmod>
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/preface</loc>
-        <lastmod>2025-04-26T03:38:02.503Z</lastmod>
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/setup</loc>
-        <lastmod>2025-04-26T03:38:02.504Z</lastmod>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week1-01-attention</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week1-02-positional-encodings</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week1-03-gqa</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week1-04-rmsnorm-and-mlp</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week1-05-qwen3-model</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week1-06-generate-response</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week1-07-sampling-prepare</loc>
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/week1-overview</loc>
-        <lastmod>2025-04-26T03:38:02.504Z</lastmod>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-01-kv-cache</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-02-benchmarking</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-03-quantized-matvec</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-04-decode-attention</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-05-fast-kernels</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-06-simd-matrix-prefill</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-07-split-k-prefill</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-overview</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-01-continuous-batching</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-02-chunked-prefill</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-03-paged-attention-part1</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-04-paged-attention-part2</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-05-flash-attention</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-optional-moe</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-optional-speculative-decoding</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week3-overview</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week4-overview</loc>
     </url>
 </urlset>

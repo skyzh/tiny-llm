@@ -119,8 +119,9 @@ else:
 ```
 
 The negative branch is algebraically equivalent to the direct sigmoid formula, but it prevents `exp(-x)` from becoming
-`exp(large positive)` when `x` is a large negative value. In vector code, compute the direct branch with `abs(x)`, then
-use `1 - y` for negative inputs. This approach closely matches MLX's low-precision GPU path.
+`exp(large positive)` when `x` is a large negative value. In vector code, first compute `z = exp(-abs(x))`. Use
+`z / (1 + z)` for negative inputs and `1 / (1 + z)` otherwise. Do not rewrite the negative branch as
+`1 - 1 / (1 + z)`: in low precision, the fraction can round to `1`, and the subtraction then incorrectly produces zero.
 
 Then implement `Qwen3MLP`. Qwen3's MLP contains:
 

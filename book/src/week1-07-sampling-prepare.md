@@ -76,6 +76,7 @@ command-line tools, including the Metal compiler, to build them.
 
     ```bash
     sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+    xcode-select --print-path
     ```
 
     Adjust the path if Xcode is installed elsewhere.
@@ -88,10 +89,25 @@ command-line tools, including the Metal compiler, to build them.
     sudo xcodebuild -license accept
     ```
 
-6. **Install CMake:**
+6. **Verify the Metal Compiler:**
+
+    ```bash
+    xcrun metal --version
+    ```
+
+    With Xcode 26, the Metal toolchain may be a separate component. If the command reports a missing Metal toolchain,
+    download it and verify the compiler again:
+
+    ```bash
+    xcodebuild -downloadComponent MetalToolchain
+    xcrun metal --version
+    ```
+
+7. **Install CMake:**
 
     ```bash
     brew install cmake
+    cmake --version
     ```
 
 (This instruction is graciously provided by [Liu Jinyi](https://github.com/KKKZOZ).)
