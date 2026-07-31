@@ -50,6 +50,7 @@ kind of evidence must not be used as a claim about another:
 | Decode-attention boundaries | Continuously tested | The suite covers Qwen head dimension 128, query lengths 1 and 8, contexts around 32 and 128, GQA ratios 1 and 4, causal masks, and explicit masks. |
 | Qwen3-1.7B and Qwen3-4B integration | Optional local tests | These tests skip unless the corresponding model is already downloaded; ordinary CI does not certify them. |
 | Qwen3-4B performance | One-machine evidence | Checked-in results were measured on one M4 Pro. They are research evidence, not a cross-device performance guarantee. |
+| Xcode GPU profiles | Optional hardware-specific evidence | The advanced appendix defines one six-view capture contract for every Day 2–7 checkpoint. Device-specific traces explain a selected kernel but are not correctness or throughput gates. |
 | Benchmark methodology | Experimental | Implementations are interleaved in balanced order and checkpoints run in fresh processes, but the results still need reproduction on more machines. |
 | Maintainer kernel ownership | Incomplete | Every retained kernel still needs a maintainer pass over its invariants, winning and losing shapes, fallback, and benchmark failure modes. |
 
@@ -121,18 +122,23 @@ The order is intentional:
    denominator, the removable decode gap moves to repeated RMSNorm, RoPE, and
    SwiGLU work. Fuse the measured cluster one operator at a time.
 5. **Decode attention:** after the pointwise cluster shrinks, sweep cached
-   context and measure score, softmax, and value work. Introduce online softmax,
-   retain it only over its measured winning range, and reprofile before changing
-   the workload.
-6. **SIMD-matrix prefill:** switch to the prefill profile, where quantized
-   matrix multiplication dominates. Introduce 8×8 matrix fragments with FP32
-   accumulation and benchmark real Qwen projection shapes.
-7. **Split-K prefill:** the Day 6 shape sweep reveals under-filled grids only
-   for small Qwen K/V projections. Partition their reduction dimension, merge
-   BF16 partial storage with an FP32 final sum, and fall back to Day 6 at the
-   measured crossover.
+   context and measure score, softmax, and value work. Introduce online softmax
+   only over its measured short-context range, then verify it with a matched
+   workload that actually enters the dispatch guard.
+6. **SIMD-matrix prefill:** return to the fixed 128-token workload and switch
+   to its prefill profile, where the correctness-first vanilla quantized matrix
+   path dominates. Introduce 8×8 matrix fragments with FP32 accumulation and
+   benchmark real Qwen projection shapes.
+7. **Split-K prefill:** the Day 6 shape sweep reveals under-filled grids at
+   short row counts, most clearly in the narrow Qwen K/V projections. Partition
+   the reduction dimension, merge BF16 partial storage with an FP32 final sum,
+   and fall back to Day 6 at the measured crossover.
 
 A later chapter never becomes an undeclared prerequisite for an earlier one.
+At each boundary, the end-to-end and operator measurements select the next
+kernel family. An optional Xcode trace explains what happens inside that
+representative GPU kernel; the following operator profile, not the trace alone,
+decides which chapter follows.
 
 ## Why FlashAttention Waits Until Week 3
 

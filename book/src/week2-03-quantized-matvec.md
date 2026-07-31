@@ -429,8 +429,8 @@ Do this in two measured stages. They expose the same math but schedule
 different shapes differently:
 
 1. **Vanilla matmul:** one Metal thread computes one output element. This is
-   the direct GPU translation of the computation flow above and the correctness
-   baseline.
+   the direct GPU translation of the computation flow above and an inspectable
+   bring-up control.
 2. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
    activation row and calculate several output columns together.
 
@@ -641,6 +641,17 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case quantized-matvec:decode:128 --warmup 4 --iterations 12
 ```
 
+Use this optional advanced capture only when you are tuning the shader or the
+model and operator results disagree:
+
+```bash
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
+MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm --workload quantized-projection \
+  --projection q --rows 1 --schedule matvec --iterations 10 \
+  --output /tmp/week2-day3-packed-q-m1.gputrace
+```
+
 Attach the complete-model before/after rows, the per-projection latency table,
 and the new kernel-group profile. First require a clear decode gain over
 `kv-cache`. Then compare each projection with MLX at the identical shape.
@@ -648,15 +659,17 @@ Projections may remain the largest absolute category because the model performs
 them in every layer; once their operator latency is close to MLX, that bar is
 no longer the largest removable gap.
 
-Capture and replay the matvec `.gputrace` only if the operator table still
-leaves a material gap or you are doing the optional kernel-tuning exercise.
-Record the pipeline, counters, and highest-cost source lines with `gpudebug` as
-described in the advanced appendix; Xcode's graphical Metal debugger is the
-manual fallback. Continue to Day 4 when normalization, position, and activation
-account for the largest removable gap. If the projection comparison is still
-far behind, keep tuning the matvec instead. The
+The [Xcode checkpoint contract](./appendix-performance.md#week-2-xcode-checkpoint-contract)
+records the pipeline, limiters, memory traffic, and highest-cost source lines
+with the consistent screenshot set from the advanced appendix.
+Continue to Day 4 when the matched projection table is close to MLX and the
+post-Day-3 profile makes normalization, position, and activation the largest
+removable gap. If the projection comparison is still far behind, keep tuning
+the matvec instead. The
 [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
 pairs the model delta, projection microbenchmarks, attribution, and the
-source-enabled matvec trace.
+source-enabled matvec trace. Its matched operator result is the reason the hot
+masked products do not become Day 4: after the projection gap shrinks, the
+pointwise cluster is the larger removable model cost.
 
 {{#include copyright.md}}

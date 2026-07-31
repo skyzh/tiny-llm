@@ -38,8 +38,9 @@ original two-dimensional grid is under-filled.
 
 ## Task 1: Reproduce the Under-Filled Grid
 
-Benchmark Q, K, V, gate, up, and down projections at `M = 16, 32, 64, 128`
-before changing dispatch:
+Begin with the narrow K projection at `M=32` before changing dispatch. This is
+the smallest baseline needed to reproduce the under-filled Day 6 grid; Task 4
+runs the full all-projection, all-row sweep after Split-K exists:
 
 ```bash
 pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
@@ -47,9 +48,9 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --warmup 5 --iterations 30
 ```
 
-Record synchronized Day 6, requested split-K, and MLX latency. The narrow K/V
-shape is the clearest small-grid case. Large output widths or prompt lengths
-may already have enough row-by-column tiles and should become controls.
+Record synchronized Day 6 and MLX latency before implementing Split-K. The
+narrow K/V shape is the clearest small-grid case. Large output widths or prompt
+lengths may already have enough row-by-column tiles and should become controls.
 
 ## Task 2: Reuse the Day 6 Kernel for Each Partition
 
@@ -114,6 +115,14 @@ FP32 and cast once to the model dtype. Test:
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 7
+
+for context in 16 32 64 128 2048; do
+  for projection in q k v o gate up down; do
+    pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+      --section prefill-projections --context "${context}" \
+      --prefill-projection "${projection}" --include-split-k
+  done
+done
 ```
 
 ## Benchmark Analysis: Complete Week 2
@@ -124,38 +133,58 @@ that one-token decode remains unchanged because it still dispatches to Day 3's
 matvec, and that sufficiently large prefill shapes select the unsplit Day 6
 kernel instead of paying for partial storage and reduction.
 
-Run the fixed Week 2 acceptance workload from Day 2 after the shape sweep. The
+Keep a short complete-model control beside the under-filled shape sweep, then
+run the fixed Week 2 acceptance workload from Day 2. The
 [performance appendix](./appendix-performance.md) is the single place for the
-measured hardware, dependency versions, checkpoint table, and final
-MLX ratios.
+measured hardware, dependency versions, checkpoint table, and final MLX ratios.
 
 ```bash
-pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
-  --section prefill-projections --context 32 --prefill-projection k \
-  --include-split-k
-
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
   --variant week2-simd-matmul --variant week2-split-k --variant mlx \
   --model qwen3-4b --input-len 32 --output-len 33 --warmup 2 \
   --prefill-logits last
+
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-simd-matmul --variant week2-split-k --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last
+
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-simd-matmul --variant week2-split-k --variant mlx \
+  --model qwen3-4b --input-len 2048 --output-len 129 --warmup 2 \
+  --prefill-logits last
 ```
 
-Repeat both comparisons at the 128-token acceptance shape and at a long control
-such as 2,048 tokens. Attach the three end-to-end comparisons and the
+Use a source-enabled Split-K capture for your implementation only as part of
+the optional profiling appendix:
+
+```bash
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
+MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm --workload quantized-projection \
+  --projection k --rows 32 --schedule split-k --iterations 10 \
+  --output /tmp/week2-day7-k-m32-split-k.gputrace
+```
+
+Repeat the operator comparison at the 128-token acceptance shape and at a long
+control such as 2,048 tokens. Attach the three end-to-end comparisons and the
 per-projection SIMD/Split-K/MLX table at each crossover candidate. Retain
 Split-K only below the measured crossover: it must improve the under-filled
 projection, preserve one-token decode, and fall back exactly to Day 6 when the
-ordinary result grid is already occupied. A second `.gputrace` replay is
-optional when the recorded dispatch geometry and the operator table already
-agree; when they disagree, save the `gpudebug` text record that resolves which
-measurement selected the crossover. The final performance-lab acceptance run
-must still reach 80% of MLX in both phases.
+ordinary result grid is already occupied. Replay both the unsplit and Split-K
+traces when tuning your implementation; record the accumulation and reduction
+pipelines and total GPU time beside the calculated partition policy and
+operator table. The final performance-lab acceptance run must still reach 80%
+of MLX in both phases.
 
 The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
 pairs the short-shape operator gains with the end-to-end result and keeps the
-neutral acceptance and long controls separate. Week 3 then changes the
-benchmark itself: request turnover and dense KV reconstruction, rather than
-another static projection, become the measured serving bottleneck.
+neutral acceptance and long controls separate. Use Xcode to verify that the
+short shape executes the accumulation and merge pipelines, while the calculated
+policy names the partitions and the shape sweep prevents their overhead from
+leaking into occupied controls. Week 3 then changes the benchmark itself:
+request turnover and dense KV reconstruction, rather than another static
+projection, become the measured serving bottleneck.
 
 The Week 2 loop is now complete:
 

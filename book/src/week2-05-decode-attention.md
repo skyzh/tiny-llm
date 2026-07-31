@@ -7,7 +7,9 @@
 This chapter starts only after the Day 4 profile has verified that the fused
 model kernels reduced the repeated pointwise cluster. Linear projections remain
 important, but their operator latency is already close to the external
-denominator, while the attention walk grows with cached context. During
+denominator, while attention is the next measured removable gap through cached
+context 128. Longer-context measurements define the readable fallback rather
+than selecting this bounded kernel. During
 single-request decode, query length is normally one while the cached key/value
 sequence grows by one token at a time. Week 1 expresses attention as matrix
 multiplication, masking, softmax, and another matrix multiplication. That is
@@ -173,23 +175,28 @@ otherwise identical settings:
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint swiglu --model qwen3-4b \
-  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+  --num-seqs 1 --min-input-len 32 --max-input-len 32 \
+  --min-output-len 97 --max-output-len 97 --warmup 2 \
+  --prefill-logits last
 
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint decode-attention --model qwen3-4b \
-  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+  --num-seqs 1 --min-input-len 32 --max-input-len 32 \
+  --min-output-len 97 --max-output-len 97 --warmup 2 \
+  --prefill-logits last
 ```
 
-Your solution dispatches short-query contexts through your Metal kernel and
-falls back to the exact readable Week 1 composition outside the validated
-range.
+Prefill produces the first token, so the 96 timed decode calls grow the cache
+from `S=33` through `S=128`. Every one is inside the custom dispatch guard.
+Your solution falls back to the exact readable Week 1 composition outside that
+validated range.
 
 ## Benchmark Analysis: Select Day 6
 
-Measure the attention operator and the cumulative checkpoint separately, then
-change the profile workload only after decode clears its target:
+Measure the attention operator and the cumulative checkpoint separately. The
+first progression is the matched short-context acceptance test for this
+bounded kernel. The second keeps the fixed Week 2 denominator as a neutral
+control and exposes its unchanged 128-token prefill profile:
 
 ```bash
 pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
@@ -197,28 +204,48 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
 
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
   --variant week2-swiglu --variant week2-decode-attention --variant mlx \
+  --model qwen3-4b --input-len 32 --output-len 97 --warmup 2 \
+  --prefill-logits last
+
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-swiglu --variant week2-decode-attention --variant mlx \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case decode-attention:decode:128 \
+  --case decode-attention:decode:32 --case decode-attention:decode:128 \
   --case decode-attention:prefill:128 --warmup 4 --iterations 12
 ```
 
+Use a source-enabled `S=128` trace for your implementation only as part of the
+optional profiling appendix:
+
+```bash
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
+MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm --workload decode-attention --iterations 10 \
+  --output /tmp/week2-day5-decode-attention-s128.gputrace
+```
+
 Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
-attach that context sweep beside the `swiglu`/`decode-attention` model rows.
+attach that context sweep beside the short-context
+`swiglu`/`decode-attention` model rows.
 The intermediate points reveal whether the custom kernel has a useful measured
 crossover rather than assuming that an endpoint applies to every context. Also
 attach the decode and prefill kernel-group results. Reject the custom dispatch
-if repeated fresh-process model runs do not improve, even when the isolated
-kernel looks faster. If the operator wins only over a limited context range,
-encode that measured crossover in the dispatch guard; replay a `.gputrace` with
-`gpudebug` only when the operator and model results still disagree.
+if repeated fresh-process short-context runs do not improve, even when the
+isolated kernel looks faster. If the operator wins only over a limited context
+range, encode that measured crossover in the dispatch guard.
 
-Once decode reaches 80% of MLX, read the prefill attribution as a new workload.
-Continue to Day 6 only when quantized matrix-shaped projections dominate it.
+The fixed `128/129` control does not execute the custom attention kernel:
+prefill has `L=128`, and the first decode call appends the new token before the
+guard sees `S=129`. Treat any Day 4-to-Day 5 difference in that table as noise,
+not an attention gain. Return to its 128-token prefill attribution and continue
+to Day 6 only when quantized matrix-shaped projections dominate it.
 The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
-pairs the context microbenchmarks, model delta, and prefill attribution that
-select the matrix kernel.
+pairs the context microbenchmarks with the matched short-context model delta,
+fixed-workload control, and prefill attribution. The optional Xcode replay
+verifies the attention dispatch inside its measured guard; the fixed workload's
+unchanged prefill exposes the next matrix-shaped projection bottleneck.
 
 {{#include copyright.md}}

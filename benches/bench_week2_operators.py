@@ -159,12 +159,17 @@ def report(name: str, course_us: float, mlx_us: float) -> None:
 
 
 def report_progression(
-    name: str, readable_us: float, optimized_us: float, mlx_us: float
+    name: str,
+    baseline_us: float,
+    optimized_us: float,
+    mlx_us: float,
+    *,
+    baseline_label: str = "readable",
 ) -> None:
     print(
-        f"{name:<22} readable={readable_us:>9.1f} us  "
+        f"{name:<22} {baseline_label}={baseline_us:>9.1f} us  "
         f"optimized={optimized_us:>9.1f} us  mlx={mlx_us:>9.1f} us  "
-        f"speedup={readable_us / optimized_us:>5.2f}x"
+        f"speedup={baseline_us / optimized_us:>5.2f}x"
     )
 
 
@@ -241,7 +246,7 @@ def benchmark_decode_projections(
         timings = benchmark_comparison(
             [
                 (
-                    "readable",
+                    "vanilla",
                     lambda x=x, weights=weights: ops.quantized_matmul_vanilla(
                         weights.scales,
                         weights.biases,
@@ -274,9 +279,10 @@ def benchmark_decode_projections(
         )
         report_progression(
             name,
-            timings["readable"],
+            timings["vanilla"],
             timings["optimized"],
             timings["mlx"],
+            baseline_label="vanilla",
         )
 
 

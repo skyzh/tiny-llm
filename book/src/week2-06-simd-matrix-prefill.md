@@ -6,9 +6,9 @@
 
 Day 5 ends by switching the profile from one-token decode to multi-token
 prefill. The measured bottleneck changes with the workload: pointwise kernels
-no longer dominate, and the Day 3 matrix-vector schedule does not reuse packed
-weights efficiently across prompt rows. Quantized projections are now the
-largest cost, so today we build a separate matrix schedule for them.
+no longer dominate, and Day 3 deliberately left `M > 8` on its
+correctness-first vanilla quantized matrix path. Quantized projections are now
+the largest cost, so today we replace that inherited multi-row schedule.
 
 Re-run the dependency-aware kernel profile from Day 2 with
 `--case decode-attention:prefill:128`. Continue only when projections dominate the
@@ -113,7 +113,12 @@ pdm run build-ext
 pdm run test --week 2 --day 6
 
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
-  --variant week2-simd-matmul --variant mlx \
+  --variant week2-decode-attention --variant week2-simd-matmul --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last
+
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-decode-attention --variant week2-simd-matmul --variant mlx \
   --model qwen3-4b --input-len 32 --output-len 33 --warmup 2 \
   --prefill-logits last
 ```
@@ -134,32 +139,45 @@ Compare the matrix kernel at both an occupied control shape and the short K/V
 shape, then profile the latter without enabling Split-K:
 
 ```bash
-pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
-  --section prefill-projections --context 32 \
-  --prefill-projection k --prefill-projection q
+for context in 32 128 2048; do
+  for projection in q k v o gate up down; do
+    pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+      --section prefill-projections --context "${context}" \
+      --prefill-projection "${projection}"
+  done
+done
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case simd-matmul:prefill:128 --case simd-matmul:prefill:32 \
   --warmup 4 --iterations 12
+```
 
+The dispatch formula gives the unsplit 32-row K projection 32 independent
+threadgroups. Capture your implementation only as part of the optional
+profiling appendix:
+
+```bash
 CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
-MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
-  --solution tiny_llm --projection k --rows 32 --schedule simd-matmul \
+MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm --workload quantized-projection \
+  --projection k --rows 32 --schedule simd-matmul \
   --iterations 10 --output /tmp/week2-k-m32-unsplit.gputrace
 ```
 
 Attach the complete-model prefill delta, per-projection tables at 32, 128, and
-2,048 rows, the 32/128-row attribution, and the unsplit 32-row dispatch geometry
-reported by `gpudebug`. Do not select Split-K merely because projections still
-occupy most of prefill. First require the long or wide controls to approach
-MLX, while the short, narrow projection remains disproportionately slow.
+2,048 rows, and the 32/128-row attribution. In the optional Xcode capture,
+record the unsplit pipeline, its limiters and memory traffic, and the weighted
+tile source. Do not select Split-K merely because projections still occupy
+most of prefill. First require the long or wide controls to approach MLX,
+while the short, narrow projection remains disproportionately slow.
 
-In the trace, confirm that the unsplit result grid has too few independent
-threadgroups. Record the grid and threadgroup geometry as text. If the
-performance tree or weighted source lines instead show costly work inside each
-tile, repair Day 6 before multiplying the grid. The
+Use the dispatch calculation and short-shape operator sweep to establish that
+the unsplit result grid has too few independent threadgroups. Then use Pipeline
+Statistics and weighted source lines to rule out costly work inside each tile;
+if they expose such a cost, repair Day 6 before multiplying the grid. The
 [reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
 pairs the prefill gain with long and short operator controls and the dispatch
-geometry that motivates Split-K.
+geometry that motivates Split-K. A remaining arithmetic hot spot would send
+you back to Day 6 instead.
 
 {{#include copyright.md}}
