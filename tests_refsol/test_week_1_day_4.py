@@ -45,13 +45,22 @@ def test_task_1_rms_norm_cast_to_float32(stream: mx.Stream):
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
-@pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
+@pytest.mark.parametrize(
+    "precision",
+    [*PRECISIONS, mx.bfloat16],
+    ids=[*PRECISION_IDS, "bf16"],
+)
 def test_task_2_silu(stream: mx.Stream, precision: mx.Dtype):
     with mx.stream(stream):
         BATCH_SIZE = 10
         DIM = 10
         for _ in range(100):
-            x = mx.random.uniform(shape=(BATCH_SIZE, DIM), dtype=precision)
+            x = mx.random.uniform(
+                low=-20,
+                high=20,
+                shape=(BATCH_SIZE, DIM),
+                dtype=precision,
+            )
             user_output = silu(x)
             reference_output = nn.silu(x)
             assert_allclose(user_output, reference_output, precision=precision)
