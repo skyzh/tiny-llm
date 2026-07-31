@@ -145,9 +145,11 @@ such as 2,048 tokens. Attach the three end-to-end comparisons and the
 per-projection SIMD/Split-K/MLX table at each crossover candidate. Retain
 Split-K only below the measured crossover: it must improve the under-filled
 projection, preserve one-token decode, and fall back exactly to Day 6 when the
-ordinary result grid is already occupied. A second Xcode trace is optional when
-the measured dispatch and the operator table already agree. The final
-performance-lab acceptance run must still reach 80% of MLX in both phases.
+ordinary result grid is already occupied. A second `.gputrace` replay is
+optional when the recorded dispatch geometry and the operator table already
+agree; when they disagree, save the `gpudebug` text record that resolves which
+measurement selected the crossover. The final performance-lab acceptance run
+must still reach 80% of MLX in both phases.
 
 The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
 pairs the short-shape operator gains with the end-to-end result and keeps the

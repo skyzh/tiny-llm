@@ -63,12 +63,12 @@ below contain the measurements.
 | Checkpoint | Required invariant | Performance hypothesis | Retained range and losing shapes | Fallback or control | Main benchmark trap |
 |---|---|---|---|---|---|
 | Dense KV cache | Caller offset equals every layer cache length; K/V append on the sequence axis | Reuse projected prefix K/V instead of recomputing the full model prefix | Wins incremental decode as the prefix grows; repeated `concat` still copies `O(S²)` bytes | Week 1 full-prefix model remains the semantic control; Week 3 pages replace growth copies | Comparing cached MLX with an uncached course model measures different algorithms |
-| Packed quantized matvec | W4, group size 128, BF16 parameters, contiguous packed layout, and the declared transpose convention | Read packed weights once and share unpack/scale work across SIMD lanes | Retained for `M <= 8`; multi-row prefill exposes poor reuse and motivates Day 6 | Vanilla W4 primitive is the operator oracle; named earlier checkpoints preserve the dense control | Lazy execution or timing post-materialized weights can hide weight traffic |
+| Packed quantized matvec | W4, group size 128, BF16 parameters, contiguous packed layout, and the declared transpose convention | Read packed weights once and share unpack/scale work across SIMD lanes | Retained for `M <= 8`; multi-row prefill exposes poor reuse and motivates Day 6 | Readable MLX equation is the correctness oracle; vanilla W4 is an inspectable Metal control; named earlier checkpoints preserve the dense control | Lazy execution or timing post-materialized weights can hide weight traffic |
 | RMSNorm | BF16 I/O with the sum of squares accumulated in FP32 | Fuse reduction, normalization, and weight multiply into one dispatch | Retained at Qwen hidden dimensions after both operator and decode gains; unknown dimensions require remeasurement | Readable RMSNorm and the Day 3 checkpoint remain selectable | Adding isolated microseconds as if checkpoint gains were independent |
 | RoPE | One valid offset per batch row; even rotated dimension; tail values preserved | Fuse angle generation and pair rotation without intermediate graphs | Retained for Qwen decode rows; head-count and rotated-dimension changes require remeasurement | Readable RoPE and the RMSNorm-only checkpoint remain selectable | Benchmarking a cached or precomputed angle path against fresh angle construction |
 | SwiGLU | Gate and up tensors have identical shape and dtype | Fuse SiLU and the gate/up product into one elementwise dispatch | Retained for Qwen MLP shapes; tiny tensors and other dtypes are not a performance claim | Readable SiLU-product and the RoPE checkpoint remain selectable | Accepting an operator win without a repeated complete-model gain |
 | Decode attention | `Hq % Hkv == 0`, `D <= 256`, FP32 online-softmax state, and causal/explicit mask semantics | Avoid score/probability tensors and merge softmax while walking K/V | Model dispatch is `L <= 8`, `S <= 128`, and no explicit mask; it loses past the measured context crossover and is under-filled at very short contexts | Readable grouped attention handles longer queries, longer contexts, and explicit masks | Fixed implementation order, GPU performance-state drift, or treating correctness at `S=1` as schedule efficiency |
-| SIMD-matrix prefill | W4/group-128 layout, BF16 storage, FP32 tile accumulation, and correct partial tiles | Reuse activation and dequantized-weight tiles across prompt rows | Performance-lab path for `M > 8`; partial and new model shapes need both correctness and timing sweeps | Day 3 matvec remains the short-row dispatch; vanilla matmul is the oracle | Comparing all-logit course prefill with last-logit MLX serving |
+| SIMD-matrix prefill | W4/group-128 layout, BF16 storage, FP32 tile accumulation, and correct partial tiles | Reuse activation and dequantized-weight tiles across prompt rows | Performance-lab path for `M > 8`; partial and new model shapes need both correctness and timing sweeps | Readable MLX matmul is the correctness oracle; Day 3 matvec remains the short-row dispatch and vanilla Metal is a bring-up control | Comparing all-logit course prefill with last-logit MLX serving |
 | Split-K prefill | Partitions align to quantization groups; partial planes are disjoint; final reduction is FP32 | Add independent groups only while the ordinary result grid is under-filled | Helps short narrow Qwen projections, is neutral around the 128-token acceptance shape, and loses once the base grid is occupied | `split_k <= 1` dispatches exactly to the Day 6 unsplit kernel | Profiling independent layers can hide under-occupancy that appears in the dependency-ordered model |
 
 This is a retention ledger, not a portability certificate. A new GPU, MLX
@@ -393,11 +393,11 @@ or arithmetic. For the narrow K projection, the unsplit launch geometry is:
 | 2,048 | 64 | 32 | 2,048 |
 
 The source-enabled capture command at the end of Day 6 records the first row of
-this table. In Xcode, the encoder must show the unsplit SIMD-matrix pipeline,
-`32 x 1 x 1` threadgroups, and 128 threads per threadgroup before the trace is
-accepted as occupancy evidence. The long controls rule out a generally slow
-tile, while the short operator table and dispatch geometry select Split-K for
-Day 7.
+this table. Before the trace is accepted as occupancy evidence, the `gpudebug`
+record must name the unsplit SIMD-matrix pipeline and report `32 x 1 x 1`
+threadgroups with 128 threads per threadgroup. The long controls rule out a
+generally slow tile, while the short operator table and dispatch geometry
+select Split-K for Day 7.
 
 ### Day 7: Split K Only Below the Crossover
 
@@ -426,8 +426,8 @@ operator sweep is neutral: Q, O, gate, and down dispatch unchanged, while the
 narrow K split measures 221.2 us versus 222.8 us unsplit. The fresh-process
 acceptance result is likewise neutral at 792.55 versus 797.45 prefill tok/s. At
 `M=2048`, every projection falls back exactly to Day 6. Because the dispatch
-geometry, operator table, and end-to-end result agree, another Xcode trace would
-not change the retention decision.
+geometry, operator table, and end-to-end result agree, another `.gputrace`
+replay would not change the retention decision.
 
 The fresh-process samples for the short control point are checked in at
 `benchmark_results/m4-pro-qwen3-4b-week2-32-mlx-0.32.0.json`. The completed
@@ -550,11 +550,13 @@ MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --output /tmp/week2-q-projection.gputrace
 ```
 
-Open the trace in Xcode and profile the selected compute pipeline. Pipeline
-Statistics reports shader GPU time together with instruction, ALU, cache, MMU,
-control-flow, register, and spill evidence. On M3 and newer Macs, the Shader
-Cost Graph is a true function-call flame graph with weighted source lines. The
-checked-in chart above does not substitute for either view.
+Replay the trace with `gpudebug` and profile the selected compute pipeline.
+Pipeline Statistics reports shader GPU time together with instruction, ALU,
+cache, MMU, control-flow, register, and spill evidence. On M3 and newer Macs,
+the Shader Cost Graph is a true function-call flame graph with weighted source
+lines. Record the exact line of code and percentage as text; a screenshot is
+not required. Xcode's graphical Metal debugger can provide the same evidence
+when a compatible `gpudebug` is unavailable.
 
 `xcrun xctrace` is available from the command line:
 
@@ -585,13 +587,16 @@ empty counter table, and do not use trace wall time as a throughput result.
 
 ### M4 Pro Decode-Matvec Pipeline Profile
 
-This capture uses an Apple M4 Pro with a 20-core GPU, macOS 26.5.2, Xcode 26.6,
-MLX 0.32.0, and the Qwen3-4B query projection at `M=1`, `K=2560`, `N=4096`.
-Ten requested evaluations produced nine compute dispatches and one final
-synchronization-only command buffer. Xcode measured 331.58 us of GPU time, or
-36.84 us per recorded dispatch; the median after excluding the first dispatch
-was 35.22 us. The Performance State was Medium, so these timings describe the
-profile replay rather than an acceptance benchmark.
+This evidence record was collected from the graphical Xcode 26.6 profiler and
+normalized into text. A compatible `gpudebug` replay should record the same
+fields; the values below are not presented as beta CLI output. The capture uses
+an Apple M4 Pro with a 20-core GPU, macOS 26.5.2, MLX 0.32.0, and the Qwen3-4B
+query projection at `M=1`, `K=2560`, `N=4096`. Ten requested evaluations
+produced nine compute dispatches and one final synchronization-only command
+buffer. Xcode measured 331.58 us of GPU time, or 36.84 us per recorded
+dispatch; the median after excluding the first dispatch was 35.22 us. The
+Performance State was Medium, so these timings describe the profile replay
+rather than an acceptance benchmark.
 
 The trace occupies 161 MiB because it snapshots buffers, the debug metallib,
 and source line tables. Size alone is not validation: the replay was accepted
@@ -615,10 +620,6 @@ scores within the same replay, not percentages of wall time.
 | Last-level-cache limiter | 6.40% |
 | Control-flow limiter | 3.94% |
 
-![Xcode instruction, ALU, and F32 counters for the decode matvec](./week2-xcode-arithmetic-counters.png)
-
-![Xcode MMU and last-level-cache counters for the same dispatches](./week2-xcode-memory-counters.png)
-
 The limiter scores alone do not mean that weight traffic is free. The same
 steady-state dispatches report the following memory behavior:
 
@@ -628,8 +629,6 @@ steady-state dispatches report the following memory behavior:
 | Bytes read from device memory | 5.33 MiB/dispatch |
 | Last-level-cache bandwidth | 201.64 GiB/s |
 | Last-level-cache miss rate | 95.2% |
-
-![Xcode device-memory bandwidth counters for the repeated quantized projection](./week2-xcode-bandwidth-counters.png)
 
 The projection is still a streaming kernel: almost every packed weight byte
 comes from device memory, and the high cache miss rate is expected because each
@@ -642,15 +641,13 @@ the incremental headroom above a substantial bandwidth floor.
 
 The Shader Cost Graph locates the cost more precisely:
 
-| Metal source | Shader cost |
-|---|---:|
-| Line 516, first masked weight product | 22.44% |
-| Line 517, second masked weight product | 20.38% |
-| Line 518, third masked weight product | 16.20% |
-| Line 519, fourth masked weight product | 12.83% |
-| **Four-line masked dot product** | **71.85%** |
-
-![Xcode source costs for the four masked W4 dot-product terms](./week2-xcode-matvec-hot-lines.png)
+| Line | Metal source | Shader cost |
+|---:|---|---:|
+| 516 | `scaled_activations[local] * (weights & 0x000f)` | 22.44% |
+| 517 | `scaled_activations[local + 1] * (weights & 0x00f0)` | 20.38% |
+| 518 | `scaled_activations[local + 2] * (weights & 0x0f00)` | 16.20% |
+| 519 | `scaled_activations[local + 3] * (weights & 0xf000)` | 12.83% |
+|  | **Four-line masked dot product** | **71.85%** |
 
 This makes the next experiment narrow. Keep the packed W4A16 layout and the
 four-output, two-SIMD-group schedule, but reduce instruction and register

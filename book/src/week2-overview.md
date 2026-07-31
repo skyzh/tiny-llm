@@ -32,9 +32,11 @@ weights, activations, projections, KV-cache entries, and model-facing kernel
 outputs are BF16. Numerically sensitive reductions, dot products, and
 online-softmax state accumulate in FP32 inside readable expressions or kernel
 registers. Week 2 extensions are GPU-only: readable Python equations written
-with `mlx.core` and vanilla Metal kernels provide correctness oracles without
-requiring CPU BF16 support. This contract remains in force for Week 3, so later
-chapters only describe new storage and scheduling behavior.
+with `mlx.core` provide correctness oracles without requiring CPU BF16 support.
+Vanilla Metal kernels are inspectable bring-up controls for optimized Metal
+schedules, but they must still agree with the readable oracle. This contract
+remains in force for Week 3, so later chapters only describe new storage and
+scheduling behavior.
 
 ## Verification Status
 

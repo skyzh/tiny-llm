@@ -166,12 +166,12 @@ the dependency-aware operator attribution. If those two measurements disagree,
 or if you want to investigate a course-owned Metal shader, continue with the
 [advanced Metal profiling appendix](./week2-advanced-profiling.md).
 
-That appendix contains the Xcode capture workflow, Pipeline Statistics and
-Shader Cost Graph interpretation, screenshot requirements, Instruments
-commands, and the evidence order for schedule tuning. Keeping those steps out
-of the required lab makes the boundary explicit: they are useful performance
-research, not prerequisites for understanding prefill, decode, synchronization,
-or matched baselines.
+That appendix contains the `.gputrace` capture workflow, the Xcode beta
+`gpudebug` session, Pipeline Statistics and Shader Cost Graph interpretation,
+the required text evidence record, Instruments commands, and the evidence order
+for schedule tuning. Keeping those steps out of the required lab makes the
+boundary explicit: they are useful performance research, not prerequisites for
+understanding prefill, decode, synchronization, or matched baselines.
 
 ## Record a Matched Baseline
 
