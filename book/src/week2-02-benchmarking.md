@@ -166,12 +166,12 @@ the dependency-aware operator attribution. If those two measurements disagree,
 or if you want to investigate a course-owned Metal shader, continue with the
 [advanced Metal profiling appendix](./week2-advanced-profiling.md).
 
-That appendix contains the `.gputrace` capture workflow, the Xcode beta
-`gpudebug` session, Pipeline Statistics and Shader Cost Graph interpretation,
-the required text evidence record, Instruments commands, and the evidence order
-for schedule tuning. Keeping those steps out of the required lab makes the
-boundary explicit: they are useful performance research, not prerequisites for
-understanding prefill, decode, synchronization, or matched baselines.
+That appendix contains the `.gputrace` capture and Xcode GUI replay workflow,
+the consistent screenshot checklist for Pipeline Statistics, memory, and
+Shader Cost Graph evidence, Instruments commands, and the evidence order for
+schedule tuning. Keeping those steps out of the required lab makes the
+boundary explicit: they are useful performance research, not prerequisites
+for understanding prefill, decode, synchronization, or matched baselines.
 
 ## Record a Matched Baseline
 
@@ -250,9 +250,10 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 Attach two results to the checkpoint report: the fresh-process JSON with your
 solution and MLX, and the kernel-group JSON with absolute times as well as
 shares. The first says how far decode is from MLX; the second says which
-operator family owns the current implementation's time. A GPU trace is not
-required to choose the family. Attach one only after the selected work reaches
-a course-owned shader and the trace passes the replay checks above.
+operator family owns the current implementation's time. The optional advanced
+lab replays an inspectable vanilla Metal quantized projection and captures the
+same Xcode views used by every later checkpoint. That isolated trace does not replace the
+dependency-aware attribution that ranks the complete operator families.
 
 Continue to Day 3 when projection work is the largest removable cost and its
 dense weight traffic scales with the roofline calculation. If another family
@@ -260,6 +261,10 @@ dominates your profile, inspect that family before copying the reference
 solution's next step. The
 [reference checkpoint](./appendix-performance.md#day-2-measure-before-optimizing)
 pairs its end-to-end result with the synchronized attribution while keeping
-machine-specific values out of this chapter.
+machine-specific values in the appendix. Its Xcode control makes the schedule
+concrete: the vanilla packed-weight Metal projection spends each output thread
+walking the full reduction independently. The Day 2 model itself still uses
+dense weights; the complete-model attribution, not this isolated control,
+selects the Day 3 storage and scheduling change before the smaller families.
 
 {{#include copyright.md}}

@@ -188,13 +188,19 @@ it establishes the synchronized benchmark and profile that choose Day 3.
 | Chapter | Cumulative checkpoint | Prefill tok/s | Decode tok/s | Output tok/s | Change selected by the preceding profile |
 |---|---|---:|---:|---:|---|
 | Day 1 | Dense request KV cache | 730.43 | 24.63 | 24.01 | Stop full-prefix decode recomputation. |
-| Day 2 | Benchmark and profile | 730.43 | 24.63 | 24.01 | Measure packed projection weight traffic. |
+| Day 2 | Benchmark and profile | 730.43 | 24.63 | 24.01 | Measure dense projection weight traffic. |
 | Day 3 | Quantized matvec | 105.00 | 58.71 | 37.95 | Keep weights packed and add the x4 decode kernel. |
 | Day 4 | Fused model kernels | 105.97 | 75.21 | 44.33 | Remove the newly exposed pointwise graph launches. |
-| Day 5 | Fused decode attention | 105.99 | 75.75 | 44.50 | Replace the next measured context-dependent gap. |
+| Day 5 | Bounded decode attention | 105.99 | 75.75 | 44.50 | Guard inactive at this shape; no expected change. |
 | Day 6 | SIMD-matrix prefill | 797.45 | 75.12 | 69.17 | Fix the quantized matrix path exposed by Day 3. |
 | Day 7 | Split-K prefill | 792.55 | 75.41 | 69.37 | Fill the GPU only for under-occupied short projections. |
 | Baseline | MLX 0.32.0 | 830.49 | 89.37 | 81.30 | External denominator. |
+
+Day 5's custom path is inactive throughout this fixed workload. Prefill has
+`L=128`; after cache append, the first timed decode step sees `S=129` and every
+later step is longer. The small observed Day 4-to-Day 5 difference is therefore
+run noise, not an accepted attention gain. A matched short-context checkpoint
+below evaluates the bounded kernel where it actually dispatches.
 
 ### The Kernel Profile That Selects Each Chapter
 
@@ -222,8 +228,9 @@ change.
 
 This is an operator-attribution chart, not a Metal flame graph. It ranks model
 operator families and selects the next kernel to inspect. The Shader Cost Graph
-described in [GPU Profile and CLI Tools](#gpu-profile-and-cli-tools) answers the
-next question: which function and source line inside that kernel is costly.
+described in the [Week 2 Xcode checkpoint contract](#week-2-xcode-checkpoint-contract)
+answers the next question: which function and source line inside that kernel is
+costly.
 
 The profile makes the progression concrete:
 
@@ -232,11 +239,11 @@ The profile makes the progression concrete:
 - After packed matvec, the pointwise group is 35.8% while attention is only
   4.5% at the 128-token acceptance context. Day 4 therefore removes the
   measured normalization, position, and activation overhead first.
-- After the Day 4 pointwise kernels, attention rises to 6.4% and is the next
-  context-dependent gap. Day 5 tests online softmax and retains it only after
-  the complete-model benchmark also improves.
-- After Day 5, decode reaches 84.8% of MLX. Changing the workload to
-  128-token prefill makes the readable quantized projection path 99.0% of
+- After the Day 4 pointwise kernels, a context and operator sweep isolates a
+  removable attention gap through `S=128`. Day 5 tests online softmax there and
+  retains it only after a matched 32-token-prompt model run also improves.
+- Returning to the fixed workload leaves Day 5 inactive by design. Its
+  128-token prefill makes the vanilla quantized projection path 99.0% of
   attributed time, which selects the cooperative matrix kernel in Day 6.
 - After Day 6, projections remain most of the inherent prefill work, but the
   long-shape operator comparison is already close to MLX. The 32-token shape
@@ -275,18 +282,20 @@ row and synchronized attribution answer different parts of the handoff:
 | Attention | 0.85 ms, 2.1% | Do not select attention from this workload. |
 | KV growth | 0.33 ms, 0.8% | The dense cache already removed prefix recomputation. |
 
-The operator-family result is sufficient to select Day 3. A source-enabled GPU
-trace becomes useful after the projection is a course-owned shader; the Day 3
-analysis attaches that kernel-internal evidence.
+The operator-family result is sufficient to select Day 3. The optional Day 2
+Xcode control provides an inspectable vanilla Metal projection at the same Qwen
+shape. That isolated packed-W4 control is not the Day 2 model's dense
+projection; it exists so a later trace can compare schedules without pretending
+that one shader ranked the complete model.
 
 ### Day 3: Keep Weights Packed
 
 The x4 W4A16 matvec raises complete-model decode from 24.63 to 58.71 tok/s, a
 138.4% gain. Prefill falls from 730.43 to 105.00 tok/s because matrix-shaped
-inputs still use the readable quantized kernel. The operator microbenchmark
+inputs still use the vanilla Metal quantized kernel. The operator microbenchmark
 checks whether the decode gain came from the intended projection schedule:
 
-| Qwen3-4B projection, `M=1` | Readable | Packed matvec | MLX |
+| Qwen3-4B projection, `M=1` | Vanilla Metal | Packed matvec | MLX |
 |---|---:|---:|---:|
 | Q | 750.3 us | 187.6 us | 183.4 us |
 | K | 239.5 us | 145.1 us | 147.8 us |
@@ -303,12 +312,11 @@ uses them, but normalization, position, and activation now occupy 35.8% and are
 the larger removable gap. That combination, rather than the absolute height of
 the projection bar, selects Day 4.
 
-The [source-enabled matvec profile](#m4-pro-decode-matvec-pipeline-profile) is
-the kernel-internal attachment for this checkpoint. It reports a 35.22 us
-steady-state GPU dispatch, 5.33 MiB read per dispatch, and 71.85% of shader cost
-on four masked W4 products. Those hot lines identify optional matvec tuning,
-but the matched operator table shows why that work does not displace the larger
-pointwise model gap in the required course order.
+The [source-enabled matvec profile](#week-2-xcode-checkpoint-contract) is the
+optional kernel-internal attachment for this checkpoint. Use its Memory view
+and weighted source lines to identify additional matvec headroom, but do not let
+that shader-local result displace the larger pointwise model gap established by
+the matched operator table.
 
 ### Day 4: Fused Model Kernels
 
@@ -323,16 +331,24 @@ The cumulative model and operator results agree on all three retained changes:
 
 The pointwise group falls from 35.8% after Day 3 to 10.5%. Projections are now
 80.5% of attributed decode time but are already close to their MLX operator
-latencies. Attention is 6.4% at the acceptance context and grows with context,
-which makes it the next shape-dependent operator to test. No source trace is
-needed for this handoff because the three microbenchmarks, cumulative model
-rows, and updated attribution agree.
+latencies. In the optional Xcode checkpoint, verify that the RMSNorm, RoPE, and
+SwiGLU pipelines all dispatched. The `S=32`, `S=128`, and `S=160` sweep then
+isolates a short-context attention opportunity and its fallback boundary. That
+evidence selects a bounded Day 5 experiment; the longer losing range does not.
 
 ### Day 5: Fused Decode Attention
 
-At the 128-token acceptance context, fused attention raises complete-model
-decode from 75.21 to 75.75 tok/s. The model-equivalent microbenchmark includes
-the FP32 promotion and output cast used by the readable fallback:
+The matched short-context model checkpoint uses a 32-token prompt and an output
+length of 97. Prefill produces the first token, so all 96 timed decode calls
+grow the cache from `S=33` through `S=128` and enter the custom guard. Under
+that workload, fused attention raises median decode from 59.90 to 61.78 tok/s
+(+3.1%) and output throughput from 48.52 to 49.54 tok/s (+2.1%). MLX reaches
+68.86 decode tok/s, so the bounded checkpoint reaches 89.7% of that matched
+denominator. The raw samples are checked in at
+`benchmark_results/m4-pro-qwen3-4b-week2-short-context-mlx-0.32.0.json`.
+
+The model-equivalent operator microbenchmark includes the FP32 promotion and
+output cast used by the readable fallback:
 
 | Cached context | Readable | Fused | MLX | Fused vs readable |
 |---:|---:|---:|---:|---:|
@@ -343,20 +359,20 @@ the FP32 promotion and output cast used by the readable fallback:
 | 256 | 241.4 us | 265.1 us | 154.8 us | 9.8% slower |
 
 The measured crossover narrows the reference dispatch guard to contexts of at
-most 128 tokens. Larger contexts retain the readable path. This is why both
-operator latency and the complete-model result belong in the analysis: the
-model accepts the optimization, while the shape sweep defines where it is
-valid.
+most 128 tokens. Larger contexts retain the readable path. The operator sweep
+and matched short-context model gain establish where the schedule is valid; an
+optional Xcode `S=128` replay verifies the intended dispatch and its hot loop.
 
-The completed decode checkpoint reaches 84.8% of MLX. Switching the profile to
-128-token prefill attributes 1,196.34 ms of 1,208.78 ms, or 99.0%, to
-quantized projections; attention accounts for 6.08 ms and the pointwise group
-for 6.35 ms. That new workload selects the matrix-shaped projection kernel in
-Day 6 without requiring another attention trace.
+The fixed 128-token acceptance workload remains a neutral control because it
+never enters the guard. Returning to that workload and profiling its prefill
+attributes 1,196.34 ms of 1,208.78 ms, or 99.0%, to quantized projections;
+attention accounts for 6.08 ms and the pointwise group for 6.35 ms. That
+unchanged prefill bottleneck selects the matrix-shaped projection kernel in
+Day 6.
 
 ### Day 6: Use Cooperative Loads for Quantized Prefill
 
-At the Day 5 prefill checkpoint, quantized projections account for 1,196.34 ms
+At the fixed-workload prefill checkpoint, quantized projections account for 1,196.34 ms
 of the 1,208.78 ms attributed profile, or 99.0%. The cooperative matrix
 schedule reduces attributed projection time to 147.63 ms and raises
 complete-model prefill from 105.99 to 797.45 tok/s. MLX reaches 830.49 tok/s.
@@ -392,12 +408,12 @@ or arithmetic. For the narrow K projection, the unsplit launch geometry is:
 | 128 | 4 | 32 | 128 |
 | 2,048 | 64 | 32 | 2,048 |
 
-The source-enabled capture command at the end of Day 6 records the first row of
-this table. Before the trace is accepted as occupancy evidence, the `gpudebug`
-record must name the unsplit SIMD-matrix pipeline and report `32 x 1 x 1`
-threadgroups with 128 threads per threadgroup. The long controls rule out a
-generally slow tile, while the short operator table and dispatch geometry
-select Split-K for Day 7.
+The dispatch formula yields 32 independent threadgroups for the first row of
+this table. The source-enabled capture at the end of Day 6 must name the
+unsplit SIMD-matrix pipeline and show that its weighted source and limiter
+evidence is consistent with under-occupancy rather than a costly inner tile.
+The long controls rule out a generally slow schedule, while the short operator
+table and calculated dispatch geometry select Split-K for Day 7.
 
 ### Day 7: Split K Only Below the Crossover
 
@@ -426,8 +442,10 @@ operator sweep is neutral: Q, O, gate, and down dispatch unchanged, while the
 narrow K split measures 221.2 us versus 222.8 us unsplit. The fresh-process
 acceptance result is likewise neutral at 792.55 versus 797.45 prefill tok/s. At
 `M=2048`, every projection falls back exactly to Day 6. Because the dispatch
-geometry, operator table, and end-to-end result agree, another `.gputrace`
-replay would not change the retention decision.
+geometry, operator table, and end-to-end result agree, use the optional Xcode
+replay only as confirmation: it must show the accumulation and merge pipelines,
+while the calculated policy supplies the partition count and the shape sweep
+decides where those costs are worthwhile.
 
 The fresh-process samples for the short control point are checked in at
 `benchmark_results/m4-pro-qwen3-4b-week2-32-mlx-0.32.0.json`. The completed
@@ -527,150 +545,29 @@ growth, and page reuse. Prefix sharing and speculative decoding require
 separate traces with shared prefixes or cache rewind events and are not claimed
 by this result.
 
-## GPU Profile and CLI Tools
+## Week 2 Xcode Checkpoint Contract
 
-Two profiles are useful at different levels. The synchronized
-reference-solution attribution ranks operator families without a GUI:
+The synchronized operator attribution selects a family; a source-enabled Xcode
+replay explains what happens inside one representative shader from that family.
+Preserve the same six whole-window screenshots from a large, non-full-screen
+Xcode window for every Day 2–7 checkpoint: performance overview, left and right
+performance limiters, left and right memory counters, and the Cost Graph with
+20–30 weighted source lines around the hot loop. The
+[advanced profiling appendix](./week2-advanced-profiling.md) gives the capture
+and replay procedure.
 
-```bash
-pdm run profile-week2-kernels --solution tiny_llm_ref --model qwen3-4b \
-  --warmup 4 --iterations 12
-```
-
-After it selects an operator family, capture one source-enabled shader at the
-same Qwen3-4B shape:
-
-```bash
-CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext-ref
-
-MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
-  --solution tiny_llm_ref \
-  --projection q --rows 1 \
-  --iterations 10 \
-  --output /tmp/week2-q-projection.gputrace
-```
-
-Replay the trace with `gpudebug` and profile the selected compute pipeline.
-Pipeline Statistics reports shader GPU time together with instruction, ALU,
-cache, MMU, control-flow, register, and spill evidence. On M3 and newer Macs,
-the Shader Cost Graph is a true function-call flame graph with weighted source
-lines. Record the exact line of code and percentage as text; a screenshot is
-not required. Xcode's graphical Metal debugger can provide the same evidence
-when a compatible `gpudebug` is unavailable.
-
-`xcrun xctrace` is available from the command line:
-
-```bash
-xcrun xctrace list templates
-
-xcrun xctrace record \
-  --template "Metal System Trace" \
-  --output /tmp/tiny-llm-decode.trace \
-  --launch -- pdm run bench --solution tiny_llm_ref --loader week3 \
-    --model qwen3-4b --num-seqs 1 \
-    --min-input-len 2048 --max-input-len 2048 \
-    --min-output-len 33 --max-output-len 33 --warmup 1 \
-    --prefill-logits last
-
-xcrun xctrace export --input /tmp/tiny-llm-decode.trace --toc
-```
-
-On the measured M4 Pro, the CLI system trace resolves the exact
-reference-solution pipelines, including
-`quantized_matvec_x4_fast_w4a16_g128_bf16`,
-`week2_decode_attention_bf16`, `week2_rms_norm_bf16`,
-`week2_swiglu_bf16`, and `week2_rope_bf16`. Its exported shader-sample and
-counter tables contain no rows on this configuration, so it identifies
-functions but cannot establish an ALU or memory limiter. The source-enabled
-`.gputrace` replay below supplies that evidence. Never infer a limiter from an
-empty counter table, and do not use trace wall time as a throughput result.
-
-### M4 Pro Decode-Matvec Pipeline Profile
-
-This evidence record was collected from the graphical Xcode 26.6 profiler and
-normalized into text. A compatible `gpudebug` replay should record the same
-fields; the values below are not presented as beta CLI output. The capture uses
-an Apple M4 Pro with a 20-core GPU, macOS 26.5.2, MLX 0.32.0, and the Qwen3-4B
-query projection at `M=1`, `K=2560`, `N=4096`. Ten requested evaluations
-produced nine compute dispatches and one final synchronization-only command
-buffer. Xcode measured 331.58 us of GPU time, or 36.84 us per recorded
-dispatch; the median after excluding the first dispatch was 35.22 us. The
-Performance State was Medium, so these timings describe the profile replay
-rather than an acceptance benchmark.
-
-The trace occupies 161 MiB because it snapshots buffers, the debug metallib,
-and source line tables. Size alone is not validation: the replay was accepted
-only after Xcode showed the exact target pipeline, nine compute encoders, nine
-dispatch calls, nonzero GPU time, and populated counter rows.
-
-The Shaders view attributes 100% of captured shader cost to
-`quantized_matvec_x4_fast_w4a16_g128_bf16`. Xcode reports 91 allocated
-registers, a high-water mark of 91, and zero spilled bytes. The following
-medians exclude the first dispatch. Xcode's limiter values are comparable
-scores within the same replay, not percentages of wall time.
-
-| Pipeline statistic | Steady-state median |
-|---|---:|
-| Occupancy manager target | 55.99% |
-| Instruction-throughput limiter | 46.78% |
-| Integer-and-complex limiter | 45.44% |
-| F32 limiter | 32.07% |
-| ALU utilization | 27.75% |
-| MMU limiter | 6.84% |
-| Last-level-cache limiter | 6.40% |
-| Control-flow limiter | 3.94% |
-
-The limiter scores alone do not mean that weight traffic is free. The same
-steady-state dispatches report the following memory behavior:
-
-| Memory statistic | Steady-state median |
-|---|---:|
-| Device-memory bandwidth | 191.59 GiB/s |
-| Bytes read from device memory | 5.33 MiB/dispatch |
-| Last-level-cache bandwidth | 201.64 GiB/s |
-| Last-level-cache miss rate | 95.2% |
-
-The projection is still a streaming kernel: almost every packed weight byte
-comes from device memory, and the high cache miss rate is expected because each
-output row is consumed once. Quantization has already reduced that unavoidable
-traffic. At this schedule, however, the instruction and arithmetic limiter
-scores are about seven times the MMU and last-level-cache limiter scores, while
-the source-cost graph places most of the work on masked products rather than
-the load. The profile therefore identifies arithmetic and code generation as
-the incremental headroom above a substantial bandwidth floor.
-
-The Shader Cost Graph locates the cost more precisely:
-
-| Line | Metal source | Shader cost |
-|---:|---|---:|
-| 516 | `scaled_activations[local] * (weights & 0x000f)` | 22.44% |
-| 517 | `scaled_activations[local + 1] * (weights & 0x00f0)` | 20.38% |
-| 518 | `scaled_activations[local + 2] * (weights & 0x0f00)` | 16.20% |
-| 519 | `scaled_activations[local + 3] * (weights & 0xf000)` | 12.83% |
-|  | **Four-line masked dot product** | **71.85%** |
-
-This makes the next experiment narrow. Keep the packed W4A16 layout and the
-four-output, two-SIMD-group schedule, but reduce instruction and register
-pressure inside the masked dot product. One small candidate is an eight-value
-staged variant that shortens the lifetime of the 16-element activation array;
-another is a `float4` dot formulation that lets the compiler schedule the four
-masked products together. Re-profile allocated registers, the four source
-lines, isolated projection time, and full-model decode after each variant, and
-drop the change unless all relevant measurements improve.
-
-This is an optional follow-up, not another required Week 2 chapter. MLX's
-[`qmv_fast_impl`](https://github.com/ml-explore/mlx/blob/v0.32.0/mlx/backend/metal/kernels/quantized.h)
-uses the same affine rearrangement and four-output, two-SIMD-group structure,
-so restating that formula is not a new optimization. The profile selects a
-compiler-scheduling experiment; it does not claim that the experiment has
-already won.
+For the reference M4 Pro measurements, record macOS, Xcode, Metal compiler,
+MLX, performance state, source revision, trace name, implementation, and tensor
+shape beside each set. Xcode replay time is diagnostic; the Overview must show
+the actual execution mode, while the balanced fresh-process tables above remain
+the acceptance evidence.
 
 ## Optimization Map
 
 | Measured bottleneck | Retained change | Chapter |
 |---|---|---|
 | Full-prefix decode recomputation | Dense request KV cache | Week 2 Day 1 |
-| Quantized projection weight traffic | Packed W4A16 x4 SIMD matvec | Week 2 Day 3 |
+| Dense projection weight traffic | Packed W4A16 x4 SIMD matvec | Week 2 Day 3 |
 | Repeated small graph dispatches | RMSNorm, RoPE, SwiGLU kernels | Week 2 Day 4 |
 | Growing short-context attention | Online-softmax decode kernel | Week 2 Day 5 |
 | Scalar/strided prefill projection loads | Cooperative 32×32×32 quantized matmul | Week 2 Day 6 |
