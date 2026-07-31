@@ -214,8 +214,8 @@ crossover rather than assuming that an endpoint applies to every context. Also
 attach the decode and prefill kernel-group results. Reject the custom dispatch
 if repeated fresh-process model runs do not improve, even when the isolated
 kernel looks faster. If the operator wins only over a limited context range,
-encode that measured crossover in the dispatch guard; use an Xcode trace only
-when the operator and model results still disagree.
+encode that measured crossover in the dispatch guard; replay a `.gputrace` with
+`gpudebug` only when the operator and model results still disagree.
 
 The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
 rotated every implementation order, and recorded all 60 samples per

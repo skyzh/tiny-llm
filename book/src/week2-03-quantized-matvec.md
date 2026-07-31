@@ -457,7 +457,8 @@ Start with a two-dimensional grid over output row `i` and output column `k`.
 Each thread walks all `N` input values, unpacks eight int4 weights from each
 `uint32`, applies the group scale and bias, and accumulates one `C[i, k]` in
 float32. This kernel repeats activation loads and does not share work, but its
-control flow mirrors the equation and is a useful debugging oracle.
+control flow mirrors the equation and makes it a useful debugging control. The
+readable MLX equation remains the correctness oracle for both Metal schedules.
 
 Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 6
 revisits that workload with cooperative tiling.
@@ -618,8 +619,9 @@ pdm run bench --solution tiny_llm --loader week2 \
 Run the same command with `--solution tiny_llm_ref` to compare it with the
 reference solution.
 
-The vanilla matrix product remains callable as a correctness oracle, but only
-the SIMD matvec is integrated into decode.
+The vanilla matrix product remains callable as an inspectable Metal control,
+but the readable MLX equation is the correctness oracle and only the SIMD
+matvec is integrated into decode.
 
 ## Benchmark Analysis: Select Day 4
 
@@ -646,11 +648,13 @@ Projections may remain the largest absolute category because the model performs
 them in every layer; once their operator latency is close to MLX, that bar is
 no longer the largest removable gap.
 
-Capture the matvec in Xcode only if the operator table still leaves a material
-gap or you are doing the optional kernel-tuning exercise. Continue to Day 4
-when normalization, position, and activation account for the largest removable
-gap. If the projection comparison is still far behind, keep tuning the matvec
-instead. The
+Capture and replay the matvec `.gputrace` only if the operator table still
+leaves a material gap or you are doing the optional kernel-tuning exercise.
+Record the pipeline, counters, and highest-cost source lines with `gpudebug` as
+described in the advanced appendix; Xcode's graphical Metal debugger is the
+manual fallback. Continue to Day 4 when normalization, position, and activation
+account for the largest removable gap. If the projection comparison is still
+far behind, keep tuning the matvec instead. The
 [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
 pairs the model delta, projection microbenchmarks, attribution, and the
 source-enabled matvec trace.

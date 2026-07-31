@@ -29,9 +29,10 @@ The implementation remains deliberately narrow:
 ## From a Matvec to a Cooperative Tile
 
 The vanilla one-thread dot product and a single-group 8×8 tile are useful
-correctness oracles, but neither provides enough cooperative reuse for
-multi-row prefill. The performance schedule must share both activations and
-dequantized weights across a larger result tile.
+Metal bring-up controls, but neither provides enough cooperative reuse for
+multi-row prefill. Compare both with the readable MLX correctness oracle. The
+performance schedule must share both activations and dequantized weights across
+a larger result tile.
 
 The optimized kernel assigns four SIMD groups, or 128 threads, to one
 32×32×32 tile:
@@ -148,15 +149,15 @@ MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
 ```
 
 Attach the complete-model prefill delta, per-projection tables at 32, 128, and
-2,048 rows, the 32/128-row attribution, and the unsplit 32-row Xcode dispatch
-geometry. Do not select Split-K merely because projections still occupy most
-of prefill. First require the long or wide controls to approach MLX, while the
-short, narrow projection remains disproportionately slow.
+2,048 rows, the 32/128-row attribution, and the unsplit 32-row dispatch geometry
+reported by `gpudebug`. Do not select Split-K merely because projections still
+occupy most of prefill. First require the long or wide controls to approach
+MLX, while the short, narrow projection remains disproportionately slow.
 
-In the Xcode capture, confirm that the unsplit result grid has too few
-independent threadgroups; if Pipeline Statistics or the Shader Cost Graph
-instead shows costly work inside each tile, repair Day 6 before multiplying the
-grid. The
+In the trace, confirm that the unsplit result grid has too few independent
+threadgroups. Record the grid and threadgroup geometry as text. If the
+performance tree or weighted source lines instead show costly work inside each
+tile, repair Day 6 before multiplying the grid. The
 [reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
 pairs the prefill gain with long and short operator controls and the dispatch
 geometry that motivates Split-K.

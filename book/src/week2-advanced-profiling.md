@@ -8,8 +8,61 @@
 Use this appendix after a synchronized operator benchmark and the
 dependency-aware kernel attribution agree on the kernel family to investigate.
 The required Day 2 lab ends with benchmark JSON and an attribution profile;
-Xcode capture, counter interpretation, source-line analysis, and schedule
+GPU trace replay, counter interpretation, source-line analysis, and schedule
 tuning belong here.
+
+## Configure Agent-Compatible GPU Tools on macOS 26
+
+`gpudebug` is documented as part of the Xcode 27 command-line workflow, but
+Xcode 27 beta does not require macOS 27. Apple supports the beta on macOS 26.4
+or later. Install Xcode beta from
+[Apple Developer Downloads](https://developer.apple.com/download/all/), then
+select it and install its optional Metal compiler toolchain:
+
+```bash
+sudo xcode-select --switch /Applications/Xcode-beta.app/Contents/Developer
+xcodebuild -runFirstLaunch -checkForNewerComponents
+xcodebuild -downloadComponent MetalToolchain
+```
+
+The Xcode app, standalone Command Line Tools package, and Metal Toolchain are
+distinct pieces. Selecting the Xcode beta does not install the optional Metal
+compiler, and installing that compiler does not replace an older standalone
+Command Line Tools package. The standalone package is not a substitute for
+selecting the Xcode app. Verify the active versions and the actual executable
+instead of assuming that any one installer provided everything:
+
+```bash
+sw_vers -productVersion
+xcode-select --print-path
+xcodebuild -version
+pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
+xcrun metal --version
+command -v gpudebug || xcrun --find gpudebug
+man gpudebug
+```
+
+If `metal` is missing, repeat the `xcodebuild -downloadComponent` command. Do
+not switch the active developer path back to
+`/Library/Developer/CommandLineTools`; the build and capture commands below
+need the selected Xcode beta.
+
+> **Xcode 27 beta 4 packaging note:** On macOS 26.5.2, Xcode 27 beta 4
+> (`27A5228h`), its `27A5228f` Metal Toolchain, and Command Line Tools 27 beta 4
+> install the `gpudebug(1)` manual page but not a discoverable `gpudebug`
+> executable. A successful `man gpudebug` is therefore not an installation
+> check. Require `command -v` or `xcrun --find`; when both fail, use the Xcode 26
+> GUI fallback below for the trace and retain the text evidence format. Do not
+> infer that macOS 27 is required from this beta packaging gap.
+
+Xcode 26's graphical Metal debugger can open the same `.gputrace` and expose
+the counter tables, shader list, and Shader Cost Graph used in this appendix.
+That is a valid manual fallback. The course uses the Xcode beta `gpudebug`
+interface when available because its self-describing text and JSON output can
+be inspected, recorded, and compared by a coding agent without screenshots.
+See Apple's
+[AI-agent workflow](https://developer.apple.com/documentation/xcode/investigating-gpu-issues-with-ai-agents)
+and run `man gpudebug` for the installed command reference.
 
 ## Match the Tool to the Question
 
@@ -17,10 +70,10 @@ tuning belong here.
 |---|---|
 | Did the complete model improve? | Fresh-process throughput benchmark |
 | Which operator family dominates? | Synchronized kernel-group attribution |
-| Which shader, function, and source line is expensive? | Metal Pipeline Statistics and Shader Cost Graph |
+| Which shader, function, and source line is expensive? | `gpudebug` performance tree and source costs |
 
 The operator-attribution chart is not a flame graph. On M3 and newer Macs,
-Xcode's
+the Metal debugger's
 [Shader Cost Graph](https://developer.apple.com/documentation/xcode/analyzing-apple-gpu-performance-using-shader-cost-graph-a17-m3)
 ranks shader function calls and connects them to weighted source lines.
 [Pipeline Statistics](https://developer.apple.com/documentation/xcode/analyzing-draw-command-and-compute-dispatch-performance-with-pipeline-statistics)
@@ -40,8 +93,6 @@ MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --projection q --rows 1 \
   --iterations 10 \
   --output /tmp/week2-q-projection.gputrace
-
-open /tmp/week2-q-projection.gputrace
 ```
 
 The capture uses synthetic buffers with the real `M=1`, `K=2560`, `N=4096`
@@ -56,58 +107,80 @@ bottleneck as proof about your implementation.
 Do not validate a trace by file size. After replay, require all three checks:
 
 - the exact target pipeline appears;
-- Xcode reports at least one compute encoder and dispatch;
+- `gpudebug` reports at least one compute encoder and dispatch;
 - profiling produces nonzero GPU time and counter rows.
 
 `--iterations` is the requested evaluation count, not a promised dispatch
 count. MLX may materialize or synchronize the graph differently, so record
-Xcode's replay summary.
+the replay summary.
 
-## Capture the Counter Tables
+## Reuse One `gpudebug` Session
 
-Open the trace in Xcode, click the profiling gauge, and wait for replay:
+Point an agent at the trace and `man gpudebug`. Begin with a single session and
+reuse its printed session identifier so that the trace and replayer are not
+loaded for every question:
 
-1. Open **Counters**, select **Encoders**, and filter to the repeated target
-   compute encoders.
-2. Select **Performance Limiters**. Expose occupancy, instruction throughput,
-   integer and complex, F32, ALU, MMU, last-level-cache, and control-flow
-   columns.
-3. Confirm that every row belongs to the target pipeline.
-4. Treat the first recorded dispatch as replay warmup and report the median of
-   the remaining rows. Use the same exclusion rule for every comparison.
+```bash
+gpudebug -t /tmp/week2-q-projection.gputrace -c "list"
 
-![Xcode Performance Limiters table for repeated decode-matvec dispatches](./week2-xcode-arithmetic-counters.png)
+# Replace 412 with the session identifier printed above.
+gpudebug -s 412 -c "profile list"
 
-Switch to **Memory** without changing the encoder selection. Record
-device-memory bandwidth, GPU read bandwidth, bytes read from device memory,
-last-level-cache bandwidth, and cache miss rate.
+# For a raw capture, collect and embed a new profile.
+gpudebug -s 412 \
+  -c "profile run --gpu-state medium --exec serial --embed"
+gpudebug -s 412 -c "go performance" -c "list --all"
+```
 
-![Xcode Memory table for the same repeated dispatches](./week2-xcode-bandwidth-counters.png)
+If `profile list` reports an embedded session that you intend to reuse, run
+`profile load` instead of `profile run`. Do not load one profile and then
+silently replace it with another.
 
-Bandwidth and bytes answer different questions: bandwidth describes transfer
-rate, while bytes per dispatch describes how much traffic the algorithm
-requires. Preserve the column headers and several dispatch rows in screenshots,
-and record the raw values separately. A crop of unexplained numbers is not
-reproducible evidence.
+The available performance nodes depend on the GPU and trace. Follow the
+actions printed by `list`; do not assume a hard-coded path. Use `go`, `find`,
+`info`, and `list --all` to locate the target pipeline, its encoders,
+shader statistics, counters, and weighted source lines. Add `--json` when a
+result needs to be aggregated or compared programmatically. End the session
+when the evidence record is complete:
 
-## Capture the Shader Cost Graph
+```bash
+gpudebug --terminate 412
+```
 
-The limiter table selects a kind of work. The Shader Cost Graph locates that
-work in the program:
+Use `--oneshot` only for an isolated query. A chapter investigation normally
+needs several commands, so repeatedly loading the trace with `--oneshot` wastes
+time and can make the investigation harder to follow.
 
-1. Open **Shaders** and find the target pipeline. Record GPU time, allocated
-   registers, register high-water mark, and spilled bytes.
-2. Double-click the pipeline-state cell, then open **Cost Graph**.
-3. Follow the highest-cost function node. In **Source Files**, select the Metal
-   source and keep the source metric set to **Cost**.
-4. Record the highest-cost lines and percentages with the pipeline name,
-   source filename, line numbers, and cost labels visible.
+## Record Text Evidence, Not Screenshots
 
-![Xcode Shader Cost Graph for the masked W4 dot product](./week2-xcode-matvec-hot-lines.png)
+Save a compact text or JSON record beside the benchmark result. It must contain:
+
+- trace path, source commit, hardware, macOS, Xcode, MLX, and performance state;
+- tensor shape, exact pipeline, compute-encoder count, and dispatch count;
+- total GPU time and steady-state median dispatch time;
+- allocated registers, register high-water mark, and spilled bytes;
+- occupancy, instruction, arithmetic, cache, MMU, and control-flow limiters;
+- bytes read per dispatch, memory bandwidth, cache bandwidth, and miss rate;
+- highest-cost source lines as filename, line number, code, and cost percentage.
+
+Treat the first recorded dispatch as replay warmup and report the median of the
+remaining rows. Use the same exclusion rule for every comparison. Bandwidth
+describes transfer rate; bytes per dispatch describes how much traffic the
+algorithm requires. Keep both.
+
+The reference decode-matvec trace, for example, attributes 71.85% of shader
+cost to four adjacent expressions:
+
+| Line | Metal source | Shader cost |
+|---:|---|---:|
+| 516 | `scaled_activations[local] * (weights & 0x000f)` | 22.44% |
+| 517 | `scaled_activations[local + 1] * (weights & 0x00f0)` | 20.38% |
+| 518 | `scaled_activations[local + 2] * (weights & 0x0f00)` | 16.20% |
+| 519 | `scaled_activations[local + 3] * (weights & 0xf000)` | 12.83% |
 
 Counter and source-cost percentages are comparable within one replay. They are
-not percentages of end-to-end model time, and the screenshots are examples of
-the workflow rather than targets for another machine. The
+not percentages of end-to-end model time, and the measured values are not
+targets for another machine. The
 [M4 Pro evidence ledger](./appendix-performance.md#m4-pro-decode-matvec-pipeline-profile)
 shows how raw rows become median tables and a bounded interpretation.
 
@@ -138,9 +211,8 @@ intervals. A compatible Metal Shader Timeline or counter template can rank
 pipelines over a longer request.
 
 Do not use trace-instrumented wall time as a throughput result: capture adds
-overhead and may serialize commands. Record at least the tensor shape, pipeline
-name, GPU time, dispatch count, Pipeline Statistics activity, highest-cost
-function, and highest-cost source line.
+overhead and may serialize commands. Preserve the same evidence fields as the
+single-shader trace so the longer trace answers a specific new question.
 
 ## Evidence Order
 
