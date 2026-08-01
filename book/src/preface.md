@@ -27,11 +27,38 @@ tests compare your implementation with trusted MLX operations and model implemen
 
 ## Course Structure
 
-This course is divided into three weeks. We will serve Qwen3 MLX models and optimize the serving path throughout the course.
+This course is divided into four weeks. We will serve Qwen3 MLX models, optimize the serving path, and use it to build a
+small coding agent.
 
 - Week 1: Serve Qwen3 using array and matrix operations written in Python.
 - Week 2: Implement custom C++ and Metal kernels to accelerate the model.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
+- Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
+
+## Choose a Model for Your Mac
+
+The table below is a conservative starting point for common MacBook unified-memory sizes. Each entry is
+**recommended / maximum** for that week's course path. The recommendation is the checkpoint to use while completing the
+exercises; the maximum is the largest course-supported checkpoint worth trying with short prompts and the chapter's
+default batch settings.
+
+| Unified memory | Week 1 | Week 2 | Week 3 | Week 4 |
+| --- | --- | --- | --- | --- |
+| 16 GB | 0.6B / 1.7B | 4B / 8B[^week2-dense] | 4B / 8B | 4B / 8B |
+| 32 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
+| 64 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
+
+Week 1 reads an official 4-bit checkpoint but materializes its linear and embedding weights in BF16. On a 16 GB Mac,
+use 0.6B for the required work and treat 1.7B as an upper-end experiment. Week 2 keeps weights packed only after the
+quantized-matvec chapter; Weeks 3 and 4 inherit that packed path. More memory still helps after reaching the largest
+supported model because prompt length, batch size, KV caches, compilation, macOS, and other applications all share the
+same pool. These ceilings are therefore planning guidance, not a guarantee that every workload will avoid memory
+pressure.
+
+[^week2-dense]: Week 2 Days 1 and 2 still use the dense Week 1 loader. On a 16 GB Mac, keep using 0.6B until Day 3; the
+    4B recommendation and 8B maximum apply after the packed quantized-matvec path is complete.
+[^moe]: 30B-A3B requires the optional Week 3 MoE implementation. In Week 4, select the Week 3 loader. Use batch size one
+    and a short context when approaching this ceiling; 4B remains the required-course target.
 
 ## How to Use This Book
 
