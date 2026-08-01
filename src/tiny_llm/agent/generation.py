@@ -19,6 +19,7 @@ class GenerationStats:
     prefilled_tokens: int = 0
     output_tokens: int = 0
     cold_start: bool = True
+    latency_seconds: float | None = None
 
 
 def initial_messages(task: str, system_prompt: str) -> list[Message]:
@@ -48,7 +49,7 @@ class GenerationSession:
 
         pass
 
-    def encode_messages(self, messages: list[Message]) -> list[int]:
+    def encode_messages(self, messages: list[Message]) -> tuple[int, ...]:
         """Render semantic messages and return the model's prompt token IDs."""
 
         pass

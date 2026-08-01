@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 
 
@@ -19,6 +20,7 @@ class GenerationStats:
     prefilled_tokens: int = 0
     output_tokens: int = 0
     cold_start: bool = True
+    latency_seconds: float | None = None
 
 
 def initial_messages(task: str, system_prompt: str) -> list[Message]:
@@ -63,7 +65,7 @@ class GenerationSession:
 
         return tuple(self._cached_token_ids)
 
-    def encode_messages(self, messages: list[Message]) -> list[int]:
+    def encode_messages(self, messages: list[Message]) -> tuple[int, ...]:
         """Render semantic messages and return the model's prompt token IDs."""
 
         prompt = self._tokenizer.apply_chat_template(
@@ -72,10 +74,10 @@ class GenerationSession:
             add_generation_prompt=True,
             enable_thinking=self._enable_thinking,
         )
-        return [
+        return tuple(
             int(token)
             for token in self._tokenizer.encode(prompt, add_special_tokens=False)
-        ]
+        )
 
     @staticmethod
     def _release(caches: Sequence[Any]) -> None:
@@ -164,6 +166,7 @@ class GenerationSession:
 
         import mlx.core as mx
 
+        started = perf_counter()
         desired_tokens = self.encode_messages(messages)
         if not desired_tokens:
             raise ValueError("rendered prompt must contain at least one token")
@@ -204,8 +207,8 @@ class GenerationSession:
                 rewound_tokens = 0
 
         reused_tokens = common_prefix
-        prompt_suffix = desired_tokens[common_prefix:]
-        represented_tokens = desired_tokens[:common_prefix]
+        prompt_suffix = list(desired_tokens[common_prefix:])
+        represented_tokens = list(desired_tokens[:common_prefix])
         output: list[int] = []
         input_ids = prompt_suffix
         offset = common_prefix
@@ -235,6 +238,7 @@ class GenerationSession:
             prefilled_tokens=len(prompt_suffix),
             output_tokens=len(output),
             cold_start=cold_start,
+            latency_seconds=perf_counter() - started,
         )
         return self._tokenizer.decode(output)
 

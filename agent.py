@@ -73,7 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--max-tokens", type=int, default=256)
-    parser.add_argument("--max-context-chars", type=int, default=48_000)
+    parser.add_argument("--max-context-tokens", type=int, default=32_768)
+    parser.add_argument("--reserve-tokens", type=int, default=8_192)
+    parser.add_argument("--summary-max-tokens", type=int, default=1_024)
+    parser.add_argument("--max-tool-result-tokens", type=int, default=4_096)
+    parser.add_argument("--min-recent-turns", type=int, default=2)
     parser.add_argument(
         "--root",
         type=Path,
@@ -122,6 +126,21 @@ def validate_session_arguments(
         parser.error("--no-session cannot be combined with a resume option")
     if args.interactive and not getattr(sys.stdin, "isatty", lambda: False)():
         parser.error("--interactive requires a TTY")
+
+
+def validate_budget_arguments(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject generation settings that can exceed the advertised context limit."""
+
+    if args.max_tokens <= 0:
+        parser.error("--max-tokens must be positive")
+    if args.max_steps <= 0:
+        parser.error("--max-steps must be positive")
+    if args.max_tokens > args.reserve_tokens:
+        parser.error("--max-tokens must not exceed --reserve-tokens")
+    if args.summary_max_tokens >= args.max_context_tokens:
+        parser.error("--summary-max-tokens must be below --max-context-tokens")
 
 
 def confirm_tool_call(action, root: Path) -> bool:
@@ -240,6 +259,7 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     validate_session_arguments(parser, args)
+    validate_budget_arguments(parser, args)
     if args.solution != "mlx" and args.device != "gpu":
         parser.error("The completed Week 2 and Week 3 models require --device gpu")
     try:
@@ -248,13 +268,6 @@ def main():
         parser.error(str(error))
     if not args.root.exists() or not args.root.is_dir():
         parser.error("--root must be an existing directory")
-    if args.max_tokens <= 0:
-        parser.error("--max-tokens must be positive")
-    if args.max_steps <= 0:
-        parser.error("--max-steps must be positive")
-    if args.max_context_chars <= 0:
-        parser.error("--max-context-chars must be positive")
-
     import mlx.core as mx
     from mlx_lm import load
 
@@ -273,16 +286,20 @@ def main():
             allow_writes=args.allow_writes,
             allowed_commands=allowed_commands,
         )
+        context_policy = agent.ContextPolicy(
+            max_tokens=args.max_context_tokens,
+            reserve_tokens=args.reserve_tokens,
+            summary_max_tokens=args.summary_max_tokens,
+            max_tool_result_tokens=args.max_tool_result_tokens,
+            min_recent_turns=args.min_recent_turns,
+        )
     except ValueError as error:
         parser.error(str(error))
     workspace = agent.Workspace(
         policy,
         confirm_tool=lambda action: confirm_tool_call(action, policy.root),
     )
-    limits = agent.AgentLimits(
-        max_steps=args.max_steps,
-        max_context_chars=args.max_context_chars,
-    )
+    limits = agent.AgentLimits(max_steps=args.max_steps)
 
     if not args.allow_writes:
         print(
@@ -405,6 +422,57 @@ def main():
             generate.last_stats = generation_session.last_stats
             return response
 
+    if generation_session is None:
+
+        def encode_messages(messages):
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=args.enable_thinking,
+            )
+            return tuple(tokenizer.encode(prompt, add_special_tokens=False))
+
+    else:
+        encode_messages = generation_session.encode_messages
+
+    context_manager = agent.ContextManager(encode_messages, context_policy)
+
+    def summarize(messages):
+        """Generate one summary with state separate from the primary cache."""
+
+        if args.solution == "mlx":
+            from mlx_lm import generate as mlx_generate
+
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=args.enable_thinking,
+            )
+
+            return run_with_spinner(
+                "Compacting context...",
+                lambda: mlx_generate(
+                    model,
+                    tokenizer,
+                    prompt,
+                    max_tokens=args.summary_max_tokens,
+                    verbose=False,
+                ),
+            )
+        summary_session = agent.GenerationSession(
+            model,
+            tokenizer,
+            cache_factory,
+            args.summary_max_tokens,
+            args.enable_thinking,
+        )
+        try:
+            return run_with_spinner("Compacting context...", summary_session, messages)
+        finally:
+            summary_session.close()
+
     def show_event(event):
         """Week 4, Day 7: print the same trace represented by AgentEvent."""
 
@@ -428,6 +496,8 @@ def main():
                 limits,
                 show_event,
                 session=session_log,
+                context_manager=context_manager,
+                summarize=summarize,
             )
 
     try:

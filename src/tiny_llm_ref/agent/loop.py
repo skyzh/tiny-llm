@@ -4,8 +4,14 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, is_dataclass
 
-from .context import append_tool_result, compact_messages
-from .generation import Generate, initial_messages
+from .context import (
+    ContextLimitError,
+    ContextManager,
+    ContextWindow,
+    append_tool_result,
+    compact_messages,
+)
+from .generation import Generate, Message, initial_messages
 from .protocol import (
     AgentAction,
     AgentError,
@@ -75,10 +81,14 @@ def run_agent(
     on_event: Callable[[AgentEvent], None] | None = None,
     *,
     session: SessionLog | None = None,
+    context_manager: ContextManager | None = None,
+    summarize: Callable[[list[Message]], str] | None = None,
 ) -> AgentRun:
     """Run a bounded loop, optionally recording its canonical durable events."""
 
     limits = limits or AgentLimits()
+    if context_manager is not None and session is None:
+        raise ValueError("token context management requires a session")
     system_prompt = build_system_prompt(workspace)
     if session is None:
         if task is None:
@@ -112,13 +122,14 @@ def run_agent(
         elif not prior_user_messages:
             raise ValueError("session has no task to resume")
         session.append("run_started")
-        messages = compact_messages(
-            session.messages(system_prompt), limits.max_context_chars
-        )
+        messages = session.messages(system_prompt)
+        if context_manager is None:
+            messages = compact_messages(messages, limits.max_context_chars)
     events: list[AgentEvent] = []
     invalid_actions = 0
     previous_signature: str | None = None
     identical_actions = 0
+    context_window: ContextWindow | None = None
 
     def finish(completed: bool, reason: str, final: str | None = None) -> AgentRun:
         """Week 4, Day 7: freeze the trace and modified paths into a result."""
@@ -160,20 +171,54 @@ def run_agent(
             session.messages(system_prompt), limits.max_context_chars
         )
 
+    def prepare_messages() -> bool:
+        """Prepare one immutable model request, stopping cleanly on overflow."""
+
+        nonlocal context_window, messages
+        if context_manager is None:
+            context_window = None
+            return True
+        assert session is not None
+        try:
+            context_window = context_manager.prepare(session, system_prompt, summarize)
+        except ContextLimitError:
+            return False
+        messages = [dict(message) for message in context_window.messages]
+        return True
+
     def record_assistant(response: str) -> None:
         if session is None:
             return
         stats = getattr(generate, "last_stats", None)
         generation = asdict(stats) if is_dataclass(stats) else None
-        session.append("assistant_message", content=response, generation=generation)
+        context = None
+        if context_window is not None:
+            max_tokens = context_manager.policy.max_tokens
+            context = {
+                "input_tokens": len(context_window.token_ids),
+                "utilization": len(context_window.token_ids) / max_tokens,
+                "visible_tool_result_bytes": (context_window.visible_tool_result_bytes),
+                "followed_compaction": context_window.followed_compaction,
+                "compaction_event_id": context_window.compaction_event_id,
+            }
+        session.append(
+            "assistant_message",
+            content=response,
+            generation=generation,
+            context=context,
+        )
 
     initial_chars = sum(len(message["content"]) for message in messages)
-    if initial_chars > limits.max_context_chars:
+    if context_manager is None and initial_chars > limits.max_context_chars:
         return finish(False, "context_limit")
 
     for step in range(1, limits.max_steps + 1):
-        if sum(len(message["content"]) for message in messages) > (
-            limits.max_context_chars
+        if not prepare_messages():
+            return finish(False, "context_limit")
+        if (
+            context_manager is None
+            and sum(len(message["content"]) for message in messages)
+            > limits.max_context_chars
         ):
             return finish(False, "context_limit")
         response = generate(messages)
@@ -209,7 +254,8 @@ def run_agent(
                 )
             else:
                 messages = append_tool_result(messages, response, result)
-            messages = rebuild_messages()
+            if context_manager is None:
+                messages = rebuild_messages()
             continue
 
         if isinstance(action, FinalAction):
@@ -264,6 +310,7 @@ def run_agent(
             on_event(event)
         if session is None:
             messages = append_tool_result(messages, response, result)
-        messages = rebuild_messages()
+        if context_manager is None:
+            messages = rebuild_messages()
 
     return finish(False, "step_limit")

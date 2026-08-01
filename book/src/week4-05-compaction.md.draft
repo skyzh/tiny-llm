@@ -1,89 +1,79 @@
-# Day 5: Context and Compaction (Planned)
+# Day 5: Token-Aware Context Compaction
 
-An append-only session grows forever, but a model has a finite context window.
-This planned chapter builds a context policy that keeps the working set small
-without discarding the complete session trace.
+An append-only session grows forever, but the model has a finite context window.
+Day 5 derives a bounded model-visible working set without deleting or rewriting
+the durable trace from Day 4.
 
-> **Implementation status:** The current Day 5 checkpoint covers approved atomic
-> writes, exact edits, and exact command allowlisting. The current context helper
-> only trims complete turns by character count and is checked on Day 4. Token
-> accounting, structured summaries, durable compaction events, and KV-cache
-> reconciliation described below are not implemented or tested.
+> **Implementation status:** The reference implementation, learner API surface,
+> and focused tests are executable. Week 4 remains unpublished while the later
+> recovery and evaluation checkpoints are completed.
 
-## Current Repository Checkpoint
+## Check the Chapter
 
-Implement `write_file()`, `edit_file()`, and `run_command()` in
-`src/tiny_llm/agent/workspace.py`, then run:
+Implement the context APIs under `src/tiny_llm/agent/`, then run:
 
 ```bash
 pdm run test --week 4 --day 5
 ```
 
-The cumulative safety contract is:
+Use `pdm run test-refsol --week 4 --day 5` for the supplied implementation. The
+new compaction tests use synthetic transcripts and injected encoders/summarizers;
+the retained Day 3 safety tests use mocked processes rather than executing agent
+commands.
 
-- model-dispatched `write_file` and `edit_file` actions require
-  `--allow-writes` and a separate `y/N` approval through `Workspace.execute()`;
-- an existing file must be read before replacement;
-- its in-memory observation digest must match at the post-approval recheck;
-- `edit_file` requires one exact, non-empty `old` match;
-- a model-dispatched `run_command` receives `argv`, must exactly match an
-  operator allowlist entry, and requires its own default-No approval;
-- a working directory, allowlist, and human prompt do not sandbox the approved
-  program; and
-- `modified_files` covers confirmed file-tool changes and
-  `uncertain_modified_files` preserves a path whose commit was interrupted;
-  separate run flags report that a started command may have untracked side
-  effects or could not be completely cleaned up.
+## The Executable Policy
 
-Use `pdm run test-refsol --week 4 --day 5` for the supplied implementation.
-Everything after this checkpoint is the planned compaction design.
+`ContextPolicy` makes every budget explicit:
 
-## Planned Token Budget
+```python
+ContextPolicy(
+    max_tokens=32_768,
+    reserve_tokens=8_192,
+    summary_max_tokens=1_024,
+    max_tool_result_tokens=4_096,
+    min_recent_turns=2,
+)
+```
 
-Use 32,768 total tokens for the course Qwen3-4B model. Start compaction before
-the rendered input exceeds 24,576 tokens, leaving 8,192 tokens for the next
-model response and a large tool result. The
-[performance appendix](./appendix-performance.md#long-context-budget-for-week-4)
-derives this limit from the model's training range, checkpoint configuration,
-KV-cache size, and the measured M4 Pro working set.
+The working input limit is `max_tokens - reserve_tokens`, or 24,576 tokens for
+the course Qwen3-4B default. The reserve covers the next response and observation;
+it is not extra model context.
 
-Count the tokenized system instructions, tool schemas, messages, and tool
-results. Characters are not a stable token estimate, and counting only chat
-messages omits context that the model still receives. If one tool result cannot
-fit inside the reserve, bound that result before asking the model to compact.
+`ContextManager` receives the same exact message encoder used by generation:
 
-## Planned Measurements
+```python
+manager = ContextManager(generation.encode_messages, policy)
+window = manager.prepare(session, system_prompt, summarize)
+```
 
-Record for every model turn:
+`ContextWindow.token_ids` therefore counts the fully rendered request, including
+chat-template framing, the system tool schema, project instructions, messages,
+summaries, and visible tool results. Character counts and per-message token
+estimates are not accepted as the limit.
 
-- input and output tokens;
-- context utilization as a fraction of the model limit;
-- bytes contributed by tool results;
-- generation latency; and
-- whether the turn followed a compaction.
+If the immutable anchors plus the minimum recent tail cannot fit, preparation
+raises `ContextLimitError`. The loop stops once with `reason="context_limit"`;
+it never drops the current request, repeatedly retries compaction, or calls the
+model with a known-overflowing request.
 
-End-to-end agent efficiency depends on the whole harness, not only the model's
-price or token speed. Repeatedly feeding irrelevant history can cost more than
-the useful reasoning itself.
+## Bound Observations Before Summarizing
 
-## Planned Deterministic Reduction
+The durable `tool_result` event always retains its original bounded tool output.
+Only its model-visible rendering may be reduced further:
 
-Compaction should not compensate for unbounded tools. Before summarizing history:
+- listings keep the useful head;
+- command-style output keeps the useful tail; and
+- file-like text keeps a head and tail separated by an omission marker.
 
-- call `read_file` only for required files and add a line-window extension only
-  if evaluation justifies it;
-- cap directory listings and search results;
-- keep the useful tail of compiler and test output;
-- return diffs rather than rewritten files; and
-- replace duplicate results with a short reference when safe.
+The manager uses the exact encoder to verify the reduced result against
+`max_tool_result_tokens`. This prevents one large observation from consuming the
+entire compaction budget while preserving the canonical evidence for audit and
+later evaluation.
 
-These operations are deterministic and preserve more fidelity than asking a
-model to summarize already excessive output.
+## Structured Working Summary
 
-## Planned Structured Working Summary
-
-When the context approaches its budget, summarize older events into explicit
-fields:
+Older complete events are replaced in model-visible context by one strict
+`WorkingSummary`:
 
 ```json
 {
@@ -92,82 +82,80 @@ fields:
   "facts": ["parse_value is defined in src/config.py"],
   "changed_files": ["src/config.py"],
   "validation": ["test_empty_value still fails"],
-  "failed_approaches": ["Changing the default value broke test_missing_value"],
+  "failed_approaches": ["The first exact edit produced a tool error"],
   "next_step": "Inspect normalization before parse_value"
 }
 ```
 
-Keep the original user task, project instructions, the newest summary, and a
-recent tail of events. Replace only the older model-visible events. The JSONL
-session continues to retain every original event.
+The parser requires exactly these keys, non-blank required strings, immutable
+string tuples, and fixed item/size bounds. Extra keys and wrong types are
+rejected. The original goal remains anchored. Even for an accepted model
+summary, changed paths and command status are reconciled from successful
+structured tool results rather than claims embedded in untrusted output text.
 
-The summary is lossy, so make it visible in traces and let evaluation compare
-behavior with and without compaction.
+An optional summarizer receives a dedicated schema instruction and semantic
+messages and may return this JSON once. The manager exact-encodes that request
+and reserves the configured summary output before calling the model. Its raw
+response or error is recorded in a bounded, audit-only `summary_attempt` event.
+Invalid JSON, schema failure, an exception, or an over-budget request or summary
+immediately selects the deterministic fallback; there is no recursive retry.
 
-## Planned Compaction Algorithm
+The CLI supplies a fresh temporary generation cache for summary work, so the
+primary agent cache is unchanged until the validated compaction event is
+durable. Tests and lightweight integrations may omit the callback and select the
+deterministic strategy directly.
 
-A simple policy is sufficient:
+## Durable Compaction Marker
 
-1. count tokens for the system instructions, tool schemas, and selected events;
-2. reserve space for the next model response and one large tool result;
-3. when the remaining budget is too small, select an old event prefix;
-4. ask the model for the structured summary using a dedicated prompt;
-5. validate the summary fields and append a `compaction` event; and
-6. retry the interrupted model turn with the summary and recent tail.
+Compaction appends this event instead of changing older events:
 
-If summary generation fails, fall back to a deterministic record of tool names,
-changed paths, command exit codes, and the last few messages. Context overflow
-must not trap the agent in a retry loop.
+```json
+{
+  "covered_through_event_id": "...",
+  "strategy": "model",
+  "fallback_reason": null,
+  "summary": {"goal": "..."},
+  "input_tokens_before": 25001,
+  "input_tokens_after": 3812
+}
+```
 
-## Planned Cache Reconciliation
+The coverage boundary must reference an existing event and cannot cross an
+unmatched tool call. Repeated compaction starts from the newest structured
+summary plus later events; only the newest summary is model-visible. Original
+JSONL events remain inspectable and replayable.
 
-Compaction changes an older part of the rendered prompt, so the Day 4 generation
-session cannot keep every cached token. Pass the compacted messages through the
-same token-level reconciliation path used for an ordinary turn: find the common
-prefix, remove `cached_length - common_prefix_length` tokens from every layer
-with `rewind(...)`, and prefill the new summary and recent tail.
+`ContextWindow` returns the exact token IDs, visible tool-result byte count,
+whether this preparation appended a compaction, and that event's ID. The
+assistant event records those context metrics. Course `GenerationSession`
+backends also record `GenerationStats`, whose Day 5 fields now include latency;
+the stateless MLX compatibility backend leaves generation metrics unknown.
 
-Do not try to summarize or edit K/V tensors directly. They are derived state,
-not semantic memory. If little prefix remains after compaction, a cold prefill
-may be simpler and just as fast. Compare both policies, but require them to
-produce the same first-token logits and greedy response.
+## Cache Reconciliation
 
-## Planned Working Memory and Optional RAG
+Compaction changes an older portion of the rendered prompt. The loop passes the
+new semantic messages to Day 4's `GenerationSession`, which uses the same token
+longest-common-prefix path as any other turn. Every layer is validated before a
+rewind; compatible layers rewind the divergent suffix and prefill the new
+summary/tail, while any inconsistent state is discarded for a cold prefill.
 
-Compaction is working memory: it preserves the state of the current task. RAG is
-retrieval: it finds external information that was not already in the active
-conversation.
+The event log and summary are semantic state. K/V tensors remain derived state
+and are never summarized, edited, or required for restart correctness.
 
-For a beginner coding agent, allowed repository-search commands plus targeted
-`read_file` calls are the primary retrieval mechanism. They use current source
-and give the model control over follow-up queries. A vector index is an optional
-extension for large design documents or API references:
+## Exercise
 
-1. split documents into inspectable chunks;
-2. embed and index those chunks;
-3. retrieve candidates for the current question;
-4. place source identifiers and text into the context; and
-5. measure retrieval quality separately from answer quality.
+1. Build a synthetic session containing repeated reads, edits, and validation
+   observations.
+2. Measure its fully rendered token count.
+3. Verify that under-budget preparation writes no compaction event.
+4. Compact the old prefix and reload the JSONL session.
+5. Force invalid summary JSON and inspect the deterministic fallback marker.
+6. Confirm that the original tool result remains byte-for-byte unchanged.
+7. Reconcile the warm generation cache and compare its response with a cold run.
+8. Reduce the budget below the anchors and observe one fail-closed stop.
 
-A fluent answer cannot repair missing evidence. Conversely, good retrieval can
-still be lost through poor prompt assembly or later compaction.
-
-## Planned Exercise
-
-Construct a synthetic session with repeated reads, two edits, one failed test,
-and one successful test. Then:
-
-1. show the token contribution of each event;
-2. compact the old prefix into a structured summary;
-3. verify that modified files, failed approaches, and validation status survive;
-4. resume the task using only the compacted context and recent tail; and
-5. compare total input tokens and task outcome against full replay; and
-6. reconcile a warm cache to the compacted prompt and compare it with a cold
-   prefill.
-
-After this design is implemented and tested, the compacted agent should know what
-it changed and which test passed without receiving every source excerpt again.
-Passing the current Day 5 tests establishes only the mutation and command-policy
-checkpoint above.
+Day 6 adds write-ahead mutation recovery, checkpoints, undo, cancellation,
+steering, and branches. RAG, disk K/V snapshots, adaptive cache heuristics, and
+Day 7 grading remain explicit extensions.
 
 {{#include copyright.md}}

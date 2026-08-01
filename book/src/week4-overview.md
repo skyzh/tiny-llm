@@ -2,8 +2,8 @@
 
 > 🚧 **Course status:** The daily chapters are drafts and are not included in
 > the rendered book yet. The repository contains a smaller tested baseline, but
-> interactive sessions and reusable-cache checkpoint from Day 4 is executable.
-> Structured compaction, recovery controls, and held-out evaluation remain
+> interactive sessions, reusable-cache, and structured-compaction checkpoints
+> through Day 5 are executable. Recovery controls and held-out evaluation remain
 > planned work.
 
 Weeks 1 through 3 turned tokens into text, made decoding efficient, and
@@ -45,7 +45,8 @@ currently provides:
 - read-only workspace tools by default, with explicit tool enablement and
   per-dispatched-call approval;
 - durable append-only session logs, resume, and project-instruction snapshots;
-- character-bounded retention of the newest complete tool turns; and
+- rendered-token budgeting, bounded observations, and durable structured
+  compaction; and
 - a bounded loop that records actions, observations, confirmed and
   outcome-uncertain file-tool modifications, whether commands may have
   untracked or incompletely cleaned-up side effects, and its terminal reason.
@@ -54,9 +55,9 @@ currently provides:
 model—not task correctness. The baseline leaves `task_success` unknown because
 it has no deterministic grader.
 
-It does **not** yet implement structured token summaries, checkpoints, undo,
-steering, cooperative decode cancellation, recorded interrupt events, session
-branches, or held-out task packages. The later draft chapters specify those
+It does **not** yet implement checkpoints, undo, steering, cooperative decode
+cancellation, recorded interrupt events, session branches, or held-out task
+packages. The later draft chapters specify those
 intended extensions. Their examples are design targets, not commands or APIs
 that work in the current CLI.
 
@@ -113,7 +114,7 @@ The append-only event log remains the source of
 truth. A process restart may rebuild KV state from events, so persisting K/V to
 disk is an optional optimization rather than a correctness requirement.
 
-The planned Qwen3-4B context budget is 32,768 total tokens. Planned Day 5 starts
+The Qwen3-4B context budget is 32,768 total tokens. Day 5 starts
 compaction at 24,576 input tokens and keeps the remaining 8,192 tokens for the
 next response and tool output. This limit follows the model's training range,
 not the amount of unified memory available; the derivation and long-context
@@ -167,7 +168,7 @@ provide a focused inference-framework exercise without changing model kernels.
 | 2 | Tools and actions | Structured actions and enabled-tool prompts are validated. |
 | 3 | Safety and validation | Bounded reads, protected paths, symlink rejection, and read-only defaults are validated. |
 | 4 | Interactive sessions | Append-only sessions, resume checks, instruction snapshots, and live token-prefix reuse are validated. |
-| 5 | Compaction | Atomic writes, exact edits, and exact command allowlisting are validated; token compaction is not implemented. |
+| 5 | Compaction | Exact rendered-token accounting, bounded observations, structured summaries, durable markers, and cache reconciliation are validated. |
 | 6 | Control and recovery | The bounded loop recovers from malformed actions and stops repeated calls; undo and steering are not implemented. |
 | 7 | Evaluation | A scripted safe edit and rejection of a disabled command are validated; held-out task packages are not implemented. |
 
