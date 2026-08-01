@@ -28,12 +28,15 @@ class AgentLimits:
     def __post_init__(self) -> None:
         """Week 4, Day 6: reject budgets that could disable a stop condition."""
 
-        if min(
-            self.max_steps,
-            self.max_context_chars,
-            self.max_invalid_actions,
-            self.max_identical_actions,
-        ) <= 0:
+        if (
+            min(
+                self.max_steps,
+                self.max_context_chars,
+                self.max_invalid_actions,
+                self.max_identical_actions,
+            )
+            <= 0
+        ):
             raise ValueError("agent limits must be positive")
 
 
@@ -49,13 +52,17 @@ class AgentEvent:
 
 @dataclass(frozen=True)
 class AgentRun:
-    """Week 4, Day 7: the complete, measurable result of an agent task."""
+    """One bounded run; ``completed`` means the model returned a valid final."""
 
     completed: bool
     reason: str
     final: str | None
     events: tuple[AgentEvent, ...]
     modified_files: tuple[str, ...]
+    task_success: bool | None = None
+    command_side_effects_untracked: bool = False
+    uncertain_modified_files: tuple[str, ...] = ()
+    command_cleanup_incomplete: bool = False
 
 
 def run_agent(
@@ -83,7 +90,23 @@ def run_agent(
                 for path in workspace.modified_files
             )
         )
-        return AgentRun(completed, reason, final, tuple(events), modified)
+        uncertain = tuple(
+            sorted(
+                str(path.relative_to(workspace.policy.root))
+                for path in workspace.uncertain_modified_files
+            )
+        )
+        return AgentRun(
+            completed,
+            reason,
+            final,
+            tuple(events),
+            modified,
+            task_success=None,
+            command_side_effects_untracked=(workspace.command_side_effects_untracked),
+            uncertain_modified_files=uncertain,
+            command_cleanup_incomplete=workspace.command_cleanup_incomplete,
+        )
 
     initial_chars = sum(len(message["content"]) for message in messages)
     if initial_chars > limits.max_context_chars:

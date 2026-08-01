@@ -1,7 +1,9 @@
 # 🚧 Week 4: Build a Coding Agent
 
 > 🚧 **Course status:** The daily chapters are drafts and are not included in
-> the rendered book yet.
+> the rendered book yet. The repository contains a smaller tested baseline, but
+> the interactive-session, reusable-cache, structured-compaction, recovery, and
+> held-out-evaluation milestones described below are still planned work.
 
 Weeks 1 through 3 turned tokens into text, made decoding efficient, and
 introduced serving techniques. Week 4 adds the next layer: an agent loop that
@@ -15,10 +17,10 @@ by the inference stack you already built.
 
 ## What You Will Build
 
-The finished agent can:
+The Week 4 target agent can:
 
 - inspect a repository without loading every file into the prompt;
-- read files in bounded chunks and make exact, reviewable edits;
+- read bounded UTF-8 files and make exact, reviewable edits;
 - run a narrowly scoped test command and use its output as feedback;
 - continue an interactive conversation and resume it after process exit;
 - reuse compatible KV-cache state instead of prefilling every turn from zero;
@@ -31,6 +33,32 @@ This is a deliberately small target. Features such as multi-agent delegation,
 remote execution, MCP integrations, and long-term user memory remain extensions
 rather than prerequisites.
 
+## Current Executable Baseline
+
+The checked-in reference implementation is smaller than that target. It
+currently provides:
+
+- a stateless `generate_response()` adapter;
+- strict parsing of one final answer or one structured tool action;
+- `list_files`, `read_file`, `write_file`, `edit_file`, and `run_command`;
+- a read-only default with explicit tool enablement and per-dispatched-call
+  approval;
+- character-bounded retention of the newest complete tool turns; and
+- a bounded loop that records actions, observations, confirmed and
+  outcome-uncertain file-tool modifications, whether commands may have
+  untracked or incompletely cleaned-up side effects, and its terminal reason.
+
+`AgentRun.completed` records protocol completion—a valid final action from the
+model—not task correctness. The baseline leaves `task_success` unknown because
+it has no deterministic grader.
+
+It does **not** yet implement durable session files, `GenerationSession`, token
+level prefix reuse, structured summaries, checkpoints, undo, steering,
+cooperative decode cancellation, recorded interrupt events, session branches,
+or held-out task packages. The later draft chapters specify those intended
+extensions. Their examples are design targets, not commands or APIs that work
+in the current CLI.
+
 ## The Core Loop
 
 Every chapter builds on the same loop:
@@ -38,8 +66,9 @@ Every chapter builds on the same loop:
 1. Render the task, project instructions, recent events, and tool descriptions.
 2. Decode one structured action using the model and KV cache.
 3. Parse and validate the action before it reaches the operating system.
-4. Run one workspace tool and append its observation to the session.
-5. Repeat until the model returns a final answer or reaches a budget.
+4. For a write, edit, or command, obtain a fresh default-No human approval.
+5. Run the approved workspace tool and append its observation to the session.
+6. Repeat until the model returns a final answer or reaches a budget.
 
 The model does not edit files directly. It proposes an action; ordinary code
 decides whether that action is valid and performs it. This boundary makes agent
@@ -52,13 +81,13 @@ task + session events
   context builder ---> model ---> action validator
         ^                            |
         |                            v
-   tool result <--- tool runner <--- validated action
+   tool result <--- tool runner <--- policy + conditional y/N gate
                          |
                          v
                       workspace
 ```
 
-## One Targeted Inference Extension
+## Planned Inference Extension
 
 The starting model boundary is deliberately stateless:
 
@@ -72,59 +101,84 @@ one response, and releases the caches. That is a useful correctness baseline,
 but an interactive agent repeatedly sends a long prompt whose prefix barely
 changes.
 
-Day 4 replaces the function with a callable `GenerationSession` that keeps the
-same agent-facing API while owning token IDs and layer caches. It compares the
-new rendered prompt with the cached token sequence, rewinds a divergent suffix,
-and prefills only the new tokens. Days 5 and 6 reuse this operation after
-compaction, steering, and session branching.
+The planned Day 4 chapter replaces the function with a callable
+`GenerationSession` that keeps the same agent-facing API while owning token IDs
+and layer caches. It compares the new rendered prompt with the cached token
+sequence, rewinds a divergent suffix, and prefills only the new tokens. Planned
+Days 5 and 6 reuse this operation after compaction, steering, and session
+branching. `GenerationSession` is not present in the current source tree.
 
-The append-only event log remains the source of truth. A process restart may
-always rebuild KV state from events, so persisting K/V to disk is an optional
-optimization rather than a correctness requirement.
+In the planned architecture, the append-only event log remains the source of
+truth. A process restart may rebuild KV state from events, so persisting K/V to
+disk is an optional optimization rather than a correctness requirement.
 
-The course Qwen3-4B context budget is 32,768 total tokens. Day 5 starts
+The planned Qwen3-4B context budget is 32,768 total tokens. Planned Day 5 starts
 compaction at 24,576 input tokens and keeps the remaining 8,192 tokens for the
 next response and tool output. This limit follows the model's training range,
-not the amount of unified memory available; the full derivation and long-context
+not the amount of unified memory available; the derivation and long-context
 measurements are in the
 [performance appendix](./appendix-performance.md#long-context-budget-for-week-4).
 
 ## A Small Tool Surface
 
-The target agent uses four tools inspired by small coding-agent harnesses:
+The baseline uses five tools inspired by small coding-agent harnesses. These
+names and fields are the executable JSON protocol:
 
 ```text
-read(path, offset?, limit?)
-edit(path, old_text, new_text)
-write(path, content)
-bash(command, timeout?)
+list_files(path?)
+read_file(path)
+edit_file(path, old, new)
+write_file(path, content)
+run_command(argv)
 ```
 
-`read` and `edit` are preferable to shell equivalents because they can enforce
-consistent bounds and return structured errors. `bash` supplies repository
-search, file discovery, and test execution without requiring a separate tool for
-every command-line program.
+`read_file` and `edit_file` are preferable to shell equivalents because they can
+enforce consistent bounds and return structured errors. `list_files` provides
+bounded discovery. `run_command` accepts a non-empty JSON array of exact
+arguments, runs without a shell, and uses the timeout configured by the workspace
+policy; the model cannot supply its own timeout.
+
+The operator must first enable writes or name an exact allowed command. That is
+only the outer policy gate. Once an eligible model-dispatched `write_file`,
+`edit_file`, or `run_command` action passes schema, policy, and tool preflight,
+the CLI asks for `y/N`; an empty response, EOF, non-interactive input, or any
+answer other than an explicit yes denies the call. File mutations then revalidate
+their path and observed digest before commit. A denial is returned to the model
+as an observation.
 
 A shell working directory is not a security sandbox. During this course, run the
 agent only in a disposable exercise workspace. A production agent would need a
-container, virtual machine, or similarly strong isolation boundary.
+container, virtual machine, or similarly strong isolation boundary. An exact
+allowed command can still delete files, read outside the workspace, launch child
+processes, or use the network. Human confirmation reduces accidental execution;
+it does not confine the approved program.
 
-The initial demo calls the model through the stateless baseline. The week keeps
-the agent loop, tools, and safety work as its main arc, then uses interactive
-sessions as a focused opportunity to improve the inference framework without
-changing the model kernels.
+The initial demo calls the model through the stateless baseline. The draft week
+keeps the agent loop, tools, and safety work as its main arc, then plans to use
+interactive sessions as a focused opportunity to improve the inference framework
+without changing the model kernels.
 
-## Seven-Day Plan
+## Seven-Day Plan and Current Evidence
 
-| Day | Topic | Working milestone |
+| Day | Planned topic | Current repository checkpoint |
 | --- | --- | --- |
-| 1 | Agent loop | The model alternates between actions and observations. |
-| 2 | Tools | The agent can read, edit, write, and run a bounded command. |
-| 3 | Safety and validation | Mutations are confined, reviewable, and followed by validation. |
-| 4 | Interactive sessions | Follow-up turns reuse compatible KV state, and durable work survives process exit. |
-| 5 | Compaction | Sessions compact before 24,576 input tokens and reconcile the cache to the new prompt. |
-| 6 | Control and recovery | The user can steer, interrupt, checkpoint, rewind, and undo. |
-| 7 | Evaluation | The agent fixes a small bug and passes held-out tests. |
+| 1 | Agent loop | Initial system and task messages are validated. |
+| 2 | Tools and actions | Structured actions and enabled-tool prompts are validated. |
+| 3 | Safety and validation | Bounded reads, protected paths, symlink rejection, and read-only defaults are validated. |
+| 4 | Interactive sessions | Complete in-memory tool turns and simple character-bounded retention are validated; sessions are not implemented. |
+| 5 | Compaction | Atomic writes, exact edits, and exact command allowlisting are validated; token compaction is not implemented. |
+| 6 | Control and recovery | The bounded loop recovers from malformed actions and stops repeated calls; undo and steering are not implemented. |
+| 7 | Evaluation | A scripted safe edit and rejection of a disabled command are validated; held-out task packages are not implemented. |
+
+Each draft chapter names the focused learner command for its current checkpoint.
+For example:
+
+```bash
+pdm run test --week 4 --day 2
+```
+
+Use `pdm run test-refsol --week 4 --day 2` to check the supplied reference
+implementation without copying the learner test.
 
 ## Run the Starting Demo
 
@@ -140,15 +194,21 @@ use MLX-LM's optimized executor. The starting program is intentionally smaller
 than the final agent: each day replaces one shortcut with an explicit component
 that can be inspected and tested.
 
-Day 4 adds `--interactive` so a completed turn can receive a follow-up without
-starting a new conversation. Run the same scripted interaction through the cold
-and stateful adapters to verify identical output before comparing prefill work.
+The current command is read-only and exposes no command runner by default.
+`--allow-writes` and repeated `--allow-command "..."` flags make those tools
+eligible. Each eligible action that passes preflight still defaults to **No** at
+its `y/N` prompt. Keep `--root` pointed at a disposable exercise directory. Do
+not interpret an exact command allowlist, a working directory, or a confirmation
+prompt as process isolation.
+
+The planned Day 4 CLI adds `--interactive`, `--continue`, `--session`, and
+`--no-session`. None of those flags exists in the current command.
 
 The default Qwen3 4B model follows the structured action protocol more reliably.
 Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more
 time on malformed-action recovery.
 
-## Milestones
+## Target Milestones
 
 - **Minimal:** the model can inspect a workspace and produce one valid action.
 - **Useful:** the agent can make a precise change and run its test.

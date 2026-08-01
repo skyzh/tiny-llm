@@ -1,8 +1,9 @@
 import argparse
-import shutil
 import os
-import pytest
+import shutil
 from pathlib import Path
+
+import pytest
 
 
 def copy_test(args, skip_if_exists=False, force=False):
@@ -25,27 +26,25 @@ def copy_test(args, skip_if_exists=False, force=False):
 def test(args):
     if args.week and args.day:
         copy_test(args, skip_if_exists=True)
-        pytest.main(
+        return pytest.main(
             ["-v", f"tests/test_week_{args.week}_day_{args.day}.py"] + args.remainders
         )
     elif args.week or args.day:
         print("Please provide both week and day")
-        exit(1)
-    else:
-        pytest.main(["-v", "tests"] + args.remainders)
+        return 1
+    return pytest.main(["-v", "tests"] + args.remainders)
 
 
 def test_refsol(args):
     if args.week and args.day:
-        pytest.main(
+        return pytest.main(
             ["-v", f"tests_refsol/test_week_{args.week}_day_{args.day}.py"]
             + args.remainders
         )
     elif args.week or args.day:
         print("Please provide both week and day")
-        exit(1)
-    else:
-        pytest.main(["-v", "tests_refsol"] + args.remainders)
+        return 1
+    return pytest.main(["-v", "tests_refsol"] + args.remainders)
 
 
 def main():
@@ -70,9 +69,9 @@ def main():
     if hasattr(args, "copy_test_parser"):
         copy_test(args, force=args.force)
     if hasattr(args, "test_parser"):
-        test(args)
+        raise SystemExit(test(args))
     if hasattr(args, "test_refsol_parser"):
-        test_refsol(args)
+        raise SystemExit(test_refsol(args))
 
 
 if __name__ == "__main__":
