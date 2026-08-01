@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, is_dataclass
 
+from .control import AgentInterrupted, CancellationToken
 from .context import (
     ContextLimitError,
     ContextManager,
@@ -69,6 +70,7 @@ class AgentRun:
     task_success: bool | None = None
     command_side_effects_untracked: bool = False
     uncertain_modified_files: tuple[str, ...] = ()
+    retained_recovery_files: tuple[str, ...] = ()
     command_cleanup_incomplete: bool = False
     session_id: str | None = None
 
@@ -83,18 +85,97 @@ def run_agent(
     session: SessionLog | None = None,
     context_manager: ContextManager | None = None,
     summarize: Callable[[list[Message]], str] | None = None,
+    cancellation: CancellationToken | None = None,
 ) -> AgentRun:
     """Run a bounded loop, optionally recording its canonical durable events."""
 
     limits = limits or AgentLimits()
+    workspace_cancellation = getattr(workspace, "cancellation", None)
+    if cancellation is None:
+        cancellation = workspace_cancellation
+    elif workspace_cancellation is None:
+        workspace.cancellation = cancellation
+    elif workspace_cancellation is not cancellation:
+        raise ValueError("workspace and loop must share one cancellation token")
+    if session is None:
+        if workspace.session_log is not None:
+            raise ValueError("workspace journal requires the same run session")
+    else:
+        workspace.bind_session(session)
     if context_manager is not None and session is None:
         raise ValueError("token context management requires a session")
-    system_prompt = build_system_prompt(workspace)
-    if session is None:
-        if task is None:
-            raise ValueError("task is required without a session")
-        messages = initial_messages(task, system_prompt)
-    else:
+    system_prompt = ""
+    events: list[AgentEvent] = []
+
+    def finish(completed: bool, reason: str, final: str | None = None) -> AgentRun:
+        """Week 4, Day 7: freeze the trace and modified paths into a result."""
+
+        def finalize() -> AgentRun:
+            if session is not None:
+                session.append(
+                    "run_finished", completed=completed, reason=reason, final=final
+                )
+
+            modified = tuple(
+                sorted(
+                    str(path.relative_to(workspace.policy.root))
+                    for path in workspace.modified_files
+                )
+            )
+            uncertain = tuple(
+                sorted(
+                    str(path.relative_to(workspace.policy.root))
+                    for path in workspace.uncertain_modified_files
+                )
+            )
+            retained = tuple(
+                sorted(
+                    str(path.relative_to(workspace.policy.root))
+                    for path in workspace.retained_recovery_files
+                )
+            )
+            return AgentRun(
+                completed,
+                reason,
+                final,
+                tuple(events),
+                modified,
+                task_success=None,
+                command_side_effects_untracked=(
+                    workspace.command_side_effects_untracked
+                ),
+                uncertain_modified_files=uncertain,
+                retained_recovery_files=retained,
+                command_cleanup_incomplete=workspace.command_cleanup_incomplete,
+                session_id=session.session_id if session is not None else None,
+            )
+
+        if reason != "interrupted" and cancellation is not None:
+            return cancellation.run_if_active("run_finish", finalize)
+        return finalize()
+
+    def interrupted(error: BaseException, phase: str) -> AgentRun:
+        if isinstance(error, AgentInterrupted):
+            reason = error.reason
+            phase = error.phase
+        else:
+            reason = "keyboard_interrupt"
+            if cancellation is not None:
+                cancellation.cancel(reason)
+                reason = cancellation.reason or reason
+        if session is not None:
+            session.recover_incomplete_turns()
+            session.append("interrupted", reason=reason, phase=phase)
+        return finish(False, "interrupted")
+
+    def initialize_messages() -> list[Message]:
+        nonlocal system_prompt
+
+        system_prompt = build_system_prompt(workspace)
+        if session is None:
+            if task is None:
+                raise ValueError("task is required without a session")
+            return initial_messages(task, system_prompt)
         if session.workspace != workspace.policy.root:
             raise ValueError("session belongs to a different workspace")
         session.recover_incomplete_turns()
@@ -109,7 +190,12 @@ def run_agent(
             ),
             None,
         )
-        if task is None and finished is not None and finished.data.get("completed"):
+        if (
+            task is None
+            and finished is not None
+            and finished.data.get("completed")
+            and not session.pending_steering()
+        ):
             raise ValueError("completed session requires a follow-up message")
         if task is not None:
             if not task.strip():
@@ -122,47 +208,20 @@ def run_agent(
         elif not prior_user_messages:
             raise ValueError("session has no task to resume")
         session.append("run_started")
-        messages = session.messages(system_prompt)
+        initialized = session.messages(system_prompt)
         if context_manager is None:
-            messages = compact_messages(messages, limits.max_context_chars)
-    events: list[AgentEvent] = []
+            initialized = compact_messages(initialized, limits.max_context_chars)
+        return initialized
+
+    try:
+        messages = initialize_messages()
+    except (AgentInterrupted, KeyboardInterrupt) as error:
+        return interrupted(error, "session_setup")
+
     invalid_actions = 0
     previous_signature: str | None = None
     identical_actions = 0
     context_window: ContextWindow | None = None
-
-    def finish(completed: bool, reason: str, final: str | None = None) -> AgentRun:
-        """Week 4, Day 7: freeze the trace and modified paths into a result."""
-
-        if session is not None:
-            session.append(
-                "run_finished", completed=completed, reason=reason, final=final
-            )
-
-        modified = tuple(
-            sorted(
-                str(path.relative_to(workspace.policy.root))
-                for path in workspace.modified_files
-            )
-        )
-        uncertain = tuple(
-            sorted(
-                str(path.relative_to(workspace.policy.root))
-                for path in workspace.uncertain_modified_files
-            )
-        )
-        return AgentRun(
-            completed,
-            reason,
-            final,
-            tuple(events),
-            modified,
-            task_success=None,
-            command_side_effects_untracked=(workspace.command_side_effects_untracked),
-            uncertain_modified_files=uncertain,
-            command_cleanup_incomplete=workspace.command_cleanup_incomplete,
-            session_id=session.session_id if session is not None else None,
-        )
 
     def rebuild_messages() -> list[dict[str, str]]:
         if session is None:
@@ -186,9 +245,9 @@ def run_agent(
         messages = [dict(message) for message in context_window.messages]
         return True
 
-    def record_assistant(response: str) -> None:
+    def record_assistant(response: str):
         if session is None:
-            return
+            return None
         stats = getattr(generate, "last_stats", None)
         generation = asdict(stats) if is_dataclass(stats) else None
         context = None
@@ -201,40 +260,87 @@ def run_agent(
                 "followed_compaction": context_window.followed_compaction,
                 "compaction_event_id": context_window.compaction_event_id,
             }
-        session.append(
+        return session.append(
             "assistant_message",
             content=response,
             generation=generation,
             context=context,
         )
 
-    initial_chars = sum(len(message["content"]) for message in messages)
-    if context_manager is None and initial_chars > limits.max_context_chars:
-        return finish(False, "context_limit")
+    def execute_steps() -> AgentRun:
+        nonlocal identical_actions, invalid_actions, messages, previous_signature
 
-    for step in range(1, limits.max_steps + 1):
-        if not prepare_messages():
+        initial_chars = sum(len(message["content"]) for message in messages)
+        if context_manager is None and initial_chars > limits.max_context_chars:
+            if cancellation is not None:
+                cancellation.raise_if_cancelled("context_limit")
             return finish(False, "context_limit")
-        if (
-            context_manager is None
-            and sum(len(message["content"]) for message in messages)
-            > limits.max_context_chars
-        ):
-            return finish(False, "context_limit")
-        response = generate(messages)
-        record_assistant(response)
-        try:
-            action = parse_action(response, workspace.available_tools)
-        except AgentError as error:
-            invalid_actions += 1
-            previous_signature = None
-            identical_actions = 0
-            result = f"error: {error}"
-            event = AgentEvent(step, response, None, result)
-            events.append(event)
-            if on_event is not None:
-                on_event(event)
-            if invalid_actions >= limits.max_invalid_actions:
+
+        for step in range(1, limits.max_steps + 1):
+            if cancellation is not None:
+                cancellation.raise_if_cancelled("model_request")
+            delivered_steering = (
+                session.deliver_pending_steering() if session is not None else ()
+            )
+            if delivered_steering and context_manager is None:
+                messages = rebuild_messages()
+            if not prepare_messages():
+                if cancellation is not None:
+                    cancellation.raise_if_cancelled("context_limit")
+                return finish(False, "context_limit")
+            if (
+                context_manager is None
+                and sum(len(message["content"]) for message in messages)
+                > limits.max_context_chars
+            ):
+                return finish(False, "context_limit")
+            if cancellation is not None:
+                cancellation.raise_if_cancelled("model_request")
+            response = generate(messages)
+            if cancellation is not None:
+                try:
+                    cancellation.raise_if_cancelled("model_response")
+                except AgentInterrupted:
+                    assistant_event = record_assistant(response)
+                    if session is not None:
+                        session.append(
+                            "tool_result",
+                            tool_call_id=None,
+                            tool=None,
+                            is_error=True,
+                            discarded_response=True,
+                            assistant_event_id=assistant_event.id,
+                            content=(
+                                "error: cancellation arrived after the model "
+                                "returned; its response was recorded but no action "
+                                "from it was executed"
+                            ),
+                        )
+                    raise
+            assistant_event = record_assistant(response)
+            try:
+                action = parse_action(response, workspace.available_tools)
+            except AgentError as error:
+                invalid_actions += 1
+                previous_signature = None
+                identical_actions = 0
+                result = f"error: {error}"
+                event = AgentEvent(step, response, None, result)
+                events.append(event)
+                if on_event is not None:
+                    on_event(event)
+                if cancellation is not None:
+                    cancellation.raise_if_cancelled("event_callback")
+                if invalid_actions >= limits.max_invalid_actions:
+                    if session is not None:
+                        session.append(
+                            "tool_result",
+                            tool_call_id=None,
+                            tool=None,
+                            is_error=True,
+                            content=result,
+                        )
+                    return finish(False, "invalid_action_limit")
                 if session is not None:
                     session.append(
                         "tool_result",
@@ -243,74 +349,108 @@ def run_agent(
                         is_error=True,
                         content=result,
                     )
-                return finish(False, "invalid_action_limit")
+                else:
+                    messages = append_tool_result(messages, response, result)
+                if context_manager is None:
+                    messages = rebuild_messages()
+                continue
+
+            if isinstance(action, FinalAction):
+                event = AgentEvent(step, response, action, None)
+                events.append(event)
+                if on_event is not None:
+                    on_event(event)
+                if cancellation is not None:
+                    cancellation.raise_if_cancelled("event_callback")
+                delivered_steering = ()
+                if session is not None:
+                    accepted, terminal_run = session.run_if_no_pending_steering(
+                        lambda: finish(True, "completed", action.final)
+                    )
+                    if accepted:
+                        assert terminal_run is not None
+                        return terminal_run
+                    session.append(
+                        "tool_result",
+                        tool_call_id=None,
+                        tool=None,
+                        is_error=True,
+                        discarded_response=True,
+                        assistant_event_id=assistant_event.id,
+                        content=(
+                            "error: steering arrived before the final response "
+                            "became terminal; the final was not accepted"
+                        ),
+                    )
+                    delivered_steering = session.deliver_pending_steering()
+                if delivered_steering:
+                    previous_signature = None
+                    identical_actions = 0
+                    if context_manager is None:
+                        messages = rebuild_messages()
+                    continue
+                return finish(True, "completed", action.final)
+
+            signature = json.dumps(
+                {"tool": action.tool, **action.arguments}, sort_keys=True
+            )
+            if signature == previous_signature:
+                identical_actions += 1
+            else:
+                previous_signature = signature
+                identical_actions = 1
+            if identical_actions > limits.max_identical_actions:
+                result = "error: identical action loop detected"
+                event = AgentEvent(step, response, action, result)
+                events.append(event)
+                if on_event is not None:
+                    on_event(event)
+                if cancellation is not None:
+                    cancellation.raise_if_cancelled("event_callback")
+                if session is not None:
+                    session.append(
+                        "tool_result",
+                        tool_call_id=None,
+                        tool=action.tool,
+                        is_error=True,
+                        content=result,
+                    )
+                return finish(False, "repeated_action_limit")
+
+            tool_call = None
+            if session is not None:
+                tool_call = session.append(
+                    "tool_call", tool=action.tool, arguments=action.arguments
+                )
+            if cancellation is not None:
+                cancellation.raise_if_cancelled("tool_dispatch")
+            result = workspace.execute(action)
             if session is not None:
                 session.append(
                     "tool_result",
-                    tool_call_id=None,
-                    tool=None,
-                    is_error=True,
+                    tool_call_id=tool_call.id,
+                    tool=action.tool,
+                    arguments=action.arguments,
+                    is_error=result.startswith("error:"),
                     content=result,
                 )
-            else:
-                messages = append_tool_result(messages, response, result)
-            if context_manager is None:
-                messages = rebuild_messages()
-            continue
-
-        if isinstance(action, FinalAction):
-            event = AgentEvent(step, response, action, None)
-            events.append(event)
-            if on_event is not None:
-                on_event(event)
-            return finish(True, "completed", action.final)
-
-        signature = json.dumps(
-            {"tool": action.tool, **action.arguments}, sort_keys=True
-        )
-        if signature == previous_signature:
-            identical_actions += 1
-        else:
-            previous_signature = signature
-            identical_actions = 1
-        if identical_actions > limits.max_identical_actions:
-            result = "error: identical action loop detected"
+                session.deliver_pending_steering()
             event = AgentEvent(step, response, action, result)
             events.append(event)
             if on_event is not None:
                 on_event(event)
-            if session is not None:
-                session.append(
-                    "tool_result",
-                    tool_call_id=None,
-                    tool=action.tool,
-                    is_error=True,
-                    content=result,
-                )
-            return finish(False, "repeated_action_limit")
+            if cancellation is not None:
+                cancellation.raise_if_cancelled("event_callback")
+            if session is None:
+                messages = append_tool_result(messages, response, result)
+            if context_manager is None:
+                messages = rebuild_messages()
 
-        tool_call = None
-        if session is not None:
-            tool_call = session.append(
-                "tool_call", tool=action.tool, arguments=action.arguments
-            )
-        result = workspace.execute(action)
-        if session is not None:
-            session.append(
-                "tool_result",
-                tool_call_id=tool_call.id,
-                tool=action.tool,
-                arguments=action.arguments,
-                is_error=result.startswith("error:"),
-                content=result,
-            )
-        event = AgentEvent(step, response, action, result)
-        events.append(event)
-        if on_event is not None:
-            on_event(event)
-        if session is None:
-            messages = append_tool_result(messages, response, result)
-        if context_manager is None:
-            messages = rebuild_messages()
+        if cancellation is not None:
+            cancellation.raise_if_cancelled("step_limit")
+        return finish(False, "step_limit")
 
-    return finish(False, "step_limit")
+    try:
+        return execute_steps()
+    except (AgentInterrupted, KeyboardInterrupt) as error:
+        return interrupted(error, "agent_loop")

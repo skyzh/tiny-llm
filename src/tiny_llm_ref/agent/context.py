@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from .control import AgentInterrupted
 from .generation import Message
 from .protocol import AgentError
 from .session import SessionEvent, SessionLog
@@ -781,6 +782,8 @@ class ContextManager:
                     )
                     if not self._summary_fits(summary_value):
                         raise ValueError("summary exceeds summary_max_tokens")
+                except AgentInterrupted:
+                    raise
                 except ValueError as error:
                     status = "invalid"
                     attempt_error = self._bounded_text(str(error), 1_024)

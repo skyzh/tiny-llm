@@ -9,6 +9,7 @@ from .context import (
     append_tool_result,
     compact_messages,
 )
+from .control import AgentInterrupted, CancellationToken, SteeringHandle
 from .generation import (
     GenerationSession,
     GenerationStats,
@@ -23,6 +24,15 @@ from .protocol import (
     build_system_prompt,
     parse_action,
 )
+from .recovery import (
+    Checkpoint,
+    MutationIntent,
+    MutationJournal,
+    PlannedRestore,
+    RecoveryResult,
+    UndoPlan,
+    UndoResult,
+)
 from .session import SessionEvent, SessionLog, SessionStore, memory_session
 from .workspace import ToolPolicy, Workspace
 
@@ -32,6 +42,9 @@ __all__ = [
     "AgentEvent",
     "AgentLimits",
     "AgentRun",
+    "AgentInterrupted",
+    "CancellationToken",
+    "Checkpoint",
     "ContextLimitError",
     "ContextManager",
     "ContextPolicy",
@@ -39,11 +52,18 @@ __all__ = [
     "FinalAction",
     "GenerationSession",
     "GenerationStats",
+    "MutationIntent",
+    "MutationJournal",
+    "PlannedRestore",
+    "RecoveryResult",
     "SessionEvent",
     "SessionLog",
     "SessionStore",
+    "SteeringHandle",
     "ToolAction",
     "ToolPolicy",
+    "UndoPlan",
+    "UndoResult",
     "Workspace",
     "WorkingSummary",
     "append_tool_result",
