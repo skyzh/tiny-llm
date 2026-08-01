@@ -4,7 +4,7 @@ from .generation import Message
 
 
 def compact_messages(messages: list[Message], max_chars: int) -> list[Message]:
-    """Week 4, Day 4: retain task anchors and the newest complete tool turns."""
+    """Retain anchors, standalone messages, and complete recent tool turns."""
 
     if max_chars <= 0:
         raise ValueError("max_chars must be positive")
@@ -14,15 +14,31 @@ def compact_messages(messages: list[Message], max_chars: int) -> list[Message]:
 
     anchors = list(messages[:2])
     anchor_chars = sum(len(item["content"]) for item in anchors)
-    if anchor_chars >= max_chars:
-        return anchors
-
-    turns = [messages[index : index + 2] for index in range(2, len(messages), 2)]
+    turns: list[list[Message]] = []
+    index = 2
+    while index < len(messages):
+        message = messages[index]
+        if (
+            message["role"] == "assistant"
+            and index + 1 < len(messages)
+            and messages[index + 1]["role"] == "user"
+            and messages[index + 1]["content"].startswith("Tool result:\n")
+        ):
+            turns.append(messages[index : index + 2])
+            index += 2
+        else:
+            turns.append([message])
+            index += 1
     kept: list[list[Message]] = []
     used = anchor_chars
     for turn in reversed(turns):
         turn_chars = sum(len(item["content"]) for item in turn)
         if used + turn_chars > max_chars:
+            if not kept:
+                # Returning an over-budget newest unit lets the loop fail closed
+                # instead of silently generating without the current request or
+                # most recent observation.
+                kept.append(turn)
             break
         kept.append(turn)
         used += turn_chars

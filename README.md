@@ -35,9 +35,9 @@ The course follows a four-week learning path:
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
   the scheduler does not rebuild dense history on every step.
-- **Week 4: Build a Coding Agent.** Start with a bounded, stateless coding-agent
-  baseline. The planned course then uses multi-turn sessions to motivate cache
-  reuse, context compaction, rewind, cooperative cancellation, and evaluation.
+- **Week 4: Build a Coding Agent.** Start with a bounded coding-agent baseline.
+  Multi-turn sessions then motivate cache reuse, context compaction, rewind,
+  cooperative cancellation, and evaluation.
 
 ## Why MLX and Qwen3?
 
@@ -73,14 +73,14 @@ appendix. The detailed chapter order and current status live in the
 The status columns track whether each chapter's code, tests, and documentation
 are ready. Week 4 remains a design draft and is not yet part of the rendered
 daily course. Its repository baseline currently covers structured actions,
-bounded workspace tools, exact command allowlisting, simple context trimming,
-and a bounded loop. Interactive persistence, reusable generation caches,
-structured token compaction, undo, steering, cooperative decode cancellation,
-and held-out task packages remain planned targets rather than executable course
-checkpoints.
+bounded workspace tools, exact command allowlisting, durable sessions, reusable
+generation caches, simple context trimming, and a bounded loop. Structured token
+compaction, undo, steering, cooperative decode cancellation, and held-out task
+packages remain planned targets rather than executable course checkpoints.
 
-The Week 4 CLI is read-only by default. Enabling writes or an exact command only
-makes that tool eligible. Once an eligible model-dispatched `write_file`,
+The Week 4 CLI's workspace tools are read-only by default; persistent runs still
+write a sensitive transcript under `.tiny-llm/sessions`. Enabling writes or an
+exact command only makes that tool eligible. Once an eligible model-dispatched `write_file`,
 `edit_file`, or `run_command` action passes preflight, it still requires an
 interactive `y/N` approval, with anything other than an explicit yes treated as
 no. Command execution is not sandboxed by its working directory or by this
@@ -115,7 +115,7 @@ succeeded.
 | 4.1 | Agent Loop | 🚧 | 🚧 | 🚧 |
 | 4.2 | Tools | 🚧 | 🚧 | 🚧 |
 | 4.3 | Safety and Validation | 🚧 | 🚧 | 🚧 |
-| 4.4 | Interactive Sessions | 🚧 | 🚧 | 🚧 |
+| 4.4 | Interactive Sessions | ✅ | ✅ | ✅ |
 | 4.5 | Context Compaction | 🚧 | 🚧 | 🚧 |
 | 4.6 | Control and Recovery | 🚧 | 🚧 | 🚧 |
 | 4.7 | Evaluation | 🚧 | 🚧 | 🚧 |

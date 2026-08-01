@@ -1,178 +1,146 @@
-# Day 4: Interactive Sessions and Resume (Planned)
+# Day 4: Interactive Sessions and Resume
 
-The current process loses the agent's conversation and progress when it exits.
-This planned chapter stores an append-only session that can be inspected,
-resumed, and later compacted without treating a rendered prompt as the source of
-truth. It also keeps the conversation open for follow-up messages and reuses
-compatible KV state between model turns.
+The stateless loop from the first three days loses its conversation whenever the
+process exits. This chapter makes the event stream durable and adds a reusable
+generation cache without making either representation depend on the other.
 
-> **Implementation status:** Durable events, session files, instruction
-> discovery, `GenerationSession`, and the CLI flags shown below do not exist in
-> the current source or tests. The current Day 4 checkpoint covers only complete
-> in-memory tool turns and simple character-bounded retention. Every section
-> after the current checkpoint is a design target.
+> **Implementation status:** The reference implementation, learner API surface,
+> and focused tests in this chapter are executable. The Week 4 chapters remain
+> unpublished while the later daily checkpoints are completed.
 
-## Current Repository Checkpoint
+## Check the Chapter
 
-Implement `append_tool_result()` and `compact_messages()` in
-`src/tiny_llm/agent/context.py`, then run:
+Implement the session and generation APIs under `src/tiny_llm/agent/`, then run:
 
 ```bash
 pdm run test --week 4 --day 4
 ```
 
-`append_tool_result()` returns a new list containing the assistant's raw action
-and a user-role `Tool result:` observation. `compact_messages()` always retains
-the system and original task messages, then keeps the newest complete two-message
-tool turns that fit under `max_chars`. It counts characters, creates no summary,
-writes no session file, and does not touch a KV cache.
+Use `pdm run test-refsol --week 4 --day 4` to check the supplied implementation.
+The tests use temporary directories and fake caches; they do not execute model
+commands or destructive subprocesses.
 
-Use `pdm run test-refsol --week 4 --day 4` for the supplied implementation.
+## Three Separate States
 
-## Planned State Model
+The implementation deliberately separates:
 
-Keep these states separate:
+1. **Durable session state:** append-only user, assistant, tool, and lifecycle
+   events.
+2. **Model-visible context:** semantic chat messages rebuilt from those events.
+3. **KV state:** an in-process optimization for one rendered token prefix.
 
-1. **Durable session state** records user messages, model actions, tool results,
-   checkpoints, and control events.
-2. **Model-visible context** is the selected and rendered subset sent on the next
-   model turn.
-3. **KV-cache state** is an optimization tied to one token sequence and model
-   instance.
+The JSONL log is canonical. Losing or closing a KV cache only makes the next
+turn perform a cold prefill; it does not make the conversation impossible to
+resume.
 
-A session remains valid after its KV cache is evicted. A context can be compacted
-without deleting the durable trace. This separation also lets the agent resume
-after a process restart by rebuilding model context from stored events.
+## Append-Only Session Log
 
-## Planned Append-Only JSONL
+`SessionEvent` stores an ID, UTC timestamp, event type, optional parent ID, and
+type-specific data. `SessionLog.append()` serializes ID assignment and append,
+flushes the line, and calls `fsync` before returning. A persisted session begins
+with metadata containing its resolved workspace, model/backend/template
+identifier, and loaded project instructions.
 
-Use one JSON object per line. Every event has an ID, timestamp, type, and
-type-specific payload:
-
-```json
-{"id":"01...","type":"user_message","content":"fix empty values"}
-{"id":"02...","type":"assistant_message","content":"{...}"}
-{"id":"03...","type":"tool_call","tool":"read_file","arguments":{"path":"src/config.py"}}
-{"id":"04...","type":"tool_result","tool_call_id":"03...","is_error":false,"content":"..."}
-```
-
-Append and flush an assistant response before executing its action. If the
-process exits during a tool call, resume logic can detect the unmatched call and
-record an interruption rather than pretending it completed.
-
-Do not store secrets copied from the process environment. Treat session files as
-sensitive because source excerpts and command output may themselves contain
-private information.
-
-## Planned Session Lifecycle
-
-The target CLI supports this command set; these flags are not currently
-accepted:
+The agent records events in this order:
 
 ```text
-agent TASK                 start a new session
-agent --interactive TASK   continue accepting follow-up messages
-agent --continue           continue the newest session for this workspace
-agent --session SESSION_ID resume a selected session
-agent --no-session TASK    run without persistence
+user_message
+assistant_message        # durable before parsing or executing
+tool_call
+tool_result
+run_finished
 ```
 
-Store the resolved workspace path and model identifier in session metadata.
-Refuse to resume in a different workspace unless the user explicitly selects a
-new root; silently replaying file actions against another repository is unsafe.
+If a process exits after `tool_call`, resume appends a concise interrupted
+`tool_result`. It never repeats the side effect or invents a successful result.
+Malformed, oversized, duplicate-ID, symlinked, or metadata-inconsistent logs
+fail closed.
 
-## Planned Conversation Rebuild
+Session transcripts can contain source text and command output. They live under
+`.tiny-llm/sessions`, are ignored by Git, and are hidden from the model's
+workspace tools. Treat that directory as sensitive local data.
 
-The context builder maps events back to chat messages:
+## Resume Boundaries
 
-- user events become user messages;
-- assistant responses remain assistant messages;
-- tool results use the role or wrapper expected by the model's chat template;
-- checkpoints and timing metadata remain in the durable log but need not be
-  shown to the model; and
-- interrupted tool calls become concise error observations.
+`SessionStore` creates, loads, and selects the newest session. Loading validates
+the resolved workspace and model/backend/template identifier. A session cannot
+silently be replayed against a different repository or inference template.
 
-Rendering happens only when a model turn starts. This prevents presentation
-details from becoming the persistent data model.
+At creation and resume, the store reads the workspace-root `AGENTS.md` when it
+is a bounded, regular UTF-8 file. The snapshot and SHA-256 digest are recorded.
+If the file changes, an `instructions_changed` event explains which policy is
+now visible. Recursive instruction discovery and arbitrary configuration files
+are intentionally deferred.
 
-## Planned KV Reuse Between Turns
+The CLI supports:
 
-The starting `Generate` callback receives semantic messages and returns model
-text, but `generate_response()` creates and releases a fresh cache on every
-call. Preserve the application boundary by replacing the function with a
-callable object:
+```text
+agent TASK                 start and persist a new session
+agent --interactive TASK   accept follow-up messages in the same process
+agent --continue           resume the newest session for this workspace/model
+agent --session ID         resume one selected session
+agent --no-session TASK    run without creating a session file
+```
+
+`--continue` and `--session` are mutually exclusive. `--no-session` cannot be
+combined with resume flags. Existing Day 3 safety rules still apply to every
+tool call after resume. A completed session needs a new interactive follow-up;
+resume never creates an unsolicited model turn.
+
+## Rebuilding Context
+
+The context builder maps user and assistant events back to their chat roles and
+wraps completed tool results as user observations. Lifecycle, timing, and
+metadata events remain audit-only. A recovered unmatched call becomes a normal
+error observation, so the next model turn can choose a safe next action.
+
+Day 4 still uses the character-bounded retention helper once the conversation
+is rebuilt. Token-aware reduction and structured summaries belong to Day 5;
+the durable log is never trimmed.
+
+## Reusing KV State
+
+`GenerationSession` preserves the existing one-argument `Generate` boundary:
 
 ```python
-class GenerationSession:
-    def __call__(self, messages: list[Message]) -> str: ...
-    def close(self) -> None: ...
+response = generation_session(messages)
 ```
 
-The object owns the rendered token IDs and one cache per model layer. Before a
-turn, tokenize the desired prompt and find its longest common prefix with the
-cached token IDs. If the cache currently holds `cached_length` tokens and the
-prefix contains `common_prefix_length`, call
-`rewind(cached_length - common_prefix_length)` on every layer, then prefill only
-the new suffix. Chat templates may replace a generation marker when an assistant
-turn is appended, so compare token IDs rather than assuming the rendered string
-only grows at the end.
+It renders and tokenizes the requested messages, compares token IDs with the
+prefix represented by every live cache layer, and computes their longest common
+prefix. Before rewinding, it verifies that all layer offsets agree with its own
+bookkeeping. A valid divergent suffix is rewound on every layer and only the new
+suffix is prefetched. Any disagreement, unsupported rewind, or cache error
+releases the whole cache set and starts cold.
 
-Keep one invariant across all layers:
+`GenerationStats` reports input, reused, rewound, prefetched, and output token
+counts plus whether the turn started cold. The represented-token invariant is:
 
 ```text
-cache.offset == number of token IDs represented by that cache
+every cache offset == len(the token IDs represented by the live cache)
 ```
 
-Validate every layer before rewinding any of them. If the offsets disagree, the
-model changes, or reuse is otherwise unsafe, release the caches and perform a
-cold full prefill. Warm and cold execution must produce the same logits and
-greedy output.
+The final sampled token is included only after it has actually been fed through
+the model. `close()` is idempotent and releases every cache. Warm and cold paths
+must produce the same greedy response.
 
-The event log remains canonical. After a process restart, rebuild the messages
-and cache from durable events. Saving K/V to disk can be an optional extension,
-but a missing or incompatible cache snapshot must never make the session
-impossible to resume.
+The reusable cache is implemented for the course Week 2/3 model adapter. The
+`--solution mlx` compatibility backend keeps its stateless generator; durable
+session replay still works there.
 
-## Planned Project Instructions
+## Exercise
 
-At session start, discover an `AGENTS.md` or equivalent instruction file in the
-workspace and add its contents to the initial context. Record which instruction
-files were loaded so resume behavior is explainable.
+1. Round-trip every session event through JSONL.
+2. Verify that an assistant response is durable before a tool runs.
+3. Resume an unmatched tool call without re-executing it.
+4. Reject a workspace or model mismatch.
+5. Change `AGENTS.md` and inspect the recorded transition.
+6. Confirm that `--no-session` writes nothing.
+7. Compare cache reuse, rewind, and cold-fallback counters with fake layers.
+8. Close a live generation session twice without leaking a cache.
 
-Choose a policy for changed instructions. A simple implementation rereads them
-when resuming and records an event if their content hash differs.
-
-## Planned Multi-Session Serving Boundary
-
-The Week 3 scheduler may run model requests for several agents, but each agent
-still owns its own event stream, context budget, and tool execution state. Keep
-the scheduler interface narrow:
-
-```text
-session context -> generation request -> assistant action
-```
-
-The serving layer should not write session files or execute tools. It may evict
-a session's KV cache while the durable event log remains resumable. A later turn
-then pays for a cold prefill rather than failing.
-
-## Planned Exercise
-
-1. Serialize and reload every event type without losing fields.
-2. Stop an agent after two tool calls, restart the program, and continue it.
-3. Simulate a crash between a tool call and its result.
-4. Verify that `--no-session` creates no durable file.
-5. Attempt to resume a session from a different workspace.
-6. Change `AGENTS.md` between runs and make the change visible in the trace.
-7. Continue a completed turn with an interactive follow-up message.
-8. Compare cold and reused-cache logits while recording reused and prefetched
-   token counts.
-9. Restart without saved K/V and verify that event replay rebuilds the same
-   conversation.
-
-After this planned slice is implemented and tested, a model should be able to
-resume the bug-fixing task from Day 3, accept a follow-up, and avoid prefilling
-an unchanged prefix while the process remains alive. Passing the current Day 4
-test does not establish any of those capabilities.
+Day 5 adds rendered-token budgeting and structured compaction. Day 6 adds
+mutation recovery, checkpoints, cancellation, steering, and branches. Disk KV
+snapshots and multi-process session writers are not part of this checkpoint.
 
 {{#include copyright.md}}

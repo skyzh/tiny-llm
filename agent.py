@@ -39,7 +39,29 @@ def build_parser() -> argparse.ArgumentParser:
     """CLI support for Week 4: define model, budget, and safety policy flags."""
 
     parser = argparse.ArgumentParser(description="A tiny Week 4 coding agent.")
-    parser.add_argument("task", nargs="+", help="coding task for the agent")
+    parser.add_argument("task", nargs="*", help="coding task for a new session")
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="accept follow-up messages after each bounded run",
+    )
+    resume = parser.add_mutually_exclusive_group()
+    resume.add_argument(
+        "--continue",
+        dest="continue_session",
+        action="store_true",
+        help="resume the newest session for this workspace and model",
+    )
+    resume.add_argument(
+        "--session",
+        metavar="SESSION_ID",
+        help="resume a selected session for this workspace and model",
+    )
+    parser.add_argument(
+        "--no-session",
+        action="store_true",
+        help="do not write a persistent session transcript",
+    )
     parser.add_argument("--model", default="qwen3-4b")
     parser.add_argument(
         "--solution",
@@ -83,6 +105,23 @@ def parse_allowed_commands(values: list[str]) -> tuple[tuple[str, ...], ...]:
             raise ValueError("--allow-command must not be empty")
         commands.append(argv)
     return tuple(commands)
+
+
+def validate_session_arguments(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject ambiguous session lifecycles before loading a model."""
+
+    if not args.task and not (args.continue_session or args.session):
+        parser.error("TASK is required unless --continue or --session is used")
+    if args.task and not " ".join(args.task).strip():
+        parser.error("TASK must not be empty")
+    if args.task and (args.continue_session or args.session):
+        parser.error("TASK cannot be combined with --continue or --session")
+    if args.no_session and (args.continue_session or args.session):
+        parser.error("--no-session cannot be combined with a resume option")
+    if args.interactive and not getattr(sys.stdin, "isatty", lambda: False)():
+        parser.error("--interactive requires a TTY")
 
 
 def confirm_tool_call(action, root: Path) -> bool:
@@ -200,6 +239,7 @@ def main():
 
     parser = build_parser()
     args = parser.parse_args()
+    validate_session_arguments(parser, args)
     if args.solution != "mlx" and args.device != "gpu":
         parser.error("The completed Week 2 and Week 3 models require --device gpu")
     try:
@@ -245,7 +285,10 @@ def main():
     )
 
     if not args.allow_writes:
-        print("Safety: read-only mode; pass --allow-writes to permit file changes")
+        print(
+            "Safety: workspace tools are read-only; pass --allow-writes to "
+            "permit file changes"
+        )
     if allowed_commands:
         print("Safety: only the exact --allow-command values may be executed")
     else:
@@ -266,10 +309,51 @@ def main():
         )
         print(f"Using {package} with the {args.loader} loader on {args.device}")
 
-    def generate(messages):
-        """Week 4, Day 1: adapt the selected inference backend to the agent API."""
+    backend_id = "|".join(
+        (
+            model_name,
+            f"solution={'mlx' if args.solution == 'mlx' else package}",
+            f"loader={'mlx' if args.solution == 'mlx' else args.loader}",
+            f"thinking={args.enable_thinking}",
+        )
+    )
+    try:
+        if args.no_session:
+            session_log = agent.memory_session(policy.root, backend_id)
+        else:
+            session_store = agent.SessionStore(policy.root, backend_id)
+            if args.continue_session:
+                session_log = session_store.latest()
+            elif args.session:
+                session_log = session_store.load(args.session)
+            else:
+                session_log = session_store.create()
+    except ValueError as error:
+        parser.error(str(error))
+    if session_log.path is None:
+        print("Session: ephemeral (--no-session)")
+    else:
+        print(f"Session transcript: {session_log.session_id} (sensitive local data)")
 
-        if args.solution == "mlx":
+    completed_session = next(
+        (
+            event.data.get("completed") is True
+            for event in reversed(session_log.events)
+            if event.type == "run_finished"
+        ),
+        False,
+    )
+    if completed_session and not args.task and not args.interactive:
+        parser.error(
+            "the selected session completed; provide a follow-up interactively"
+        )
+
+    generation_session = None
+    if args.solution == "mlx":
+
+        def generate(messages):
+            """Adapt the stateless MLX-LM compatibility backend."""
+
             from mlx_lm import generate as mlx_generate
 
             prompt = tokenizer.apply_chat_template(
@@ -292,6 +376,7 @@ def main():
 
             return run_with_spinner("Model is working...", generate_mlx)
 
+    else:
         if args.loader == "week2":
             cache_type = importlib.import_module(f"{package}.kv_cache").TinyKvFullCache
 
@@ -302,16 +387,23 @@ def main():
 
         else:
             cache_factory = model.create_kv_cache
-        return run_with_spinner(
-            "Model is working...",
-            agent.generate_response,
+        generation_session = agent.GenerationSession(
             model,
             tokenizer,
-            messages,
             cache_factory,
             args.max_tokens,
             args.enable_thinking,
         )
+
+        def generate(messages):
+            """Generate with Day 4's reusable course-model cache."""
+
+            assert generation_session is not None
+            response = run_with_spinner(
+                "Model is working...", generation_session, messages
+            )
+            generate.last_stats = generation_session.last_stats
+            return response
 
     def show_event(event):
         """Week 4, Day 7: print the same trace represented by AgentEvent."""
@@ -325,15 +417,41 @@ def main():
         if event.result is not None:
             print(f"tool> {json.dumps(event.result, ensure_ascii=True)}")
 
-    def execute_agent():
+    def execute_agent(task):
         """Run generation within the requested MLX stream."""
 
         with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
             return agent.run_agent(
-                " ".join(args.task), generate, workspace, limits, show_event
+                task,
+                generate,
+                workspace,
+                limits,
+                show_event,
+                session=session_log,
             )
 
-    run_and_report(execute_agent, workspace)
+    try:
+        pending_task = " ".join(args.task).strip() if args.task else None
+        if pending_task is None and completed_session:
+            try:
+                pending_task = input("\nfollow-up (blank to exit)> ").strip()
+            except EOFError:
+                return None
+            if not pending_task:
+                return None
+        result = run_and_report(lambda: execute_agent(pending_task), workspace)
+        while args.interactive:
+            try:
+                follow_up = input("\nfollow-up (blank to exit)> ").strip()
+            except EOFError:
+                break
+            if not follow_up:
+                break
+            result = run_and_report(lambda: execute_agent(follow_up), workspace)
+        return result
+    finally:
+        if generation_session is not None:
+            generation_session.close()
 
 
 if __name__ == "__main__":

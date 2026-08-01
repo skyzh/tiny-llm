@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 
 from .context import append_tool_result, compact_messages
 from .generation import Generate, initial_messages
@@ -13,6 +13,7 @@ from .protocol import (
     build_system_prompt,
     parse_action,
 )
+from .session import SessionLog
 from .workspace import Workspace
 
 
@@ -63,19 +64,57 @@ class AgentRun:
     command_side_effects_untracked: bool = False
     uncertain_modified_files: tuple[str, ...] = ()
     command_cleanup_incomplete: bool = False
+    session_id: str | None = None
 
 
 def run_agent(
-    task: str,
+    task: str | None,
     generate: Generate,
     workspace: Workspace,
     limits: AgentLimits | None = None,
     on_event: Callable[[AgentEvent], None] | None = None,
+    *,
+    session: SessionLog | None = None,
 ) -> AgentRun:
-    """Week 4, Day 6: run the bounded observe-act loop with recovery and tracing."""
+    """Run a bounded loop, optionally recording its canonical durable events."""
 
     limits = limits or AgentLimits()
-    messages = initial_messages(task, build_system_prompt(workspace))
+    system_prompt = build_system_prompt(workspace)
+    if session is None:
+        if task is None:
+            raise ValueError("task is required without a session")
+        messages = initial_messages(task, system_prompt)
+    else:
+        if session.workspace != workspace.policy.root:
+            raise ValueError("session belongs to a different workspace")
+        session.recover_incomplete_turns()
+        prior_user_messages = any(
+            event.type == "user_message" for event in session.events
+        )
+        finished = next(
+            (
+                event
+                for event in reversed(session.events)
+                if event.type == "run_finished"
+            ),
+            None,
+        )
+        if task is None and finished is not None and finished.data.get("completed"):
+            raise ValueError("completed session requires a follow-up message")
+        if task is not None:
+            if not task.strip():
+                raise ValueError("task must not be empty")
+            session.append(
+                "user_message",
+                content=task,
+                kind="follow_up" if prior_user_messages else "task",
+            )
+        elif not prior_user_messages:
+            raise ValueError("session has no task to resume")
+        session.append("run_started")
+        messages = compact_messages(
+            session.messages(system_prompt), limits.max_context_chars
+        )
     events: list[AgentEvent] = []
     invalid_actions = 0
     previous_signature: str | None = None
@@ -83,6 +122,11 @@ def run_agent(
 
     def finish(completed: bool, reason: str, final: str | None = None) -> AgentRun:
         """Week 4, Day 7: freeze the trace and modified paths into a result."""
+
+        if session is not None:
+            session.append(
+                "run_finished", completed=completed, reason=reason, final=final
+            )
 
         modified = tuple(
             sorted(
@@ -106,14 +150,34 @@ def run_agent(
             command_side_effects_untracked=(workspace.command_side_effects_untracked),
             uncertain_modified_files=uncertain,
             command_cleanup_incomplete=workspace.command_cleanup_incomplete,
+            session_id=session.session_id if session is not None else None,
         )
+
+    def rebuild_messages() -> list[dict[str, str]]:
+        if session is None:
+            return compact_messages(messages, limits.max_context_chars)
+        return compact_messages(
+            session.messages(system_prompt), limits.max_context_chars
+        )
+
+    def record_assistant(response: str) -> None:
+        if session is None:
+            return
+        stats = getattr(generate, "last_stats", None)
+        generation = asdict(stats) if is_dataclass(stats) else None
+        session.append("assistant_message", content=response, generation=generation)
 
     initial_chars = sum(len(message["content"]) for message in messages)
     if initial_chars > limits.max_context_chars:
         return finish(False, "context_limit")
 
     for step in range(1, limits.max_steps + 1):
+        if sum(len(message["content"]) for message in messages) > (
+            limits.max_context_chars
+        ):
+            return finish(False, "context_limit")
         response = generate(messages)
+        record_assistant(response)
         try:
             action = parse_action(response, workspace.available_tools)
         except AgentError as error:
@@ -126,9 +190,26 @@ def run_agent(
             if on_event is not None:
                 on_event(event)
             if invalid_actions >= limits.max_invalid_actions:
+                if session is not None:
+                    session.append(
+                        "tool_result",
+                        tool_call_id=None,
+                        tool=None,
+                        is_error=True,
+                        content=result,
+                    )
                 return finish(False, "invalid_action_limit")
-            messages = append_tool_result(messages, response, result)
-            messages = compact_messages(messages, limits.max_context_chars)
+            if session is not None:
+                session.append(
+                    "tool_result",
+                    tool_call_id=None,
+                    tool=None,
+                    is_error=True,
+                    content=result,
+                )
+            else:
+                messages = append_tool_result(messages, response, result)
+            messages = rebuild_messages()
             continue
 
         if isinstance(action, FinalAction):
@@ -152,14 +233,37 @@ def run_agent(
             events.append(event)
             if on_event is not None:
                 on_event(event)
+            if session is not None:
+                session.append(
+                    "tool_result",
+                    tool_call_id=None,
+                    tool=action.tool,
+                    is_error=True,
+                    content=result,
+                )
             return finish(False, "repeated_action_limit")
 
+        tool_call = None
+        if session is not None:
+            tool_call = session.append(
+                "tool_call", tool=action.tool, arguments=action.arguments
+            )
         result = workspace.execute(action)
+        if session is not None:
+            session.append(
+                "tool_result",
+                tool_call_id=tool_call.id,
+                tool=action.tool,
+                arguments=action.arguments,
+                is_error=result.startswith("error:"),
+                content=result,
+            )
         event = AgentEvent(step, response, action, result)
         events.append(event)
         if on_event is not None:
             on_event(event)
-        messages = append_tool_result(messages, response, result)
-        messages = compact_messages(messages, limits.max_context_chars)
+        if session is None:
+            messages = append_tool_result(messages, response, result)
+        messages = rebuild_messages()
 
     return finish(False, "step_limit")
