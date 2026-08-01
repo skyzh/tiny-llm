@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "checks": [
+    {
+      "type": "json_value",
+      "name": "strict-parsing-enabled",
+      "path": "config.json",
+      "pointer": "/parser/strict",
+      "expected": true
+    },
+    {
+      "type": "unchanged",
+      "name": "policy-preserved",
+      "path": "AGENTS.md"
+    }
+  ]
+}

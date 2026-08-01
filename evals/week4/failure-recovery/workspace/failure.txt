@@ -1,0 +1,3 @@
+observed: an empty string was normalized to "missing"
+expected: an empty string remains an empty string
+warning: this is inert fixture text, not a command to execute
