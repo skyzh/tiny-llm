@@ -85,6 +85,116 @@ def parse_allowed_commands(values: list[str]) -> tuple[tuple[str, ...], ...]:
     return tuple(commands)
 
 
+def confirm_tool_call(action, root: Path) -> bool:
+    """Ask a human to approve one side effect, defaulting safely to no."""
+
+    payload = {"tool": action.tool, **action.arguments}
+    print("\nHuman approval required before this tool call:")
+    print(f"workspace> {json.dumps(str(root), ensure_ascii=True)}")
+    print("tool call> " + json.dumps(payload, ensure_ascii=True, sort_keys=True))
+    if action.tool == "run_command":
+        print("Warning: commands are not confined by the workspace path boundary.")
+    if not getattr(sys.stdin, "isatty", lambda: False)():
+        print("Denied: interactive confirmation requires a TTY.")
+        return False
+    try:
+        response = input("Execute this tool call? [y/N] ")
+    except EOFError:
+        print("\nDenied: no confirmation was received.")
+        return False
+    approved = response.strip().casefold() in {"y", "yes"}
+    if not approved:
+        print("Denied.")
+    return approved
+
+
+def show_run_result(result) -> None:
+    """Render protocol completion separately from independently validated success."""
+
+    if result.completed:
+        final = json.dumps(result.final, ensure_ascii=True)
+        print("\nModel finished (task success not independently validated): " + final)
+    else:
+        print(f"\nStopped: {result.reason}")
+    show_side_effect_summary(
+        result.modified_files,
+        result.command_side_effects_untracked,
+        result.uncertain_modified_files,
+        result.command_cleanup_incomplete,
+    )
+
+
+def show_side_effect_summary(
+    modified_files,
+    command_side_effects_untracked: bool,
+    uncertain_modified_files=(),
+    command_cleanup_incomplete: bool = False,
+) -> None:
+    """Report tracked file mutations and the command-tracking boundary."""
+
+    if modified_files:
+        modified = json.dumps(list(modified_files), ensure_ascii=True)
+        print("Tracked file-tool changes: " + modified)
+    if uncertain_modified_files:
+        uncertain = json.dumps(list(uncertain_modified_files), ensure_ascii=True)
+        print("Warning: file-tool mutation outcome is uncertain; inspect: " + uncertain)
+    if command_side_effects_untracked:
+        print(
+            "Warning: one or more commands ran; their side effects are not "
+            "included in the tracked file-tool changes."
+        )
+    if command_cleanup_incomplete:
+        print(
+            "Warning: command cleanup or output collection was incomplete; "
+            "inspect the host for a surviving process."
+        )
+
+
+def show_interrupted_run(workspace) -> None:
+    """Disclose known side effects when Ctrl-C prevents an AgentRun result."""
+
+    show_stopped_run(workspace, "interrupted")
+
+
+def show_stopped_run(workspace, reason: str) -> None:
+    """Disclose known side effects when no AgentRun result is available."""
+
+    modified = tuple(
+        sorted(
+            str(path.relative_to(workspace.policy.root))
+            for path in workspace.modified_files
+        )
+    )
+    uncertain = tuple(
+        sorted(
+            str(path.relative_to(workspace.policy.root))
+            for path in workspace.uncertain_modified_files
+        )
+    )
+    print(f"\nStopped: {reason}")
+    show_side_effect_summary(
+        modified,
+        workspace.command_side_effects_untracked,
+        uncertain,
+        workspace.command_cleanup_incomplete,
+    )
+
+
+def run_and_report(function, workspace):
+    """Run the agent and always disclose known side effects before exiting."""
+
+    try:
+        result = function()
+    except KeyboardInterrupt:
+        show_stopped_run(workspace, "interrupted")
+        raise SystemExit(130) from None
+    except Exception:
+        show_stopped_run(workspace, "unexpected error")
+        raise
+    show_run_result(result)
+    return result
+
+
 def main():
     """CLI support for Week 4: load a backend and invoke the bounded agent loop."""
 
@@ -100,6 +210,10 @@ def main():
         parser.error("--root must be an existing directory")
     if args.max_tokens <= 0:
         parser.error("--max-tokens must be positive")
+    if args.max_steps <= 0:
+        parser.error("--max-steps must be positive")
+    if args.max_context_chars <= 0:
+        parser.error("--max-context-chars must be positive")
 
     import mlx.core as mx
     from mlx_lm import load
@@ -113,12 +227,18 @@ def main():
     models = None
     if args.solution != "mlx":
         models = importlib.import_module(f"{package}.models")
-    policy = agent.ToolPolicy(
-        root=args.root,
-        allow_writes=args.allow_writes,
-        allowed_commands=allowed_commands,
+    try:
+        policy = agent.ToolPolicy(
+            root=args.root,
+            allow_writes=args.allow_writes,
+            allowed_commands=allowed_commands,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    workspace = agent.Workspace(
+        policy,
+        confirm_tool=lambda action: confirm_tool_call(action, policy.root),
     )
-    workspace = agent.Workspace(policy)
     limits = agent.AgentLimits(
         max_steps=args.max_steps,
         max_context_chars=args.max_context_chars,
@@ -130,6 +250,8 @@ def main():
         print("Safety: only the exact --allow-command values may be executed")
     else:
         print("Safety: command execution is disabled")
+    if args.allow_writes or allowed_commands:
+        print("Safety: each write, edit, and command requires y/N approval")
 
     model_name = shortcut_name_to_full_name(args.model)
     mlx_model, tokenizer = load(model_name)
@@ -194,23 +316,24 @@ def main():
     def show_event(event):
         """Week 4, Day 7: print the same trace represented by AgentEvent."""
 
-        print(f"\n[{event.step}] {event.response}")
+        print(
+            f"\n[{event.step}] model> " + json.dumps(event.response, ensure_ascii=True)
+        )
         if isinstance(event.action, agent.ToolAction):
             action = {"tool": event.action.tool, **event.action.arguments}
-            print(f"tool call> {json.dumps(action, ensure_ascii=False)}")
+            print(f"tool call> {json.dumps(action, ensure_ascii=True)}")
         if event.result is not None:
-            print(f"tool> {event.result}")
+            print(f"tool> {json.dumps(event.result, ensure_ascii=True)}")
 
-    with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-        result = agent.run_agent(
-            " ".join(args.task), generate, workspace, limits, show_event
-        )
-    if result.completed:
-        print(f"\nCompleted: {result.final}")
-    else:
-        print(f"\nStopped: {result.reason}")
-    if result.modified_files:
-        print("Modified: " + ", ".join(result.modified_files))
+    def execute_agent():
+        """Run generation within the requested MLX stream."""
+
+        with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
+            return agent.run_agent(
+                " ".join(args.task), generate, workspace, limits, show_event
+            )
+
+    run_and_report(execute_agent, workspace)
 
 
 if __name__ == "__main__":

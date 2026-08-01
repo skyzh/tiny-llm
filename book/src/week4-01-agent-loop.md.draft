@@ -4,6 +4,26 @@ The decoder from Week 1 produces text once and exits. An agent repeatedly turns
 text into an action, executes that action, and gives the result back to the
 model. Today you will make that control flow explicit.
 
+> **Implementation status:** The current Day 1 learner check covers
+> `initial_messages()`: it preserves the system instructions and task and rejects
+> an empty task. The complete `run_agent()` loop described later in this chapter
+> exists in the reference baseline, but its focused checks currently live under
+> Day 6. Treat the rest of this chapter as the intended Day 1 expansion, not as
+> behavior proved by the Day 1 test.
+
+## Current Repository Checkpoint
+
+Implement `initial_messages(task, system_prompt)` in
+`src/tiny_llm/agent/generation.py`, then run:
+
+```bash
+pdm run test --week 4 --day 1
+```
+
+The expected result is that both Day 1 tests pass without loading a model. To
+check the supplied implementation instead, run
+`pdm run test-refsol --week 4 --day 1`.
+
 ## Learning Goals
 
 By the end of the day, you will be able to:
@@ -20,7 +40,7 @@ model that does not expose native tool calls. An assistant turn produces exactly
 one of two shapes:
 
 ```json
-{"tool":"read","path":"README.md"}
+{"tool":"read_file","path":"README.md"}
 ```
 
 ```json
@@ -35,7 +55,7 @@ Return validation failures to the model as observations. This lets the model
 repair a malformed action without hiding the failure:
 
 ```text
-error: read requires a non-empty string field named path
+error: missing fields for read_file: path
 ```
 
 ## The Loop
@@ -43,20 +63,28 @@ error: read requires a non-empty string field named path
 Keep orchestration separate from inference and tool execution:
 
 ```python
-def run_agent(task, model, tools, max_steps):
-    events = [user_message(task)]
-    for _ in range(max_steps):
-        response = model.generate(events, tools)
-        events.append(assistant_message(response))
+def run_agent(task, generate, workspace, limits):
+    messages = initial_messages(task, build_system_prompt(workspace))
+    events = []
+    for step in range(1, limits.max_steps + 1):
+        response = generate(messages)
 
-        action = parse_and_validate(response)
-        if action.is_final:
-            return action.final
+        try:
+            action = parse_action(response, workspace.available_tools)
+        except AgentError as error:
+            result = f"error: {error}"
+            events.append(AgentEvent(step, response, None, result))
+            messages = append_tool_result(messages, response, result)
+            continue
+        if isinstance(action, FinalAction):
+            events.append(AgentEvent(step, response, action, None))
+            break
 
-        result = tools.execute(action)
-        events.append(tool_result(action, result))
+        result = workspace.execute(action)
+        events.append(AgentEvent(step, response, action, result))
+        messages = append_tool_result(messages, response, result)
 
-    raise StepLimitExceeded(max_steps)
+    # Construct AgentRun with either "completed" or "step_limit".
 ```
 
 The loop owns policy such as budgets and stop conditions. The model adapter owns
@@ -65,7 +93,9 @@ boundaries will matter when sessions and cancellation arrive later in the week.
 
 ## Preserve the Trace
 
-For now, an in-memory list is sufficient. Record at least:
+For now, an in-memory list is sufficient. The current `AgentEvent` records the
+step, raw response, parsed action when valid, and result. The target trace should
+eventually also make these run-level facts discoverable:
 
 - the user's task;
 - the assistant's raw response;
@@ -76,10 +106,10 @@ For now, an in-memory list is sufficient. Record at least:
 Do not store only the latest prompt string. Named events are easier to inspect
 and can later be serialized without reverse-engineering the chat template.
 
-## Exercise
+## Planned Loop Exercise
 
-Refactor the starting demo so `generate()` returns model text and a new
-`run_agent()` function owns the loop.
+Keep `generate_response()` responsible for one model response and make
+`run_agent()` own the loop.
 
 Implement and test these cases without loading a model:
 
@@ -95,15 +125,18 @@ not require expensive model tests.
 
 ## Checkpoint
 
-At the end of Day 1, the following trace should be possible:
+After the planned loop slice is implemented, the following trace should be
+possible:
 
 ```text
 user      inspect the repository
-assistant {"tool":"read","path":"README.md"}
+assistant {"tool":"read_file","path":"README.md"}
 tool      # Tiny LLM ...
 assistant {"final":"This repository teaches LLM inference and serving."}
 ```
 
-The tool can still be a stub. Tomorrow it will become a real workspace API.
+The tool can still be a stub in this planned slice. The current source tree's
+bounded workspace API is introduced by the Day 2 and Day 3 checkpoints, and the
+current loop behavior is verified by Day 6.
 
 {{#include copyright.md}}

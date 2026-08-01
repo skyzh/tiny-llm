@@ -35,13 +35,17 @@ class AgentEvent:
 
 @dataclass(frozen=True)
 class AgentRun:
-    """Week 4, Day 7: the complete, measurable result of an agent task."""
+    """One bounded run; ``completed`` means the model returned a valid final."""
 
     completed: bool
     reason: str
     final: str | None
     events: tuple[AgentEvent, ...]
     modified_files: tuple[str, ...]
+    task_success: bool | None = None
+    command_side_effects_untracked: bool = False
+    uncertain_modified_files: tuple[str, ...] = ()
+    command_cleanup_incomplete: bool = False
 
 
 def run_agent(

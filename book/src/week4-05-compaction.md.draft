@@ -1,10 +1,44 @@
-# Day 5: Context and Compaction
+# Day 5: Context and Compaction (Planned)
 
 An append-only session grows forever, but a model has a finite context window.
-Today you will build a context policy that keeps the working set small without
-discarding the complete session trace.
+This planned chapter builds a context policy that keeps the working set small
+without discarding the complete session trace.
 
-## Set the Token Budget
+> **Implementation status:** The current Day 5 checkpoint covers approved atomic
+> writes, exact edits, and exact command allowlisting. The current context helper
+> only trims complete turns by character count and is checked on Day 4. Token
+> accounting, structured summaries, durable compaction events, and KV-cache
+> reconciliation described below are not implemented or tested.
+
+## Current Repository Checkpoint
+
+Implement `write_file()`, `edit_file()`, and `run_command()` in
+`src/tiny_llm/agent/workspace.py`, then run:
+
+```bash
+pdm run test --week 4 --day 5
+```
+
+The cumulative safety contract is:
+
+- model-dispatched `write_file` and `edit_file` actions require
+  `--allow-writes` and a separate `y/N` approval through `Workspace.execute()`;
+- an existing file must be read before replacement;
+- its in-memory observation digest must match at the post-approval recheck;
+- `edit_file` requires one exact, non-empty `old` match;
+- a model-dispatched `run_command` receives `argv`, must exactly match an
+  operator allowlist entry, and requires its own default-No approval;
+- a working directory, allowlist, and human prompt do not sandbox the approved
+  program; and
+- `modified_files` covers confirmed file-tool changes and
+  `uncertain_modified_files` preserves a path whose commit was interrupted;
+  separate run flags report that a started command may have untracked side
+  effects or could not be completely cleaned up.
+
+Use `pdm run test-refsol --week 4 --day 5` for the supplied implementation.
+Everything after this checkpoint is the planned compaction design.
+
+## Planned Token Budget
 
 Use 32,768 total tokens for the course Qwen3-4B model. Start compaction before
 the rendered input exceeds 24,576 tokens, leaving 8,192 tokens for the next
@@ -18,7 +52,7 @@ results. Characters are not a stable token estimate, and counting only chat
 messages omits context that the model still receives. If one tool result cannot
 fit inside the reserve, bound that result before asking the model to compact.
 
-## Measure Before Compacting
+## Planned Measurements
 
 Record for every model turn:
 
@@ -32,11 +66,12 @@ End-to-end agent efficiency depends on the whole harness, not only the model's
 price or token speed. Repeatedly feeding irrelevant history can cost more than
 the useful reasoning itself.
 
-## First Reduce Tool Results
+## Planned Deterministic Reduction
 
 Compaction should not compensate for unbounded tools. Before summarizing history:
 
-- read only the required file window;
+- call `read_file` only for required files and add a line-window extension only
+  if evaluation justifies it;
 - cap directory listings and search results;
 - keep the useful tail of compiler and test output;
 - return diffs rather than rewritten files; and
@@ -45,7 +80,7 @@ Compaction should not compensate for unbounded tools. Before summarizing history
 These operations are deterministic and preserve more fidelity than asking a
 model to summarize already excessive output.
 
-## A Structured Working Summary
+## Planned Structured Working Summary
 
 When the context approaches its budget, summarize older events into explicit
 fields:
@@ -69,7 +104,7 @@ session continues to retain every original event.
 The summary is lossy, so make it visible in traces and let evaluation compare
 behavior with and without compaction.
 
-## Compaction Algorithm
+## Planned Compaction Algorithm
 
 A simple policy is sufficient:
 
@@ -84,29 +119,29 @@ If summary generation fails, fall back to a deterministic record of tool names,
 changed paths, command exit codes, and the last few messages. Context overflow
 must not trap the agent in a retry loop.
 
-## Reconcile the Cache After Compaction
+## Planned Cache Reconciliation
 
 Compaction changes an older part of the rendered prompt, so the Day 4 generation
 session cannot keep every cached token. Pass the compacted messages through the
 same token-level reconciliation path used for an ordinary turn: find the common
-prefix, rewind every layer to that boundary, and prefill the new summary and
-recent tail.
+prefix, remove `cached_length - common_prefix_length` tokens from every layer
+with `rewind(...)`, and prefill the new summary and recent tail.
 
 Do not try to summarize or edit K/V tensors directly. They are derived state,
 not semantic memory. If little prefix remains after compaction, a cold prefill
 may be simpler and just as fast. Compare both policies, but require them to
 produce the same first-token logits and greedy response.
 
-## Working Memory Versus RAG
+## Planned Working Memory and Optional RAG
 
 Compaction is working memory: it preserves the state of the current task. RAG is
 retrieval: it finds external information that was not already in the active
 conversation.
 
-For a beginner coding agent, repository search plus targeted `read` calls is the
-primary retrieval mechanism. It uses current source and gives the model control
-over follow-up queries. A vector index is an optional extension for large design
-documents or API references:
+For a beginner coding agent, allowed repository-search commands plus targeted
+`read_file` calls are the primary retrieval mechanism. They use current source
+and give the model control over follow-up queries. A vector index is an optional
+extension for large design documents or API references:
 
 1. split documents into inspectable chunks;
 2. embed and index those chunks;
@@ -117,7 +152,7 @@ documents or API references:
 A fluent answer cannot repair missing evidence. Conversely, good retrieval can
 still be lost through poor prompt assembly or later compaction.
 
-## Exercise
+## Planned Exercise
 
 Construct a synthetic session with repeated reads, two edits, one failed test,
 and one successful test. Then:
@@ -130,7 +165,9 @@ and one successful test. Then:
 6. reconcile a warm cache to the compacted prompt and compare it with a cold
    prefill.
 
-The compacted agent should know what it changed and which test passed without
-receiving every source excerpt again.
+After this design is implemented and tested, the compacted agent should know what
+it changed and which test passed without receiving every source excerpt again.
+Passing the current Day 5 tests establishes only the mutation and command-policy
+checkpoint above.
 
 {{#include copyright.md}}
