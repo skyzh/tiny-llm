@@ -2,8 +2,9 @@
 
 > 🚧 **Course status:** The daily chapters are drafts and are not included in
 > the rendered book yet. The repository contains a smaller tested baseline, but
-> the interactive-session, reusable-cache, structured-compaction, recovery, and
-> held-out-evaluation milestones described below are still planned work.
+> interactive sessions and reusable-cache checkpoint from Day 4 is executable.
+> Structured compaction, recovery controls, and held-out evaluation remain
+> planned work.
 
 Weeks 1 through 3 turned tokens into text, made decoding efficient, and
 introduced serving techniques. Week 4 adds the next layer: an agent loop that
@@ -38,11 +39,12 @@ rather than prerequisites.
 The checked-in reference implementation is smaller than that target. It
 currently provides:
 
-- a stateless `generate_response()` adapter;
+- a stateless `generate_response()` adapter and a reusable `GenerationSession`;
 - strict parsing of one final answer or one structured tool action;
 - `list_files`, `read_file`, `write_file`, `edit_file`, and `run_command`;
-- a read-only default with explicit tool enablement and per-dispatched-call
-  approval;
+- read-only workspace tools by default, with explicit tool enablement and
+  per-dispatched-call approval;
+- durable append-only session logs, resume, and project-instruction snapshots;
 - character-bounded retention of the newest complete tool turns; and
 - a bounded loop that records actions, observations, confirmed and
   outcome-uncertain file-tool modifications, whether commands may have
@@ -52,12 +54,11 @@ currently provides:
 model—not task correctness. The baseline leaves `task_success` unknown because
 it has no deterministic grader.
 
-It does **not** yet implement durable session files, `GenerationSession`, token
-level prefix reuse, structured summaries, checkpoints, undo, steering,
-cooperative decode cancellation, recorded interrupt events, session branches,
-or held-out task packages. The later draft chapters specify those intended
-extensions. Their examples are design targets, not commands or APIs that work
-in the current CLI.
+It does **not** yet implement structured token summaries, checkpoints, undo,
+steering, cooperative decode cancellation, recorded interrupt events, session
+branches, or held-out task packages. The later draft chapters specify those
+intended extensions. Their examples are design targets, not commands or APIs
+that work in the current CLI.
 
 ## The Core Loop
 
@@ -87,7 +88,7 @@ task + session events
                       workspace
 ```
 
-## Planned Inference Extension
+## Stateful Inference Extension
 
 The starting model boundary is deliberately stateless:
 
@@ -101,14 +102,14 @@ one response, and releases the caches. That is a useful correctness baseline,
 but an interactive agent repeatedly sends a long prompt whose prefix barely
 changes.
 
-The planned Day 4 chapter replaces the function with a callable
+Day 4 adds a callable
 `GenerationSession` that keeps the same agent-facing API while owning token IDs
 and layer caches. It compares the new rendered prompt with the cached token
 sequence, rewinds a divergent suffix, and prefills only the new tokens. Planned
 Days 5 and 6 reuse this operation after compaction, steering, and session
-branching. `GenerationSession` is not present in the current source tree.
+branching.
 
-In the planned architecture, the append-only event log remains the source of
+The append-only event log remains the source of
 truth. A process restart may rebuild KV state from events, so persisting K/V to
 disk is an optional optimization rather than a correctness requirement.
 
@@ -153,10 +154,10 @@ allowed command can still delete files, read outside the workspace, launch child
 processes, or use the network. Human confirmation reduces accidental execution;
 it does not confine the approved program.
 
-The initial demo calls the model through the stateless baseline. The draft week
-keeps the agent loop, tools, and safety work as its main arc, then plans to use
-interactive sessions as a focused opportunity to improve the inference framework
-without changing the model kernels.
+The default demo now calls the course model through `GenerationSession`; the
+`--solution mlx` compatibility backend retains the stateless adapter. The agent
+loop, tools, and safety work remain the main arc, while interactive sessions
+provide a focused inference-framework exercise without changing model kernels.
 
 ## Seven-Day Plan and Current Evidence
 
@@ -165,7 +166,7 @@ without changing the model kernels.
 | 1 | Agent loop | Initial system and task messages are validated. |
 | 2 | Tools and actions | Structured actions and enabled-tool prompts are validated. |
 | 3 | Safety and validation | Bounded reads, protected paths, symlink rejection, and read-only defaults are validated. |
-| 4 | Interactive sessions | Complete in-memory tool turns and simple character-bounded retention are validated; sessions are not implemented. |
+| 4 | Interactive sessions | Append-only sessions, resume checks, instruction snapshots, and live token-prefix reuse are validated. |
 | 5 | Compaction | Atomic writes, exact edits, and exact command allowlisting are validated; token compaction is not implemented. |
 | 6 | Control and recovery | The bounded loop recovers from malformed actions and stops repeated calls; undo and steering are not implemented. |
 | 7 | Evaluation | A scripted safe edit and rejection of a disabled command are validated; held-out task packages are not implemented. |
@@ -194,15 +195,18 @@ use MLX-LM's optimized executor. The starting program is intentionally smaller
 than the final agent: each day replaces one shortcut with an explicit component
 that can be inspected and tested.
 
-The current command is read-only and exposes no command runner by default.
+The current command's workspace tools are read-only and expose no command runner
+by default. Unless `--no-session` is selected, the CLI still writes its sensitive
+local transcript under `.tiny-llm/sessions`.
 `--allow-writes` and repeated `--allow-command "..."` flags make those tools
 eligible. Each eligible action that passes preflight still defaults to **No** at
 its `y/N` prompt. Keep `--root` pointed at a disposable exercise directory. Do
 not interpret an exact command allowlist, a working directory, or a confirmation
 prompt as process isolation.
 
-The planned Day 4 CLI adds `--interactive`, `--continue`, `--session`, and
-`--no-session`. None of those flags exists in the current command.
+The Day 4 CLI supports `--interactive`, `--continue`, `--session`, and
+`--no-session`. Persistent transcripts are sensitive local files under
+`.tiny-llm/sessions`; `--no-session` retains the earlier ephemeral behavior.
 
 The default Qwen3 4B model follows the structured action protocol more reliably.
 Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more

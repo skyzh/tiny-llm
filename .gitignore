@@ -117,6 +117,9 @@ ipython_config.py
 .pdm-python
 .pdm-build/
 
+# Local coding-agent session transcripts (may contain source and tool output)
+.tiny-llm/
+
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
 

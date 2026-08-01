@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from .generation import Generate
 from .protocol import AgentAction
+from .session import SessionLog
 from .workspace import Workspace
 
 
@@ -46,15 +47,18 @@ class AgentRun:
     command_side_effects_untracked: bool = False
     uncertain_modified_files: tuple[str, ...] = ()
     command_cleanup_incomplete: bool = False
+    session_id: str | None = None
 
 
 def run_agent(
-    task: str,
+    task: str | None,
     generate: Generate,
     workspace: Workspace,
     limits: AgentLimits | None = None,
     on_event: Callable[[AgentEvent], None] | None = None,
+    *,
+    session: SessionLog | None = None,
 ) -> AgentRun:
-    """Week 4, Day 6: run the bounded observe-act loop with recovery and tracing."""
+    """Run a bounded loop, optionally recording its canonical durable events."""
 
     pass
