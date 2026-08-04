@@ -77,8 +77,9 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     mx.metal.start_capture(str(args.output.resolve()))
     try:
-        mx.eval(quantized_linear(capture_x, weights))
+        # close the old command buffer created before `start_capture`
         mx.synchronize()
+        mx.eval(quantized_linear(capture_x, weights))
     finally:
         mx.metal.stop_capture()
 
