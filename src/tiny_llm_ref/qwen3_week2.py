@@ -27,6 +27,8 @@ WEEK2_CHECKPOINTS = (
     "split-k",
 )
 
+DECODE_ATTENTION_MAX_CONTEXT = 256
+
 
 def _linear(x: mx.array, weight: mx.array | QuantizedWeights) -> mx.array:
     if isinstance(weight, QuantizedWeights):
@@ -121,7 +123,7 @@ class Qwen3MultiHeadAttention:
         if (
             self.use_decode_attention
             and L <= 8
-            and projection_k.shape[-2] <= 128
+            and projection_k.shape[-2] <= DECODE_ATTENTION_MAX_CONTEXT
             and not isinstance(mask, mx.array)
         ):
             x = decode_attention_custom(

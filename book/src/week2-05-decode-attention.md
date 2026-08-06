@@ -120,7 +120,7 @@ SIMD-matrix tiles for FlashAttention; prefill is a different workload where
 both query and context lengths are large.
 
 Set a concrete dispatch guard: use your Metal kernel only when query length is
-at most eight and cached context length is at most 128. Otherwise use the
+at most eight and cached context length is at most 256. Otherwise use the
 readable grouped-attention path. Keep this condition at the model call site so
 the benchmarked operating range remains reviewable instead of becoming a
 hidden performance policy inside the Metal kernel.
@@ -200,7 +200,9 @@ control and exposes its unchanged 128-token prefill profile:
 
 ```bash
 pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
-  --section attention --context 128
+  --section attention --context 32 --context 128 --context 160 \
+  --context 192 --context 256 --context-repeats 6 \
+  --json-output benchmark_results/week2-attention-context-sweep.json
 
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
   --variant week2-swiglu --variant week2-decode-attention --variant mlx \
@@ -236,6 +238,26 @@ attach the decode and prefill kernel-group results. Reject the custom dispatch
 if repeated fresh-process short-context runs do not improve, even when the
 isolated kernel looks faster. If the operator wins only over a limited context
 range, encode that measured crossover in the dispatch guard.
+
+The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
+rotated every implementation order, and recorded all 60 samples per
+implementation and pass:
+
+| Context | Readable | Metal | MLX | Metal speedup |
+|---:|---:|---:|---:|---:|
+| 32 | 143.0 us | 125.7 us | 116.3 us | 1.138x |
+| 128 | 149.3 us | 136.3 us | 120.6 us | 1.095x |
+| 160 | 151.2 us | 140.1 us | 120.9 us | 1.079x |
+| 192 | 154.0 us | 143.9 us | 121.9 us | 1.071x |
+| 256 | 158.0 us | 150.7 us | 122.8 us | 1.048x |
+
+The Metal path wins at every measured point through 256, so 256 is the largest
+evidenced context guard. The readable path remains the policy beyond that
+range; do not extrapolate the final 4.8% operator win to longer caches. The raw
+record, including exact source SHA, model configuration, MLX and mlx-lm
+versions, Xcode/Metal versions, device information, execution order, samples,
+and medians, is
+`benchmark_results/m4-pro-qwen3-4b-week2-attention-context-sweep-mlx-0.32.0.json`.
 
 The fixed `128/129` control does not execute the custom attention kernel:
 prefill has `L=128`, and the first decode call appends the new token before the
