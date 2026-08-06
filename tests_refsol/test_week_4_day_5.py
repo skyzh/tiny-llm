@@ -302,7 +302,7 @@ def test_task_2_tracks_a_file_when_commit_outcome_is_uncertain(tmp_path, monkeyp
     )
     workspace.read_file("answer.py")
 
-    def replace_then_interrupt(target, content):
+    def replace_then_interrupt(target, content, **_write_state):
         target.write_bytes(content)
         raise KeyboardInterrupt
 

@@ -4,6 +4,7 @@ import hashlib
 import heapq
 import os
 import signal
+import stat
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -54,6 +55,8 @@ class _PreparedWrite:
     path: Path
     content: bytes
     expected_digest: bytes | None
+    expected_mode: int | None
+    after_mode: int
 
 
 @dataclass(frozen=True)
@@ -214,15 +217,38 @@ class Workspace:
             current = self._read_bounded_file(path, tool="write_file")
             if self._digest(current) != expected_digest:
                 raise AgentError("file changed since it was read; read it again")
+            expected_mode = stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode)
+            after_mode = expected_mode & 0o777
+        else:
+            expected_mode = None
+            after_mode = 0o600
         if not path.parent.exists() or not path.parent.is_dir():
             raise AgentError("parent directory must already exist")
-        return _PreparedWrite(path, encoded, expected_digest)
+        return _PreparedWrite(
+            path,
+            encoded,
+            expected_digest,
+            expected_mode,
+            after_mode,
+        )
 
     def _commit_write(self, prepared: _PreparedWrite) -> str:
         """Revalidate and commit one previously prepared write."""
 
         relative = prepared.path.relative_to(self.policy.root)
         path = self.resolve_path(str(relative), must_exist=False)
+        self._revalidate_prepared_write(prepared)
+        self.uncertain_modified_files.add(path)
+        self._atomic_write(path, prepared.content, after_mode=prepared.after_mode)
+        self.observed_files[path] = self._digest(prepared.content)
+        self.modified_files.add(path)
+        self.uncertain_modified_files.discard(path)
+        return f"wrote {relative}"
+
+    def _revalidate_prepared_write(self, prepared: _PreparedWrite) -> None:
+        """Reject content or mode changes made after operator approval."""
+
+        path = prepared.path
         if prepared.expected_digest is None:
             if path.exists():
                 raise AgentError("write target appeared after approval; read it first")
@@ -230,14 +256,12 @@ class Workspace:
             if not path.exists():
                 raise AgentError("file changed since it was read; read it again")
             current = self._read_bounded_file(path, tool="write_file")
-            if self._digest(current) != prepared.expected_digest:
+            current_mode = stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode)
+            if (
+                self._digest(current) != prepared.expected_digest
+                or current_mode != prepared.expected_mode
+            ):
                 raise AgentError("file changed since it was read; read it again")
-        self.uncertain_modified_files.add(path)
-        self._atomic_write(path, prepared.content)
-        self.observed_files[path] = self._digest(prepared.content)
-        self.modified_files.add(path)
-        self.uncertain_modified_files.discard(path)
-        return f"wrote {relative}"
 
     def edit_file(self, raw: str, old: str, new: str) -> str:
         """Week 4, Day 5: make one exact, reviewable replacement in a read file."""
@@ -507,7 +531,7 @@ class Workspace:
 
         return hashlib.sha256(content).digest()
 
-    def _atomic_write(self, path: Path, content: bytes) -> None:
+    def _atomic_write(self, path: Path, content: bytes, *, after_mode: int) -> None:
         """Week 4, Day 3: replace a file without exposing a partial write."""
 
         descriptor, temporary_name = tempfile.mkstemp(
@@ -515,12 +539,11 @@ class Workspace:
         )
         temporary = Path(temporary_name)
         try:
+            os.fchmod(descriptor, after_mode)
             with os.fdopen(descriptor, "wb") as file:
                 file.write(content)
                 file.flush()
                 os.fsync(file.fileno())
-            if path.exists():
-                os.chmod(temporary, path.stat().st_mode & 0o777)
             os.replace(temporary, path)
         finally:
             if temporary.exists():
