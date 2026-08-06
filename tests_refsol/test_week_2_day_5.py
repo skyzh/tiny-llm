@@ -44,12 +44,12 @@ def test_model_uses_decode_attention_only_through_measured_context(monkeypatch):
     monkeypatch.setattr(module, "scaled_dot_product_attention_grouped", record_readable)
 
     hidden = model.hidden_size
-    mx.eval(attention(mx.zeros((1, 127, hidden), dtype=model.precision), 0, cache))
+    mx.eval(attention(mx.zeros((1, 255, hidden), dtype=model.precision), 0, cache))
     calls.clear()
-    mx.eval(attention(mx.zeros((1, 1, hidden), dtype=model.precision), 127, cache))
-    mx.eval(attention(mx.zeros((1, 1, hidden), dtype=model.precision), 128, cache))
+    mx.eval(attention(mx.zeros((1, 1, hidden), dtype=model.precision), 255, cache))
+    mx.eval(attention(mx.zeros((1, 1, hidden), dtype=model.precision), 256, cache))
 
-    assert calls == [("custom", 128), ("readable", 129)]
+    assert calls == [("custom", 256), ("readable", 257)]
 
 
 def test_fast_attention_matches_grouped_attention():
