@@ -45,11 +45,12 @@ def test_model_uses_decode_attention_only_through_measured_context(monkeypatch):
 
     cases = (
         (0, 1, "custom", 1),
-        (23, 8, "custom", 31),
-        (120, 8, "custom", 128),
-        (248, 8, "custom", 256),
+        (29, 2, "custom", 31),
+        (126, 2, "custom", 128),
+        (254, 2, "custom", 256),
         (256, 1, "readable", 257),
-        (247, 9, "readable", 256),
+        (253, 3, "readable", 256),
+        (248, 8, "readable", 256),
     )
     for prefix_length, query_length, expected_path, expected_context in cases:
         model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
