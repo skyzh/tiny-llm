@@ -13,6 +13,7 @@ from .control import AgentInterrupted, CancellationToken, SteeringHandle
 from .evaluation import (
     CandidateSnapshot,
     CheckResult,
+    DirectorySnapshot,
     EvaluatedRun,
     EvaluationMetrics,
     FileSnapshot,
@@ -65,6 +66,7 @@ __all__ = [
     "ContextManager",
     "ContextPolicy",
     "ContextWindow",
+    "DirectorySnapshot",
     "EvaluatedRun",
     "EvaluationMetrics",
     "FileSnapshot",
