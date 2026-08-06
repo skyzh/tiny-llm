@@ -125,15 +125,19 @@ def parse_args() -> argparse.Namespace:
         "--context-repeats",
         type=int,
         help=(
-            "number of full context sweeps; defaults to 1 for one context and "
-            "2 for multiple contexts"
+            "number of full context/query-shape sweeps; defaults to 1 for one "
+            "shape and 2 for multiple shapes"
         ),
     )
     parser.add_argument(
         "--query-length",
+        dest="query_lengths",
         type=int,
-        default=1,
-        help="query rows for the attention section (default: 1)",
+        action="append",
+        help=(
+            "query rows for the attention section; repeat to run a balanced "
+            "query-length sweep (default: 1)"
+        ),
     )
     parser.add_argument(
         "--gqa-ratio",
@@ -177,25 +181,47 @@ def parse_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
     args.contexts = args.contexts or [128]
+    args.query_lengths = args.query_lengths or [1]
     if len(set(args.contexts)) != len(args.contexts):
         parser.error("--context values must be unique")
     if any(context <= 0 for context in args.contexts):
         parser.error("--context values must be positive")
+    if len(set(args.query_lengths)) != len(args.query_lengths):
+        parser.error("--query-length values must be unique")
+    if any(query_length <= 0 for query_length in args.query_lengths):
+        parser.error("--query-length values must be positive")
+    shape_count = len(args.contexts) * len(args.query_lengths)
     if args.context_repeats is None:
-        args.context_repeats = 1 if len(args.contexts) == 1 else 2
+        args.context_repeats = 1 if shape_count == 1 else 2
     if args.context_repeats <= 0:
         parser.error("--context-repeats must be positive")
-    if len(args.contexts) > 1 and args.context_repeats % 2 != 0:
+    if shape_count > 1 and args.context_repeats % 2 != 0:
         parser.error(
-            "--context-repeats must be even for a multi-context sweep so "
-            "forward and reverse context orders are balanced"
+            "--context-repeats must be even for a multi-shape sweep so "
+            "forward and reverse context/query orders are balanced"
         )
+    if len(args.query_lengths) > 1 and set(args.section or SECTIONS) != {"attention"}:
+        parser.error("a --query-length sweep requires --section attention")
     return args
 
 
 def context_execution_order(contexts: list[int], repeats: int) -> list[list[int]]:
     return [
-        list(contexts if repeat % 2 == 0 else reversed(contexts))
+        [context for context, _ in order]
+        for order in shape_execution_order(contexts, [1], repeats)
+    ]
+
+
+def shape_execution_order(
+    contexts: list[int], query_lengths: list[int], repeats: int
+) -> list[list[tuple[int, int]]]:
+    shapes = [
+        (context, query_length)
+        for context in contexts
+        for query_length in query_lengths
+    ]
+    return [
+        list(shapes if repeat % 2 == 0 else reversed(shapes))
         for repeat in range(repeats)
     ]
 
@@ -711,46 +737,51 @@ def collect_metadata(
 
 
 def summarize_runs(
-    runs: list[dict[str, Any]], contexts: list[int]
+    runs: list[dict[str, Any]], contexts: list[int], query_lengths: list[int]
 ) -> list[dict[str, Any]]:
     summary = []
     for context in contexts:
-        section_samples: dict[str, dict[str, dict[str, list[float]]]] = {}
-        for run in runs:
-            if run["context"] != context:
-                continue
-            for section, comparisons in run["sections"].items():
-                section_cases = section_samples.setdefault(section, {})
-                for comparison in comparisons:
-                    case = section_cases.setdefault(comparison["name"], {})
-                    for implementation, samples in comparison["samples_us"].items():
-                        case.setdefault(implementation, []).extend(samples)
-        summary.append(
-            {
-                "context": context,
-                "sections": {
-                    section: [
-                        {
-                            "name": name,
-                            "medians_us": {
-                                implementation: median(samples)
-                                for implementation, samples in implementations.items()
-                            },
-                        }
-                        for name, implementations in cases.items()
-                    ]
-                    for section, cases in section_samples.items()
-                },
-            }
-        )
+        for query_length in query_lengths:
+            section_samples: dict[str, dict[str, dict[str, list[float]]]] = {}
+            for run in runs:
+                if run["context"] != context or run["query_length"] != query_length:
+                    continue
+                for section, comparisons in run["sections"].items():
+                    section_cases = section_samples.setdefault(section, {})
+                    for comparison in comparisons:
+                        case = section_cases.setdefault(comparison["name"], {})
+                        for implementation, samples in comparison["samples_us"].items():
+                            case.setdefault(implementation, []).extend(samples)
+            summary.append(
+                {
+                    "context": context,
+                    "query_length": query_length,
+                    "sections": {
+                        section: [
+                            {
+                                "name": name,
+                                "medians_us": {
+                                    implementation: median(samples)
+                                    for implementation, samples in implementations.items()
+                                },
+                            }
+                            for name, implementations in cases.items()
+                        ]
+                        for section, cases in section_samples.items()
+                    },
+                }
+            )
     return summary
 
 
 def print_summary(summary: list[dict[str, Any]]) -> None:
-    print("\nAggregated medians across balanced context sweeps:")
-    for context_result in summary:
-        print(f"context={context_result['context']}")
-        for section, comparisons in context_result["sections"].items():
+    print("\nAggregated medians across balanced context/query sweeps:")
+    for shape_result in summary:
+        print(
+            f"context={shape_result['context']} "
+            f"query_length={shape_result['query_length']}"
+        )
+        for section, comparisons in shape_result["sections"].items():
             for comparison in comparisons:
                 medians = " ".join(
                     f"{name}={value:.1f} us"
@@ -762,24 +793,24 @@ def print_summary(summary: list[dict[str, Any]]) -> None:
 def main() -> None:
     args = parse_args()
     if (
-        args.query_length <= 0
-        or args.warmup < 0
+        args.warmup < 0
         or args.iterations <= 0
         or (args.gqa_ratio is not None and args.gqa_ratio <= 0)
     ):
         raise ValueError(
-            "query-length, gqa-ratio, and iterations must be positive; "
-            "warmup cannot be negative"
+            "gqa-ratio and iterations must be positive; warmup cannot be negative"
         )
     ops = load_implementation(args.solution)
     model_name = shortcut_name_to_full_name(args.model)
     model, _ = load(model_name)
     root = Path(__file__).resolve().parents[1]
-    context_orders = context_execution_order(args.contexts, args.context_repeats)
+    shape_orders = shape_execution_order(
+        args.contexts, args.query_lengths, args.context_repeats
+    )
     print(
         f"Solution={ops.name} Model={model_name} contexts={args.contexts} "
         f"context_repeats={args.context_repeats} "
-        f"query_length={args.query_length} "
+        f"query_lengths={args.query_lengths} "
         f"gqa_ratio={args.gqa_ratio or 'model'} "
         f"attention_mask={args.attention_mask} "
         f"MLX={importlib.metadata.version('mlx')} "
@@ -787,7 +818,7 @@ def main() -> None:
     )
     print(
         "Median synchronized latency with rotated implementation order and "
-        "forward/reverse context order; lower is better."
+        "forward/reverse context/query order; lower is better."
     )
     selected = set(args.section or SECTIONS)
     runners = {
@@ -798,14 +829,16 @@ def main() -> None:
         "attention": benchmark_attention,
     }
     runs = []
-    for repeat_index, context_order in enumerate(context_orders):
-        for context_position, context in enumerate(context_order):
+    for repeat_index, shape_order in enumerate(shape_orders):
+        for shape_position, (context, query_length) in enumerate(shape_order):
             print(
                 f"\ncontext repeat={repeat_index + 1}/{args.context_repeats} "
-                f"position={context_position + 1}/{len(context_order)} "
-                f"tokens={context}"
+                f"position={shape_position + 1}/{len(shape_order)} "
+                f"tokens={context} query_length={query_length}"
             )
-            run_args = argparse.Namespace(**vars(args), context=context)
+            run_args = argparse.Namespace(
+                **vars(args), context=context, query_length=query_length
+            )
             sections = {}
             for section in SECTIONS:
                 if section in selected:
@@ -813,27 +846,34 @@ def main() -> None:
             runs.append(
                 {
                     "context_repeat": repeat_index,
-                    "context_position": context_position,
+                    "shape_position": shape_position,
                     "context": context,
+                    "query_length": query_length,
                     "sections": sections,
                 }
             )
 
-    summary = summarize_runs(runs, args.contexts)
+    summary = summarize_runs(runs, args.contexts, args.query_lengths)
     print_summary(summary)
     if args.json_output is not None:
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "metadata": collect_metadata(root, args.model, model_name, model),
             "configuration": {
                 "solution": args.solution,
                 "sections": [section for section in SECTIONS if section in selected],
                 "contexts": args.contexts,
+                "query_lengths": args.query_lengths,
                 "context_repeats": args.context_repeats,
-                "context_execution_order": context_orders,
+                "shape_execution_order": [
+                    [
+                        {"context": context, "query_length": query_length}
+                        for context, query_length in order
+                    ]
+                    for order in shape_orders
+                ],
                 "warmup": args.warmup,
                 "iterations": args.iterations,
-                "query_length": args.query_length,
                 "gqa_ratio": args.gqa_ratio,
                 "attention_mask": args.attention_mask,
                 "prefill_projections": args.prefill_projection or ["q"],
