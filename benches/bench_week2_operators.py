@@ -1,8 +1,12 @@
 import argparse
 import importlib
 import importlib.metadata
+import json
+import platform
+import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
+from datetime import datetime, timezone
 from itertools import permutations
 from pathlib import Path
 from statistics import median
@@ -49,6 +53,23 @@ class OperatorImplementation:
     swiglu: Callable[[mx.array, mx.array], mx.array]
 
 
+@dataclass(frozen=True)
+class BenchmarkComparison:
+    medians_us: dict[str, float]
+    samples_us: dict[str, list[float]]
+    measurement_orders: list[list[str]]
+
+    def __getitem__(self, name: str) -> float:
+        return self.medians_us[name]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "medians_us": self.medians_us,
+            "samples_us": self.samples_us,
+            "measurement_orders": self.measurement_orders,
+        }
+
+
 def load_implementation(name: str) -> OperatorImplementation:
     basics = importlib.import_module(f"{name}.basics")
     embedding = importlib.import_module(f"{name}.embedding")
@@ -93,7 +114,21 @@ def parse_args() -> argparse.Namespace:
         choices=SECTIONS,
         help="operator family to run; repeat as needed (default: all)",
     )
-    parser.add_argument("--context", type=int, default=128)
+    parser.add_argument(
+        "--context",
+        dest="contexts",
+        type=int,
+        action="append",
+        help="context length; repeat to run a balanced context sweep (default: 128)",
+    )
+    parser.add_argument(
+        "--context-repeats",
+        type=int,
+        help=(
+            "number of full context sweeps; defaults to 1 for one context and "
+            "2 for multiple contexts"
+        ),
+    )
     parser.add_argument(
         "--query-length",
         type=int,
@@ -115,7 +150,15 @@ def parse_args() -> argparse.Namespace:
         help="mask contract for the attention section (default: none)",
     )
     parser.add_argument("--warmup", type=int, default=12)
-    parser.add_argument("--iterations", type=int, default=60)
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=60,
+        help=(
+            "timed rounds per case; must be divisible by every implementation-"
+            "order cycle (default: 60)"
+        ),
+    )
     parser.add_argument(
         "--prefill-projection",
         action="append",
@@ -127,27 +170,69 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="also benchmark the Day 7 split-K path",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="optionally save metadata, execution order, raw samples, and medians",
+    )
+    args = parser.parse_args()
+    args.contexts = args.contexts or [128]
+    if len(set(args.contexts)) != len(args.contexts):
+        parser.error("--context values must be unique")
+    if any(context <= 0 for context in args.contexts):
+        parser.error("--context values must be positive")
+    if args.context_repeats is None:
+        args.context_repeats = 1 if len(args.contexts) == 1 else 2
+    if args.context_repeats <= 0:
+        parser.error("--context-repeats must be positive")
+    if len(args.contexts) > 1 and args.context_repeats % 2 != 0:
+        parser.error(
+            "--context-repeats must be even for a multi-context sweep so "
+            "forward and reverse context orders are balanced"
+        )
+    return args
+
+
+def context_execution_order(contexts: list[int], repeats: int) -> list[list[int]]:
+    return [
+        list(contexts if repeat % 2 == 0 else reversed(contexts))
+        for repeat in range(repeats)
+    ]
 
 
 def benchmark_comparison(
     functions: list[tuple[str, Callable[[], mx.array]]],
     warmup: int,
     iterations: int,
-) -> dict[str, float]:
+) -> BenchmarkComparison:
     orders = list(permutations(functions))
+    if iterations % len(orders) != 0:
+        raise ValueError(
+            f"iterations must be divisible by {len(orders)} to balance every "
+            "implementation order"
+        )
     for round_index in range(warmup):
         for _, function in orders[round_index % len(orders)]:
             mx.eval(function())
 
     timings = {name: [] for name, _ in functions}
+    measurement_orders = []
     for round_index in range(iterations):
         order = orders[(warmup + round_index) % len(orders)]
+        measurement_orders.append([name for name, _ in order])
         for name, function in order:
             start = perf_counter()
             mx.eval(function())
-            timings[name].append(perf_counter() - start)
-    return {name: median(samples) * 1_000_000 for name, samples in timings.items()}
+            timings[name].append((perf_counter() - start) * 1_000_000)
+    return BenchmarkComparison(
+        medians_us={name: median(samples) for name, samples in timings.items()},
+        samples_us=timings,
+        measurement_orders=measurement_orders,
+    )
+
+
+def comparison_record(name: str, result: BenchmarkComparison) -> dict[str, Any]:
+    return {"name": name, **result.as_dict()}
 
 
 def report(name: str, course_us: float, mlx_us: float) -> None:
@@ -185,7 +270,7 @@ def report_split_k(
 
 def benchmark_embedding(
     args: argparse.Namespace, model: Any, ops: OperatorImplementation
-) -> None:
+) -> list[dict[str, Any]]:
     hidden_size = model.args.hidden_size
     weights = ops.quantized_weights_type.from_mlx_layer(model.model.embed_tokens)
     embedding = ops.quantized_embedding_type(
@@ -219,11 +304,12 @@ def benchmark_embedding(
         timings["optimized"],
         timings["mlx"],
     )
+    return [comparison_record("quantized embedding", timings)]
 
 
 def benchmark_decode_projections(
     args: argparse.Namespace, model: Any, ops: OperatorImplementation
-) -> None:
+) -> list[dict[str, Any]]:
     layer = model.model.layers[0]
     precision = model.model.embed_tokens.scales.dtype
     hidden_size = model.args.hidden_size
@@ -239,6 +325,7 @@ def benchmark_decode_projections(
         ("down projection", layer.mlp.down_proj, model.args.intermediate_size),
         ("lm head", model.model.embed_tokens, hidden_size),
     )
+    results = []
     for name, mlx_layer, input_dim in projections:
         weights = ops.quantized_weights_type.from_mlx_layer(mlx_layer)
         x = mx.random.normal((1, 1, input_dim)).astype(precision)
@@ -284,11 +371,13 @@ def benchmark_decode_projections(
             timings["mlx"],
             baseline_label="vanilla",
         )
+        results.append(comparison_record(name, timings))
+    return results
 
 
 def benchmark_prefill_projections(
     args: argparse.Namespace, model: Any, ops: OperatorImplementation
-) -> None:
+) -> list[dict[str, Any]]:
     layer = model.model.layers[0]
     precision = model.model.embed_tokens.scales.dtype
     hidden_size = model.args.hidden_size
@@ -303,6 +392,7 @@ def benchmark_prefill_projections(
         "up": (layer.mlp.up_proj, hidden_size),
         "down": (layer.mlp.down_proj, model.args.intermediate_size),
     }
+    results = []
     for projection in args.prefill_projection or ["q"]:
         mlx_layer, input_dim = prefill_layers[projection]
         weights = ops.quantized_weights_type.from_mlx_layer(mlx_layer)
@@ -362,11 +452,13 @@ def benchmark_prefill_projections(
             report_split_k(name, timings["simd"], timings["split-k"], timings["mlx"])
         else:
             report(name, timings["simd"], timings["mlx"])
+        results.append(comparison_record(name, timings))
+    return results
 
 
 def benchmark_model_kernels(
     args: argparse.Namespace, model: Any, ops: OperatorImplementation
-) -> None:
+) -> list[dict[str, Any]]:
     layer = model.model.layers[0]
     precision = model.model.embed_tokens.scales.dtype
     hidden_size = model.args.hidden_size
@@ -395,12 +487,14 @@ def benchmark_model_kernels(
         args.warmup,
         args.iterations,
     )
+    results = []
     report_progression(
         "RMSNorm",
         timings["readable"],
         timings["optimized"],
         timings["mlx"],
     )
+    results.append(comparison_record("RMSNorm", timings))
 
     x_rope = mx.random.normal((1, 1, num_heads, head_dim)).astype(precision)
     rope = ops.fast_rope_type(
@@ -437,6 +531,7 @@ def benchmark_model_kernels(
         timings["optimized"],
         timings["mlx"],
     )
+    results.append(comparison_record("RoPE", timings))
 
     gate = mx.random.normal((1, 1, model.args.intermediate_size)).astype(precision)
     up = mx.random.normal(gate.shape).astype(precision)
@@ -456,11 +551,13 @@ def benchmark_model_kernels(
         timings["optimized"],
         timings["mlx"],
     )
+    results.append(comparison_record("SwiGLU", timings))
+    return results
 
 
 def benchmark_attention(
     args: argparse.Namespace, model: Any, ops: OperatorImplementation
-) -> None:
+) -> list[dict[str, Any]]:
     precision = model.model.embed_tokens.scales.dtype
     head_dim = model.args.head_dim
     num_heads = model.args.num_attention_heads
@@ -523,26 +620,171 @@ def benchmark_attention(
         timings["optimized"],
         timings["mlx"],
     )
+    return [comparison_record("decode attention", timings)]
+
+
+def _run_text(command: list[str], cwd: Path | None = None) -> str | None:
+    completed = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip()
+
+
+def _jsonable(value: Any) -> Any:
+    return json.loads(json.dumps(value, default=str))
+
+
+def collect_metadata(
+    root: Path, requested_model: str, resolved_model: str, model: Any
+) -> dict[str, Any]:
+    model_args = {}
+    if is_dataclass(model.args):
+        model_args = {
+            field.name: _jsonable(getattr(model.args, field.name))
+            for field in fields(model.args)
+        }
+    else:
+        for name in (
+            "model_type",
+            "hidden_size",
+            "num_hidden_layers",
+            "num_attention_heads",
+            "num_key_value_heads",
+            "head_dim",
+            "intermediate_size",
+            "vocab_size",
+            "max_position_embeddings",
+            "rope_theta",
+        ):
+            if hasattr(model.args, name):
+                model_args[name] = _jsonable(getattr(model.args, name))
+
+    hardware = None
+    if sys.platform == "darwin":
+        profile_text = _run_text(
+            ["system_profiler", "SPHardwareDataType", "SPDisplaysDataType", "-json"]
+        )
+        if profile_text:
+            profile = json.loads(profile_text)
+            system = profile.get("SPHardwareDataType", [{}])[0]
+            display = profile.get("SPDisplaysDataType", [{}])[0]
+            hardware = {
+                "machine_name": system.get("machine_name"),
+                "machine_model": system.get("machine_model"),
+                "chip_type": system.get("chip_type"),
+                "cpu_cores": system.get("number_processors"),
+                "gpu_model": display.get("sppci_model"),
+                "gpu_cores": display.get("sppci_cores"),
+                "physical_memory": system.get("physical_memory"),
+            }
+
+    git_commit = _run_text(["git", "rev-parse", "HEAD"], cwd=root)
+    git_status = _run_text(["git", "status", "--porcelain"], cwd=root)
+    return {
+        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "source": {
+            "git_commit": git_commit,
+            "git_dirty": bool(git_status),
+        },
+        "host": {
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "hardware": hardware,
+            "mlx_device": _jsonable(mx.device_info()),
+        },
+        "software": {
+            "python_version": platform.python_version(),
+            "python_executable": sys.executable,
+            "mlx_version": importlib.metadata.version("mlx"),
+            "mlx_lm_version": importlib.metadata.version("mlx-lm"),
+            "numpy_version": importlib.metadata.version("numpy"),
+            "xcode_version": _run_text(["xcodebuild", "-version"]),
+            "metal_version": _run_text(["xcrun", "metal", "--version"]),
+        },
+        "model": {
+            "requested": requested_model,
+            "resolved": resolved_model,
+            "configuration": model_args,
+            "weight_dtype": str(model.model.embed_tokens.weight.dtype),
+            "scale_dtype": str(model.model.embed_tokens.scales.dtype),
+            "quantization": {
+                "group_size": getattr(model.model.embed_tokens, "group_size", None),
+                "bits": getattr(model.model.embed_tokens, "bits", None),
+            },
+        },
+    }
+
+
+def summarize_runs(
+    runs: list[dict[str, Any]], contexts: list[int]
+) -> list[dict[str, Any]]:
+    summary = []
+    for context in contexts:
+        section_samples: dict[str, dict[str, dict[str, list[float]]]] = {}
+        for run in runs:
+            if run["context"] != context:
+                continue
+            for section, comparisons in run["sections"].items():
+                section_cases = section_samples.setdefault(section, {})
+                for comparison in comparisons:
+                    case = section_cases.setdefault(comparison["name"], {})
+                    for implementation, samples in comparison["samples_us"].items():
+                        case.setdefault(implementation, []).extend(samples)
+        summary.append(
+            {
+                "context": context,
+                "sections": {
+                    section: [
+                        {
+                            "name": name,
+                            "medians_us": {
+                                implementation: median(samples)
+                                for implementation, samples in implementations.items()
+                            },
+                        }
+                        for name, implementations in cases.items()
+                    ]
+                    for section, cases in section_samples.items()
+                },
+            }
+        )
+    return summary
+
+
+def print_summary(summary: list[dict[str, Any]]) -> None:
+    print("\nAggregated medians across balanced context sweeps:")
+    for context_result in summary:
+        print(f"context={context_result['context']}")
+        for section, comparisons in context_result["sections"].items():
+            for comparison in comparisons:
+                medians = " ".join(
+                    f"{name}={value:.1f} us"
+                    for name, value in comparison["medians_us"].items()
+                )
+                print(f"  {section}/{comparison['name']}: {medians}")
 
 
 def main() -> None:
     args = parse_args()
     if (
-        args.context <= 0
-        or args.query_length <= 0
+        args.query_length <= 0
         or args.warmup < 0
         or args.iterations <= 0
         or (args.gqa_ratio is not None and args.gqa_ratio <= 0)
     ):
         raise ValueError(
-            "context, query-length, gqa-ratio, and iterations must be positive; "
+            "query-length, gqa-ratio, and iterations must be positive; "
             "warmup cannot be negative"
         )
     ops = load_implementation(args.solution)
     model_name = shortcut_name_to_full_name(args.model)
     model, _ = load(model_name)
+    root = Path(__file__).resolve().parents[1]
+    context_orders = context_execution_order(args.contexts, args.context_repeats)
     print(
-        f"Solution={ops.name} Model={model_name} context={args.context} "
+        f"Solution={ops.name} Model={model_name} contexts={args.contexts} "
+        f"context_repeats={args.context_repeats} "
         f"query_length={args.query_length} "
         f"gqa_ratio={args.gqa_ratio or 'model'} "
         f"attention_mask={args.attention_mask} "
@@ -550,8 +792,8 @@ def main() -> None:
         f"mlx-lm={importlib.metadata.version('mlx-lm')}"
     )
     print(
-        "Median synchronized latency with rotated implementation order; "
-        "lower is better."
+        "Median synchronized latency with rotated implementation order and "
+        "forward/reverse context order; lower is better."
     )
     selected = set(args.section or SECTIONS)
     runners = {
@@ -561,9 +803,54 @@ def main() -> None:
         "model-kernels": benchmark_model_kernels,
         "attention": benchmark_attention,
     }
-    for section in SECTIONS:
-        if section in selected:
-            runners[section](args, model, ops)
+    runs = []
+    for repeat_index, context_order in enumerate(context_orders):
+        for context_position, context in enumerate(context_order):
+            print(
+                f"\ncontext repeat={repeat_index + 1}/{args.context_repeats} "
+                f"position={context_position + 1}/{len(context_order)} "
+                f"tokens={context}"
+            )
+            run_args = argparse.Namespace(**vars(args), context=context)
+            sections = {}
+            for section in SECTIONS:
+                if section in selected:
+                    sections[section] = runners[section](run_args, model, ops)
+            runs.append(
+                {
+                    "context_repeat": repeat_index,
+                    "context_position": context_position,
+                    "context": context,
+                    "sections": sections,
+                }
+            )
+
+    summary = summarize_runs(runs, args.contexts)
+    print_summary(summary)
+    if args.json_output is not None:
+        payload = {
+            "schema_version": 1,
+            "metadata": collect_metadata(root, args.model, model_name, model),
+            "configuration": {
+                "solution": args.solution,
+                "sections": [section for section in SECTIONS if section in selected],
+                "contexts": args.contexts,
+                "context_repeats": args.context_repeats,
+                "context_execution_order": context_orders,
+                "warmup": args.warmup,
+                "iterations": args.iterations,
+                "query_length": args.query_length,
+                "gqa_ratio": args.gqa_ratio,
+                "attention_mask": args.attention_mask,
+                "prefill_projections": args.prefill_projection or ["q"],
+                "include_split_k": args.include_split_k,
+            },
+            "runs": runs,
+            "summary": summary,
+        }
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(json.dumps(payload, indent=2) + "\n")
+        print(f"Wrote {args.json_output}", file=sys.stderr)
 
 
 if __name__ == "__main__":
