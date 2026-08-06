@@ -1734,6 +1734,131 @@ def test_task_6_interrupted_undo_reconciles_completed_change_before_retry(
     )
 
 
+def _record_pending_undo_change(session, journal, plan, change, change_id):
+    operation = "remove" if change.remove else "restore"
+    retained_recovery_path = journal._retained_recovery_path(change, change_id)
+    session.append(
+        "undo_change_started",
+        undo_change_id=change_id,
+        checkpoint_id=plan.checkpoint.id,
+        plan_fingerprint=journal._undo_plan_fingerprint(plan),
+        intent_id=change.intent_id,
+        covered_intent_ids=list(change.covered_intent_ids),
+        path=change.path,
+        operation=operation,
+        retained_recovery_path=retained_recovery_path,
+        expected_parent_dev=change.expected_parent_dev,
+        expected_parent_ino=change.expected_parent_ino,
+        expected_sha256=change.expected_sha256,
+        expected_mode=change.expected_mode,
+        result_sha256=journal._undo_result_sha256(change),
+        result_mode=change.restore_mode,
+        branch_id=plan.checkpoint.branch_id,
+    )
+
+
+def _pending_applied_undo(tmp_path, operation):
+    target = tmp_path / "value.txt"
+    session = memory_session(tmp_path, "test-model")
+    journal = MutationJournal(session, tmp_path)
+    if operation == "restore":
+        target.write_text("old", encoding="utf-8")
+        target.chmod(0o640)
+        checkpoint = journal.create_checkpoint("before edit")
+        _journaled_write(journal, target, "new")
+    else:
+        checkpoint = journal.create_checkpoint("before create")
+        _journaled_write(journal, target, "created")
+    plan = journal.plan_undo(checkpoint)
+    change = plan.changes[0]
+    _record_pending_undo_change(session, journal, plan, change, "a" * 32)
+    if operation == "restore":
+        assert change.restore_content is not None
+        assert change.restore_mode is not None
+        target.write_text(change.restore_content, encoding="utf-8")
+        target.chmod(change.restore_mode)
+    else:
+        target.unlink()
+    return target, session, journal, plan
+
+
+@pytest.mark.parametrize("operation", ["restore", "remove"])
+def test_task_6_reconciled_hard_crash_fsyncs_parent_before_finish(
+    tmp_path, monkeypatch, operation
+):
+    target, session, journal, plan = _pending_applied_undo(tmp_path, operation)
+    recovery_module = importlib.import_module(MutationJournal.__module__)
+    real_fsync = recovery_module.os.fsync
+    original_append = session.append
+    order = []
+
+    def record_parent_fsync(descriptor):
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            order.append("parent_fsync")
+        return real_fsync(descriptor)
+
+    def record_finish(event_type, **data):
+        if event_type == "undo_change_finished":
+            order.append("finish")
+        return original_append(event_type, **data)
+
+    monkeypatch.setattr(recovery_module.os, "fsync", record_parent_fsync)
+    monkeypatch.setattr(session, "append", record_finish)
+
+    resumed = journal.apply_undo(
+        plan,
+        confirm=lambda _plan: pytest.fail("reconciled undo prompted again"),
+    )
+
+    assert resumed.conflicts == ()
+    if operation == "restore":
+        assert resumed.restored == ("value.txt",)
+        assert target.read_text(encoding="utf-8") == "old"
+    else:
+        assert resumed.removed == ("value.txt",)
+        assert not target.exists()
+    assert order.count("finish") == 1
+    assert "parent_fsync" in order
+    assert order.index("parent_fsync") < order.index("finish")
+
+
+@pytest.mark.parametrize("operation", ["restore", "remove"])
+def test_task_6_reconciled_hard_crash_fsync_failure_stays_conflicted(
+    tmp_path, monkeypatch, operation
+):
+    _target, session, journal, plan = _pending_applied_undo(tmp_path, operation)
+    recovery_module = importlib.import_module(MutationJournal.__module__)
+    real_fsync = recovery_module.os.fsync
+
+    def fail_parent_fsync(descriptor):
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("injected reconciliation fsync failure")
+        return real_fsync(descriptor)
+
+    monkeypatch.setattr(recovery_module.os, "fsync", fail_parent_fsync)
+
+    resumed = journal.apply_undo(
+        plan,
+        confirm=lambda _plan: pytest.fail("conflicted undo prompted again"),
+    )
+
+    assert resumed.restored == ()
+    assert resumed.removed == ()
+    assert resumed.conflicts == ("value.txt",)
+    assert not any(
+        event.type == "undo_change_finished"
+        for event in session.events
+        if event.data.get("undo_change_id") == "a" * 32
+    )
+    recovery = next(
+        event
+        for event in session.events
+        if event.type == "undo_change_recovered"
+        and event.data.get("undo_change_id") == "a" * 32
+    )
+    assert recovery.data["status"] == "conflict"
+
+
 def test_task_6_interrupted_after_durable_undo_finish_resumes_remaining_change(
     tmp_path, monkeypatch
 ):
