@@ -28,6 +28,7 @@ WEEK2_CHECKPOINTS = (
 )
 
 DECODE_ATTENTION_MAX_CONTEXT = 256
+DECODE_ATTENTION_MAX_QUERY = 2
 
 
 def _linear(x: mx.array, weight: mx.array | QuantizedWeights) -> mx.array:
@@ -122,7 +123,7 @@ class Qwen3MultiHeadAttention:
         )
         if (
             self.use_decode_attention
-            and L <= 8
+            and L <= DECODE_ATTENTION_MAX_QUERY
             and projection_k.shape[-2] <= DECODE_ATTENTION_MAX_CONTEXT
             and not isinstance(mask, mx.array)
         ):
