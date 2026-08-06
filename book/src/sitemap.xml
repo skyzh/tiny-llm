@@ -49,10 +49,10 @@
         <loc>https://skyzh.github.io/tiny-llm/week2-03-quantized-matvec</loc>
     </url>
     <url>
-        <loc>https://skyzh.github.io/tiny-llm/week2-04-decode-attention</loc>
+        <loc>https://skyzh.github.io/tiny-llm/week2-04-fused-model-kernels</loc>
     </url>
     <url>
-        <loc>https://skyzh.github.io/tiny-llm/week2-05-fast-kernels</loc>
+        <loc>https://skyzh.github.io/tiny-llm/week2-05-decode-attention</loc>
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-06-simd-matrix-prefill</loc>
