@@ -8,8 +8,10 @@ executes candidate code.
 
 > **Implementation status:** The reference implementation, learner API surface,
 > inert task packages, and focused tests implement the static evaluation boundary
-> described here. Executable Python tests and general coding-task grading remain
-> deferred until the candidate can run inside a container or virtual machine.
+> described here. Like every Week 4 daily chapter, this file remains unrendered
+> pending course review; executable does not mean published. Executable Python
+> tests and general coding-task grading remain deferred until the candidate can
+> run inside a container or virtual machine.
 
 ## Check the Chapter
 

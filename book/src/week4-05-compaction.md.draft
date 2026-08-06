@@ -5,8 +5,9 @@ Day 5 derives a bounded model-visible working set without deleting or rewriting
 the durable trace from Day 4.
 
 > **Implementation status:** The reference implementation, learner API surface,
-> and focused tests are executable. Week 4 remains unpublished while the later
-> recovery and evaluation checkpoints are completed.
+> and focused tests in this chapter are executable. Like every Week 4 daily
+> chapter, this file remains unrendered pending course review; executable does
+> not mean published.
 
 ## Check the Chapter
 
