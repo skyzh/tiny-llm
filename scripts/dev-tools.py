@@ -6,7 +6,21 @@ from pathlib import Path
 import pytest
 
 
+def validate_week_day(args, required=False):
+    week_provided = args.week is not None
+    day_provided = args.day is not None
+    if week_provided != day_provided or (required and not week_provided):
+        print("Please provide both week and day")
+        return False
+    if week_provided and (args.week <= 0 or args.day <= 0):
+        print("Week and day must be positive integers")
+        return False
+    return True
+
+
 def copy_test(args, skip_if_exists=False, force=False):
+    if not validate_week_day(args, required=True):
+        return 1
     source_file = f"tests_refsol/test_week_{args.week}_day_{args.day}.py"
     target_file = f"tests/test_week_{args.week}_day_{args.day}.py"
     if skip_if_exists and os.path.exists(target_file) and not force:
@@ -25,26 +39,24 @@ def copy_test(args, skip_if_exists=False, force=False):
 
 
 def test(args):
-    if args.week and args.day:
+    if not validate_week_day(args):
+        return 1
+    if args.week is not None:
         copy_test(args, skip_if_exists=True)
         return pytest.main(
             ["-v", f"tests/test_week_{args.week}_day_{args.day}.py"] + args.remainders
         )
-    elif args.week or args.day:
-        print("Please provide both week and day")
-        return 1
     return pytest.main(["-v", "tests"] + args.remainders)
 
 
 def test_refsol(args):
-    if args.week and args.day:
+    if not validate_week_day(args):
+        return 1
+    if args.week is not None:
         return pytest.main(
             ["-v", f"tests_refsol/test_week_{args.week}_day_{args.day}.py"]
             + args.remainders
         )
-    elif args.week or args.day:
-        print("Please provide both week and day")
-        return 1
     return pytest.main(["-v", "tests_refsol"] + args.remainders)
 
 

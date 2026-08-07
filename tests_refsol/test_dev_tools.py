@@ -60,6 +60,32 @@ def test_partial_week_day_selection_fails_closed(tmp_path, command):
     assert "Please provide both week and day" in result.stdout
 
 
+@pytest.mark.parametrize("command", ["test", "test-refsol"])
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        ("--week", "0"),
+        ("--day", "0"),
+        ("--week", "0", "--day", "0"),
+        ("--week", "-1", "--day", "1"),
+        ("--week", "1", "--day", "-1"),
+    ],
+)
+def test_non_positive_week_day_selection_fails_closed(tmp_path, command, selectors):
+    result = subprocess.run(
+        [sys.executable, str(DEV_TOOLS), command, *selectors],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    if len(selectors) == 2:
+        assert "Please provide both week and day" in result.stdout
+    else:
+        assert "Week and day must be positive integers" in result.stdout
+
+
 def test_copy_test_missing_source_fails_closed(tmp_path):
     result = subprocess.run(
         [
@@ -78,6 +104,26 @@ def test_copy_test_missing_source_fails_closed(tmp_path):
     )
     assert result.returncode != 0
     assert "tests_refsol/test_week_99_day_99.py" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        ("--week", "0", "--day", "1"),
+        ("--week", "1", "--day", "0"),
+        ("--week", "-1", "--day", "1"),
+    ],
+)
+def test_copy_test_non_positive_selection_fails_closed(tmp_path, selectors):
+    result = subprocess.run(
+        [sys.executable, str(DEV_TOOLS), "copy-test", *selectors],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Week and day must be positive integers" in result.stdout
 
 
 def test_missing_command_fails_closed(tmp_path):
