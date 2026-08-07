@@ -65,48 +65,20 @@ pdm run test-refsol -- -- -k week_1
 
 The `tiny_llm` package is where students implement the exercises.
 `tiny_llm_ref` contains the reference solution used by the tests and benchmark
-appendix. The detailed chapter order and current status live in the
-[book summary](book/src/SUMMARY.md).
+appendix. The [book summary](book/src/SUMMARY.md) lists the chapter order;
+implementation, test, and publication readiness is tracked below.
 
 ## Roadmap
 
-The status columns track whether each chapter's complete learner checkpoint,
-focused tests, and rendered documentation are ready. Week 4 remains unpublished
-and is not yet part of the rendered daily course, so every Week 4 documentation
-cell remains 🚧 even when an executable draft exists. Rows 4.1–4.3 also remain
-🚧 for code and tests because their current focused checks cover narrower
-starter slices while the draft chapters describe larger cumulative exercises.
+The table distinguishes complete learner checkpoints (`Code`), focused tests
+(`Test`), and rendered chapters (`Doc`). Week 4 has tested reference checkpoints
+through Day 7, but its daily chapters are not yet published and Days 1–3 remain
+incomplete learner checkpoints.
 
-The executable Week 4 checkpoints now cover structured actions, bounded
-workspace tools, exact command allowlisting, durable sessions, reusable
-generation caches, structured token compaction, cooperative cancellation,
-durable steering, write-ahead file-mutation recovery, checkpoints, undo, and
-session branches. The Day 7 checkpoint adds sealed inert task packages, frozen
-candidate snapshots, deterministic static held-out checks, forbidden-path
-grading, and evaluation metrics without importing or executing candidate code.
-
-The Week 4 CLI's workspace tools are read-only by default; persistent runs still
-write a sensitive transcript under `.tiny-llm/sessions`. Enabling writes or an
-exact command only makes that tool eligible. Once an eligible model-dispatched `write_file`,
-`edit_file`, or `run_command` action passes preflight, it still requires an
-interactive `y/N` approval, with anything other than an explicit yes treated as
-no. Command execution is not sandboxed by its working directory or by this
-prompt. Run the agent only against a disposable workspace; an allowed program
-can still read or modify paths outside that workspace. A model final means only
-that the loop finished; it is not proof that the task or its validation
-succeeded. Programmatic workspace undo is also default-No and requires a fresh
-explicit confirmation; the CLI does not yet expose checkpoint, undo, branch, or
-live-steering commands. Protected safety copies retained to avoid deleting
-concurrent bytes are reported for manual inspection and can accumulate across
-repeated writes or undo operations.
-
-Static evaluation keeps commands disabled and file writes default-No. Its
-Python checks use `ast.parse()` and literal-node inspection only; they do not
-import a candidate module. Executable pytest, compilers, task-local graders, and
-model-authored programs remain deferred until a container or virtual machine
-backend provides a real isolation boundary. The `evaluate-agent` command can
-inspect an inert package or grade its unchanged baseline without loading a model
-or approving a mutation.
+Persistent Week 4 runs can store sensitive transcripts under
+`.tiny-llm/sessions`, and model-directed file or command tools are not sandboxed.
+Use a disposable workspace and read the
+[Week 4 overview](book/src/week4-overview.md) before enabling writes or commands.
 
 | Week + Chapter | Topic | Code | Test | Doc |
 |---|---|---|---|---|
