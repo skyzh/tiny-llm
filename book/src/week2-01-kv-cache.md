@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 1: KV Cache
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 In this chapter, we will add a **key-value cache** to the Qwen3 model. During
 generation, the cache lets each attention layer reuse the keys and values from
@@ -137,6 +139,15 @@ key, value = self.key_values  # B, H, offset, D
 
 return key, value, self.offset, mask
 ```
+
+This is deliberately a readable dense baseline, not a production KV cache.
+`mx.concat` allocates a larger buffer and copies the previous K/V contents on
+every growth step. Over a token-by-token decode of length `S`, those copies add
+up to `O(S²)` bytes even though caching avoids `O(S²)` prefix recomputation.
+The reference cache records this traffic as `growth_copy_bytes` so the profiler
+can keep it separate from attention. Week 3 replaces this baseline with
+preallocated pages; do not copy the repeated-concatenation design into a
+serving cache.
 
 ## Task 2: Preserve the Week 1 Boundary
 

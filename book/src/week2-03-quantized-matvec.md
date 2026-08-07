@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 3: Quantized Matvec
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 Day 2's decode profile should show the same scaling before you start this
 chapter: linear projections repeatedly read far more weight data than one-token

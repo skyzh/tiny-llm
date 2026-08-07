@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 7: Split-K Prefill
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental performance lab.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 Day 6 made each 32×32×32 tile efficient. Its follow-up sweep shows a different
 problem at short prefill: Qwen's narrow K/V projections do not launch enough
@@ -145,7 +147,7 @@ Split-K only below the measured crossover: it must improve the under-filled
 projection, preserve one-token decode, and fall back exactly to Day 6 when the
 ordinary result grid is already occupied. A second Xcode trace is optional when
 the measured dispatch and the operator table already agree. The final
-acceptance run must still reach 80% of MLX in both phases.
+performance-lab acceptance run must still reach 80% of MLX in both phases.
 
 The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
 pairs the short-shape operator gains with the end-to-end result and keeps the

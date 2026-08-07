@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 2: Benchmark and Profile
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 Optimization starts with a trustworthy comparison. In this chapter, we measure
 prefill and decode separately, synchronize MLX's lazy execution inside every
@@ -157,164 +159,19 @@ fresh-process model benchmark to confirm the change. The
 [performance appendix](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 contains the reference-solution operator-attribution chart and raw-result path.
 
-## Inspect the Metal Pipeline
+## Optional Advanced Investigation
 
-An end-to-end benchmark tells us whether a checkpoint improved. A GPU profile
-tells us what to optimize next. The measurements answer different questions:
+The required Day 2 lab ends after you save the fresh-process benchmark JSON and
+the dependency-aware operator attribution. If those two measurements disagree,
+or if you want to investigate a course-owned Metal shader, continue with the
+[advanced Metal profiling appendix](./week2-advanced-profiling.md).
 
-| Question | Measurement |
-|---|---|
-| Did the complete model improve? | Fresh-process throughput benchmark |
-| Which operator family dominates? | Synchronized kernel-group attribution |
-| Which shader, function, and source line is expensive? | Metal Pipeline Statistics and Shader Cost Graph |
-
-The operator-attribution chart is not a flame graph. On M3 and newer Macs,
-Xcode's
-[Shader Cost Graph](https://developer.apple.com/documentation/xcode/analyzing-apple-gpu-performance-using-shader-cost-graph-a17-m3)
-is the flame graph: it ranks shader function calls and connects them to
-weighted source lines.
-[Pipeline Statistics](https://developer.apple.com/documentation/xcode/analyzing-draw-command-and-compute-dispatch-performance-with-pipeline-statistics)
-provides instruction, ALU, cache, MMU, control-flow, register, and spill
-evidence for the selected pipeline.
-
-Build your extension with source and line tables, then capture one Qwen3-4B
-projection at its real shape:
-
-```bash
-CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
-
-MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
-  --solution tiny_llm \
-  --projection q --rows 1 \
-  --iterations 10 \
-  --output /tmp/week2-q-projection.gputrace
-
-open /tmp/week2-q-projection.gputrace
-```
-
-The capture uses synthetic buffers with the real `M=1`, `K=2560`, `N=4096`
-Qwen3-4B shape. This avoids embedding all model weights; the dispatched
-kernel and its schedule are unchanged. The warmup and input
-materialization happen before capture, and repeated evaluations give Xcode
-enough steady-state dispatches to profile.
-
-Use `--solution tiny_llm_ref` with `build-ext-ref` only when reproducing the
-appendix's reference-solution capture. Do not profile the reference solution
-and use its bottleneck as proof about your implementation.
-
-Do not validate a trace by file size. Debug line tables and captured buffers can
-make an unusable trace large. After replay, require all three of these checks:
-
-- the exact `quantized_matvec_x4_fast_w4a16_g128_bf16` pipeline appears;
-- Xcode reports at least one compute encoder and dispatch;
-- profiling produces nonzero GPU time and counter rows.
-
-`--iterations` names requested evaluations, not promised dispatches. MLX may
-materialize or synchronize the graph differently, so use Xcode's replay summary
-as the dispatch count.
-
-### Capture the Counter Tables
-
-Open the trace in Xcode and click the profiling gauge. Wait for replay to
-finish before reading any counter. Then:
-
-1. Open **Counters**, select **Encoders**, and use the encoder filter to keep
-   the repeated compute encoders in view.
-2. Select **Performance Limiters**. Use **Edit Counters...** or horizontal
-   scrolling to expose occupancy, instruction throughput, integer and complex,
-   F32, ALU, MMU, last-level-cache, and control-flow columns. Xcode versions may
-   arrange the columns differently.
-3. Confirm that every recorded row belongs to the target compute pipeline. Do
-   not combine rows from different shaders just because they share an encoder.
-4. For this lab, treat the first recorded dispatch as replay warmup and report
-   the median of the remaining rows. Keep the same exclusion rule for every
-   before-and-after capture.
-
-![Xcode Performance Limiters table for repeated decode-matvec dispatches](./week2-xcode-arithmetic-counters.png)
-
-Switch from **Performance Limiters** to **Memory** without changing the encoder
-selection. Record device-memory bandwidth, GPU read bandwidth, bytes read from
-device memory, last-level-cache bandwidth, and cache miss rate. Bandwidth and
-bytes answer different questions: high bandwidth describes the transfer rate,
-while bytes per dispatch describes how much traffic the algorithm requires.
-
-![Xcode Memory table for the same repeated dispatches](./week2-xcode-bandwidth-counters.png)
-
-Preserve the column headers and several dispatch rows when capturing either
-table. On macOS, press **Shift-Command-4**, drag over the Xcode table, and save
-the resulting PNG with the benchmark record. A crop containing only numbers is
-not reproducible because it loses the counter names and selected view. Record
-the raw row values as well; the screenshot is supporting evidence, not a data
-format.
-
-### Capture the Shader Cost Graph
-
-The limiter table selects a kind of work. The Shader Cost Graph locates that
-work in the program:
-
-1. Open **Shaders** and find
-   `quantized_matvec_x4_fast_w4a16_g128_bf16`. Record its GPU time, allocated
-   registers, register high-water mark, and spilled bytes.
-2. Double-click the pipeline-state cell, then open **Cost Graph**.
-3. Follow the highest-cost function node. In **Source Files**, select the Metal
-   source file and leave the source metric set to **Cost**.
-4. Record the highest-cost lines and their percentages. Keep the pipeline name,
-   source filename, line numbers, and cost labels visible in the screenshot.
-
-![Xcode Shader Cost Graph for the masked W4 dot product](./week2-xcode-matvec-hot-lines.png)
-
-The source-cost view is the useful endpoint: it connects a pipeline limiter to
-the code that can change. Counter and source-cost percentages are comparable
-within one replay; they are not percentages of end-to-end model time. Treat the
-values in these screenshots as examples of the workflow, not targets for
-another machine. The
-[performance appendix](./appendix-performance.md#m4-pro-decode-matvec-pipeline-profile)
-shows how the recorded rows become median tables and an interpretation.
-
-Missing source lines mean the extension was not rebuilt with
-`MLX_METAL_DEBUG`. Missing counter samples mean the selected profiler is not
-supported on that OS, Xcode, or GPU combination; neither case justifies an
-ALU- or bandwidth-bound claim.
-
-Use the result in this order:
-
-1. Run the acceptance benchmark outside a trace and save its JSON output.
-2. Use operator attribution to select a kernel family.
-3. Capture that kernel, rank pipeline and function cost, and inspect the
-   dominant source lines.
-4. Optimize the highest measured cost whose scaling matches the target
-   workload.
-5. Re-run the isolated operator, end-to-end benchmark, and profile before
-   choosing the next chapter.
-
-For a longer request, Instruments can complement the single-dispatch capture:
-
-```bash
-xcrun xctrace list templates
-
-xcrun xctrace record \
-  --template /path/to/TinyLLMMetal.tracetemplate \
-  --output /tmp/week2.trace \
-  --launch -- pdm run bench-week2-operators \
-    --solution tiny_llm --model qwen3-4b \
-    --section prefill-projections --context 32 --prefill-projection k
-
-xcrun xctrace export --input /tmp/week2.trace --toc
-```
-
-The stock Metal System Trace is useful for command buffers, queues, and GPU
-intervals. A compatible Metal Shader Timeline or counter template can rank
-pipelines over the longer request. Use the source-enabled GPU trace for the
-per-function flame graph and per-line activity breakdown.
-
-Do not use trace-instrumented wall time as a throughput result: capture adds
-overhead and profiling may serialize commands. Record at least the tensor
-shape, pipeline name, GPU time, dispatch count, Pipeline Statistics activity,
-highest-cost function, and highest-cost source line. If the trace does not
-identify a dominant cost, do not invent one from the source code. Shorten the
-workload or return to the dependency-aware operator attribution, then check
-that its attributed total and the complete-model phase time move in the same
-direction.
+That appendix contains the Xcode capture workflow, Pipeline Statistics and
+Shader Cost Graph interpretation, screenshot requirements, Instruments
+commands, and the evidence order for schedule tuning. Keeping those steps out
+of the required lab makes the boundary explicit: they are useful performance
+research, not prerequisites for understanding prefill, decode, synchronization,
+or matched baselines.
 
 ## Record a Matched Baseline
 
@@ -357,9 +214,9 @@ prefill-logit mode, and exact model with the result. A dependency upgrade
 changes the comparison baseline, so remeasure MLX rather than carrying an old
 denominator forward.
 
-## Acceptance Target
+## Optional Performance-Lab Acceptance Target
 
-The Week 2 targets are:
+The performance-lab targets are:
 
 ```plain
 your solution's prefill throughput / MLX prefill throughput >= 0.80
@@ -368,10 +225,10 @@ your solution's decode throughput / MLX decode throughput >= 0.80
 
 The prefill ratio is also 0.80; both ratios use Qwen3-4B, a 128-token prompt,
 128 timed decode steps, and last-row logits. `--output-len 129` includes the
-first token produced by prefill. Reaching 80% is the acceptance threshold, not
-a promise that every educational kernel individually matches its MLX
-counterpart. MLX is the comparison baseline; your solution must reach both
-targets with its own operator implementations. If either ratio
+first token produced by prefill. Reaching 80% is the optional performance-lab
+threshold, not a promise that every educational kernel individually matches
+its MLX counterpart. MLX is the comparison baseline; the performance-lab
+solution must reach both targets with its own operator implementations. If either ratio
 misses, the next chapter starts from the new benchmark and profile rather than
 a predetermined optimization.
 

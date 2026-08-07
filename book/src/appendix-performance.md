@@ -1,6 +1,8 @@
-# 🚧 Appendix: Performance and Profiling
+# 🚧 Appendix: Performance Evidence Ledger
 
-> 🚧 This appendix is under review and may change.
+> **Status: Experimental, single-machine evidence.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) before
+> treating a correctness, integration, or performance result as broader proof.
 
 This appendix records the measurements that determined the course order. The
 numbers are not additive promises: after one bottleneck shrinks, every other
@@ -49,6 +51,28 @@ The measured machine below is an Apple M4 Pro with a 20-core GPU and 64 GB of
 memory. Static Week 2 rows use two complete warmups and the median of four
 balanced fresh processes; the continuous-serving rows use one warmup and the
 median of three fresh processes.
+
+## Week 2 Checkpoint Retention Ledger
+
+A polished explanation is not evidence that an optimization belongs in the
+course. Before retaining a checkpoint, answer six questions: its invariant,
+why it could be faster, where it wins, where it loses, its fallback, and how the
+benchmark could mislead us. This ledger records the current answers; links
+below contain the measurements.
+
+| Checkpoint | Required invariant | Performance hypothesis | Retained range and losing shapes | Fallback or control | Main benchmark trap |
+|---|---|---|---|---|---|
+| Dense KV cache | Caller offset equals every layer cache length; K/V append on the sequence axis | Reuse projected prefix K/V instead of recomputing the full model prefix | Wins incremental decode as the prefix grows; repeated `concat` still copies `O(S²)` bytes | Week 1 full-prefix model remains the semantic control; Week 3 pages replace growth copies | Comparing cached MLX with an uncached course model measures different algorithms |
+| Packed quantized matvec | W4, group size 128, BF16 parameters, contiguous packed layout, and the declared transpose convention | Read packed weights once and share unpack/scale work across SIMD lanes | Retained for `M <= 8`; multi-row prefill exposes poor reuse and motivates Day 6 | Vanilla W4 primitive is the operator oracle; named earlier checkpoints preserve the dense control | Lazy execution or timing post-materialized weights can hide weight traffic |
+| RMSNorm | BF16 I/O with the sum of squares accumulated in FP32 | Fuse reduction, normalization, and weight multiply into one dispatch | Retained at Qwen hidden dimensions after both operator and decode gains; unknown dimensions require remeasurement | Readable RMSNorm and the Day 3 checkpoint remain selectable | Adding isolated microseconds as if checkpoint gains were independent |
+| RoPE | One valid offset per batch row; even rotated dimension; tail values preserved | Fuse angle generation and pair rotation without intermediate graphs | Retained for Qwen decode rows; head-count and rotated-dimension changes require remeasurement | Readable RoPE and the RMSNorm-only checkpoint remain selectable | Benchmarking a cached or precomputed angle path against fresh angle construction |
+| SwiGLU | Gate and up tensors have identical shape and dtype | Fuse SiLU and the gate/up product into one elementwise dispatch | Retained for Qwen MLP shapes; tiny tensors and other dtypes are not a performance claim | Readable SiLU-product and the RoPE checkpoint remain selectable | Accepting an operator win without a repeated complete-model gain |
+| Decode attention | `Hq % Hkv == 0`, `D <= 256`, FP32 online-softmax state, and causal/explicit mask semantics | Avoid score/probability tensors and merge softmax while walking K/V | Model dispatch is `L <= 8`, `S <= 128`, and no explicit mask; it loses past the measured context crossover and is under-filled at very short contexts | Readable grouped attention handles longer queries, longer contexts, and explicit masks | Fixed implementation order, GPU performance-state drift, or treating correctness at `S=1` as schedule efficiency |
+| SIMD-matrix prefill | W4/group-128 layout, BF16 storage, FP32 tile accumulation, and correct partial tiles | Reuse activation and dequantized-weight tiles across prompt rows | Performance-lab path for `M > 8`; partial and new model shapes need both correctness and timing sweeps | Day 3 matvec remains the short-row dispatch; vanilla matmul is the oracle | Comparing all-logit course prefill with last-logit MLX serving |
+| Split-K prefill | Partitions align to quantization groups; partial planes are disjoint; final reduction is FP32 | Add independent groups only while the ordinary result grid is under-filled | Helps short narrow Qwen projections, is neutral around the 128-token acceptance shape, and loses once the base grid is occupied | `split_k <= 1` dispatches exactly to the Day 6 unsplit kernel | Profiling independent layers can hide under-occupancy that appears in the dependency-ordered model |
+
+This is a retention ledger, not a portability certificate. A new GPU, MLX
+release, model shape, dtype, or workload reopens the corresponding row.
 
 ## Long-Context Budget for Week 4
 

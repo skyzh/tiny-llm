@@ -16,11 +16,12 @@
 - [🚧 Week 2: A Step Closer to vLLM](./week2-overview.md)
     - [🚧 KV Cache](./week2-01-kv-cache.md)
     - [🚧 Benchmark and Profile](./week2-02-benchmarking.md)
+    - [🚧 Advanced: Metal Profiling](./week2-advanced-profiling.md)
     - [🚧 Quantized Matvec](./week2-03-quantized-matvec.md)
     - [🚧 Fused Model Kernels](./week2-04-fused-model-kernels.md)
     - [🚧 Fused Decode Attention](./week2-05-decode-attention.md)
-    - [🚧 SIMD-Matrix Prefill](./week2-06-simd-matrix-prefill.md)
-    - [🚧 Split-K Prefill](./week2-07-split-k-prefill.md)
+    - [🚧 Performance Lab: SIMD-Matrix Prefill](./week2-06-simd-matrix-prefill.md)
+    - [🚧 Performance Lab: Split-K Prefill](./week2-07-split-k-prefill.md)
 - [🚧 Week 3: Build a Mini vLLM](./week3-overview.md)
     - [🚧 Continuous Batching](./week3-01-continuous-batching.md)
     - [🚧 Chunked Prefill](./week3-02-chunked-prefill.md)
@@ -30,7 +31,7 @@
     - [🚧 Optional: Speculative Decoding](./week3-optional-speculative-decoding.md)
     - [Optional: Mixture of Experts](./week3-optional-moe.md)
 - [🚧 Week 4: Build a Coding Agent](./week4-overview.md)
-- [🚧 Appendix: Performance by Chapter](./appendix-performance.md)
+- [🚧 Appendix: Performance Evidence Ledger](./appendix-performance.md)
 
 ---
 
