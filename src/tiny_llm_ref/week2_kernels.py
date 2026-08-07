@@ -108,6 +108,8 @@ def decode_attention_custom(
         raise ValueError("query, key, and value batch dimensions must match")
     if head_dim != key_head_dim or num_heads % num_kv_heads != 0:
         raise ValueError("incompatible grouped-query attention shapes")
+    if isinstance(mask, str) and mask != "causal":
+        raise ValueError(f"unsupported attention mask: {mask}")
 
     query = mx.contiguous(query.reshape(batch_size * num_heads, query_length, head_dim))
     key = mx.contiguous(

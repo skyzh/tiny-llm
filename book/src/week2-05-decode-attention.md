@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 5: Fused Decode Attention
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 This chapter starts only after the Day 4 profile has verified that the fused
 model kernels reduced the repeated pointwise cluster. Linear projections remain
@@ -116,15 +118,18 @@ SIMD-matrix tiles for FlashAttention; prefill is a different workload where
 both query and context lengths are large.
 
 Set a concrete dispatch guard: use your Metal kernel only when query length is
-at most eight and cached context length is at most 256. Otherwise use the
+at most two and cached context length is at most 256. Otherwise use the
 readable grouped-attention path. Keep this condition at the model call site so
 the benchmarked operating range remains reviewable instead of becoming a
 hidden performance policy inside the Metal kernel.
 
-Keep arbitrary dense, per-request masks on the readable compatibility path.
-They appear in the first continuous-batching exercise, while the normal Week 2
-decode path uses no explicit mask. Week 3 replaces dense batch masks with paged
-attention metadata instead of complicating this focused decode kernel.
+Keep arbitrary dense, per-request masks on the readable model path. The
+primitive still accepts explicit masks so its arithmetic contract can be
+tested, but the Week 2 dispatch guard selects the custom kernel only for
+`None` or `"causal"`. Explicit masks appear in the first continuous-batching
+exercise, while normal single-request decode uses no mask. Week 3 replaces
+dense batch masks with paged-attention metadata instead of making them a hidden
+performance policy in this focused model path.
 
 ```bash
 pdm run build-ext
@@ -132,8 +137,35 @@ pdm run test --week 2 --day 5
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit
-masks against the readable Week 1 implementation. Use a tolerance because the
-online softmax changes the floating-point reduction order.
+masks against the readable Week 1 implementation. The reference suite uses
+Qwen's `D = 128`, query lengths 1 and 8, GQA ratios 1 and 4, and cached contexts
+`1, 31, 32, 127, 128, 129, 255, 256`. It also checks both sides of the model's
+`L <= 2` and `S <= 256` dispatch guard. Use a tolerance because online softmax
+changes the floating-point reduction order.
+
+Correctness over that grid does not prove that a fixed 32-SIMD-group schedule
+is efficient. At contexts 1, 8, and 31, many of its 1,024 threads have no score
+position to process. Run the same real-shape operator sweep on each target
+machine before retaining the schedule:
+
+```bash
+for context in 1 31 32 127 128 129 255 256; do
+  pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+    --section attention --context "${context}" \
+    --query-length 1 --gqa-ratio 4 --attention-mask none
+done
+
+for context in 8 31 32 127 128 129 255 256; do
+  pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+    --section attention --context "${context}" \
+    --query-length 8 --gqa-ratio 4 --attention-mask causal
+done
+```
+
+Repeat representative points with `--gqa-ratio 1` and
+`--attention-mask explicit`. Keep M1 and M4 results as separate records; a
+correctness run on the M1 CI runner is not evidence that the M4 crossover
+applies there.
 
 Run the preceding checkpoint and your solution with the new dispatch under
 otherwise identical settings:
@@ -204,6 +236,33 @@ record, including exact source SHA, model configuration, MLX and mlx-lm
 versions, Xcode/Metal versions, device information, execution order, samples,
 and medians, is
 `benchmark_results/m4-pro-qwen3-4b-week2-attention-context-sweep-mlx-0.32.0.json`.
+
+The production-boundary sweep held context at 128, selected Qwen3-4B's 4:1 GQA
+ratio and causal mask, and balanced L1/L2/L4/L8 order over six passes. Each pass
+also rotated the three implementation orders and retained every sample:
+
+| Query length | Readable | Metal | MLX | Metal speedup | Pass wins |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 244.4 us | 213.1 us | 155.9 us | 1.147x | 6/6 |
+| 2 | 341.4 us | 258.8 us | 185.3 us | 1.319x | 6/6 |
+| 4 | 322.7 us | 297.3 us | 197.4 us | 1.085x | 4/6 |
+| 8 | 377.7 us | 491.5 us | 290.6 us | 0.768x | 0/6 |
+
+L4's aggregate median improved, but it lost two of six balanced passes. L2 is
+the largest repeat-consistent win, so the dispatch guard remains conservative
+at `L <= 2`; L4 and L8 use the readable path. Reproduce the recorded sweep with:
+
+```bash
+pdm run bench-week2-operators --solution tiny_llm_ref --model qwen3-4b \
+  --section attention --context 128 \
+  --query-length 1 --query-length 2 --query-length 4 --query-length 8 \
+  --gqa-ratio 4 --attention-mask causal --context-repeats 6 \
+  --warmup 12 --iterations 60 \
+  --json-output benchmark_results/week2-attention-query-sweep.json
+```
+
+The checked raw record is
+`benchmark_results/m4-pro-qwen3-4b-week2-attention-query-sweep-mlx-0.32.0.json`.
 
 Once decode reaches 80% of MLX, read the prefill attribution as a new workload.
 Continue to Day 6 only when quantized matrix-shaped projections dominate it.

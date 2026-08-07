@@ -16,6 +16,13 @@ def test_context_execution_order_balances_forward_and_reverse_sweeps():
     ]
 
 
+def test_shape_execution_order_balances_context_and_query_lengths():
+    assert benchmark.shape_execution_order([128], [1, 2, 4, 8], 2) == [
+        [(128, 1), (128, 2), (128, 4), (128, 8)],
+        [(128, 8), (128, 4), (128, 2), (128, 1)],
+    ]
+
+
 def test_benchmark_comparison_records_every_rotated_order(monkeypatch):
     monkeypatch.setattr(benchmark.mx, "eval", lambda value: None)
     functions = [(name, lambda name=name: name) for name in ("a", "b", "c")]
@@ -44,6 +51,7 @@ def test_summarize_runs_combines_raw_samples_across_context_repeats():
     runs = [
         {
             "context": 32,
+            "query_length": 1,
             "sections": {
                 "attention": [
                     {
@@ -58,6 +66,7 @@ def test_summarize_runs_combines_raw_samples_across_context_repeats():
         },
         {
             "context": 32,
+            "query_length": 1,
             "sections": {
                 "attention": [
                     {
@@ -72,11 +81,12 @@ def test_summarize_runs_combines_raw_samples_across_context_repeats():
         },
     ]
 
-    summary = benchmark.summarize_runs(runs, [32])
+    summary = benchmark.summarize_runs(runs, [32], [1])
 
     assert summary == [
         {
             "context": 32,
+            "query_length": 1,
             "sections": {
                 "attention": [
                     {

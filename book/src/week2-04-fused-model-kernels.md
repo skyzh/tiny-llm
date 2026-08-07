@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 4: Fused Model Kernels
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 The Day 3 profile should now show many smaller pointwise and reduction
 dispatches behind the optimized projections.

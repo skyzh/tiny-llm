@@ -1,6 +1,8 @@
 # 🚧 Week 2 Day 6: SIMD-Matrix Prefill
 
-> 🚧 This chapter is under review and may change.
+> **Status: Experimental performance lab.** See the
+> [Week 2 verification matrix](./week2-overview.md#verification-status) for
+> what is continuously tested, locally measured, and still under review.
 
 Day 5 ends by switching the profile from one-token decode to multi-token
 prefill. The measured bottleneck changes with the workload: pointwise kernels
@@ -13,8 +15,8 @@ Re-run the dependency-aware kernel profile from Day 2 with
 attribution and the complete-model prefill phase moves with their latency. The
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 shows that evidence chain. MLX remains an external performance denominator;
-the required path in your solution continues to call the C++/Metal primitive
-you implement for every projection.
+the performance-lab path in your solution continues to call the C++/Metal
+primitive you implement for every projection.
 
 The implementation remains deliberately narrow:
 
