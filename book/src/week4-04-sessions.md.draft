@@ -1,12 +1,35 @@
-# Day 4: Interactive Sessions and Resume
+# Day 4: Interactive Sessions and Resume (Planned)
 
-So far, exiting the process loses the agent's conversation and progress. Today
-you will store an append-only session that can be inspected, resumed, and later
-compacted without treating a rendered prompt as the source of truth. You will
-also keep the conversation open for follow-up messages and reuse compatible KV
-state between model turns.
+The current process loses the agent's conversation and progress when it exits.
+This planned chapter stores an append-only session that can be inspected,
+resumed, and later compacted without treating a rendered prompt as the source of
+truth. It also keeps the conversation open for follow-up messages and reuses
+compatible KV state between model turns.
 
-## Three Kinds of State
+> **Implementation status:** Durable events, session files, instruction
+> discovery, `GenerationSession`, and the CLI flags shown below do not exist in
+> the current source or tests. The current Day 4 checkpoint covers only complete
+> in-memory tool turns and simple character-bounded retention. Every section
+> after the current checkpoint is a design target.
+
+## Current Repository Checkpoint
+
+Implement `append_tool_result()` and `compact_messages()` in
+`src/tiny_llm/agent/context.py`, then run:
+
+```bash
+pdm run test --week 4 --day 4
+```
+
+`append_tool_result()` returns a new list containing the assistant's raw action
+and a user-role `Tool result:` observation. `compact_messages()` always retains
+the system and original task messages, then keeps the newest complete two-message
+tool turns that fit under `max_chars`. It counts characters, creates no summary,
+writes no session file, and does not touch a KV cache.
+
+Use `pdm run test-refsol --week 4 --day 4` for the supplied implementation.
+
+## Planned State Model
 
 Keep these states separate:
 
@@ -21,7 +44,7 @@ A session remains valid after its KV cache is evicted. A context can be compacte
 without deleting the durable trace. This separation also lets the agent resume
 after a process restart by rebuilding model context from stored events.
 
-## Append-Only JSONL
+## Planned Append-Only JSONL
 
 Use one JSON object per line. Every event has an ID, timestamp, type, and
 type-specific payload:
@@ -29,7 +52,7 @@ type-specific payload:
 ```json
 {"id":"01...","type":"user_message","content":"fix empty values"}
 {"id":"02...","type":"assistant_message","content":"{...}"}
-{"id":"03...","type":"tool_call","tool":"read","arguments":{"path":"src/config.py"}}
+{"id":"03...","type":"tool_call","tool":"read_file","arguments":{"path":"src/config.py"}}
 {"id":"04...","type":"tool_result","tool_call_id":"03...","is_error":false,"content":"..."}
 ```
 
@@ -41,9 +64,10 @@ Do not store secrets copied from the process environment. Treat session files as
 sensitive because source excerpts and command output may themselves contain
 private information.
 
-## Session Lifecycle
+## Planned Session Lifecycle
 
-Support a minimal command set:
+The target CLI supports this command set; these flags are not currently
+accepted:
 
 ```text
 agent TASK                 start a new session
@@ -57,7 +81,7 @@ Store the resolved workspace path and model identifier in session metadata.
 Refuse to resume in a different workspace unless the user explicitly selects a
 new root; silently replaying file actions against another repository is unsafe.
 
-## Rebuilding a Conversation
+## Planned Conversation Rebuild
 
 The context builder maps events back to chat messages:
 
@@ -71,7 +95,7 @@ The context builder maps events back to chat messages:
 Rendering happens only when a model turn starts. This prevents presentation
 details from becoming the persistent data model.
 
-## Reusing KV State Between Turns
+## Planned KV Reuse Between Turns
 
 The starting `Generate` callback receives semantic messages and returns model
 text, but `generate_response()` creates and releases a fresh cache on every
@@ -86,10 +110,12 @@ class GenerationSession:
 
 The object owns the rendered token IDs and one cache per model layer. Before a
 turn, tokenize the desired prompt and find its longest common prefix with the
-cached token IDs. Rewind every layer to that length, then prefill only the new
-suffix. Chat templates may replace a generation marker when an assistant turn
-is appended, so compare token IDs rather than assuming the rendered string only
-grows at the end.
+cached token IDs. If the cache currently holds `cached_length` tokens and the
+prefix contains `common_prefix_length`, call
+`rewind(cached_length - common_prefix_length)` on every layer, then prefill only
+the new suffix. Chat templates may replace a generation marker when an assistant
+turn is appended, so compare token IDs rather than assuming the rendered string
+only grows at the end.
 
 Keep one invariant across all layers:
 
@@ -107,7 +133,7 @@ and cache from durable events. Saving K/V to disk can be an optional extension,
 but a missing or incompatible cache snapshot must never make the session
 impossible to resume.
 
-## Project Instructions
+## Planned Project Instructions
 
 At session start, discover an `AGENTS.md` or equivalent instruction file in the
 workspace and add its contents to the initial context. Record which instruction
@@ -116,7 +142,7 @@ files were loaded so resume behavior is explainable.
 Choose a policy for changed instructions. A simple implementation rereads them
 when resuming and records an event if their content hash differs.
 
-## Serving Multiple Agent Sessions
+## Planned Multi-Session Serving Boundary
 
 The Week 3 scheduler may run model requests for several agents, but each agent
 still owns its own event stream, context budget, and tool execution state. Keep
@@ -130,7 +156,7 @@ The serving layer should not write session files or execute tools. It may evict
 a session's KV cache while the durable event log remains resumable. A later turn
 then pays for a cold prefill rather than failing.
 
-## Exercise
+## Planned Exercise
 
 1. Serialize and reload every event type without losing fields.
 2. Stop an agent after two tool calls, restart the program, and continue it.
@@ -144,8 +170,9 @@ then pays for a cold prefill rather than failing.
 9. Restart without saved K/V and verify that event replay rebuilds the same
    conversation.
 
-At the end of the day, a model should be able to resume the bug-fixing task from
-Day 3, accept a follow-up, and avoid prefilling an unchanged prefix while the
-process remains alive.
+After this planned slice is implemented and tested, a model should be able to
+resume the bug-fixing task from Day 3, accept a follow-up, and avoid prefilling
+an unchanged prefix while the process remains alive. Passing the current Day 4
+test does not establish any of those capabilities.
 
 {{#include copyright.md}}

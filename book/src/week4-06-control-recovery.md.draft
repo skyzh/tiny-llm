@@ -1,13 +1,44 @@
-# Day 6: Control and Recovery
+# Day 6: Control and Recovery (Planned)
 
 Long-running agents need a way for users to change direction and recover from
-bad mutations. Today you will add checkpoints, undo, steering, and cooperative
-cancellation without hiding any of them from the session trace.
+bad mutations. This planned chapter adds checkpoints, undo, steering, and
+cooperative cancellation without hiding any of them from the session trace.
 
-## Checkpoints and Undo
+> **Implementation status:** The current Day 6 checkpoint covers the bounded
+> observe-act loop, recovery from malformed JSON, and repeated-action stopping.
+> It does not implement a mutation journal, checkpoints, undo, session branches,
+> steering, decode interruption, or validation-aware completion. Every recovery
+> feature after the current checkpoint is a design target.
 
-The mutation journal from Day 3 already records before-images and hashes. A
-checkpoint groups those mutations under a named boundary:
+The command runner already attempts to kill its process group on timeout or
+`KeyboardInterrupt`, waits up to a bounded cleanup grace period for the
+foreground process, and attempts to terminate same-process-group descendants
+that retain its output pipe after the foreground process exits. It reports when
+cleanup or output collection remains incomplete. A child that creates another
+session can escape, so stronger process isolation is still required. The broader
+cancellation signal and recorded interrupt event described below remain planned.
+
+## Current Repository Checkpoint
+
+Implement `AgentLimits` and `run_agent()` in `src/tiny_llm/agent/loop.py`, then
+run:
+
+```bash
+pdm run test --week 4 --day 6
+```
+
+The checks use predetermined model responses, so they do not load a model or run
+a subprocess. They establish successful observation followed by completion,
+malformed-action recovery, and repeated-action termination. A valid final action
+still marks the current run complete without proving that required validation
+passed.
+
+Use `pdm run test-refsol --week 4 --day 6` for the supplied implementation.
+
+## Planned Checkpoints and Undo
+
+The planned mutation journal from Day 3 records before-images and hashes. Once it
+exists, a checkpoint groups those mutations under a named boundary:
 
 ```text
 /checkpoint before-parser-change
@@ -24,7 +55,7 @@ Creating or deleting a file also needs a reversible journal entry. Empty
 directories do not need to be reconstructed unless the application assigns them
 meaning.
 
-## Session Branching Is Different
+## Planned Session Branching
 
 Keep these operations distinct:
 
@@ -36,7 +67,7 @@ Keep these operations distinct:
 Branching a session does not automatically undo files. Undoing files does not
 erase the record that an earlier approach was attempted.
 
-## Conversation Checkpoints and Cache Rewind
+## Planned Conversation Checkpoints and Cache Rewind
 
 A conversation checkpoint records an event boundary. When the Day 4 generation
 session currently represents that exact event prefix, it may also record the
@@ -54,12 +85,13 @@ Cache rewind and workspace undo are independent. A command that coordinates
 both should restore the workspace with conflict checks, select the conversation
 branch, and then rewind or rebuild inference state as three explicit steps.
 
-## Interrupt
+## Planned Interrupt
 
 Use one cancellation signal across decoding and tool execution:
 
 - the decode loop checks it between generated tokens;
-- subprocess execution forwards it by terminating the process tree;
+- subprocess execution forwards it by attempting to terminate the command's
+  process group;
 - file mutation code checks it before the atomic replace; and
 - the agent loop records an `interrupted` event.
 
@@ -69,7 +101,7 @@ replace. The mutation remains in the journal and can be undone normally.
 Do not catch `KeyboardInterrupt` only at the outermost loop. That leaves a long
 test or token generation running until it happens to return.
 
-## Steer
+## Planned Steering
 
 A steering message changes the active task while the agent is working:
 
@@ -84,23 +116,28 @@ session, then rebuild context so the next action sees it.
 For the first implementation, steering does not need to cancel the active tool.
 The user can interrupt first when immediate cancellation is required.
 
-## Loop Detection and Recovery
+## Current Loop Detection and Planned Recovery
 
-Hash normalized tool names and arguments. If the same failing call repeats, add
-a concise warning to the next observation. Stop after a configured threshold.
+The current loop serializes each consecutive action into a canonical JSON
+signature and stops when an identical action exceeds the configured threshold.
+It applies this rule to successful and failing actions and does not first inject
+a warning. A later recovery policy can hash only failing calls and add a concise
+warning to the next observation before stopping.
 
-Other useful terminal conditions include:
+The current loop also stops with `invalid_action_limit` after too many malformed
+actions and `step_limit` after exhausting its model-turn budget. The generation
+backend independently bounds output tokens.
 
-- too many malformed actions;
-- exhausted token or step budget;
+Still-planned terminal or recovery conditions include:
+
 - repeated edits that alternate the same text;
 - a final answer immediately after a failing validation command; and
-- a user interrupt with no request to continue.
+- a recorded user interrupt with no request to continue.
 
 The agent may report an incomplete result. Honest termination is preferable to
 silently claiming success.
 
-## Exercise
+## Planned Exercise
 
 Use the Day 3 fixture repository for four scenarios:
 
@@ -113,6 +150,8 @@ Use the Day 3 fixture repository for four scenarios:
 Finally, branch the session before the first edit and pursue an alternative
 solution. Inspect both branches in the durable trace while keeping workspace
 mutations explicit. Verify that restoring the live ancestor cache matches a cold
-prefill of the selected branch.
+prefill of the selected branch. Passing the current Day 6 tests does not
+establish branching, workspace undo, steering, or unified cooperative
+interruption.
 
 {{#include copyright.md}}

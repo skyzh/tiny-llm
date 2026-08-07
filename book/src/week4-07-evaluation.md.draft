@@ -1,11 +1,39 @@
-# Day 7: Evaluation and Capstone
+# Day 7: Evaluation and Capstone (Planned Suite)
 
 Anecdotes are useful while building an agent, but they cannot tell whether a
-prompt, tool schema, or compaction policy actually improved it. Today you will
-turn small repository tasks into a repeatable evaluation suite and run the final
-capstone.
+prompt, tool schema, or compaction policy actually improved it. This planned
+chapter turns small repository tasks into a repeatable evaluation suite and runs
+the final capstone.
 
-## What Makes a Good Task
+> **Implementation status:** The current Day 7 checkpoint contains deterministic,
+> scripted smoke tests. It records one approved exact edit, one denied edit, and
+> verifies with a harmless nonexistent sentinel that a disabled `run_command`
+> action cannot start a process. A process-launch tripwire makes the safety
+> property observable even against an incomplete learner implementation. A
+> mocked started command also proves that task success remains unknown and
+> command side effects are reported as untracked. Renderer checks cover
+> outcome-uncertain file mutation and incomplete command cleanup warnings. These
+> checks do not load a model, run validation, install held-out tests, grade task
+> behavior, survive a restart, or collect the metric suite below.
+
+## Current Repository Checkpoint
+
+Complete the cumulative agent baseline, then run:
+
+```bash
+pdm run test --week 4 --day 7
+```
+
+The safe-edit trajectory calls `read_file`, receives approval for `edit_file`,
+and returns a final action. The command-denial trajectory requests
+`run_command` while commands are disabled and confirms that no operating-system
+call occurs. This proves a narrow harness property, not autonomous bug fixing or
+task correctness.
+
+Use `pdm run test-refsol --week 4 --day 7` for the supplied implementation.
+Everything after this checkpoint specifies the planned evaluation suite.
+
+## Planned Task Design
 
 Use recent, human-written changes as inspiration, but keep each course task:
 
@@ -28,7 +56,7 @@ Do not expose a later Git commit containing the solution. A shell-capable agent
 can inspect Git history just like a human can. Use a sealed snapshot with no
 reachable solution history.
 
-## Grade Behavior, Not Style
+## Planned Deterministic Grading
 
 When the agent declares completion or reaches its budget:
 
@@ -43,7 +71,7 @@ implementations and reject fluent explanations paired with broken code. Rewrite
 overly specific tests that compare incidental formatting or exact strings when
 the requirement is behavioral.
 
-## Metrics
+## Planned Metrics
 
 Report at least:
 
@@ -63,7 +91,7 @@ Report at least:
 Compare trajectories as well as final scores. A tool change may preserve pass
 rate while sharply reducing repeated reads or context tokens.
 
-## A Small Course Suite
+## Planned Course Suite
 
 Begin with three difficulty levels:
 
@@ -77,7 +105,7 @@ Run each task more than once if generation is sampled. For greedy decoding, one
 run is reproducible only when the surrounding kernels and tool environment are
 also deterministic.
 
-## Capstone
+## Planned Capstone
 
 Give the agent a fresh fixture repository and the following kind of task:
 
@@ -93,13 +121,16 @@ The agent must:
 5. survive one process restart or context compaction; and
 6. produce a concise final summary naming changed files and validation.
 
-Only the held-out grader decides whether the task passes.
+Only the planned held-out grader decides whether the full capstone task passes.
+`AgentRun.completed` means only that the model returned a valid final action;
+`task_success` remains unknown in the baseline. Neither that protocol state nor
+the current Day 7 smoke tests substitute for grading evidence.
 
-## Experiments
+## Planned Experiments
 
 Once the suite runs end to end, change one variable at a time:
 
-- three file tools versus the four-tool interface;
+- the four workspace file tools alone versus adding `run_command`;
 - whole-file writes versus exact edits;
 - full session replay versus compaction;
 - fresh generation caches versus a persistent `GenerationSession`;
@@ -125,6 +156,7 @@ After the capstone, good optional projects include:
 - a terminal UI for browsing session branches and tool diffs.
 
 The core lesson remains small: a coding agent is a model inside a measured,
-persistent, and carefully controlled feedback loop.
+persistent, and carefully controlled feedback loop. Persistence and the full
+measurement harness remain targets until their source and focused tests land.
 
 {{#include copyright.md}}
