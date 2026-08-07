@@ -8,8 +8,9 @@ response as a safety boundary.
 > **Implementation status:** The reference implementation, learner API surface,
 > and focused tests are executable. Ctrl-C interruption is integrated with the
 > CLI. Checkpoint, undo, branch, and steering operations are programmatic APIs;
-> the CLI does not yet expose commands for them. Week 4 remains unpublished
-> while held-out evaluation is completed.
+> the CLI does not yet expose commands for them. Like every Week 4 daily
+> chapter, this file remains unrendered pending course review; executable does
+> not mean published.
 
 ## Check the Chapter
 

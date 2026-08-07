@@ -70,15 +70,20 @@ appendix. The detailed chapter order and current status live in the
 
 ## Roadmap
 
-The status columns track whether each chapter's code, tests, and documentation
-are ready. Week 4 remains unpublished and is not yet part of the rendered daily
-course. Its executable checkpoints now cover structured actions, bounded
+The status columns track whether each chapter's complete learner checkpoint,
+focused tests, and rendered documentation are ready. Week 4 remains unpublished
+and is not yet part of the rendered daily course, so every Week 4 documentation
+cell remains 🚧 even when an executable draft exists. Rows 4.1–4.3 also remain
+🚧 for code and tests because their current focused checks cover narrower
+starter slices while the draft chapters describe larger cumulative exercises.
+
+The executable Week 4 checkpoints now cover structured actions, bounded
 workspace tools, exact command allowlisting, durable sessions, reusable
 generation caches, structured token compaction, cooperative cancellation,
 durable steering, write-ahead file-mutation recovery, checkpoints, undo, and
-session branches. Day 7 adds sealed inert task packages, frozen candidate
-snapshots, deterministic static held-out checks, forbidden-path grading, and
-evaluation metrics without importing or executing candidate code.
+session branches. The Day 7 checkpoint adds sealed inert task packages, frozen
+candidate snapshots, deterministic static held-out checks, forbidden-path
+grading, and evaluation metrics without importing or executing candidate code.
 
 The Week 4 CLI's workspace tools are read-only by default; persistent runs still
 write a sensitive transcript under `.tiny-llm/sessions`. Enabling writes or an
@@ -129,10 +134,10 @@ or approving a mutation.
 | 4.1 | Agent Loop | 🚧 | 🚧 | 🚧 |
 | 4.2 | Tools | 🚧 | 🚧 | 🚧 |
 | 4.3 | Safety and Validation | 🚧 | 🚧 | 🚧 |
-| 4.4 | Interactive Sessions | ✅ | ✅ | ✅ |
-| 4.5 | Context Compaction | ✅ | ✅ | ✅ |
-| 4.6 | Control and Recovery | ✅ | ✅ | ✅ |
-| 4.7 | Evaluation | ✅ | ✅ | ✅ |
+| 4.4 | Interactive Sessions | ✅ | ✅ | 🚧 |
+| 4.5 | Context Compaction | ✅ | ✅ | 🚧 |
+| 4.6 | Control and Recovery | ✅ | ✅ | 🚧 |
+| 4.7 | Evaluation | ✅ | ✅ | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

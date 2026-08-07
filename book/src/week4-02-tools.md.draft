@@ -106,9 +106,11 @@ The timeout belongs to `ToolPolicy`, not the model action. It attempts to
 terminate the command's same-process-group descendants and reaps the foreground
 child. A descendant that creates another session can escape this cleanup, so a
 disposable workspace and stronger OS process isolation are still required for
-hostile commands. The runner handles `KeyboardInterrupt` while a command is
-active; unified loop, decoder, and steering cancellation is a planned Day 6
-extension.
+hostile commands. At the Day 2 checkpoint, the runner handles
+`KeyboardInterrupt` while a command is active. The cumulative reference
+implementation adds one cooperative cancellation signal across the loop,
+course-model decoder, command polling, and steering in Day 6; that behavior is
+not part of the Day 2 focused check.
 
 Exact allowlisting is necessary but not sufficient. Every eligible
 model-dispatched `run_command` action that passes preflight also asks `y/N` and

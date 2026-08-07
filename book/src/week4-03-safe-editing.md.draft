@@ -8,9 +8,10 @@ mutations should require review, and successful work should be validated.
 > protected roots and paths, rejection of detected symlinks, and writes disabled
 > by default.
 > Atomic writes, exact edits, and exact command allowlisting are checked on Day
-> 5. A mutation journal, automatic diff capture, validation-aware completion,
-> checkpoint undo, and process isolation are not implemented in the current
-> baseline.
+> 5. Durable mutation intents, recovery, and default-No checkpoint undo belong
+> to the cumulative Day 6 implementation, not this focused checkpoint.
+> Automatic diff capture, validation-aware completion, and process isolation
+> remain deferred.
 
 ## Current Checkpoint
 
@@ -77,7 +78,7 @@ can still read or modify any host path allowed to the process, spawn children,
 or use the network. Strong confinement requires a container, virtual machine, or
 equivalent sandbox.
 
-## Planned Mutation Journal
+## From a Stale-Write Guard to the Day 6 Mutation Journal
 
 The recovery target performs these steps around an approved write or edit:
 
@@ -88,7 +89,7 @@ The recovery target performs these steps around an approved write or edit:
 5. produce a diff for the trace or confirmation policy; and
 6. replace the file atomically.
 
-The current baseline records an in-memory content digest when it reads a file,
+The Day 3 checkpoint records an in-memory content digest when it reads a file,
 rejects byte changes detected during mutation preflight, rechecks the digest
 after human approval, performs an atomic replace, and tracks paths changed by
 file tools. It also retains an outcome-uncertain path if interruption or an
@@ -96,9 +97,13 @@ exception occurs between starting the commit and recording its completion, so
 the CLI tells the operator to inspect that file. This catches ordinary changes
 during the approval pause, but there is still a check-to-replace race against a
 hostile concurrent filesystem actor. The digest is a stale-write guard, not a
-durable journal: the baseline does not retain before-images or diffs. Do not
-claim that checkpoint undo works until those artifacts and their conflict checks
-are implemented and tested.
+durable journal, and checkpoint undo is not a Day 3 capability.
+
+The cumulative reference implementation adds bounded before-images,
+write-ahead mutation intents, restart classification, conflict checks, and
+default-No checkpoint undo in Day 6. That later journal does not add automatic
+diff capture or process isolation; follow the Day 6 chapter before claiming its
+recovery and undo guarantees.
 
 Do not automatically use `git reset`, `git checkout`, or a temporary commit as
 the mutation journal. A learner may run the agent in a repository that already

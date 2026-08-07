@@ -240,7 +240,8 @@ pdm run evaluate-agent grade evals/week4/localized-constant
 
 The grade command uses a fresh temporary stage and frozen snapshot. It keeps
 commands disabled, supplies no automatic write approval, and never runs code
-from the package.
+from the package. The shipped unchanged fixture is intentionally incorrect:
+`inspect` exits zero, while `grade` prints a normal failed report and exits one.
 
 The default Qwen3 4B model follows the structured action protocol more reliably.
 Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more

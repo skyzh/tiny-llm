@@ -5,8 +5,9 @@ process exits. This chapter makes the event stream durable and adds a reusable
 generation cache without making either representation depend on the other.
 
 > **Implementation status:** The reference implementation, learner API surface,
-> and focused tests in this chapter are executable. The Week 4 chapters remain
-> unpublished while the later daily checkpoints are completed.
+> and focused tests in this chapter are executable. Like every Week 4 daily
+> chapter, this file remains unrendered pending course review; executable does
+> not mean published.
 
 ## Check the Chapter
 
