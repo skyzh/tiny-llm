@@ -288,6 +288,9 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     mx.metal.start_capture(str(args.output.resolve()))
     try:
+        # Retire the command buffer created before capture started so measured
+        # work is encoded into command buffers created inside the capture.
+        mx.synchronize()
         for _ in range(args.iterations):
             mx.eval(*capture())
         mx.synchronize()
