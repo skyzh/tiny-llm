@@ -185,23 +185,36 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --section model-kernels --context 128
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case swiglu:decode:128 --case swiglu:decode:512 \
-  --case swiglu:decode:2048 --warmup 4 --iterations 12
+  --case swiglu:decode:32 --case swiglu:decode:128 \
+  --case swiglu:decode:160 --warmup 4 --iterations 12
+```
+
+Use a source-enabled pointwise capture for your implementation only as part of
+the optional profiling appendix:
+
+```bash
+CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
+MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
+  --solution tiny_llm --workload pointwise --iterations 10 \
+  --output /tmp/week2-day4-pointwise.gputrace
 ```
 
 Attach each cumulative model row, the three readable/optimized/MLX operator
-rows, and the post-SwiGLU kernel-group profile. Retain RMSNorm, RoPE, and SwiGLU
-independently only when their operator and cumulative model results agree. A
-trace is optional here: use it only when one fused operator regresses or its
-microbenchmark and model delta disagree.
+rows, and the post-SwiGLU kernel-group profile. Use Xcode to verify the three
+pipeline identities, but let your benchmark results decide whether the kernels
+stay.
 
 After the pointwise cluster shrinks, sweep cached context rather than assuming
-attention is next. Continue to Day 5 when attention is the next
-context-dependent gap and the projection operators are already close to their
-denominator. Day 5 must still prove that its replacement moves the complete
-model; a growing share alone is not acceptance. The
+attention is next. Continue to Day 5 when attention is a removable gap at
+`S <= 128` and the projection operators are already close to their
+denominator. Measurements at `S >= 160` define the fallback range; they do not
+justify a kernel that dispatches only through 128. Day 5 must still prove that
+its replacement moves a complete-model workload that actually enters that
+guard. The
 [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
 pairs the cumulative gains with all three operator microbenchmarks and the
-updated attribution.
+updated attribution. Use the optional trace to verify that the intended three
+fused kernels ran; the new context sweep, not the absolute projection share,
+selects attention next.
 
 {{#include copyright.md}}
