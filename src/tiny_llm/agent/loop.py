@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .control import CancellationToken
 from .context import ContextManager
 from .generation import Generate
 from .generation import Message
@@ -48,6 +49,7 @@ class AgentRun:
     task_success: bool | None = None
     command_side_effects_untracked: bool = False
     uncertain_modified_files: tuple[str, ...] = ()
+    retained_recovery_files: tuple[str, ...] = ()
     command_cleanup_incomplete: bool = False
     session_id: str | None = None
 
@@ -62,6 +64,7 @@ def run_agent(
     session: SessionLog | None = None,
     context_manager: ContextManager | None = None,
     summarize: Callable[[list[Message]], str] | None = None,
+    cancellation: CancellationToken | None = None,
 ) -> AgentRun:
     """Run a bounded loop, optionally recording its canonical durable events."""
 

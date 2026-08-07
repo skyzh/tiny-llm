@@ -2,9 +2,13 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from .generation import Message
+
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,24 @@ class SessionLog:
     def messages(self, system_prompt: str) -> list[Message]:
         pass
 
+    def pending_steering(self) -> tuple[SessionEvent, ...]:
+        pass
+
+    def queue_steering(self, message: str) -> SessionEvent:
+        """Linearize a durable steering submission with terminal acceptance."""
+
+        pass
+
+    def run_if_no_pending_steering(
+        self, operation: Callable[[], _T]
+    ) -> tuple[bool, _T | None]:
+        """Run one terminal operation only if queued steering did not win."""
+
+        pass
+
+    def deliver_pending_steering(self) -> tuple[SessionEvent, ...]:
+        pass
+
     def recover_unmatched_tool_calls(self) -> tuple[SessionEvent, ...]:
         pass
 
@@ -80,10 +102,20 @@ class SessionStore:
     def create(self, session_id: str | None = None) -> SessionLog:
         pass
 
-    def load(self, session_id: str) -> SessionLog:
+    def load(self, session_id: str, *, recover: bool = True) -> SessionLog:
         pass
 
     def latest(self) -> SessionLog:
+        pass
+
+    def branch(
+        self,
+        session_id: str,
+        at_event_id: str,
+        new_session_id: str | None = None,
+    ) -> SessionLog:
+        """Create a lineage whose model context ends at one ancestor event."""
+
         pass
 
 

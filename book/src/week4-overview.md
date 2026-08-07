@@ -2,9 +2,9 @@
 
 > 🚧 **Course status:** The daily chapters are drafts and are not included in
 > the rendered book yet. The repository contains a smaller tested baseline, but
-> interactive sessions, reusable-cache, and structured-compaction checkpoints
-> through Day 5 are executable. Recovery controls and held-out evaluation remain
-> planned work.
+> its interactive-session, reusable-cache, structured-compaction, control, and
+> recovery checkpoints through Day 6 are executable. Held-out evaluation
+> remains planned work.
 
 Weeks 1 through 3 turned tokens into text, made decoding efficient, and
 introduced serving techniques. Week 4 adds the next layer: an agent loop that
@@ -46,7 +46,12 @@ currently provides:
   per-dispatched-call approval;
 - durable append-only session logs, resume, and project-instruction snapshots;
 - rendered-token budgeting, bounded observations, and durable structured
-  compaction; and
+  compaction;
+- one cooperative cancellation signal across the loop, course-model decoding,
+  file commits, and command polling;
+- durable steering messages, write-ahead file-mutation intents, startup
+  reconciliation, branch-local checkpoints, default-No undo plans, and session
+  branches; and
 - a bounded loop that records actions, observations, confirmed and
   outcome-uncertain file-tool modifications, whether commands may have
   untracked or incompletely cleaned-up side effects, and its terminal reason.
@@ -55,11 +60,10 @@ currently provides:
 model—not task correctness. The baseline leaves `task_success` unknown because
 it has no deterministic grader.
 
-It does **not** yet implement checkpoints, undo, steering, cooperative decode
-cancellation, recorded interrupt events, session branches, or held-out task
-packages. The later draft chapters specify those
-intended extensions. Their examples are design targets, not commands or APIs
-that work in the current CLI.
+It does **not** yet implement held-out task packages or a deterministic grader.
+Checkpoint, undo, branch, and steering support are programmatic APIs in Day 6,
+not interactive CLI commands. The CLI does record an interrupted run and exits
+with status 130 after Ctrl-C.
 
 ## The Core Loop
 
@@ -106,9 +110,8 @@ changes.
 Day 4 adds a callable
 `GenerationSession` that keeps the same agent-facing API while owning token IDs
 and layer caches. It compares the new rendered prompt with the cached token
-sequence, rewinds a divergent suffix, and prefills only the new tokens. Planned
-Days 5 and 6 reuse this operation after compaction, steering, and session
-branching.
+sequence, rewinds a divergent suffix, and prefills only the new tokens. Days 5
+and 6 reuse this operation after compaction, steering, and session branching.
 
 The append-only event log remains the source of
 truth. A process restart may rebuild KV state from events, so persisting K/V to
@@ -155,6 +158,14 @@ allowed command can still delete files, read outside the workspace, launch child
 processes, or use the network. Human confirmation reduces accidental execution;
 it does not confine the approved program.
 
+Day 6 adds a write-ahead intent before each journaled file replace. On restart,
+the journal compares the current content-and-mode fingerprint with the recorded
+before and intended states and records `committed`, `not_applied`, or `conflict`
+without changing the file. Checkpoint undo performs a whole-plan conflict
+preflight and remains default-No. Safety copies retained from replacement or
+undo are protected from tools and reported for manual inspection. Commands are
+outside that reversible file journal and are never claimed as undoable.
+
 The default demo now calls the course model through `GenerationSession`; the
 `--solution mlx` compatibility backend retains the stateless adapter. The agent
 loop, tools, and safety work remain the main arc, while interactive sessions
@@ -169,7 +180,7 @@ provide a focused inference-framework exercise without changing model kernels.
 | 3 | Safety and validation | Bounded reads, protected paths, symlink rejection, and read-only defaults are validated. |
 | 4 | Interactive sessions | Append-only sessions, resume checks, instruction snapshots, and live token-prefix reuse are validated. |
 | 5 | Compaction | Exact rendered-token accounting, bounded observations, structured summaries, durable markers, and cache reconciliation are validated. |
-| 6 | Control and recovery | The bounded loop recovers from malformed actions and stops repeated calls; undo and steering are not implemented. |
+| 6 | Control and recovery | Cooperative cancellation, durable interrupt and steering events, mutation reconciliation, checkpoints, conflict-safe undo, branches, and command cancellation with a fake process are validated. |
 | 7 | Evaluation | A scripted safe edit and rejection of a disabled command are validated; held-out task packages are not implemented. |
 
 Each draft chapter names the focused learner command for its current checkpoint.
@@ -208,6 +219,10 @@ prompt as process isolation.
 The Day 4 CLI supports `--interactive`, `--continue`, `--session`, and
 `--no-session`. Persistent transcripts are sensitive local files under
 `.tiny-llm/sessions`; `--no-session` retains the earlier ephemeral behavior.
+Ctrl-C during an agent run records an interruption when a durable session is in
+use, reports known side effects, and exits with status 130. Day 6 checkpoint,
+undo, branch, and live-steering operations are APIs for the exercise harness;
+the CLI does not yet provide commands for them.
 
 The default Qwen3 4B model follows the structured action protocol more reliably.
 Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more

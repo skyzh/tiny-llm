@@ -6,13 +6,17 @@ import os
 import signal
 import stat
 import subprocess
-import tempfile
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Thread
+from time import monotonic
 
+from .control import AgentInterrupted, CancellationToken
 from .protocol import AgentError, ToolAction
+from .recovery import MutationJournal, RecoveryResult
+from .session import SessionLog
 
 
 _PROTECTED_NAMES = frozenset(
@@ -42,7 +46,12 @@ def _protected_path_reason(parts: tuple[str, ...]) -> str | None:
         lower = part.lower()
         if lower == ".git":
             return ".git is not accessible"
-        if lower in _PROTECTED_NAMES or lower.startswith(".env."):
+        if (
+            lower in _PROTECTED_NAMES
+            or lower.startswith(".env.")
+            or lower.startswith(".tiny-llm-agent-")
+            or lower.startswith(".tiny-llm-undo-")
+        ):
             return "potential secret files are not accessible"
         if lower.endswith((".pem", ".key")):
             return "potential key files are not accessible"
@@ -58,6 +67,7 @@ class _PreparedWrite:
     expected_digest: bytes | None
     expected_mode: int | None
     after_mode: int
+    parent_identity: tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -72,6 +82,7 @@ class ToolPolicy:
     max_list_entries: int = 200
     max_tool_output_chars: int = 16_000
     command_timeout_seconds: float = 30.0
+    _root_identity: tuple[int, int] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Week 4, Day 3: normalize the root and reject invalid limits."""
@@ -89,6 +100,14 @@ class ToolPolicy:
             raise ValueError("tool policy limits must be positive")
         if not root.exists() or not root.is_dir():
             raise ValueError("workspace root must be an existing directory")
+        root_status = os.stat(root, follow_symlinks=False)
+        if not stat.S_ISDIR(root_status.st_mode):
+            raise ValueError("workspace root must be a directory")
+        object.__setattr__(
+            self,
+            "_root_identity",
+            (root_status.st_dev, root_status.st_ino),
+        )
         home = Path.home().resolve()
         if root.parent == root or root == home or root in home.parents:
             raise ValueError("workspace root is too broad")
@@ -104,15 +123,112 @@ class ToolPolicy:
 
 @dataclass
 class Workspace:
-    """Week 4, Days 3 and 5: bounded tools over one explicit workspace root."""
+    """Week 4, Days 3--6: bounded tools over one explicit workspace root."""
 
     policy: ToolPolicy
     confirm_tool: Callable[[ToolAction], bool] | None = None
+    session_log: SessionLog | None = field(default=None, kw_only=True)
+    cancellation: CancellationToken | None = field(default=None, kw_only=True)
     observed_files: dict[Path, bytes] = field(default_factory=dict, init=False)
     modified_files: set[Path] = field(default_factory=set, init=False)
     uncertain_modified_files: set[Path] = field(default_factory=set, init=False)
+    retained_recovery_files: set[Path] = field(default_factory=set, init=False)
     command_side_effects_untracked: bool = field(default=False, init=False)
     command_cleanup_incomplete: bool = field(default=False, init=False)
+    journal: MutationJournal | None = field(default=None, init=False)
+    recovery_results: tuple[RecoveryResult, ...] = field(default=(), init=False)
+
+    def __post_init__(self) -> None:
+        """Bind durable mutation recovery to the matching session, when present."""
+
+        if self.session_log is not None:
+            self.journal = MutationJournal(self.session_log, self.policy.root)
+            self.recover_pending()
+            self._recover_command_state()
+
+    def bind_session(self, session_log: SessionLog) -> tuple[RecoveryResult, ...]:
+        """Bind a pristine workspace to the exact log used by its agent loop."""
+
+        if session_log.workspace != self.policy.root:
+            raise ValueError("session belongs to a different workspace")
+        if self.session_log is not None:
+            if self.session_log is not session_log:
+                raise ValueError("workspace journal belongs to a different session")
+            if self.journal is None or self.journal.session is not session_log:
+                raise ValueError("workspace journal is not bound to its session")
+            self._recover_command_state()
+            return ()
+        if self.journal is not None:
+            raise ValueError("workspace has a journal without a session")
+        if (
+            self.modified_files
+            or self.uncertain_modified_files
+            or self.retained_recovery_files
+            or self.command_side_effects_untracked
+        ):
+            raise ValueError("workspace has unjournaled side effects")
+
+        journal = MutationJournal(session_log, self.policy.root)
+        recovered = journal.recover_pending()
+        self.session_log = session_log
+        self.journal = journal
+        self.recovery_results += recovered
+        self._recover_command_state()
+        return recovered
+
+    def _recover_command_state(self) -> None:
+        """Reconstruct conservative process-side-effect flags from durable events."""
+
+        if self.session_log is None:
+            return
+        starts: dict[str, object] = {}
+        finishes: dict[str, object] = {}
+        for event in self.session_log.events:
+            if event.type == "command_started":
+                command_id = event.data.get("command_id")
+                if not isinstance(command_id, str) or command_id in starts:
+                    raise ValueError("command start event is invalid")
+                starts[command_id] = event
+            elif event.type == "command_finished":
+                command_id = event.data.get("command_id")
+                if (
+                    not isinstance(command_id, str)
+                    or command_id not in starts
+                    or command_id in finishes
+                ):
+                    raise ValueError("command finish event is invalid")
+                finishes[command_id] = event
+        for command_id in starts:
+            finished = finishes.get(command_id)
+            if finished is None:
+                self.command_side_effects_untracked = True
+                self.command_cleanup_incomplete = True
+                continue
+            launched = finished.data.get("launched")
+            cleanup_incomplete = finished.data.get("cleanup_incomplete")
+            if not isinstance(launched, bool) or not isinstance(
+                cleanup_incomplete, bool
+            ):
+                raise ValueError("command finish event is invalid")
+            if launched:
+                self.command_side_effects_untracked = True
+            if cleanup_incomplete:
+                self.command_cleanup_incomplete = True
+
+    @property
+    def mutation_journal(self) -> MutationJournal | None:
+        """Expose the session-bound journal under a descriptive alias."""
+
+        return self.journal
+
+    def recover_pending(self) -> tuple[RecoveryResult, ...]:
+        """Classify pending durable intents without changing workspace files."""
+
+        if self.journal is None:
+            return ()
+        results = self.journal.recover_pending()
+        self.recovery_results += results
+        return results
 
     @property
     def available_tools(self) -> frozenset[str]:
@@ -207,62 +323,80 @@ class Workspace:
         if len(encoded) > self.policy.max_write_bytes:
             raise AgentError(f"content exceeds {self.policy.max_write_bytes} bytes")
         path = self.resolve_path(raw, must_exist=False)
+        relative = path.relative_to(self.policy.root)
         expected_digest = self.observed_files.get(path)
-        if expected_digest is not None and not path.exists():
-            raise AgentError("file changed since it was read; read it again")
-        if path.exists():
+        parent, name = self._open_parent_directory(relative)
+        try:
+            parent_status = os.fstat(parent)
+            current = self._read_regular_at(parent, name, tool="write_file")
+        finally:
+            os.close(parent)
+        if current is None:
+            if expected_digest is not None:
+                raise AgentError("file changed since it was read; read it again")
+            expected_mode = None
+            after_mode = 0o600
+        else:
             if expected_digest is None:
                 raise AgentError(
                     "existing files must be read before they are overwritten"
                 )
-            current = self._read_bounded_file(path, tool="write_file")
-            if self._digest(current) != expected_digest:
+            current_content, current_status = current
+            if self._digest(current_content) != expected_digest:
                 raise AgentError("file changed since it was read; read it again")
-            expected_mode = stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode)
+            expected_mode = stat.S_IMODE(current_status.st_mode)
             after_mode = expected_mode & 0o777
-        else:
-            expected_mode = None
-            after_mode = 0o600
-        if not path.parent.exists() or not path.parent.is_dir():
-            raise AgentError("parent directory must already exist")
         return _PreparedWrite(
             path,
             encoded,
             expected_digest,
             expected_mode,
             after_mode,
+            (parent_status.st_dev, parent_status.st_ino),
         )
 
     def _commit_write(self, prepared: _PreparedWrite) -> str:
         """Revalidate and commit one previously prepared write."""
 
         relative = prepared.path.relative_to(self.policy.root)
-        path = self.resolve_path(str(relative), must_exist=False)
+        path = prepared.path
         self._revalidate_prepared_write(prepared)
+        journal = self.journal
+        intent = None
+        if journal is not None:
+            intent = journal.record_intent(
+                relative.as_posix(),
+                prepared.content.decode("utf-8"),
+                after_mode=prepared.after_mode,
+            )
+            expected_sha256 = (
+                None
+                if prepared.expected_digest is None
+                else prepared.expected_digest.hex()
+            )
+            if (
+                intent.before_sha256 != expected_sha256
+                or intent.before_mode != prepared.expected_mode
+                or intent.after_mode != prepared.after_mode
+            ):
+                self.recover_pending()
+                raise AgentError("file changed since it was read; read it again")
+        self._raise_if_cancelled("file_mutation")
         self.uncertain_modified_files.add(path)
-        self._atomic_write(path, prepared.content, after_mode=prepared.after_mode)
+        self._atomic_write(
+            path,
+            prepared.content,
+            expected_digest=prepared.expected_digest,
+            expected_mode=prepared.expected_mode,
+            after_mode=prepared.after_mode,
+            parent_identity=prepared.parent_identity,
+        )
+        if journal is not None and intent is not None:
+            journal.commit(intent)
         self.observed_files[path] = self._digest(prepared.content)
         self.modified_files.add(path)
         self.uncertain_modified_files.discard(path)
         return f"wrote {relative}"
-
-    def _revalidate_prepared_write(self, prepared: _PreparedWrite) -> None:
-        """Reject content or mode changes made after operator approval."""
-
-        path = prepared.path
-        if prepared.expected_digest is None:
-            if path.exists():
-                raise AgentError("write target appeared after approval; read it first")
-        else:
-            if not path.exists():
-                raise AgentError("file changed since it was read; read it again")
-            current = self._read_bounded_file(path, tool="write_file")
-            current_mode = stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode)
-            if (
-                self._digest(current) != prepared.expected_digest
-                or current_mode != prepared.expected_mode
-            ):
-                raise AgentError("file changed since it was read; read it again")
 
     def edit_file(self, raw: str, old: str, new: str) -> str:
         """Week 4, Day 5: make one exact, reviewable replacement in a read file."""
@@ -314,6 +448,8 @@ class Workspace:
         }
         process = None
         cleaned_up = False
+        command_id = uuid.uuid4().hex
+        prior_command_side_effects = self.command_side_effects_untracked
 
         def clean_up() -> None:
             """Kill this command group at most once after it has started."""
@@ -325,18 +461,60 @@ class Workspace:
                 self._kill_and_reap(process)
 
         try:
-            process = subprocess.Popen(
-                argv,
-                cwd=self.policy.root,
-                env=environment,
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                bufsize=0,
-            )
+            self._raise_if_cancelled("command")
+            if self.session_log is not None:
+                self.session_log.append(
+                    "command_started",
+                    command_id=command_id,
+                    argv=list(argv),
+                )
+            try:
+                self._raise_if_cancelled("command")
+            except AgentInterrupted:
+                if self.session_log is not None:
+                    self.session_log.append(
+                        "command_finished",
+                        command_id=command_id,
+                        returncode=130,
+                        launched=False,
+                        cleanup_incomplete=False,
+                    )
+                raise
             self.command_side_effects_untracked = True
+
+            def launch():
+                return subprocess.Popen(
+                    argv,
+                    cwd=self.policy.root,
+                    env=environment,
+                    shell=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    bufsize=0,
+                )
+
+            try:
+                process = (
+                    self.cancellation.run_if_active("command", launch)
+                    if self.cancellation is not None
+                    else launch()
+                )
+            except AgentInterrupted:
+                self.command_side_effects_untracked = prior_command_side_effects
+                if self.session_log is not None:
+                    self.session_log.append(
+                        "command_finished",
+                        command_id=command_id,
+                        returncode=130,
+                        launched=False,
+                        cleanup_incomplete=False,
+                    )
+                raise
+            except BaseException:
+                self.command_cleanup_incomplete = True
+                raise
             assert process.stdout is not None
             captured = bytearray()
             output_truncated = Event()
@@ -360,12 +538,32 @@ class Workspace:
             reader = Thread(target=drain_output, daemon=True)
             reader.start()
             try:
-                returncode = process.wait(timeout=self.policy.command_timeout_seconds)
+                if self.cancellation is None:
+                    returncode = process.wait(
+                        timeout=self.policy.command_timeout_seconds
+                    )
+                else:
+                    deadline = monotonic() + self.policy.command_timeout_seconds
+                    while True:
+                        self._raise_if_cancelled("command")
+                        remaining = deadline - monotonic()
+                        if remaining <= 0:
+                            raise subprocess.TimeoutExpired(
+                                argv, self.policy.command_timeout_seconds
+                            )
+                        try:
+                            returncode = process.wait(timeout=min(0.1, remaining))
+                            break
+                        except subprocess.TimeoutExpired:
+                            self._raise_if_cancelled("command")
             except subprocess.TimeoutExpired as error:
                 clean_up()
                 raise AgentError(
                     f"command exceeded {self.policy.command_timeout_seconds:g} seconds"
                 ) from error
+            except AgentInterrupted:
+                clean_up()
+                raise
             except KeyboardInterrupt:
                 clean_up()
                 raise
@@ -382,7 +580,7 @@ class Workspace:
                         except (OSError, ValueError):
                             pass
                         reader.join(timeout=0.1)
-        except AgentError:
+        except (AgentError, AgentInterrupted):
             clean_up()
             raise
         except Exception as error:
@@ -417,6 +615,14 @@ class Workspace:
             markers.append(f"... {warning}")
             trusted_warnings.append(warning)
         output = "\n".join(part for part in (output, *markers) if part)
+        if self.session_log is not None:
+            self.session_log.append(
+                "command_finished",
+                command_id=command_id,
+                returncode=returncode,
+                launched=True,
+                cleanup_incomplete=self.command_cleanup_incomplete,
+            )
         return f"exit code: {returncode}\n{output}".rstrip(), tuple(trusted_warnings)
 
     def _kill_and_reap(self, process) -> bool:
@@ -452,9 +658,16 @@ class Workspace:
         if self.confirm_tool is None or not self.confirm_tool(action):
             raise AgentError(f"operator denied {action.tool}")
 
+    def _raise_if_cancelled(self, phase: str) -> None:
+        """Observe a cooperative cancellation token at a safe boundary."""
+
+        if self.cancellation is not None:
+            self.cancellation.raise_if_cancelled(phase)
+
     def execute(self, action: ToolAction) -> str:
         """Week 4, Day 3: dispatch a validated action and return recoverable errors."""
 
+        self._raise_if_cancelled("tool")
         preserve_command_warnings: tuple[str, ...] = ()
         try:
             if action.tool == "list_files":
@@ -515,6 +728,134 @@ class Workspace:
             return result[:limit]
         return result[: limit - len(suffix)] + suffix
 
+    def _open_parent_directory(self, relative: Path) -> tuple[int, str]:
+        """Open every parent below the approved root without following links."""
+
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise AgentError("write path must stay below the workspace")
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        try:
+            directory = os.open(self.policy.root, flags)
+        except OSError as error:
+            raise AgentError("workspace root changed or is unsafe") from error
+        try:
+            root_status = os.fstat(directory)
+            if (
+                not stat.S_ISDIR(root_status.st_mode)
+                or (root_status.st_dev, root_status.st_ino)
+                != self.policy._root_identity
+            ):
+                raise AgentError("workspace root changed or is unsafe")
+            for component in relative.parts[:-1]:
+                try:
+                    child = os.open(component, flags, dir_fd=directory)
+                except OSError as error:
+                    raise AgentError("write parent changed or is unsafe") from error
+                os.close(directory)
+                directory = child
+                if not stat.S_ISDIR(os.fstat(directory).st_mode):
+                    raise AgentError("write parent changed or is unsafe")
+            return directory, relative.name
+        except BaseException:
+            os.close(directory)
+            raise
+
+    def _read_regular_at(
+        self,
+        parent: int,
+        name: str,
+        *,
+        tool: str,
+    ) -> tuple[bytes, os.stat_result] | None:
+        """Read and identify one final component relative to an anchored parent."""
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            descriptor = os.open(name, flags, dir_fd=parent)
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise AgentError(f"{tool} path must be a safe regular file") from error
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or opened.st_size > self.policy.max_file_bytes
+            ):
+                raise AgentError(f"{tool} path must be a safe regular file")
+            with os.fdopen(descriptor, "rb", closefd=False) as file:
+                content = file.read(self.policy.max_file_bytes + 1)
+            if len(content) > self.policy.max_file_bytes:
+                raise AgentError(f"file exceeds {self.policy.max_file_bytes} bytes")
+            latest_opened = os.fstat(descriptor)
+            try:
+                named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError as error:
+                raise AgentError("file changed while it was inspected") from error
+            if (
+                not stat.S_ISREG(named.st_mode)
+                or named.st_nlink != 1
+                or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)
+                or stat.S_IMODE(named.st_mode) != stat.S_IMODE(opened.st_mode)
+                or (
+                    latest_opened.st_size,
+                    latest_opened.st_mtime_ns,
+                    latest_opened.st_ctime_ns,
+                )
+                != (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)
+                or (
+                    named.st_size,
+                    named.st_mtime_ns,
+                    named.st_ctime_ns,
+                )
+                != (
+                    latest_opened.st_size,
+                    latest_opened.st_mtime_ns,
+                    latest_opened.st_ctime_ns,
+                )
+            ):
+                raise AgentError("file changed while it was inspected")
+            return content, opened
+        finally:
+            os.close(descriptor)
+
+    def _revalidate_prepared_write(self, prepared: _PreparedWrite) -> None:
+        """Recheck an approved target and parent before journaling its intent."""
+
+        relative = prepared.path.relative_to(self.policy.root)
+        try:
+            parent, name = self._open_parent_directory(relative)
+            try:
+                parent_status = os.fstat(parent)
+                if (
+                    parent_status.st_dev,
+                    parent_status.st_ino,
+                ) != prepared.parent_identity:
+                    raise AgentError("file changed since it was read; read it again")
+                current = self._read_regular_at(parent, name, tool="write_file")
+            finally:
+                os.close(parent)
+        except AgentError as error:
+            raise AgentError("file changed since it was read; read it again") from error
+        if prepared.expected_digest is None:
+            if current is not None:
+                raise AgentError("write target appeared after approval; read it first")
+            return
+        if current is None:
+            raise AgentError("file changed since it was read; read it again")
+        content, status = current
+        if (
+            self._digest(content) != prepared.expected_digest
+            or stat.S_IMODE(status.st_mode) != prepared.expected_mode
+        ):
+            raise AgentError("file changed since it was read; read it again")
+
     def _read_bounded_file(self, path: Path, *, tool: str) -> bytes:
         """Read a regular file without accepting a changed type or unbounded size."""
 
@@ -532,20 +873,222 @@ class Workspace:
 
         return hashlib.sha256(content).digest()
 
-    def _atomic_write(self, path: Path, content: bytes, *, after_mode: int) -> None:
+    def _atomic_write(
+        self,
+        path: Path,
+        content: bytes,
+        *,
+        expected_digest: bytes | None,
+        expected_mode: int | None,
+        after_mode: int,
+        parent_identity: tuple[int, int],
+    ) -> None:
         """Week 4, Day 3: replace a file without exposing a partial write."""
 
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".tiny-llm-agent-", dir=path.parent
-        )
-        temporary = Path(temporary_name)
+        relative = path.relative_to(self.policy.root)
+        parent, name = self._open_parent_directory(relative)
+        temporary_name = f".tiny-llm-agent-{uuid.uuid4().hex}.tmp"
+        backup_name: str | None = None
+        descriptor = None
+        temporary_identity: tuple[int, int] | None = None
+        installed = False
+        succeeded = False
+
+        def discard_private(private_name: str, identity: tuple[int, int]) -> bool:
+            """Best-effort cleanup of one unguessable internal entry."""
+
+            try:
+                named = os.stat(
+                    private_name,
+                    dir_fd=parent,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return True
+            except OSError:
+                return False
+            if (named.st_dev, named.st_ino) != identity:
+                return False
+            try:
+                os.unlink(private_name, dir_fd=parent)
+            except (FileNotFoundError, OSError):
+                return False
+            return True
+
+        def restore_backup() -> None:
+            """Relink without replacing and retain the backup as a safety copy."""
+
+            if backup_name is None:
+                return
+            try:
+                os.link(
+                    backup_name,
+                    name,
+                    src_dir_fd=parent,
+                    dst_dir_fd=parent,
+                    follow_symlinks=False,
+                )
+            except (FileExistsError, FileNotFoundError):
+                return
+
+        def quarantine_failed_install() -> None:
+            """Move a public entry aside; never check-then-unlink that name."""
+
+            if temporary_identity is None:
+                return
+            quarantine = f".tiny-llm-agent-{uuid.uuid4().hex}.failed"
+            self.retained_recovery_files.add(path.parent / quarantine)
+            try:
+                os.replace(name, quarantine, src_dir_fd=parent, dst_dir_fd=parent)
+            except FileNotFoundError:
+                return
+            try:
+                held = os.open(
+                    quarantine,
+                    os.O_RDONLY
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=parent,
+                )
+                try:
+                    moved = os.fstat(held)
+                    moved_identity = (moved.st_dev, moved.st_ino)
+                finally:
+                    os.close(held)
+            except OSError:
+                return
+            if moved_identity == temporary_identity:
+                return
+            try:
+                os.link(
+                    quarantine,
+                    name,
+                    src_dir_fd=parent,
+                    dst_dir_fd=parent,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                pass
+
         try:
-            os.fchmod(descriptor, after_mode)
-            with os.fdopen(descriptor, "wb") as file:
+            parent_status = os.fstat(parent)
+            if (parent_status.st_dev, parent_status.st_ino) != parent_identity:
+                raise AgentError("file changed since it was read; read it again")
+
+            def revalidate_target() -> None:
+                current = self._read_regular_at(parent, name, tool="write_file")
+                if expected_digest is None:
+                    if current is not None:
+                        raise AgentError(
+                            "write target appeared after approval; read it first"
+                        )
+                    return
+                if current is None:
+                    raise AgentError("file changed since it was read; read it again")
+                current_content, current_status = current
+                if (
+                    self._digest(current_content) != expected_digest
+                    or stat.S_IMODE(current_status.st_mode) != expected_mode
+                ):
+                    raise AgentError("file changed since it was read; read it again")
+
+            revalidate_target()
+            descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=parent,
+            )
+            with os.fdopen(descriptor, "wb", closefd=False) as file:
                 file.write(content)
+                os.fchmod(descriptor, after_mode)
                 file.flush()
                 os.fsync(file.fileno())
-            os.replace(temporary, path)
+            temporary_status = os.fstat(descriptor)
+            temporary_identity = (
+                temporary_status.st_dev,
+                temporary_status.st_ino,
+            )
+            os.close(descriptor)
+            descriptor = None
+            revalidate_target()
+            if expected_digest is not None:
+                backup_name = f".tiny-llm-agent-{uuid.uuid4().hex}.bak"
+                # Register the reserved evidence path before the rename so an
+                # asynchronous BaseException cannot make a real backup silent.
+                self.retained_recovery_files.add(path.parent / backup_name)
+                os.replace(name, backup_name, src_dir_fd=parent, dst_dir_fd=parent)
+                moved = self._read_regular_at(parent, backup_name, tool="write_file")
+                if moved is None or (
+                    self._digest(moved[0]),
+                    stat.S_IMODE(moved[1].st_mode),
+                ) != (expected_digest, expected_mode):
+                    restore_backup()
+                    raise AgentError("file changed since it was read; read it again")
+            os.link(
+                temporary_name,
+                name,
+                src_dir_fd=parent,
+                dst_dir_fd=parent,
+                follow_symlinks=False,
+            )
+            installed = True
+            if temporary_identity is None or not discard_private(
+                temporary_name, temporary_identity
+            ):
+                raise AgentError("could not safely clean up the temporary write")
+            replaced = self._read_regular_at(parent, name, tool="write_file")
+            if replaced is None or (
+                self._digest(replaced[0]),
+                stat.S_IMODE(replaced[1].st_mode),
+            ) != (self._digest(content), after_mode):
+                raise AgentError("atomic write result failed verification")
+            os.fsync(parent)
+            succeeded = True
+            # Keep the old inode as an internal backup. A normal editor may
+            # still hold a writable descriptor opened before the rename; no
+            # portable unlink-if-inode operation can prove it did not append
+            # new bytes after our last fingerprint check.
         finally:
-            if temporary.exists():
-                temporary.unlink()
+            try:
+                if descriptor is not None:
+                    try:
+                        if temporary_identity is None:
+                            try:
+                                temporary_status = os.fstat(descriptor)
+                                temporary_identity = (
+                                    temporary_status.st_dev,
+                                    temporary_status.st_ino,
+                                )
+                            except OSError:
+                                pass
+                    finally:
+                        os.close(descriptor)
+            finally:
+                try:
+                    if not succeeded and installed:
+                        try:
+                            quarantine_failed_install()
+                        finally:
+                            restore_backup()
+                    elif not succeeded:
+                        restore_backup()
+                finally:
+                    try:
+                        if temporary_identity is not None and not discard_private(
+                            temporary_name, temporary_identity
+                        ):
+                            self.retained_recovery_files.add(
+                                path.parent / temporary_name
+                            )
+                    finally:
+                        try:
+                            os.fsync(parent)
+                        except OSError:
+                            pass
+                        finally:
+                            os.close(parent)

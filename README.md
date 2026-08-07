@@ -71,12 +71,12 @@ appendix. The detailed chapter order and current status live in the
 ## Roadmap
 
 The status columns track whether each chapter's code, tests, and documentation
-are ready. Week 4 remains a design draft and is not yet part of the rendered
-daily course. Its repository baseline currently covers structured actions,
-bounded workspace tools, exact command allowlisting, durable sessions, reusable
-generation caches, structured token compaction, and a bounded loop. Undo,
-steering, cooperative decode cancellation, and held-out task packages remain
-planned targets rather than executable course checkpoints.
+are ready. Week 4 remains unpublished and is not yet part of the rendered daily
+course. Its executable checkpoints now cover structured actions, bounded
+workspace tools, exact command allowlisting, durable sessions, reusable
+generation caches, structured token compaction, cooperative cancellation,
+durable steering, write-ahead file-mutation recovery, checkpoints, undo, and
+session branches. Held-out task packages remain a planned target.
 
 The Week 4 CLI's workspace tools are read-only by default; persistent runs still
 write a sensitive transcript under `.tiny-llm/sessions`. Enabling writes or an
@@ -87,7 +87,11 @@ no. Command execution is not sandboxed by its working directory or by this
 prompt. Run the agent only against a disposable workspace; an allowed program
 can still read or modify paths outside that workspace. A model final means only
 that the loop finished; it is not proof that the task or its validation
-succeeded.
+succeeded. Programmatic workspace undo is also default-No and requires a fresh
+explicit confirmation; the CLI does not yet expose checkpoint, undo, branch, or
+live-steering commands. Protected safety copies retained to avoid deleting
+concurrent bytes are reported for manual inspection and can accumulate across
+repeated writes or undo operations.
 
 | Week + Chapter | Topic | Code | Test | Doc |
 |---|---|---|---|---|
@@ -117,7 +121,7 @@ succeeded.
 | 4.3 | Safety and Validation | 🚧 | 🚧 | 🚧 |
 | 4.4 | Interactive Sessions | ✅ | ✅ | ✅ |
 | 4.5 | Context Compaction | ✅ | ✅ | ✅ |
-| 4.6 | Control and Recovery | 🚧 | 🚧 | 🚧 |
+| 4.6 | Control and Recovery | ✅ | ✅ | ✅ |
 | 4.7 | Evaluation | 🚧 | 🚧 | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,

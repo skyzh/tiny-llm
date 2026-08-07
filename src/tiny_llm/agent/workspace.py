@@ -4,7 +4,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .control import CancellationToken
 from .protocol import ToolAction
+from .recovery import MutationJournal, RecoveryResult
+from .session import SessionLog
 
 
 @dataclass(frozen=True)
@@ -19,6 +22,7 @@ class ToolPolicy:
     max_list_entries: int = 200
     max_tool_output_chars: int = 16_000
     command_timeout_seconds: float = 30.0
+    _root_identity: tuple[int, int] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Week 4, Day 3: normalize the root and reject invalid limits."""
@@ -28,15 +32,51 @@ class ToolPolicy:
 
 @dataclass
 class Workspace:
-    """Week 4, Days 3 and 5: bounded tools over one explicit workspace root."""
+    """Week 4, Days 3--6: bounded tools over one explicit workspace root."""
 
     policy: ToolPolicy
     confirm_tool: Callable[[ToolAction], bool] | None = None
+    session_log: SessionLog | None = field(default=None, kw_only=True)
+    cancellation: CancellationToken | None = field(default=None, kw_only=True)
     observed_files: dict[Path, bytes] = field(default_factory=dict, init=False)
     modified_files: set[Path] = field(default_factory=set, init=False)
     uncertain_modified_files: set[Path] = field(default_factory=set, init=False)
+    retained_recovery_files: set[Path] = field(default_factory=set, init=False)
     command_side_effects_untracked: bool = field(default=False, init=False)
     command_cleanup_incomplete: bool = field(default=False, init=False)
+    journal: MutationJournal | None = field(default=None, init=False)
+    recovery_results: tuple[RecoveryResult, ...] = field(default=(), init=False)
+
+    def __post_init__(self) -> None:
+        """Bind durable mutation recovery to the matching session, when present."""
+
+        # TODO: create a journal and classify pending intents without changing files.
+        pass
+
+    def bind_session(self, session_log: SessionLog) -> tuple[RecoveryResult, ...]:
+        """Bind a pristine workspace to the exact log used by its agent loop."""
+
+        # TODO: reject mismatches and bind an unjournaled workspace before tools run.
+        pass
+
+    def _recover_command_state(self) -> None:
+        """Reconstruct conservative process-side-effect flags from durable events."""
+
+        # TODO: match command start/finish IDs and retain unmatched uncertainty.
+        pass
+
+    @property
+    def mutation_journal(self) -> MutationJournal | None:
+        """Expose the session-bound journal under a descriptive alias."""
+
+        # TODO: return the same journal exposed by ``journal``.
+        pass
+
+    def recover_pending(self) -> tuple[RecoveryResult, ...]:
+        """Classify pending durable intents without changing workspace files."""
+
+        # TODO: retain and return new recovery outcomes when a journal exists.
+        pass
 
     @property
     def available_tools(self) -> frozenset[str]:
@@ -84,7 +124,16 @@ class Workspace:
 
         pass
 
-    def _atomic_write(self, path: Path, content: bytes) -> None:
+    def _atomic_write(
+        self,
+        path: Path,
+        content: bytes,
+        *,
+        expected_digest: bytes | None,
+        expected_mode: int | None,
+        after_mode: int,
+        parent_identity: tuple[int, int],
+    ) -> None:
         """Week 4, Day 3: replace a file without exposing a partial write."""
 
         pass

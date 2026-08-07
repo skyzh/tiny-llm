@@ -178,6 +178,7 @@ def show_run_result(result) -> None:
         result.modified_files,
         result.command_side_effects_untracked,
         result.uncertain_modified_files,
+        result.retained_recovery_files,
         result.command_cleanup_incomplete,
     )
 
@@ -186,6 +187,7 @@ def show_side_effect_summary(
     modified_files,
     command_side_effects_untracked: bool,
     uncertain_modified_files=(),
+    retained_recovery_files=(),
     command_cleanup_incomplete: bool = False,
 ) -> None:
     """Report tracked file mutations and the command-tracking boundary."""
@@ -196,6 +198,9 @@ def show_side_effect_summary(
     if uncertain_modified_files:
         uncertain = json.dumps(list(uncertain_modified_files), ensure_ascii=True)
         print("Warning: file-tool mutation outcome is uncertain; inspect: " + uncertain)
+    if retained_recovery_files:
+        retained = json.dumps(list(retained_recovery_files), ensure_ascii=True)
+        print("Safety copies retained for manual inspection: " + retained)
     if command_side_effects_untracked:
         print(
             "Warning: one or more commands ran; their side effects are not "
@@ -229,11 +234,18 @@ def show_stopped_run(workspace, reason: str) -> None:
             for path in workspace.uncertain_modified_files
         )
     )
+    retained = tuple(
+        sorted(
+            str(path.relative_to(workspace.policy.root))
+            for path in workspace.retained_recovery_files
+        )
+    )
     print(f"\nStopped: {reason}")
     show_side_effect_summary(
         modified,
         workspace.command_side_effects_untracked,
         uncertain,
+        retained,
         workspace.command_cleanup_incomplete,
     )
 
@@ -250,6 +262,8 @@ def run_and_report(function, workspace):
         show_stopped_run(workspace, "unexpected error")
         raise
     show_run_result(result)
+    if result.reason == "interrupted":
+        raise SystemExit(130)
     return result
 
 
@@ -295,10 +309,6 @@ def main():
         )
     except ValueError as error:
         parser.error(str(error))
-    workspace = agent.Workspace(
-        policy,
-        confirm_tool=lambda action: confirm_tool_call(action, policy.root),
-    )
     limits = agent.AgentLimits(max_steps=args.max_steps)
 
     if not args.allow_writes:
@@ -351,6 +361,19 @@ def main():
         print("Session: ephemeral (--no-session)")
     else:
         print(f"Session transcript: {session_log.session_id} (sensitive local data)")
+    cancellation = agent.CancellationToken()
+    workspace = agent.Workspace(
+        policy,
+        confirm_tool=lambda action: confirm_tool_call(action, policy.root),
+        session_log=session_log,
+        cancellation=cancellation,
+    )
+    for recovery in workspace.recovery_results:
+        if recovery.status == "conflict":
+            print(
+                "Warning: interrupted mutation conflicts with current bytes: "
+                + json.dumps(recovery.path, ensure_ascii=True)
+            )
 
     completed_session = next(
         (
@@ -360,7 +383,13 @@ def main():
         ),
         False,
     )
-    if completed_session and not args.task and not args.interactive:
+    pending_steering = bool(session_log.pending_steering())
+    if (
+        completed_session
+        and not pending_steering
+        and not args.task
+        and not args.interactive
+    ):
         parser.error(
             "the selected session completed; provide a follow-up interactively"
         )
@@ -410,6 +439,7 @@ def main():
             cache_factory,
             args.max_tokens,
             args.enable_thinking,
+            cancellation=cancellation,
         )
 
         def generate(messages):
@@ -467,6 +497,7 @@ def main():
             cache_factory,
             args.summary_max_tokens,
             args.enable_thinking,
+            cancellation=cancellation,
         )
         try:
             return run_with_spinner("Compacting context...", summary_session, messages)
@@ -498,11 +529,12 @@ def main():
                 session=session_log,
                 context_manager=context_manager,
                 summarize=summarize,
+                cancellation=cancellation,
             )
 
     try:
         pending_task = " ".join(args.task).strip() if args.task else None
-        if pending_task is None and completed_session:
+        if pending_task is None and completed_session and not pending_steering:
             try:
                 pending_task = input("\nfollow-up (blank to exit)> ").strip()
             except EOFError:
