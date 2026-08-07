@@ -960,6 +960,8 @@ class MutationJournal:
                     ),
                 )
                 result_matches = self._undo_result_matches(change)
+                if result_matches:
+                    self._fsync_reconciled_undo_result(change)
             except AgentError:
                 self.session.append(
                     "undo_change_recovered",
@@ -1039,6 +1041,49 @@ class MutationJournal:
             self._undo_result_sha256(change),
             result_mode,
         )
+
+    def _fsync_reconciled_undo_result(self, change: PlannedRestore) -> None:
+        """Make an observed crash-reconciled namespace result durable."""
+
+        expected_parent = (
+            change.expected_parent_dev,
+            change.expected_parent_ino,
+        )
+        _relative, parent, name = self._open_parent_dir(
+            change.path,
+            expected_parent=expected_parent,
+        )
+        expected_result = (
+            self._undo_result_sha256(change),
+            None if change.remove else change.restore_mode,
+        )
+
+        def result_fingerprint() -> tuple[str | None, int | None]:
+            current = self._read_regular_at(
+                parent,
+                name,
+                allow_missing=change.remove,
+            )
+            if current is None:
+                return None, None
+            content, status = current
+            return self._digest(content), stat.S_IMODE(status.st_mode)
+
+        try:
+            if result_fingerprint() != expected_result:
+                raise AgentError("undo result changed during crash reconciliation")
+            os.fsync(parent)
+            parent_status = os.fstat(parent)
+            if (parent_status.st_dev, parent_status.st_ino) != expected_parent:
+                raise AgentError("mutation parent directory was replaced")
+            if result_fingerprint() != expected_result:
+                raise AgentError("undo result changed during crash reconciliation")
+        except OSError as error:
+            raise AgentError(
+                "could not make crash-reconciled undo result durable"
+            ) from error
+        finally:
+            os.close(parent)
 
     def _current_mode(self, raw: str) -> int | None:
         return self._current_fingerprint(raw)[1]
