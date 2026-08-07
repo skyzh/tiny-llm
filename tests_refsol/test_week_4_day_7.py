@@ -345,7 +345,10 @@ def test_empty_directory_changes_the_candidate_tree_hash(tmp_path):
 
     assert without_directory.files == with_directory.files
     assert without_directory.directories == ()
-    assert with_directory.directories == ("empty-directory",)
+    assert [item.path for item in with_directory.directories] == ["empty-directory"]
+    assert with_directory.directories[0].mode == stat.S_IMODE(
+        (staged.workspace / "empty-directory").stat().st_mode
+    )
     assert without_directory.tree_sha256 != with_directory.tree_sha256
 
 
@@ -505,6 +508,34 @@ def test_forbidden_created_and_deleted_empty_directories_fail(tmp_path, operatio
     assert all(check.passed for check in report.checks)
     assert report.status == "failed"
     assert report.forbidden_modifications == ("locked-directory",)
+
+
+def test_forbidden_directory_mode_change_fails_and_is_preserved_in_snapshots(
+    tmp_path,
+):
+    root = _make_package(tmp_path)
+    locked = root / "workspace" / "locked-directory"
+    locked.mkdir()
+    locked.chmod(0o700)
+    staged = _stage_package(root, tmp_path)
+    staged_locked = staged.workspace / "locked-directory"
+
+    assert stat.S_IMODE(staged_locked.stat().st_mode) == 0o700
+    assert [
+        item for item in staged.initial_directories if item.path == "locked-directory"
+    ][0].mode == 0o700
+
+    (staged.workspace / "value.txt").write_text("new\n", encoding="utf-8")
+    staged_locked.chmod(0o755)
+    candidate, report = _freeze_and_grade(staged, tmp_path)
+
+    assert all(check.passed for check in report.checks)
+    assert report.status == "failed"
+    assert report.forbidden_modifications == ("locked-directory",)
+    assert [item for item in candidate.directories if item.path == "locked-directory"][
+        0
+    ].mode == 0o755
+    assert candidate.tree_sha256 != staged.initial_tree_sha256
 
 
 def test_path_absent_fails_when_the_path_is_an_empty_directory(tmp_path):

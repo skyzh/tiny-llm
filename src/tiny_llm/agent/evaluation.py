@@ -33,13 +33,21 @@ class FileSnapshot:
 
 
 @dataclass(frozen=True)
+class DirectorySnapshot:
+    """Path-and-mode identity for one directory."""
+
+    path: str
+    mode: int
+
+
+@dataclass(frozen=True)
 class CandidateSnapshot:
     """An immutable in-memory view of a separately copied candidate tree."""
 
     root: Path
     task_id: str
     files: tuple[FileSnapshot, ...]
-    directories: tuple[str, ...]
+    directories: tuple[DirectorySnapshot, ...]
     tree_sha256: str
     initial_tree_sha256: str
     _contents: tuple[tuple[str, bytes], ...]
@@ -125,7 +133,7 @@ class StagedTask:
     destination: Path
     workspace: Path
     initial_files: tuple[FileSnapshot, ...]
-    initial_directories: tuple[str, ...]
+    initial_directories: tuple[DirectorySnapshot, ...]
     initial_tree_sha256: str
     _workspace_identity: tuple[int, int]
     _destination_identity: tuple[int, int]
@@ -173,6 +181,7 @@ def evaluate_task(
 __all__ = [
     "CandidateSnapshot",
     "CheckResult",
+    "DirectorySnapshot",
     "EvaluatedRun",
     "EvaluationMetrics",
     "FileSnapshot",

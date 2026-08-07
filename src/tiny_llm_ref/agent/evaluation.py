@@ -63,13 +63,21 @@ class FileSnapshot:
 
 
 @dataclass(frozen=True)
+class DirectorySnapshot:
+    """Path-and-mode identity for one directory."""
+
+    path: str
+    mode: int
+
+
+@dataclass(frozen=True)
 class CandidateSnapshot:
     """An immutable in-memory view of a separately copied candidate tree."""
 
     root: Path
     task_id: str
     files: tuple[FileSnapshot, ...]
-    directories: tuple[str, ...]
+    directories: tuple[DirectorySnapshot, ...]
     tree_sha256: str
     initial_tree_sha256: str
     _contents: tuple[tuple[str, bytes], ...]
@@ -141,7 +149,7 @@ class _FileMetadata:
 @dataclass(frozen=True)
 class _TreeCapture:
     files: tuple[FileSnapshot, ...]
-    directories: tuple[str, ...]
+    directories: tuple[DirectorySnapshot, ...]
     contents: tuple[tuple[str, bytes], ...]
     tree_sha256: str
 
@@ -241,7 +249,7 @@ def _walk_tree(
     read_contents: bool,
     exclude_infrastructure: bool,
     files: list[_FileMetadata],
-    directories: list[str],
+    directories: list[DirectorySnapshot],
     contents: dict[str, bytes],
     depth: int,
 ) -> None:
@@ -274,11 +282,18 @@ def _walk_tree(
                 raise ValueError(f"directory is unsafe: {child}") from error
             try:
                 opened = os.fstat(child_descriptor)
-                if not stat.S_ISDIR(opened.st_mode) or _identity(opened) != _identity(
-                    status
+                if (
+                    not stat.S_ISDIR(opened.st_mode)
+                    or _identity(opened) != _identity(status)
+                    or stat.S_IMODE(opened.st_mode) != stat.S_IMODE(status.st_mode)
                 ):
                     raise ValueError(f"directory changed while opening: {child}")
-                directories.append(child.as_posix())
+                directories.append(
+                    DirectorySnapshot(
+                        child.as_posix(),
+                        stat.S_IMODE(opened.st_mode),
+                    )
+                )
                 if len(directories) > _MAX_DIRECTORIES:
                     raise ValueError("evaluation tree exceeds its directory limit")
                 _walk_tree(
@@ -331,14 +346,14 @@ def _walk_tree(
 
 def _scan_tree_metadata(
     root: Path,
-) -> tuple[tuple[_FileMetadata, ...], tuple[str, ...]]:
+) -> tuple[tuple[_FileMetadata, ...], tuple[DirectorySnapshot, ...]]:
     try:
         descriptor = os.open(root, _DIRECTORY_FLAGS)
     except OSError as error:
         raise ValueError("evaluation root must be a safe directory") from error
     try:
         files: list[_FileMetadata] = []
-        directories: list[str] = []
+        directories: list[DirectorySnapshot] = []
         _walk_tree(
             descriptor,
             PurePosixPath(),
@@ -350,17 +365,20 @@ def _scan_tree_metadata(
             depth=0,
         )
         return tuple(sorted(files, key=lambda item: item.path)), tuple(
-            sorted(directories)
+            sorted(directories, key=lambda item: item.path)
         )
     finally:
         os.close(descriptor)
 
 
-def _tree_hash(files: Iterable[FileSnapshot], directories: Iterable[str] = ()) -> str:
+def _tree_hash(
+    files: Iterable[FileSnapshot],
+    directories: Iterable[DirectorySnapshot] = (),
+) -> str:
     digest = hashlib.sha256()
-    for path in sorted(directories):
+    for item in sorted(directories, key=lambda snapshot: snapshot.path):
         encoded = json.dumps(
-            ["directory", path],
+            ["directory", item.path, item.mode],
             ensure_ascii=True,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -394,7 +412,7 @@ def _capture_tree(
         ):
             raise ValueError("evaluation root identity changed")
         metadata: list[_FileMetadata] = []
-        directories: list[str] = []
+        directories: list[DirectorySnapshot] = []
         contents: dict[str, bytes] = {}
         _walk_tree(
             descriptor,
@@ -419,7 +437,7 @@ def _capture_tree(
     )
     return _TreeCapture(
         snapshots,
-        tuple(sorted(directories)),
+        tuple(sorted(directories, key=lambda item: item.path)),
         tuple((path, contents[path]) for path in sorted(contents)),
         _tree_hash(snapshots, directories),
     )
@@ -675,16 +693,16 @@ def _copy_capture(
     try:
         if _identity(os.fstat(root)) != expected_root_identity:
             raise ValueError("staging destination identity changed")
-        for relative in capture.directories:
+        for snapshot in capture.directories:
             try:
                 directory = _open_destination_directory(
                     root,
-                    PurePosixPath(relative).parts,
+                    PurePosixPath(snapshot.path).parts,
                     create=True,
                 )
             except OSError as error:
                 raise ValueError(
-                    f"could not create staged directory {relative}"
+                    f"could not create staged directory {snapshot.path}"
                 ) from error
             os.close(directory)
         snapshots = {item.path: item for item in capture.files}
@@ -721,6 +739,27 @@ def _copy_capture(
             finally:
                 os.close(descriptor)
                 os.close(parent)
+        for snapshot in sorted(
+            capture.directories,
+            key=lambda item: (len(PurePosixPath(item.path).parts), item.path),
+            reverse=True,
+        ):
+            directory = None
+            try:
+                directory = _open_destination_directory(
+                    root,
+                    PurePosixPath(snapshot.path).parts,
+                    create=False,
+                )
+                os.fchmod(directory, snapshot.mode)
+                os.fsync(directory)
+            except OSError as error:
+                raise ValueError(
+                    f"could not preserve staged directory mode {snapshot.path}"
+                ) from error
+            finally:
+                if directory is not None:
+                    os.close(directory)
         os.fsync(root)
     finally:
         os.close(root)
@@ -740,7 +779,8 @@ class TaskPackage:
         root = Path(root)
         metadata, directories = _scan_tree_metadata(root)
         paths = {item.path for item in metadata}
-        top_level = {path.split("/", 1)[0] for path in (*paths, *directories)}
+        directory_paths = {item.path for item in directories}
+        top_level = {path.split("/", 1)[0] for path in (*paths, *directory_paths)}
         if top_level != _PACKAGE_TOP_LEVEL:
             unexpected = sorted(top_level - _PACKAGE_TOP_LEVEL)
             missing = sorted(_PACKAGE_TOP_LEVEL - top_level)
@@ -750,11 +790,14 @@ class TaskPackage:
             )
         if "task.json" not in paths or "held_out_tests/checks.json" not in paths:
             raise ValueError("package task.json or held-out checks are missing")
-        if "workspace" not in directories or "held_out_tests" not in directories:
+        if (
+            "workspace" not in directory_paths
+            or "held_out_tests" not in directory_paths
+        ):
             raise ValueError("package workspace or held_out_tests directory is missing")
         held_entries = {
             path for path in paths if path.startswith("held_out_tests/")
-        } | {path for path in directories if path.startswith("held_out_tests/")}
+        } | {path for path in directory_paths if path.startswith("held_out_tests/")}
         if held_entries != {"held_out_tests/checks.json"}:
             raise ValueError("unexpected held-out grader entry")
         root_files = {path for path in paths if "/" not in path}
@@ -778,7 +821,7 @@ class TaskPackage:
             _is_infrastructure(PurePosixPath(path))
             for path in (
                 *(item.path for item in workspace.files),
-                *workspace.directories,
+                *(item.path for item in workspace.directories),
             )
         ):
             raise ValueError("package workspace contains protected evaluator state")
@@ -829,7 +872,7 @@ class StagedTask:
     destination: Path
     workspace: Path
     initial_files: tuple[FileSnapshot, ...]
-    initial_directories: tuple[str, ...]
+    initial_directories: tuple[DirectorySnapshot, ...]
     initial_tree_sha256: str
     _workspace_identity: tuple[int, int]
     _destination_identity: tuple[int, int]
@@ -1078,6 +1121,18 @@ def _validate_file_snapshot(item: Any, label: str) -> None:
         raise ValueError(f"{label} contains invalid file metadata")
 
 
+def _validate_directory_snapshot(item: Any, label: str) -> None:
+    if not isinstance(item, DirectorySnapshot):
+        raise ValueError(f"{label} contains invalid directory metadata")
+    _normalize_relative(item.path, label)
+    if (
+        isinstance(item.mode, bool)
+        or not isinstance(item.mode, int)
+        or not 0 <= item.mode <= 0o7777
+    ):
+        raise ValueError(f"{label} contains invalid directory metadata")
+
+
 def _validate_snapshot_nodes(
     files: Any,
     directories: Any,
@@ -1091,25 +1146,26 @@ def _validate_snapshot_nodes(
         raise ValueError(f"{label} directory list is invalid")
     for item in files:
         _validate_file_snapshot(item, label)
+    for item in directories:
+        _validate_directory_snapshot(item, label)
     file_paths = tuple(item.path for item in files)
     if file_paths != tuple(sorted(file_paths)) or len(set(file_paths)) != len(
         file_paths
     ):
         raise ValueError(f"{label} file paths must be unique and sorted")
-    for path in directories:
-        _normalize_relative(path, label)
-    if directories != tuple(sorted(directories)) or len(set(directories)) != len(
-        directories
-    ):
+    directory_paths = tuple(item.path for item in directories)
+    if directory_paths != tuple(sorted(directory_paths)) or len(
+        set(directory_paths)
+    ) != len(directory_paths):
         raise ValueError(f"{label} directory paths must be unique and sorted")
-    directory_paths = set(directories)
-    if set(file_paths) & directory_paths:
+    directory_path_set = set(directory_paths)
+    if set(file_paths) & directory_path_set:
         raise ValueError(f"{label} path cannot be both a file and directory")
-    all_paths = set(file_paths) | directory_paths
+    all_paths = set(file_paths) | directory_path_set
     for path in all_paths:
         parent = PurePosixPath(path).parent
         while parent != PurePosixPath("."):
-            if parent.as_posix() not in directory_paths:
+            if parent.as_posix() not in directory_path_set:
                 raise ValueError(f"{label} has a missing parent directory")
             parent = parent.parent
     if contents is None:
@@ -1189,14 +1245,16 @@ def _validate_candidate_snapshot(
 def _forbidden_modifications(
     staged: StagedTask, candidate: CandidateSnapshot
 ) -> tuple[str, ...]:
-    initial: dict[str, tuple[str, FileSnapshot | None]] = {
+    initial: dict[str, tuple[str, FileSnapshot | DirectorySnapshot]] = {
         item.path: ("file", item) for item in staged.initial_files
     }
-    initial.update({path: ("directory", None) for path in staged.initial_directories})
-    final: dict[str, tuple[str, FileSnapshot | None]] = {
+    initial.update(
+        {item.path: ("directory", item) for item in staged.initial_directories}
+    )
+    final: dict[str, tuple[str, FileSnapshot | DirectorySnapshot]] = {
         item.path: ("file", item) for item in candidate.files
     }
-    final.update({path: ("directory", None) for path in candidate.directories})
+    final.update({item.path: ("directory", item) for item in candidate.directories})
     changed = {
         path
         for path in set(initial) | set(final)
@@ -1297,7 +1355,7 @@ class StaticHeldOutGrader:
                 check,
                 initial=initial,
                 files=files,
-                directories=set(candidate.directories),
+                directories={item.path for item in candidate.directories},
                 contents=contents,
             )
             for check in checks
@@ -1506,6 +1564,7 @@ def evaluate_task(
 __all__ = [
     "CandidateSnapshot",
     "CheckResult",
+    "DirectorySnapshot",
     "EvaluatedRun",
     "EvaluationMetrics",
     "FileSnapshot",
