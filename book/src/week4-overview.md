@@ -1,10 +1,10 @@
 # 🚧 Week 4: Build a Coding Agent
 
 > 🚧 **Course status:** The daily chapters are drafts and are not included in
-> the rendered book yet. The repository contains a smaller tested baseline, but
-> its interactive-session, reusable-cache, structured-compaction, control, and
-> recovery checkpoints through Day 6 are executable. Held-out evaluation
-> remains planned work.
+> the rendered book yet. The repository contains tested checkpoints through
+> Day 7, including safe static held-out evaluation. Executing model-authored code
+> or held-out pytest remains deferred until an isolated container or virtual
+> machine backend exists.
 
 Weeks 1 through 3 turned tokens into text, made decoding efficient, and
 introduced serving techniques. Week 4 adds the next layer: an agent loop that
@@ -28,7 +28,7 @@ The Week 4 target agent can:
 - compact an overlong context while retaining task state;
 - checkpoint and undo its own file mutations;
 - accept steering messages and interrupt long-running work; and
-- solve a small repository task graded by held-out tests.
+- solve a small inert repository task graded by held-out declarative checks.
 
 This is a deliberately small target. Features such as multi-agent delegation,
 remote execution, MCP integrations, and long-term user memory remain extensions
@@ -51,19 +51,19 @@ currently provides:
   file commits, and command polling;
 - durable steering messages, write-ahead file-mutation intents, startup
   reconciliation, branch-local checkpoints, default-No undo plans, and session
-  branches; and
+  branches;
+- sealed inert task packages, frozen candidate snapshots, deterministic static
+  held-out checks, forbidden-path detection, and evaluation metrics; and
 - a bounded loop that records actions, observations, confirmed and
   outcome-uncertain file-tool modifications, whether commands may have
   untracked or incompletely cleaned-up side effects, and its terminal reason.
 
 `AgentRun.completed` records protocol completion—a valid final action from the
-model—not task correctness. The baseline leaves `task_success` unknown because
-it has no deterministic grader.
-
-It does **not** yet implement held-out task packages or a deterministic grader.
-Checkpoint, undo, branch, and steering support are programmatic APIs in Day 6,
-not interactive CLI commands. The CLI does record an interrupted run and exits
-with status 130 after Ctrl-C.
+model—not task correctness. Day 7 keeps that field separate from the static
+grader's `GradeReport` and `EvaluatedRun.task_success`. Checkpoint, undo, branch,
+and steering support are programmatic APIs in Day 6, not interactive CLI
+commands. The main CLI records an interrupted run and exits with status 130
+after Ctrl-C.
 
 ## The Core Loop
 
@@ -158,6 +158,12 @@ allowed command can still delete files, read outside the workspace, launch child
 processes, or use the network. Human confirmation reduces accidental execution;
 it does not confine the approved program.
 
+Day 7 therefore disables commands during evaluation and never imports or
+executes candidate code. Its held-out checks parse bounded text, JSON, and
+Python ASTs over a frozen snapshot. This is an honest static checkpoint, not a
+general behavioral-code evaluator. Running candidate Python, pytest, compilers,
+or task-local graders is deferred to a container or virtual machine backend.
+
 Day 6 adds a write-ahead intent before each journaled file replace. On restart,
 the journal compares the current content-and-mode fingerprint with the recorded
 before and intended states and records `committed`, `not_applied`, or `conflict`
@@ -181,7 +187,7 @@ provide a focused inference-framework exercise without changing model kernels.
 | 4 | Interactive sessions | Append-only sessions, resume checks, instruction snapshots, and live token-prefix reuse are validated. |
 | 5 | Compaction | Exact rendered-token accounting, bounded observations, structured summaries, durable markers, and cache reconciliation are validated. |
 | 6 | Control and recovery | Cooperative cancellation, durable interrupt and steering events, mutation reconciliation, checkpoints, conflict-safe undo, branches, and command cancellation with a fake process are validated. |
-| 7 | Evaluation | A scripted safe edit and rejection of a disabled command are validated; held-out task packages are not implemented. |
+| 7 | Evaluation | Sealed inert packages, frozen snapshots, static held-out checks, forbidden-path grading, and metrics are validated without executing candidate code. |
 
 Each draft chapter names the focused learner command for its current checkpoint.
 For example:
@@ -223,6 +229,18 @@ Ctrl-C during an agent run records an interruption when a durable session is in
 use, reports known side effects, and exits with status 130. Day 6 checkpoint,
 undo, branch, and live-steering operations are APIs for the exercise harness;
 the CLI does not yet provide commands for them.
+
+The Day 7 inspection CLI does not load a model or mutate a candidate. It can
+validate package metadata and grade an unchanged fixture with the static grader:
+
+```bash
+pdm run evaluate-agent inspect evals/week4/localized-constant
+pdm run evaluate-agent grade evals/week4/localized-constant
+```
+
+The grade command uses a fresh temporary stage and frozen snapshot. It keeps
+commands disabled, supplies no automatic write approval, and never runs code
+from the package.
 
 The default Qwen3 4B model follows the structured action protocol more reliably.
 Use `--model qwen3-0.6b` on memory-constrained machines and expect to spend more

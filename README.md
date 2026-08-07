@@ -76,7 +76,9 @@ course. Its executable checkpoints now cover structured actions, bounded
 workspace tools, exact command allowlisting, durable sessions, reusable
 generation caches, structured token compaction, cooperative cancellation,
 durable steering, write-ahead file-mutation recovery, checkpoints, undo, and
-session branches. Held-out task packages remain a planned target.
+session branches. Day 7 adds sealed inert task packages, frozen candidate
+snapshots, deterministic static held-out checks, forbidden-path grading, and
+evaluation metrics without importing or executing candidate code.
 
 The Week 4 CLI's workspace tools are read-only by default; persistent runs still
 write a sensitive transcript under `.tiny-llm/sessions`. Enabling writes or an
@@ -92,6 +94,14 @@ explicit confirmation; the CLI does not yet expose checkpoint, undo, branch, or
 live-steering commands. Protected safety copies retained to avoid deleting
 concurrent bytes are reported for manual inspection and can accumulate across
 repeated writes or undo operations.
+
+Static evaluation keeps commands disabled and file writes default-No. Its
+Python checks use `ast.parse()` and literal-node inspection only; they do not
+import a candidate module. Executable pytest, compilers, task-local graders, and
+model-authored programs remain deferred until a container or virtual machine
+backend provides a real isolation boundary. The `evaluate-agent` command can
+inspect an inert package or grade its unchanged baseline without loading a model
+or approving a mutation.
 
 | Week + Chapter | Topic | Code | Test | Doc |
 |---|---|---|---|---|
@@ -122,7 +132,7 @@ repeated writes or undo operations.
 | 4.4 | Interactive Sessions | ✅ | ✅ | ✅ |
 | 4.5 | Context Compaction | ✅ | ✅ | ✅ |
 | 4.6 | Control and Recovery | ✅ | ✅ | ✅ |
-| 4.7 | Evaluation | 🚧 | 🚧 | 🚧 |
+| 4.7 | Evaluation | ✅ | ✅ | ✅ |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

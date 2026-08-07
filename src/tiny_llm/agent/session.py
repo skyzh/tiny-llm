@@ -96,7 +96,13 @@ class SessionStore:
     model: str
     directory: Path
 
-    def __init__(self, workspace: Path, model: str):
+    def __init__(
+        self,
+        workspace: Path,
+        model: str,
+        *,
+        expected_workspace_identity: tuple[int, int] | None = None,
+    ):
         pass
 
     def create(self, session_id: str | None = None) -> SessionLog:

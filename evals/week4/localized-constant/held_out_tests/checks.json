@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "checks": [
+    {
+      "type": "python_constant",
+      "name": "answer-is-42",
+      "path": "answer.py",
+      "constant": "ANSWER",
+      "expected": 42
+    }
+  ]
+}

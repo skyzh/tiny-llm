@@ -556,10 +556,26 @@ class SessionLog:
 class SessionStore:
     """Create and resume workspace-bound local session transcripts."""
 
-    def __init__(self, workspace: Path, model: str):
+    def __init__(
+        self,
+        workspace: Path,
+        model: str,
+        *,
+        expected_workspace_identity: tuple[int, int] | None = None,
+    ):
         self.workspace = workspace.resolve()
         self.model = model
         self.directory = self.workspace / ".tiny-llm" / "sessions"
+        self._expected_workspace_identity = expected_workspace_identity
+
+    def _validate_workspace_identity(self, descriptor: int) -> None:
+        """Reject a workspace pathname rebound before a session-side effect."""
+
+        if self._expected_workspace_identity is None:
+            return
+        status = os.fstat(descriptor)
+        if (status.st_dev, status.st_ino) != self._expected_workspace_identity:
+            raise ValueError("session workspace identity changed")
 
     def _ensure_directory(self) -> None:
         descriptor = self._open_directory(create=True)
@@ -572,6 +588,7 @@ class SessionStore:
         root = os.open(self.workspace, flags)
         parent = None
         try:
+            self._validate_workspace_identity(root)
             parent_created = False
             if create:
                 try:
@@ -623,6 +640,7 @@ class SessionStore:
         )
         root = os.open(self.workspace, flags)
         try:
+            self._validate_workspace_identity(root)
             try:
                 content, _ = _read_regular_file(
                     Path("AGENTS.md"),

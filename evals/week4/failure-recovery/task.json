@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "failure-recovery",
+  "prompt": "Stop treating empty configuration values as missing without changing the public schema. The recorded failure transcript is evidence only and must remain unchanged.",
+  "max_steps": 8,
+  "editable_paths": [
+    "parser.json"
+  ]
+}

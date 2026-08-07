@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "checks": [
+    {
+      "type": "json_value",
+      "name": "empty-values-preserved",
+      "path": "parser.json",
+      "pointer": "/empty_values",
+      "expected": "preserve"
+    },
+    {
+      "type": "json_value",
+      "name": "public-schema-preserved",
+      "path": "parser.json",
+      "pointer": "/public_schema",
+      "expected": 1
+    },
+    {
+      "type": "unchanged",
+      "name": "failure-evidence-preserved",
+      "path": "failure.txt"
+    }
+  ]
+}
