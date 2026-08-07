@@ -56,10 +56,7 @@ def test_canonical_runner_propagates_the_pytest_exit_code(
         lambda args: pytest_calls.append(args) or 7,
     )
 
-    with pytest.raises(SystemExit) as stopped:
-        dev_tools.main()
-
-    assert stopped.value.code == 7
+    assert dev_tools.main() == 7
     assert pytest_calls == [["-v", target]]
 
 
