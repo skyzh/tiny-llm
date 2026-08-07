@@ -4,7 +4,7 @@ from .generation import Message
 
 
 def compact_messages(messages: list[Message], max_chars: int) -> list[Message]:
-    """Week 4, Day 4: retain task anchors and the newest complete tool turns."""
+    """Retain anchors, standalone messages, and complete recent tool turns."""
 
     pass
 
