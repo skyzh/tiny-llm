@@ -54,32 +54,32 @@ WEEK2_VARIANTS = (
         ("--week2-checkpoint", "quantized-matvec"),
     ),
     Variant(
-        "week2-decode-attention",
-        "2.4 Decode attention",
-        "ref",
-        "week2",
-        ("--week2-checkpoint", "decode-attention"),
-    ),
-    Variant(
         "week2-rmsnorm",
-        "2.5 Fast RMSNorm",
+        "2.4 Fast RMSNorm",
         "ref",
         "week2",
         ("--week2-checkpoint", "rmsnorm"),
     ),
     Variant(
         "week2-rope",
-        "2.5 + Fast RoPE",
+        "2.4 + Fast RoPE",
         "ref",
         "week2",
         ("--week2-checkpoint", "rope"),
     ),
     Variant(
         "week2-swiglu",
-        "2.5 + Fused SwiGLU",
+        "2.4 + Fused SwiGLU",
         "ref",
         "week2",
         ("--week2-checkpoint", "swiglu"),
+    ),
+    Variant(
+        "week2-decode-attention",
+        "2.5 Decode attention",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "decode-attention"),
     ),
     Variant(
         "week2-simd-matmul",
@@ -134,7 +134,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-len", type=int, default=128)
     parser.add_argument("--output-len", type=int, default=65)
     parser.add_argument("--warmup", type=int, default=2)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=4,
+        help="fresh-process samples; comparisons require an even count",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--prefill-logits",
@@ -186,15 +191,26 @@ def parse_args() -> argparse.Namespace:
             parser.error(
                 f"variants {invalid} do not belong to the {args.suite!r} suite"
             )
-    selected_variants = (
-        [VARIANTS_BY_KEY[key] for key in args.variant]
-        if args.variant
-        else list(WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS)
-    )
+    if args.variant:
+        selected_variants = [VARIANTS_BY_KEY[key] for key in args.variant]
+    else:
+        selected_variants = list(
+            WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS
+        )
+        if args.prefill_logits == "last":
+            selected_variants = [
+                variant for variant in selected_variants if variant.loader != "week1"
+            ]
+    if len(selected_variants) > 1 and args.repeats % 2 != 0:
+        parser.error(
+            "--repeats must be even when comparing variants so forward and "
+            "reverse execution orders are balanced"
+        )
     if args.prefill_logits == "last" and any(
         variant.loader == "week1" for variant in selected_variants
     ):
         parser.error("--prefill-logits last requires variants that exclude Week 1")
+    args.variant = [variant.key for variant in selected_variants]
     return args
 
 
@@ -366,11 +382,7 @@ def main() -> None:
     args = parse_args()
     root = Path(__file__).resolve().parents[1]
     host = collect_host_metadata()
-    variants = (
-        [VARIANTS_BY_KEY[key] for key in args.variant]
-        if args.variant
-        else list(WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS)
-    )
+    variants = [VARIANTS_BY_KEY[key] for key in args.variant]
     samples: dict[str, list[Throughput]] = {variant.key: [] for variant in variants}
 
     print(f"Host: {host['platform']} ({host['machine']}); MLX {host['mlx_version']}")

@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "solution": "tiny_llm_ref",
   "model": "Qwen/Qwen3-4B-MLX-4bit",
   "mlx_version": "0.32.0",
   "mlx_lm_version": "0.31.3",
@@ -13,34 +14,34 @@
     "max_buffer_length": 41747087360,
     "resource_limit": 499000
   },
-  "warmup": 5,
-  "iterations": 15,
+  "warmup": 4,
+  "iterations": 12,
   "profiles": [
     {
       "checkpoint": "kv-cache",
       "phase": "decode",
       "tokens": 128,
-      "attributed_us": 48271.58196712844,
+      "attributed_us": 41286.396473878995,
       "categories": [
         {
           "name": "projections",
-          "median_us": 38778.99999497458,
-          "share": 0.8033505100657767
+          "median_us": 33661.47947963327,
+          "share": 0.8153164808396431
         },
         {
           "name": "attention",
-          "median_us": 1017.790986225009,
-          "share": 0.021084682638287996
+          "median_us": 847.4584901705384,
+          "share": 0.020526337063751905
         },
         {
           "name": "normalization, position, and activation",
-          "median_us": 8097.874990198761,
-          "share": 0.1677565693975636
+          "median_us": 6449.770502513275,
+          "share": 0.15622023362087084
         },
         {
           "name": "KV growth",
-          "median_us": 376.91599573008716,
-          "share": 0.007808237898371678
+          "median_us": 327.6880015619099,
+          "share": 0.007936948475734156
         }
       ]
     },
@@ -48,27 +49,55 @@
       "checkpoint": "quantized-matvec",
       "phase": "decode",
       "tokens": 128,
-      "attributed_us": 21565.79098664224,
+      "attributed_us": 17949.686996871606,
       "categories": [
         {
           "name": "projections",
-          "median_us": 11593.582981731743,
-          "share": 0.5375913635123681
+          "median_us": 10393.750009825453,
+          "share": 0.579049094930566
         },
         {
           "name": "attention",
-          "median_us": 1122.8329967707396,
-          "share": 0.05206546782662493
+          "median_us": 812.8954796120524,
+          "share": 0.04528744594564404
         },
         {
           "name": "normalization, position, and activation",
-          "median_us": 8469.666994642466,
-          "share": 0.39273620892869365
+          "median_us": 6417.228985810652,
+          "share": 0.35751202719741526
         },
         {
           "name": "KV growth",
-          "median_us": 379.708013497293,
-          "share": 0.017606959732313205
+          "median_us": 325.81252162344754,
+          "share": 0.01815143192637467
+        }
+      ]
+    },
+    {
+      "checkpoint": "swiglu",
+      "phase": "decode",
+      "tokens": 128,
+      "attributed_us": 12850.20902287215,
+      "categories": [
+        {
+          "name": "projections",
+          "median_us": 10347.792005632073,
+          "share": 0.8052625437620499
+        },
+        {
+          "name": "attention",
+          "median_us": 816.4585160557181,
+          "share": 0.06353659419877915
+        },
+        {
+          "name": "normalization, position, and activation",
+          "median_us": 1353.2919983845204,
+          "share": 0.10531283934570942
+        },
+        {
+          "name": "KV growth",
+          "median_us": 332.6665027998388,
+          "share": 0.025888022693461566
         }
       ]
     },
@@ -76,78 +105,50 @@
       "checkpoint": "decode-attention",
       "phase": "decode",
       "tokens": 128,
-      "attributed_us": 20738.79199451767,
+      "attributed_us": 12746.978987706825,
       "categories": [
         {
           "name": "projections",
-          "median_us": 11752.04198807478,
-          "share": 0.5666695529412441
+          "median_us": 10336.916486267,
+          "share": 0.8109306915964883
         },
         {
           "name": "attention",
-          "median_us": 940.4169977642596,
-          "share": 0.04534579439404476
+          "median_us": 792.4795208964497,
+          "share": 0.062169987230756105
         },
         {
           "name": "normalization, position, and activation",
-          "median_us": 7748.7920061685145,
-          "share": 0.37363757774401324
+          "median_us": 1309.104001848027,
+          "share": 0.10269915743255918
         },
         {
           "name": "KV growth",
-          "median_us": 297.5410025101155,
-          "share": 0.014347074920697932
+          "median_us": 308.4789786953479,
+          "share": 0.024200163740196384
         }
       ]
     },
     {
-      "checkpoint": "swiglu",
-      "phase": "decode",
-      "tokens": 128,
-      "attributed_us": 14688.415976706892,
-      "categories": [
-        {
-          "name": "projections",
-          "median_us": 11825.499997939914,
-          "share": 0.8050902164462777
-        },
-        {
-          "name": "attention",
-          "median_us": 948.7909846939147,
-          "share": 0.06459450673227947
-        },
-        {
-          "name": "normalization, position, and activation",
-          "median_us": 1578.0410030856729,
-          "share": 0.10743438949360869
-        },
-        {
-          "name": "KV growth",
-          "median_us": 336.0839909873903,
-          "share": 0.02288088732783421
-        }
-      ]
-    },
-    {
-      "checkpoint": "swiglu",
+      "checkpoint": "decode-attention",
       "phase": "prefill",
       "tokens": 128,
-      "attributed_us": 1272055.791981984,
+      "attributed_us": 1208779.7089479864,
       "categories": [
         {
           "name": "projections",
-          "median_us": 1259902.8749973513,
-          "share": 0.9904462390240784
+          "median_us": 1196344.1879779566,
+          "share": 0.9897123347802946
         },
         {
           "name": "attention",
-          "median_us": 5942.916992353275,
-          "share": 0.004671899636645375
+          "median_us": 6082.375504774973,
+          "share": 0.005031831242492089
         },
         {
           "name": "normalization, position, and activation",
-          "median_us": 6209.999992279336,
-          "share": 0.004881861339276295
+          "median_us": 6353.145465254784,
+          "share": 0.005255833977213261
         }
       ]
     },
@@ -155,22 +156,22 @@
       "checkpoint": "simd-matmul",
       "phase": "prefill",
       "tokens": 128,
-      "attributed_us": 163345.91698250733,
+      "attributed_us": 159177.6254645083,
       "categories": [
         {
           "name": "projections",
-          "median_us": 151202.62498385273,
-          "share": 0.9256590417258178
+          "median_us": 147628.89599660411,
+          "share": 0.927447532690584
         },
         {
           "name": "attention",
-          "median_us": 6015.249993652105,
-          "share": 0.03682522406909183
+          "median_us": 5686.66699109599,
+          "share": 0.03572529100431857
         },
         {
           "name": "normalization, position, and activation",
-          "median_us": 6128.042005002499,
-          "share": 0.03751573420509035
+          "median_us": 5862.062476808205,
+          "share": 0.036827176305097374
         }
       ]
     },
@@ -178,22 +179,45 @@
       "checkpoint": "simd-matmul",
       "phase": "prefill",
       "tokens": 32,
-      "attributed_us": 49069.95900091715,
+      "attributed_us": 47930.353990523145,
       "categories": [
         {
           "name": "projections",
-          "median_us": 45024.20901553705,
-          "share": 0.9175513885123793
+          "median_us": 43898.33347522654,
+          "share": 0.9158775143598183
         },
         {
           "name": "attention",
-          "median_us": 1928.791985847056,
-          "share": 0.039306981809603826
+          "median_us": 1866.4369999896735,
+          "share": 0.038940605370006404
         },
         {
           "name": "normalization, position, and activation",
-          "median_us": 2116.9579995330423,
-          "share": 0.04314162967801695
+          "median_us": 2165.5835153069347,
+          "share": 0.04518188027017528
+        }
+      ]
+    },
+    {
+      "checkpoint": "split-k",
+      "phase": "prefill",
+      "tokens": 32,
+      "attributed_us": 46124.22897480428,
+      "categories": [
+        {
+          "name": "projections",
+          "median_us": 42101.83399845846,
+          "share": 0.912792147082977
+        },
+        {
+          "name": "attention",
+          "median_us": 1866.5829848032445,
+          "share": 0.04046860026262726
+        },
+        {
+          "name": "normalization, position, and activation",
+          "median_us": 2155.8119915425777,
+          "share": 0.046739252654395734
         }
       ]
     }

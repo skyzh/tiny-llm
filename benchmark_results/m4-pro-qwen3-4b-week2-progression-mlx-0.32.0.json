@@ -1,0 +1,315 @@
+{
+  "host": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.12.13",
+    "mlx_version": "0.32.0",
+    "hardware": {
+      "machine_name": "Mac mini",
+      "machine_model": "Mac16,11",
+      "chip_type": "Apple M4 Pro",
+      "cpu_cores": "proc 14:10:4:0",
+      "gpu_model": "Apple M4 Pro",
+      "gpu_cores": "20",
+      "physical_memory": "64 GB"
+    }
+  },
+  "configuration": {
+    "model": "qwen3-4b",
+    "solution": "ref",
+    "suite": "week2",
+    "device": "gpu",
+    "input_len": 128,
+    "output_len": 129,
+    "warmup": 2,
+    "repeats": 4,
+    "seed": 0,
+    "prefill_logits": "last",
+    "offline": true,
+    "cooldown_seconds": 1.0,
+    "variants": [
+      "week2-kv-cache",
+      "week2-quantized-matvec",
+      "week2-rmsnorm",
+      "week2-rope",
+      "week2-swiglu",
+      "week2-decode-attention",
+      "week2-simd-matmul",
+      "week2-split-k",
+      "mlx"
+    ]
+  },
+  "results": {
+    "week2-kv-cache": {
+      "label": "2.1 KV cache",
+      "samples": [
+        {
+          "prefill": 728.48,
+          "decode": 24.72,
+          "output": 24.09
+        },
+        {
+          "prefill": 732.39,
+          "decode": 24.53,
+          "output": 23.92
+        },
+        {
+          "prefill": 723.15,
+          "decode": 22.3,
+          "output": 21.8
+        },
+        {
+          "prefill": 735.28,
+          "decode": 24.73,
+          "output": 24.11
+        }
+      ],
+      "median": {
+        "prefill": 730.435,
+        "decode": 24.625,
+        "output": 24.005000000000003
+      }
+    },
+    "week2-quantized-matvec": {
+      "label": "2.3 Quantized matvec",
+      "samples": [
+        {
+          "prefill": 104.83,
+          "decode": 58.79,
+          "output": 37.96
+        },
+        {
+          "prefill": 105.18,
+          "decode": 58.62,
+          "output": 37.93
+        },
+        {
+          "prefill": 102.45,
+          "decode": 54.57,
+          "output": 35.88
+        },
+        {
+          "prefill": 105.34,
+          "decode": 58.94,
+          "output": 38.08
+        }
+      ],
+      "median": {
+        "prefill": 105.005,
+        "decode": 58.705,
+        "output": 37.945
+      }
+    },
+    "week2-rmsnorm": {
+      "label": "2.4 Fast RMSNorm",
+      "samples": [
+        {
+          "prefill": 104.94,
+          "decode": 65.77,
+          "output": 40.74
+        },
+        {
+          "prefill": 105.03,
+          "decode": 66.89,
+          "output": 41.18
+        },
+        {
+          "prefill": 103.13,
+          "decode": 60.36,
+          "output": 38.37
+        },
+        {
+          "prefill": 105.03,
+          "decode": 66.11,
+          "output": 40.88
+        }
+      ],
+      "median": {
+        "prefill": 104.985,
+        "decode": 65.94,
+        "output": 40.81
+      }
+    },
+    "week2-rope": {
+      "label": "2.4 + Fast RoPE",
+      "samples": [
+        {
+          "prefill": 105.42,
+          "decode": 70.59,
+          "output": 42.6
+        },
+        {
+          "prefill": 105.52,
+          "decode": 71.74,
+          "output": 43.03
+        },
+        {
+          "prefill": 103.64,
+          "decode": 64.72,
+          "output": 40.15
+        },
+        {
+          "prefill": 105.36,
+          "decode": 72.1,
+          "output": 43.14
+        }
+      ],
+      "median": {
+        "prefill": 105.39,
+        "decode": 71.16499999999999,
+        "output": 42.815
+      }
+    },
+    "week2-swiglu": {
+      "label": "2.4 + Fused SwiGLU",
+      "samples": [
+        {
+          "prefill": 105.92,
+          "decode": 74.52,
+          "output": 44.08
+        },
+        {
+          "prefill": 106.01,
+          "decode": 75.9,
+          "output": 44.57
+        },
+        {
+          "prefill": 104.17,
+          "decode": 68.41,
+          "output": 41.61
+        },
+        {
+          "prefill": 106.05,
+          "decode": 76.15,
+          "output": 44.66
+        }
+      ],
+      "median": {
+        "prefill": 105.965,
+        "decode": 75.21000000000001,
+        "output": 44.325
+      }
+    },
+    "week2-decode-attention": {
+      "label": "2.5 Decode attention",
+      "samples": [
+        {
+          "prefill": 105.93,
+          "decode": 75.83,
+          "output": 44.53
+        },
+        {
+          "prefill": 106.05,
+          "decode": 75.2,
+          "output": 44.34
+        },
+        {
+          "prefill": 105.97,
+          "decode": 75.66,
+          "output": 44.48
+        },
+        {
+          "prefill": 106.0,
+          "decode": 76.07,
+          "output": 44.62
+        }
+      ],
+      "median": {
+        "prefill": 105.985,
+        "decode": 75.745,
+        "output": 44.504999999999995
+      }
+    },
+    "week2-simd-matmul": {
+      "label": "2.6 SIMD matrix prefill",
+      "samples": [
+        {
+          "prefill": 794.96,
+          "decode": 75.35,
+          "output": 69.35
+        },
+        {
+          "prefill": 795.86,
+          "decode": 75.43,
+          "output": 69.42
+        },
+        {
+          "prefill": 799.18,
+          "decode": 74.63,
+          "output": 68.77
+        },
+        {
+          "prefill": 799.05,
+          "decode": 74.89,
+          "output": 68.99
+        }
+      ],
+      "median": {
+        "prefill": 797.4549999999999,
+        "decode": 75.12,
+        "output": 69.16999999999999
+      }
+    },
+    "week2-split-k": {
+      "label": "2.7 Split-K prefill",
+      "samples": [
+        {
+          "prefill": 792.24,
+          "decode": 75.46,
+          "output": 69.42
+        },
+        {
+          "prefill": 791.29,
+          "decode": 75.35,
+          "output": 69.32
+        },
+        {
+          "prefill": 792.85,
+          "decode": 76.03,
+          "output": 69.9
+        },
+        {
+          "prefill": 795.39,
+          "decode": 28.43,
+          "output": 27.66
+        }
+      ],
+      "median": {
+        "prefill": 792.5450000000001,
+        "decode": 75.405,
+        "output": 69.37
+      }
+    },
+    "mlx": {
+      "label": "MLX",
+      "samples": [
+        {
+          "prefill": 827.89,
+          "decode": 88.43,
+          "output": 80.5
+        },
+        {
+          "prefill": 829.33,
+          "decode": 89.02,
+          "output": 81.0
+        },
+        {
+          "prefill": 831.65,
+          "decode": 89.72,
+          "output": 81.6
+        },
+        {
+          "prefill": 831.97,
+          "decode": 91.31,
+          "output": 82.9
+        }
+      ],
+      "median": {
+        "prefill": 830.49,
+        "decode": 89.37,
+        "output": 81.3
+      }
+    }
+  }
+}

@@ -120,8 +120,8 @@ or approving a mutation.
 | 2.1 | KV Cache | ✅ | ✅ | 🚧 |
 | 2.2 | Benchmark and Profile | 🚧 | 🚧 | 🚧 |
 | 2.3 | Quantized Matvec | ✅ | ✅ | 🚧 |
-| 2.4 | Fused Decode Attention | 🚧 | 🚧 | 🚧 |
-| 2.5 | Fused Model Kernels | 🚧 | 🚧 | 🚧 |
+| 2.4 | Fused Model Kernels | 🚧 | 🚧 | 🚧 |
+| 2.5 | Fused Decode Attention | 🚧 | 🚧 | 🚧 |
 | 2.6 | SIMD-Matrix Prefill | ✅ | ✅ | 🚧 |
 | 2.7 | Split-K Prefill | ✅ | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | 🚧 |

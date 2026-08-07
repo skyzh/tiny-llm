@@ -1,14 +1,15 @@
-# 🚧 Week 2 Day 4: Fused Decode Attention
+# 🚧 Week 2 Day 5: Fused Decode Attention
 
 > 🚧 This chapter is under review and may change.
 
-This chapter starts only after profiling the quantized-matvec checkpoint across
-cached contexts. Linear projections remain important, but the attention walk
-grows with context while their shapes stay fixed. During single-request decode,
-query length is normally one while the cached key/value sequence grows by one
-token at a time. Week 1 expresses attention as matrix multiplication, masking,
-softmax, and another matrix multiplication. That is readable, but it
-materializes the complete score and probability rows.
+This chapter starts only after the Day 4 profile has verified that the fused
+model kernels reduced the repeated pointwise cluster. Linear projections remain
+important, but their operator latency is already close to the external
+denominator, while the attention walk grows with cached context. During
+single-request decode, query length is normally one while the cached key/value
+sequence grows by one token at a time. Week 1 expresses attention as matrix
+multiplication, masking, softmax, and another matrix multiplication. That is
+readable, but it materializes the complete score and probability rows.
 
 First write a readable composition to preserve the equation, then replace its
 matmuls and softmax with an online-softmax Metal kernel in your solution.
@@ -127,7 +128,7 @@ attention metadata instead of complicating this focused decode kernel.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 5
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit
@@ -139,7 +140,7 @@ otherwise identical settings:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b \
+  --week2-checkpoint swiglu --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 
@@ -151,8 +152,63 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 Your solution dispatches short-query contexts through your Metal kernel and
 falls back to the exact readable Week 1 composition outside the validated
-range. Reprofile the retained path. If repeated pointwise and reduction
-dispatches become the largest remaining cluster, continue to Day 5; otherwise
-keep tuning the dominant measured cost.
+range.
+
+## Benchmark Analysis: Select Day 6
+
+Measure the attention operator and the cumulative checkpoint separately, then
+change the profile workload only after decode clears its target:
+
+```bash
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section attention --context 32 --context 128 --context 160 \
+  --context 192 --context 256 --context-repeats 6 \
+  --json-output benchmark_results/week2-attention-context-sweep.json
+
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-swiglu --variant week2-decode-attention --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case decode-attention:decode:128 \
+  --case decode-attention:prefill:128 --warmup 4 --iterations 12
+```
+
+Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
+attach that context sweep beside the `swiglu`/`decode-attention` model rows.
+The intermediate points reveal whether the custom kernel has a useful measured
+crossover rather than assuming that an endpoint applies to every context. Also
+attach the decode and prefill kernel-group results. Reject the custom dispatch
+if repeated fresh-process model runs do not improve, even when the isolated
+kernel looks faster. If the operator wins only over a limited context range,
+encode that measured crossover in the dispatch guard; use an Xcode trace only
+when the operator and model results still disagree.
+
+The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
+rotated every implementation order, and recorded all 60 samples per
+implementation and pass:
+
+| Context | Readable | Metal | MLX | Metal speedup |
+|---:|---:|---:|---:|---:|
+| 32 | 143.0 us | 125.7 us | 116.3 us | 1.138x |
+| 128 | 149.3 us | 136.3 us | 120.6 us | 1.095x |
+| 160 | 151.2 us | 140.1 us | 120.9 us | 1.079x |
+| 192 | 154.0 us | 143.9 us | 121.9 us | 1.071x |
+| 256 | 158.0 us | 150.7 us | 122.8 us | 1.048x |
+
+The Metal path wins at every measured point through 256, so 256 is the largest
+evidenced context guard. The readable path remains the policy beyond that
+range; do not extrapolate the final 4.8% operator win to longer caches. The raw
+record, including exact source SHA, model configuration, MLX and mlx-lm
+versions, Xcode/Metal versions, device information, execution order, samples,
+and medians, is
+`benchmark_results/m4-pro-qwen3-4b-week2-attention-context-sweep-mlx-0.32.0.json`.
+
+Once decode reaches 80% of MLX, read the prefill attribution as a new workload.
+Continue to Day 6 only when quantized matrix-shaped projections dominate it.
+The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
+pairs the context microbenchmarks, model delta, and prefill attribution that
+select the matrix kernel.
 
 {{#include copyright.md}}

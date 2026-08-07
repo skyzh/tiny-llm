@@ -616,12 +616,41 @@ pdm run bench --solution tiny_llm --loader week2 \
 Run the same command with `--solution tiny_llm_ref` to compare it with the
 reference solution.
 
-Compare this result with the Day 1 `kv-cache` row. Do not start the decode
-attention chapter until the complete model uses packed weights and the
-end-to-end number has been recorded. The vanilla matrix product remains
-callable as a correctness oracle, but only the SIMD matvec is integrated into
-decode. Reprofile the quantized checkpoint across increasing cached context.
-Day 4 is justified when attention's share grows with context after projection
-traffic has fallen; otherwise keep tuning the measured matvec bottleneck.
+The vanilla matrix product remains callable as a correctness oracle, but only
+the SIMD matvec is integrated into decode.
+
+## Benchmark Analysis: Select Day 4
+
+Measure the cumulative model, the real projection shapes, and the updated
+operator attribution:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-kv-cache --variant week2-quantized-matvec --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last
+
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section decode-projections --context 128
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case quantized-matvec:decode:128 --warmup 4 --iterations 12
+```
+
+Attach the complete-model before/after rows, the per-projection latency table,
+and the new kernel-group profile. First require a clear decode gain over
+`kv-cache`. Then compare each projection with MLX at the identical shape.
+Projections may remain the largest absolute category because the model performs
+them in every layer; once their operator latency is close to MLX, that bar is
+no longer the largest removable gap.
+
+Capture the matvec in Xcode only if the operator table still leaves a material
+gap or you are doing the optional kernel-tuning exercise. Continue to Day 4
+when normalization, position, and activation account for the largest removable
+gap. If the projection comparison is still far behind, keep tuning the matvec
+instead. The
+[reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
+pairs the model delta, projection microbenchmarks, attribution, and the
+source-enabled matvec trace.
 
 {{#include copyright.md}}

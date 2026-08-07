@@ -40,8 +40,9 @@ Benchmark Q, K, V, gate, up, and down projections at `M = 16, 32, 64, 128`
 before changing dispatch:
 
 ```bash
-pdm run bench-week2-operators --model qwen3-4b \
-  --context 32 --prefill-projection k --warmup 5 --iterations 30
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section prefill-projections --context 32 --prefill-projection k \
+  --warmup 5 --iterations 30
 ```
 
 Record synchronized Day 6, requested split-K, and MLX latency. The narrow K/V
@@ -113,7 +114,7 @@ pdm run build-ext
 pdm run test --week 2 --day 7
 ```
 
-## Complete the Optimization Loop
+## Benchmark Analysis: Complete Week 2
 
 Compare Day 6, Day 7, and MLX at short, acceptance, and long prompt lengths.
 Split-K should help only while the unsplit output grid is under-filled. Verify
@@ -126,12 +127,38 @@ Run the fixed Week 2 acceptance workload from Day 2 after the shape sweep. The
 measured hardware, dependency versions, checkpoint table, and final
 MLX ratios.
 
+```bash
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section prefill-projections --context 32 --prefill-projection k \
+  --include-split-k
+
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-simd-matmul --variant week2-split-k --variant mlx \
+  --model qwen3-4b --input-len 32 --output-len 33 --warmup 2 \
+  --prefill-logits last
+```
+
+Repeat both comparisons at the 128-token acceptance shape and at a long control
+such as 2,048 tokens. Attach the three end-to-end comparisons and the
+per-projection SIMD/Split-K/MLX table at each crossover candidate. Retain
+Split-K only below the measured crossover: it must improve the under-filled
+projection, preserve one-token decode, and fall back exactly to Day 6 when the
+ordinary result grid is already occupied. A second Xcode trace is optional when
+the measured dispatch and the operator table already agree. The final
+acceptance run must still reach 80% of MLX in both phases.
+
+The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
+pairs the short-shape operator gains with the end-to-end result and keeps the
+neutral acceptance and long controls separate. Week 3 then changes the
+benchmark itself: request turnover and dense KV reconstruction, rather than
+another static projection, become the measured serving bottleneck.
+
 The Week 2 loop is now complete:
 
 ```plain
-optimize matvec -> profile decode -> optimize attention and small kernels
--> profile prefill -> optimize cooperative matmul -> profile tile occupancy
--> optimize split-K -> benchmark the complete checkpoint
+optimize matvec -> profile decode -> optimize model kernels -> profile decode
+-> optimize attention -> profile prefill -> optimize cooperative matmul
+-> profile tile occupancy -> optimize split-K -> benchmark the complete checkpoint
 ```
 
 Week 3 inherits these projection schedules. Paging is evaluated separately on

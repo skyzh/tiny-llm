@@ -23,11 +23,11 @@
     "input_len": 32,
     "output_len": 33,
     "warmup": 2,
-    "repeats": 3,
+    "repeats": 4,
     "seed": 0,
     "prefill_logits": "last",
     "offline": true,
-    "cooldown_seconds": 0.0,
+    "cooldown_seconds": 1.0,
     "variants": [
       "week2-simd-matmul",
       "week2-split-k",
@@ -39,75 +39,90 @@
       "label": "2.6 SIMD matrix prefill",
       "samples": [
         {
-          "prefill": 587.67,
-          "decode": 77.68,
-          "output": 70.7
+          "prefill": 611.8,
+          "decode": 83.93,
+          "output": 76.04
         },
         {
-          "prefill": 586.12,
-          "decode": 78.21,
-          "output": 71.1
+          "prefill": 613.39,
+          "decode": 84.19,
+          "output": 76.28
         },
         {
-          "prefill": 584.59,
-          "decode": 78.03,
-          "output": 70.93
+          "prefill": 602.92,
+          "decode": 83.12,
+          "output": 75.27
+        },
+        {
+          "prefill": 579.34,
+          "decode": 75.97,
+          "output": 69.2
         }
       ],
       "median": {
-        "prefill": 586.12,
-        "decode": 78.03,
-        "output": 70.93
+        "prefill": 607.3599999999999,
+        "decode": 83.525,
+        "output": 75.655
       }
     },
     "week2-split-k": {
       "label": "2.7 Split-K prefill",
       "samples": [
         {
-          "prefill": 644.86,
-          "decode": 77.66,
-          "output": 71.42
+          "prefill": 678.54,
+          "decode": 83.58,
+          "output": 76.67
         },
         {
-          "prefill": 653.03,
-          "decode": 78.15,
-          "output": 71.92
+          "prefill": 680.47,
+          "decode": 83.48,
+          "output": 76.61
         },
         {
-          "prefill": 650.69,
-          "decode": 77.89,
-          "output": 71.68
+          "prefill": 680.87,
+          "decode": 84.0,
+          "output": 77.04
+        },
+        {
+          "prefill": 676.84,
+          "decode": 76.07,
+          "output": 70.44
         }
       ],
       "median": {
-        "prefill": 650.69,
-        "decode": 77.89,
-        "output": 71.68
+        "prefill": 679.505,
+        "decode": 83.53,
+        "output": 76.64
       }
     },
     "mlx": {
       "label": "MLX",
       "samples": [
         {
-          "prefill": 702.63,
-          "decode": 84.94,
-          "output": 78.08
+          "prefill": 741.48,
+          "decode": 92.31,
+          "output": 84.59
         },
         {
-          "prefill": 708.68,
-          "decode": 84.69,
-          "output": 77.95
+          "prefill": 740.73,
+          "decode": 91.27,
+          "output": 83.72
         },
         {
-          "prefill": 703.58,
-          "decode": 84.42,
-          "output": 77.65
+          "prefill": 734.37,
+          "decode": 89.76,
+          "output": 82.42
+        },
+        {
+          "prefill": 728.75,
+          "decode": 81.14,
+          "output": 75.23
         }
       ],
       "median": {
-        "prefill": 703.58,
-        "decode": 84.69,
-        "output": 77.95
+        "prefill": 737.55,
+        "decode": 90.515,
+        "output": 83.07
       }
     }
   }

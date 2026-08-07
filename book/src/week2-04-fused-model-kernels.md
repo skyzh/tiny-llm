@@ -1,9 +1,9 @@
-# 🚧 Week 2 Day 5: Fused Model Kernels
+# 🚧 Week 2 Day 4: Fused Model Kernels
 
 > 🚧 This chapter is under review and may change.
 
-The Day 4 profile should now show many smaller pointwise and reduction
-dispatches behind the optimized projections and short-context attention.
+The Day 3 profile should now show many smaller pointwise and reduction
+dispatches behind the optimized projections.
 RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
 1 expresses them as readable `mlx.core` equations. Confirm the cluster with the
@@ -82,7 +82,7 @@ tests, and record the cumulative model result before writing RoPE:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5 -- -k rms
+pdm run test --week 2 --day 4 -- -k rms
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint rmsnorm --model qwen3-4b
 ```
@@ -118,7 +118,7 @@ Replace the readable RoPE in the already optimized model, then test and measure
 that cumulative checkpoint before implementing SwiGLU:
 
 ```bash
-pdm run test --week 2 --day 5 -- -k rope
+pdm run test --week 2 --day 4 -- -k rope
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint rope --model qwen3-4b
 ```
@@ -140,7 +140,7 @@ The fused kernel removes those intermediate tensors and dispatch boundaries.
 Integrate the fused expression immediately and record the third checkpoint:
 
 ```bash
-pdm run test --week 2 --day 5 -- -k swiglu
+pdm run test --week 2 --day 4 -- -k swiglu
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint swiglu --model qwen3-4b
 ```
@@ -153,15 +153,8 @@ operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 4
 ```
-
-Day 6 changes workload shape rather than replacing another element-wise or
-reduction operator: it introduces SIMD-matrix fragments for quantized prefill.
-Keep today's `swiglu` checkpoint intact so that prefill tiling has a clean
-before-and-after comparison. Switch the profile from one-token decode to a
-multi-row prefill request before starting Day 6; quantized projections should
-then dominate and the Day 3 matvec schedule should no longer fit the shape.
 
 Compare against the readable equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
@@ -173,5 +166,40 @@ expects `B, H, L, D`, so transpose into that layout before the MLX call and
 transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
 timing no longer measures an equivalent operation.
+
+## Benchmark Analysis: Select Day 5
+
+Keep the three cumulative checkpoints separate so a regression cannot hide
+inside their combined gain:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+  --variant week2-quantized-matvec \
+  --variant week2-rmsnorm --variant week2-rope --variant week2-swiglu \
+  --variant mlx --model qwen3-4b \
+  --input-len 128 --output-len 129 --warmup 2 --prefill-logits last
+
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section model-kernels --context 128
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case swiglu:decode:128 --case swiglu:decode:512 \
+  --case swiglu:decode:2048 --warmup 4 --iterations 12
+```
+
+Attach each cumulative model row, the three readable/optimized/MLX operator
+rows, and the post-SwiGLU kernel-group profile. Retain RMSNorm, RoPE, and SwiGLU
+independently only when their operator and cumulative model results agree. A
+trace is optional here: use it only when one fused operator regresses or its
+microbenchmark and model delta disagree.
+
+After the pointwise cluster shrinks, sweep cached context rather than assuming
+attention is next. Continue to Day 5 when attention is the next
+context-dependent gap and the projection operators are already close to their
+denominator. Day 5 must still prove that its replacement moves the complete
+model; a growing share alone is not acceptance. The
+[reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
+pairs the cumulative gains with all three operator microbenchmarks and the
+updated attribution.
 
 {{#include copyright.md}}
