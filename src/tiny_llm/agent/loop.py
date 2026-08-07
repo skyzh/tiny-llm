@@ -3,7 +3,9 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .context import ContextManager
 from .generation import Generate
+from .generation import Message
 from .protocol import AgentAction
 from .session import SessionLog
 from .workspace import Workspace
@@ -58,6 +60,8 @@ def run_agent(
     on_event: Callable[[AgentEvent], None] | None = None,
     *,
     session: SessionLog | None = None,
+    context_manager: ContextManager | None = None,
+    summarize: Callable[[list[Message]], str] | None = None,
 ) -> AgentRun:
     """Run a bounded loop, optionally recording its canonical durable events."""
 

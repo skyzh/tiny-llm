@@ -74,9 +74,9 @@ The status columns track whether each chapter's code, tests, and documentation
 are ready. Week 4 remains a design draft and is not yet part of the rendered
 daily course. Its repository baseline currently covers structured actions,
 bounded workspace tools, exact command allowlisting, durable sessions, reusable
-generation caches, simple context trimming, and a bounded loop. Structured token
-compaction, undo, steering, cooperative decode cancellation, and held-out task
-packages remain planned targets rather than executable course checkpoints.
+generation caches, structured token compaction, and a bounded loop. Undo,
+steering, cooperative decode cancellation, and held-out task packages remain
+planned targets rather than executable course checkpoints.
 
 The Week 4 CLI's workspace tools are read-only by default; persistent runs still
 write a sensitive transcript under `.tiny-llm/sessions`. Enabling writes or an
@@ -116,7 +116,7 @@ succeeded.
 | 4.2 | Tools | 🚧 | 🚧 | 🚧 |
 | 4.3 | Safety and Validation | 🚧 | 🚧 | 🚧 |
 | 4.4 | Interactive Sessions | ✅ | ✅ | ✅ |
-| 4.5 | Context Compaction | 🚧 | 🚧 | 🚧 |
+| 4.5 | Context Compaction | ✅ | ✅ | ✅ |
 | 4.6 | Control and Recovery | 🚧 | 🚧 | 🚧 |
 | 4.7 | Evaluation | 🚧 | 🚧 | 🚧 |
 
