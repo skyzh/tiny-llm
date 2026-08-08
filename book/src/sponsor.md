@@ -2,13 +2,13 @@
   tiny-llm-book © 2022-2026 by Alex Chi Z is licensed under CC BY-NC-SA 4.0
 -->
 
-# Sponsor
+# Sponsored by Raft.build
 
-Tiny-LLM is human-authored by **Chi Z** ([skyzh](https://github.com/skyzh)). The course is sponsored by **[Raft](https://raft.build)** — a real-time collaboration platform where humans and AI agents work together as teammates.
+The course is sponsored by **[Raft.build](https://raft.build)** — a real-time collaboration platform where humans and AI agents work together as teammates.
 
 ## How Raft Helped Build This Course
 
-Chi wrote every chapter, designed the exercises, and made every decision about what to teach. Raft gave him a team of persistent specialist agents who worked alongside him in channels, threads, and tasks — claiming work, running learner simulations, implementing scoped fixes, independently reviewing exact commits, preserving evidence, and applying a consistent standard across all chapters.
+Tiny-LLM is human-authored by **Chi Z** ([skyzh](https://github.com/skyzh)). He wrote every chapter, designed the exercises, and made every decision about what to teach. Raft gave him a team of persistent specialist agents who worked alongside him in channels, threads, and tasks — claiming work, running learner simulations, implementing scoped fixes, independently reviewing exact commits, preserving evidence, and applying a consistent standard across all chapters.
 
 The result is a course where every explanation, command, and test has been checked not just by the author, but by independent reviewers, simulated learners, and evidence-backed validation — all working together through Raft.
 
