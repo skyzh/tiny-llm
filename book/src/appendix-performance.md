@@ -469,8 +469,8 @@ decides where those costs are worthwhile.
 The fresh-process samples for the short control point are checked in at
 `benchmark_results/m4-pro-qwen3-4b-week2-32-mlx-0.32.0.json`. The completed
 Week 2 path reaches 95.4% of MLX prefill, 84.4% of MLX decode, and 85.3% of MLX
-end-to-end output throughput at the 128-token acceptance shape. All three
-exceed the 80% course target. Longer static sweeps remain attention diagnostics;
+end-to-end output throughput at the 128-token acceptance shape. Both required
+phase ratios exceed 80%; output is also 85.3% of MLX. Longer static sweeps remain attention diagnostics;
 they do not test the memory-management reasons for paging.
 
 ## Week 3 Performance by Chapter
@@ -540,10 +540,11 @@ reference solution reaches 75.1%. This explains where query tiling begins to
 help without mixing a static denominator into the serving progression.
 One-token decode continues to dispatch to the Day 4 vector schedule.
 
-The checked-in result
-`benchmark_results/m4-pro-qwen3-4b-mlx-0.32.0.json` contains the published
-acceptance and direct-serving samples, medians, configurations, and host
-metadata. Chapter checkpoint rows use the same fresh-process runner and
+The checked-in file
+`benchmark_results/m4-pro-qwen3-4b-mlx-0.32.0.json` contains
+direct-serving data plus a separate 3-repeat static control. The published
+four-repeat acceptance samples are in `...week2-progression...json`. Chapter
+checkpoint rows use the same fresh-process runner and
 hardware.
 
 Copy counters report logical operation volume, not hardware DRAM traffic.
