@@ -79,13 +79,13 @@ Use a disposable workspace and read the
 
 | Week + Chapter | Topic | Code | Test | Doc | Audit |
 |---|---|---|---|---|---|
-| 1.1 | Attention | ✅ | ✅ | ✅ | ✅ | 🚧 |
-| 1.2 | RoPE | ✅ | ✅ | ✅ | ✅ | 🚧 |
-| 1.3 | Grouped Query Attention | ✅ | ✅ | ✅ | ✅ | 🚧 |
-| 1.4 | RMSNorm and MLP | ✅ | ✅ | ✅ | ✅ | 🚧 |
-| 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ | 🚧 |
-| 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ | 🚧 |
-| 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 1.1 | Attention | ✅ | ✅ | ✅ | ✅ |
+| 1.2 | RoPE | ✅ | ✅ | ✅ | ✅ |
+| 1.3 | Grouped Query Attention | ✅ | ✅ | ✅ | ✅ |
+| 1.4 | RMSNorm and MLP | ✅ | ✅ | ✅ | ✅ |
+| 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ |
+| 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
+| 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
 | 2.1 | KV Cache | ✅ | ✅ | ✅ | 🚧 |
 | 2.2 | Benchmark and Profile | ✅ | ✅ | ✅ | 🚧 |
 | 2.3 | Quantized Matvec | ✅ | ✅ | ✅ | 🚧 |
