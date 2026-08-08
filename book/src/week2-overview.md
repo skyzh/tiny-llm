@@ -21,7 +21,7 @@ registers. This contract remains in force for Week 3.
 
 ## Verification Status
 
-Week 2 is under active development. Reference correctness and decode-attention
+Reference correctness and decode-attention
 boundaries are continuously tested on ARM64 macOS CI with Qwen3-0.6B.
 Qwen3-4B performance evidence is one-machine research data measured on an M4
 Pro, not a cross-device guarantee. Raw measurements, rejected experiments, and
@@ -67,9 +67,7 @@ uses Week 1's provided `mx.dequantize` loading helper; Day 3 replaces that
 loading path as part of keeping weights packed.
 
 Week 2 uses `mlx_lm` to load model weights and `mlx.core` for arrays, graph
-evaluation, and device synchronization. All operator implementations —
-quantized matmul, decode attention, RMSNorm, RoPE, SwiGLU — are your own
-Python, C++, or Metal code.
+evaluation, and device synchronization.
 
 ## Weekly Checkpoints
 
@@ -79,12 +77,12 @@ Python, C++, or Metal code.
    real GPU costs rather than guessing what should be slow.
 3. **Quantized matvec:** the decode profile points at projection weight reads,
    so keep weights packed and integrate the SIMD matrix-vector kernel.
-4. **Fused model kernels:** once projection latency is close to the external
-   denominator, the removable decode gap moves to repeated RMSNorm, RoPE, and
-   SwiGLU work. Fuse the measured cluster one operator at a time.
-5. **Decode attention:** sweep cached context lengths against the measured
-   score, softmax, and value profile. Introduce online softmax over its
-   measured short-context range and verify with a matched workload.
+4. **Fused model kernels:** after packed projections narrow the measured gap
+   with MLX, profile and fuse RMSNorm, RoPE, and SwiGLU one operator at a
+   time.
+5. **Decode attention:** profile score computation, softmax, and value
+   aggregation across cached context lengths. Introduce online softmax over
+   its measured short-context range and verify with a matched workload.
 6. **SIMD-matrix prefill:** return to the fixed 128-token workload and its
    prefill profile, where the correctness-first quantized matrix path
    dominates. Introduce 8×8 matrix fragments with FP32 accumulation.
