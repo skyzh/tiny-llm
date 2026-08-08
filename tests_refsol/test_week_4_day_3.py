@@ -19,7 +19,41 @@ def test_task_1_lists_and_reads_bounded_workspace_files(tmp_path):
     assert workspace.read_file("README.md") == "hello"
 
 
-@pytest.mark.parametrize("path", ["../outside", ".git/config", ".env", "key.pem"])
+def test_task_1_list_is_sorted_and_bounded(tmp_path):
+    for name in ("c.txt", "a.txt", "b.txt"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    workspace = Workspace(ToolPolicy(tmp_path, max_list_entries=2))
+
+    assert workspace.list_files().splitlines() == ["file a.txt", "file b.txt"]
+
+
+def test_task_1_rejects_oversized_non_utf8_and_non_file_reads(tmp_path):
+    (tmp_path / "large.txt").write_text("12345", encoding="utf-8")
+    (tmp_path / "binary.dat").write_bytes(b"\xff")
+    (tmp_path / "directory").mkdir()
+    workspace = Workspace(ToolPolicy(tmp_path, max_file_bytes=4))
+
+    with pytest.raises(AgentError, match="exceeds 4 bytes"):
+        workspace.read_file("large.txt")
+    assert workspace.execute(
+        ToolAction("read_file", {"path": "binary.dat"})
+    ).startswith("error:")
+    with pytest.raises(AgentError, match="regular file"):
+        workspace.read_file("directory")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../outside",
+        "/tmp/outside",
+        "",
+        "bad\x00path",
+        ".git/config",
+        ".env",
+        "key.pem",
+    ],
+)
 def test_task_2_rejects_unsafe_paths(tmp_path, path):
     workspace = Workspace(ToolPolicy(tmp_path))
     with pytest.raises(AgentError):
@@ -34,6 +68,21 @@ def test_task_2_rejects_symlinks(tmp_path):
 
     with pytest.raises(AgentError, match="symlinks"):
         workspace.read_file("link.txt")
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"max_file_bytes": 0},
+        {"max_write_bytes": 0},
+        {"max_list_entries": 0},
+        {"max_tool_output_chars": 0},
+        {"command_timeout_seconds": 0},
+    ],
+)
+def test_task_2_rejects_non_positive_policy_limits(tmp_path, overrides):
+    with pytest.raises(ValueError, match="limits must be positive"):
+        ToolPolicy(tmp_path, **overrides)
 
 
 def test_task_3_writes_are_disabled_by_default(tmp_path):
