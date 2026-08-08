@@ -543,7 +543,7 @@ One-token decode continues to dispatch to the Day 4 vector schedule.
 The checked-in file
 `benchmark_results/m4-pro-qwen3-4b-mlx-0.32.0.json` contains
 direct-serving data plus a separate 3-repeat static control. The published
-four-repeat acceptance samples are in `...week2-progression...json`. Chapter
+four-repeat acceptance samples are in `benchmark_results/m4-pro-qwen3-4b-week2-progression-mlx-0.32.0.json`. Chapter
 checkpoint rows use the same fresh-process runner and
 hardware.
 
