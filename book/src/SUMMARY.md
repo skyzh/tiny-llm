@@ -39,8 +39,8 @@
     - [🚧 Control and Recovery](./week4-06-control-recovery.md)
     - [🚧 Evaluation](./week4-07-evaluation.md)
 - [🚧 Appendix: Performance Evidence Ledger](./appendix-performance.md)
+- [Sponsor](./sponsor.md)
 
 ---
 
 [Glossary Index](./glossary.md)
-- [Sponsor](./sponsor.md)
