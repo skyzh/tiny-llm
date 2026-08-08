@@ -1,10 +1,10 @@
 # 🚧 Week 4: Build a Coding Agent
 
-> 🚧 **Course status:** The daily chapters are drafts and are not included in
-> the rendered book yet. The repository contains tested checkpoints through
-> Day 7, including safe static held-out evaluation. Executing model-authored code
-> or held-out pytest remains deferred until an isolated container or virtual
-> machine backend exists.
+> 🚧 **Course status:** The daily chapters are public for early review and may
+> change. The repository contains tested checkpoints through Day 7, including
+> safe static held-out evaluation. Executing model-authored code or held-out
+> pytest remains deferred until an isolated container or virtual machine backend
+> exists.
 
 Weeks 1 through 3 turned tokens into text, made decoding efficient, and
 introduced serving techniques. Week 4 adds the next layer: an agent loop that
@@ -189,7 +189,7 @@ provide a focused inference-framework exercise without changing model kernels.
 | 6 | Control and recovery | Cooperative cancellation, durable interrupt and steering events, mutation reconciliation, checkpoints, conflict-safe undo, branches, and command cancellation with a fake process are validated. |
 | 7 | Evaluation | Sealed inert packages, frozen snapshots, static held-out checks, forbidden-path grading, and metrics are validated without executing candidate code. |
 
-Each draft chapter names the focused learner command for its current checkpoint.
+Each daily chapter names the focused learner command for its current checkpoint.
 For example:
 
 ```bash

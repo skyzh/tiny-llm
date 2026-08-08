@@ -28,4 +28,11 @@ https://skyzh.github.io/tiny-llm/week3-05-flash-attention
 https://skyzh.github.io/tiny-llm/week3-optional-moe
 https://skyzh.github.io/tiny-llm/week3-optional-speculative-decoding
 https://skyzh.github.io/tiny-llm/week3-overview
+https://skyzh.github.io/tiny-llm/week4-01-agent-loop
+https://skyzh.github.io/tiny-llm/week4-02-tools
+https://skyzh.github.io/tiny-llm/week4-03-safe-editing
+https://skyzh.github.io/tiny-llm/week4-04-sessions
+https://skyzh.github.io/tiny-llm/week4-05-compaction
+https://skyzh.github.io/tiny-llm/week4-06-control-recovery
+https://skyzh.github.io/tiny-llm/week4-07-evaluation
 https://skyzh.github.io/tiny-llm/week4-overview

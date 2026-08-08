@@ -1,5 +1,9 @@
 # Day 7: Safe Deterministic Evaluation
 
+> 🚧 **Early-review WIP:** This chapter is public for early review and may
+> change. Use a disposable workspace when running the agent or enabling writes
+> or commands.
+
 An agent saying that it finished is not evidence that its change is correct.
 Day 7 adds a small, deterministic evaluation harness that grades the resulting
 files independently of the model's final message. The checkpoint is deliberately
@@ -8,10 +12,9 @@ executes candidate code.
 
 > **Implementation status:** The reference implementation, learner API surface,
 > inert task packages, and focused tests implement the static evaluation boundary
-> described here. Like every Week 4 daily chapter, this file remains unrendered
-> pending course review; executable does not mean published. Executable Python
-> tests and general coding-task grading remain deferred until the candidate can
-> run inside a container or virtual machine.
+> described here. The chapter remains WIP even though the checkpoint is
+> executable. Executable Python tests and general coding-task grading remain
+> deferred until the candidate can run inside a container or virtual machine.
 
 ## Check the Chapter
 
