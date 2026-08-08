@@ -23,6 +23,9 @@ WEEK2_CHECKPOINTS = (
     "split-k",
 )
 
+DECODE_ATTENTION_MAX_CONTEXT = 256
+DECODE_ATTENTION_MAX_QUERY = 2
+
 
 class Qwen3MultiHeadAttention:
     def __init__(

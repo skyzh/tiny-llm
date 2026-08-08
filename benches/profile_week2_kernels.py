@@ -59,6 +59,8 @@ class KernelImplementation:
     quantized_linear: Callable[..., mx.array]
     decode_attention: Callable[..., mx.array]
     swiglu: Callable[[mx.array, mx.array], mx.array]
+    decode_attention_max_query: int
+    decode_attention_max_context: int
 
 
 def load_implementation(name: str) -> KernelImplementation:
@@ -78,6 +80,8 @@ def load_implementation(name: str) -> KernelImplementation:
         quantized_linear=quantize.quantized_linear,
         decode_attention=kernels.decode_attention_custom,
         swiglu=kernels.swiglu,
+        decode_attention_max_query=getattr(model, "DECODE_ATTENTION_MAX_QUERY", 0),
+        decode_attention_max_context=getattr(model, "DECODE_ATTENTION_MAX_CONTEXT", 0),
     )
 
 
@@ -156,6 +160,21 @@ def project(implementation: KernelImplementation, x: mx.array, weight: Any) -> m
     if isinstance(weight, implementation.quantized_weights_type):
         return implementation.quantized_linear(x, weight)
     return implementation.linear(x, weight)
+
+
+def should_use_decode_attention(
+    implementation: KernelImplementation,
+    enabled: bool,
+    query_length: int,
+    context_length: int,
+    mask: mx.array | str | None,
+) -> bool:
+    return (
+        enabled
+        and query_length <= implementation.decode_attention_max_query
+        and context_length <= implementation.decode_attention_max_context
+        and not isinstance(mask, mx.array)
+    )
 
 
 class KernelReplay:
@@ -247,10 +266,12 @@ class KernelReplay:
         mask = "causal" if self.phase == "prefill" else None
         for layer in self.model.layers_inner:
             attention = layer.self_attn
-            if (
-                attention.use_decode_attention
-                and self.rows <= 8
-                and self.context <= 128
+            if should_use_decode_attention(
+                self.implementation,
+                attention.use_decode_attention,
+                self.rows,
+                self.context,
+                mask,
             ):
                 output = self.implementation.decode_attention(
                     self.query,
