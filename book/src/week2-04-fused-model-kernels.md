@@ -70,8 +70,7 @@ squared tensor. Instantiate the required kernel for bfloat16. Keep
 the reduction, normalization, and weight multiplication in float, then cast the
 final result once. The readable Week 1 equation rounds once before applying the
 weight, so compare the two with a tolerance rather than expecting bit-identical
-results. The single final cast also tracks the MLX model more closely in the
-Qwen3-4B end-to-end correctness test.
+results.
 
 The C++ primitive validates shape and dtype, allocates the output through MLX,
 binds the buffers and scalar constants, allocates eight float partial sums, and
@@ -206,11 +205,12 @@ stay.
 
 After the pointwise cluster shrinks, sweep cached context rather than assuming
 attention is next. Continue to Day 5 when attention is a removable gap at
-`S <= 128` and the projection operators are already close to their
-denominator. Measurements at `S >= 160` define the fallback range; they do not
-justify a kernel that dispatches only through 128. Day 5 must still prove that
-its replacement moves a complete-model workload that actually enters that
-guard. The
+the measured contexts and the projection operators are already close to their
+denominator. The checked M4 Pro sweep covers `S=32,128,160,192,256` and the
+custom operator wins all six balanced passes at every point, which supports a
+context guard through `S <= 256` but says nothing about longer caches. Day 5
+must also test query length and prove that its replacement moves a
+complete-model workload that actually enters the final guard. The
 [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
 pairs the cumulative gains with all three operator microbenchmarks and the
 updated attribution. Use the optional trace to verify that the intended three

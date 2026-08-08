@@ -67,7 +67,7 @@ below contain the measurements.
 | RMSNorm | BF16 I/O with the sum of squares accumulated in FP32 | Fuse reduction, normalization, and weight multiply into one dispatch | Retained at Qwen hidden dimensions after both operator and decode gains; unknown dimensions require remeasurement | Readable RMSNorm and the Day 3 checkpoint remain selectable | Adding isolated microseconds as if checkpoint gains were independent |
 | RoPE | One valid offset per batch row; even rotated dimension; tail values preserved | Fuse angle generation and pair rotation without intermediate graphs | Retained for Qwen decode rows; head-count and rotated-dimension changes require remeasurement | Readable RoPE and the RMSNorm-only checkpoint remain selectable | Benchmarking a cached or precomputed angle path against fresh angle construction |
 | SwiGLU | Gate and up tensors have identical shape and dtype | Fuse SiLU and the gate/up product into one elementwise dispatch | Retained for Qwen MLP shapes; tiny tensors and other dtypes are not a performance claim | Readable SiLU-product and the RoPE checkpoint remain selectable | Accepting an operator win without a repeated complete-model gain |
-| Decode attention | `Hq % Hkv == 0`, `D <= 256`, FP32 online-softmax state, and causal/explicit mask semantics | Avoid score/probability tensors and merge softmax while walking K/V | Model dispatch is `L <= 8`, `S <= 128`, and no explicit mask; it loses past the measured context crossover and is under-filled at very short contexts | Readable grouped attention handles longer queries, longer contexts, and explicit masks | Fixed implementation order, GPU performance-state drift, or treating correctness at `S=1` as schedule efficiency |
+| Decode attention | `Hq % Hkv == 0`, `D <= 256`, FP32 online-softmax state, and causal/explicit mask semantics | Avoid score/probability tensors and merge softmax while walking K/V | Model dispatch is `L <= 2`, `S <= 256`, and no explicit array mask; the context sweep wins 6/6 passes through 256, while the query sweep is repeat-consistent only through `L=2` | Readable grouped attention handles longer queries, longer contexts, and explicit array masks | Fixed implementation order, GPU performance-state drift, extrapolating beyond 256, or treating correctness at `S=1` as schedule efficiency |
 | SIMD-matrix prefill | W4/group-128 layout, BF16 storage, FP32 tile accumulation, and correct partial tiles | Reuse activation and dequantized-weight tiles across prompt rows | Performance-lab path for `M > 8`; partial and new model shapes need both correctness and timing sweeps | Readable MLX matmul is the correctness oracle; Day 3 matvec remains the short-row dispatch and vanilla Metal is a bring-up control | Comparing all-logit course prefill with last-logit MLX serving |
 | Split-K prefill | Partitions align to quantization groups; partial planes are disjoint; final reduction is FP32 | Add independent groups only while the ordinary result grid is under-filled | Helps short narrow Qwen projections, is neutral around the 128-token acceptance shape, and loses once the base grid is occupied | `split_k <= 1` dispatches exactly to the Day 6 unsplit kernel | Profiling independent layers can hide under-occupancy that appears in the dependency-ordered model |
 
@@ -191,16 +191,17 @@ it establishes the synchronized benchmark and profile that choose Day 3.
 | Day 2 | Benchmark and profile | 730.43 | 24.63 | 24.01 | Measure dense projection weight traffic. |
 | Day 3 | Quantized matvec | 105.00 | 58.71 | 37.95 | Keep weights packed and add the x4 decode kernel. |
 | Day 4 | Fused model kernels | 105.97 | 75.21 | 44.33 | Remove the newly exposed pointwise graph launches. |
-| Day 5 | Bounded decode attention | 105.99 | 75.75 | 44.50 | Guard inactive at this shape; no expected change. |
+| Day 5 | Bounded decode attention | 105.99 | 75.75 | 44.50 | Historical row from before the guard extended through `S=256`; do not use it as the current checkpoint delta. |
 | Day 6 | SIMD-matrix prefill | 797.45 | 75.12 | 69.17 | Fix the quantized matrix path exposed by Day 3. |
 | Day 7 | Split-K prefill | 792.55 | 75.41 | 69.37 | Fill the GPU only for under-occupied short projections. |
 | Baseline | MLX 0.32.0 | 830.49 | 89.37 | 81.30 | External denominator. |
 
-Day 5's custom path is inactive throughout this fixed workload. Prefill has
-`L=128`; after cache append, the first timed decode step sees `S=129` and every
-later step is longer. The small observed Day 4-to-Day 5 difference is therefore
-run noise, not an accepted attention gain. A matched short-context checkpoint
-below evaluates the bounded kernel where it actually dispatches.
+The checked-in progression file predates the current `L <= 2`, `S <= 256`
+guard. With the current implementation, prefill has `L=128` and stays on the
+readable path, while timed one-token decode steps see `S=129` through `S=256`
+and enter the custom path. The historical Day 4-to-Day 5 difference is not a
+current end-to-end measurement; the balanced context and query sweeps below are
+the checked evidence for the production guard.
 
 ### The Kernel Profile That Selects Each Chapter
 
@@ -239,12 +240,13 @@ The profile makes the progression concrete:
 - After packed matvec, the pointwise group is 35.8% while attention is only
   4.5% at the 128-token acceptance context. Day 4 therefore removes the
   measured normalization, position, and activation overhead first.
-- After the Day 4 pointwise kernels, a context and operator sweep isolates a
-  removable attention gap through `S=128`. Day 5 tests online softmax there and
-  retains it only after a matched 32-token-prompt model run also improves.
-- Returning to the fixed workload leaves Day 5 inactive by design. Its
-  128-token prefill makes the vanilla quantized projection path 99.0% of
-  attributed time, which selects the cooperative matrix kernel in Day 6.
+- After the Day 4 pointwise kernels, the balanced operator sweeps isolate a
+  removable attention gap through `S=256` and a repeat-consistent query-length
+  win through `L=2`. Day 5 tests online softmax inside those bounds.
+- At the fixed workload, 128-token prefill remains outside the query-length
+  guard. Its profile makes the vanilla quantized projection path 99.0% of
+  attributed prefill time, which selects the cooperative matrix kernel in Day
+  6; one-token decode uses the bounded Day 5 path.
 - After Day 6, projections remain most of the inherent prefill work, but the
   long-shape operator comparison is already close to MLX. The 32-token shape
   sweep then isolates under-occupied Qwen projections and selects Split-K only
@@ -283,8 +285,8 @@ row and synchronized attribution answer different parts of the handoff:
 | KV growth | 0.33 ms, 0.8% | The dense cache already removed prefix recomputation. |
 
 The operator-family result is sufficient to select Day 3. The optional Day 2
-Xcode control provides an inspectable vanilla Metal projection at the same Qwen
-shape. That isolated packed-W4 control is not the Day 2 model's dense
+Xcode workflow can inspect a vanilla Metal projection at the same Qwen shape if
+you generate a trace. That isolated packed-W4 control is not the Day 2 model's dense
 projection; it exists so a later trace can compare schedules without pretending
 that one shader ranked the complete model.
 
@@ -312,11 +314,11 @@ uses them, but normalization, position, and activation now occupy 35.8% and are
 the larger removable gap. That combination, rather than the absolute height of
 the projection bar, selects Day 4.
 
-The [source-enabled matvec profile](#week-2-xcode-checkpoint-contract) is the
-optional kernel-internal attachment for this checkpoint. Use its Memory view
-and weighted source lines to identify additional matvec headroom, but do not let
-that shader-local result displace the larger pointwise model gap established by
-the matched operator table.
+A [source-enabled matvec capture](#week-2-xcode-checkpoint-contract) is an
+optional kernel-internal investigation for this checkpoint. If you generate
+one, use its Memory view and weighted source lines to identify additional
+matvec headroom, but do not let that shader-local result displace the larger
+pointwise model gap established by the matched operator table.
 
 ### Day 4: Fused Model Kernels
 
@@ -331,10 +333,11 @@ The cumulative model and operator results agree on all three retained changes:
 
 The pointwise group falls from 35.8% after Day 3 to 10.5%. Projections are now
 80.5% of attributed decode time but are already close to their MLX operator
-latencies. In the optional Xcode checkpoint, verify that the RMSNorm, RoPE, and
-SwiGLU pipelines all dispatched. The `S=32`, `S=128`, and `S=160` sweep then
-isolates a short-context attention opportunity and its fallback boundary. That
-evidence selects a bounded Day 5 experiment; the longer losing range does not.
+latencies. An optional learner-generated Xcode trace can verify that the
+RMSNorm, RoPE, and SwiGLU pipelines all dispatched. The balanced
+`S=32,128,160,192,256` sweep then isolates an attention opportunity through the
+largest measured context; the query-length sweep supplies the other dispatch
+boundary.
 
 ### Day 5: Fused Decode Attention
 
@@ -347,28 +350,44 @@ that workload, fused attention raises median decode from 59.90 to 61.78 tok/s
 denominator. The raw samples are checked in at
 `benchmark_results/m4-pro-qwen3-4b-week2-short-context-mlx-0.32.0.json`.
 
-The model-equivalent operator microbenchmark includes the FP32 promotion and
-output cast used by the readable fallback:
+The current context sweep includes the FP32 promotion and output cast used by
+the readable fallback. It uses six forward/reverse context passes, rotates
+every implementation order, and retains 60 samples per implementation and
+pass:
 
-| Cached context | Readable | Fused | MLX | Fused vs readable |
-|---:|---:|---:|---:|---:|
-| 32 | 129.2 us | 111.3 us | 96.5 us | 1.16x faster |
-| 128 | 182.6 us | 166.8 us | 147.4 us | 1.09x faster |
-| 160 | 229.6 us | 237.9 us | 163.5 us | 3.6% slower |
-| 192 | 229.2 us | 240.9 us | 160.1 us | 5.1% slower |
-| 256 | 241.4 us | 265.1 us | 154.8 us | 9.8% slower |
+| Cached context | Readable | Fused | MLX | Fused vs readable | Pass wins |
+|---:|---:|---:|---:|---:|---:|
+| 32 | 143.0 us | 125.7 us | 116.3 us | 1.138x | 6/6 |
+| 128 | 149.3 us | 136.3 us | 120.6 us | 1.095x | 6/6 |
+| 160 | 151.2 us | 140.1 us | 120.9 us | 1.079x | 6/6 |
+| 192 | 154.0 us | 143.9 us | 121.9 us | 1.071x | 6/6 |
+| 256 | 158.0 us | 150.7 us | 122.8 us | 1.048x | 6/6 |
 
-The measured crossover narrows the reference dispatch guard to contexts of at
-most 128 tokens. Larger contexts retain the readable path. The operator sweep
-and matched short-context model gain establish where the schedule is valid; an
-optional Xcode `S=128` replay verifies the intended dispatch and its hot loop.
+The query-length sweep holds `S=128`, Qwen3-4B's 4:1 GQA ratio, and the causal
+form while balancing L1/L2/L4/L8 order over six passes:
 
-The fixed 128-token acceptance workload remains a neutral control because it
-never enters the guard. Returning to that workload and profiling its prefill
-attributes 1,196.34 ms of 1,208.78 ms, or 99.0%, to quantized projections;
+| Query length | Readable | Fused | MLX | Fused vs readable | Pass wins |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 244.4 us | 213.1 us | 155.9 us | 1.147x | 6/6 |
+| 2 | 341.4 us | 258.8 us | 185.3 us | 1.319x | 6/6 |
+| 4 | 322.7 us | 297.3 us | 197.4 us | 1.085x | 4/6 |
+| 8 | 377.7 us | 491.5 us | 290.6 us | 0.768x | 0/6 |
+
+At `L=1`, the causal mask permits the entire existing cache and is equivalent
+to unmasked one-token decode; longer rows measure causal multi-token chunks.
+The context sweep supports `S <= 256`, while `L=2` is the largest
+repeat-consistent query-length win. Those results define the current
+`L <= 2`, `S <= 256` guard. The checked raw records are
+`benchmark_results/m4-pro-qwen3-4b-week2-attention-context-sweep-mlx-0.32.0.json`
+and
+`benchmark_results/m4-pro-qwen3-4b-week2-attention-query-sweep-mlx-0.32.0.json`.
+An optional Xcode replay can inspect a dispatch if you generate a trace, but it
+is not checked-in acceptance evidence.
+
+In the fixed 128-token workload, prefill remains outside the query-length guard
+and attributes 1,196.34 ms of 1,208.78 ms, or 99.0%, to quantized projections;
 attention accounts for 6.08 ms and the pointwise group for 6.35 ms. That
-unchanged prefill bottleneck selects the matrix-shaped projection kernel in
-Day 6.
+prefill bottleneck selects the matrix-shaped projection kernel in Day 6.
 
 ### Day 6: Use Cooperative Loads for Quantized Prefill
 
@@ -548,19 +567,21 @@ by this result.
 ## Week 2 Xcode Checkpoint Contract
 
 The synchronized operator attribution selects a family; a source-enabled Xcode
-replay explains what happens inside one representative shader from that family.
-Preserve the same six whole-window screenshots from a large, non-full-screen
-Xcode window for every Day 2–7 checkpoint: performance overview, left and right
-performance limiters, left and right memory counters, and the Cost Graph with
-20–30 weighted source lines around the hot loop. The
+replay can explain what happens inside one representative shader from that
+family. The repository does not include reference `.gputrace` files or Xcode
+screenshots, so the balanced JSON tables above remain the checked-in evidence.
+If you generate a trace for your implementation, preserve the same six
+whole-window views from a large, non-full-screen Xcode window: performance
+overview, left and right performance limiters, left and right memory counters,
+and the Cost Graph with 20–30 weighted source lines around the hot loop. The
 [advanced profiling appendix](./week2-advanced-profiling.md) gives the capture
 and replay procedure.
 
-For the reference M4 Pro measurements, record macOS, Xcode, Metal compiler,
-MLX, performance state, source revision, trace name, implementation, and tensor
-shape beside each set. Xcode replay time is diagnostic; the Overview must show
-the actual execution mode, while the balanced fresh-process tables above remain
-the acceptance evidence.
+For any learner-generated capture, record macOS, Xcode, Metal compiler, MLX,
+performance state, source revision, trace name, implementation, and tensor
+shape beside the set. Xcode replay time is diagnostic; the Overview should show
+the actual execution mode, while a balanced fresh-process benchmark remains the
+acceptance evidence.
 
 ## Optimization Map
 

@@ -137,9 +137,11 @@ throughput result. Record the execution mode shown in **Overview** instead of
 assuming serialization. Keep the trace window open until every evidence view
 is captured; reopening and reprofiling a large trace can take minutes.
 
-## Preserve the Same Screenshot Set
+## Keep Learner-Generated Screenshots Consistent
 
-Save the same six images for every Day 2–7 reference checkpoint:
+The repository does not include reference `.gputrace` files or Xcode
+screenshots. If you capture them for your own implementation, use the same six
+views for each checkpoint you investigate:
 
 ```text
 week2-dayN-xcode-overview.png
@@ -150,11 +152,11 @@ week2-dayN-xcode-memory-right.png
 week2-dayN-xcode-cost-source.png
 ```
 
-The overview must keep every relevant pipeline visible. Day 4 therefore shows
-RMSNorm, RoPE, and SwiGLU together; Day 7 shows both the Split-K accumulation
-and reduction when the reduction has material cost. The Cost Graph image is
-the critical source attachment: a function name without the hottest loop and
-its weighted source-line percentages is incomplete.
+Keep every relevant pipeline visible in the overview. A Day 4 capture should
+show RMSNorm, RoPE, and SwiGLU together; a Day 7 capture should show both the
+Split-K accumulation and reduction when the reduction has material cost. A
+useful Cost Graph image includes the hottest loop and its weighted source-line
+percentages, not only the function name.
 
 Place the trace name, source commit, implementation, tensor shape, hardware,
 macOS, Xcode, Metal compiler, MLX version, and performance state in the figure
@@ -165,13 +167,15 @@ Counter and source-cost percentages are comparable within one replay. They are
 not percentages of end-to-end model time, and the measured values are not
 targets for another machine. The
 [M4 Pro evidence ledger](./appendix-performance.md#week-2-xcode-checkpoint-contract)
-defines where each screenshot set belongs beside the operator and model
-measurements that give it meaning.
+explains how a learner-generated screenshot set relates to the operator and
+model measurements that give it meaning.
 
-Missing source lines mean the extension was not rebuilt with
-`MLX_METAL_DEBUG`. Missing counter samples mean the profiler is unsupported on
-that OS, Xcode, or GPU combination. Neither result justifies an ALU- or
-bandwidth-bound claim.
+Missing source lines can mean that the extension was not rebuilt with
+`MLX_METAL_DEBUG`, that the captured pipeline is not the intended one, or that
+source mapping failed. Missing counter samples can reflect an unsupported
+OS/Xcode/GPU combination, capture settings, or a failed replay. Check those
+causes before drawing a limiter conclusion; neither symptom by itself justifies
+an ALU- or bandwidth-bound claim.
 
 ## Longer Traces with Instruments
 
