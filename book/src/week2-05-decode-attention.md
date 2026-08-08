@@ -8,8 +8,8 @@ This chapter starts only after the Day 4 profile has verified that the fused
 model kernels reduced the repeated pointwise cluster. Linear projections remain
 important, but their operator latency is already close to the external
 denominator, while attention is the next measured removable gap through cached
-context 128. Longer-context measurements define the readable fallback rather
-than selecting this bounded kernel. During
+context `S <= 256`. Longer-context measurements use the readable fallback for
+caches beyond 256; every checked context through 256 uses the optimized path. During
 single-request decode, query length is normally one while the cached key/value
 sequence grows by one token at a time. Week 1 expresses attention as matrix
 multiplication, masking, softmax, and another matrix multiplication. That is
