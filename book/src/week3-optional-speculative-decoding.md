@@ -27,7 +27,8 @@ By the end of this chapter, you should be able to:
 - Complete Week 2 cached generation for both the draft and target models.
 - Complete the Week 3 paged cache and page-aware attention path.
 - Use compatible tokenizers for the two models. A shared token id must represent
-  the same text in both vocabularies.
+  the same text in both vocabularies. Validate that contract before either model
+  runs; mismatched prompt encodings, EOS ids, or vocabularies must fail closed.
 
 This extension comes after paged attention for two concrete reasons. Rejected
 draft tokens must release pages and repair the valid tail length, and verifying
@@ -56,12 +57,28 @@ tokens and the draft-cache offset. Stop early at EOS.
 
 Keep the proposal length configurable. A longer proposal reduces target calls
 only when the acceptance rate remains high enough to repay the extra draft work.
+Use a default of four and treat zero as an explicit target-only fallback:
+
+```python
+speculative_generate(
+    draft_model,
+    model,
+    draft_tokenizer,
+    tokenizer,
+    prompt,
+    proposal_length=4,
+)
+```
 
 ## Task 3: Verify in One Target Call
 
 Pass the last accepted token followed by the draft proposal to the target model
 in one call. Request logits for every supplied position, then compare the target
 greedy tokens with the aligned draft sequence.
+
+Keep prompt, proposal, and verification token arrays in a supported 32-bit
+integer dtype. Mixing unsigned and signed 32-bit token arrays can promote a
+concatenation to 64-bit indices, which quantized embeddings reject.
 
 The first supplied token is already accepted. Starting at the next position,
 find the longest matching prefix. If every draft token matches, keep the target
@@ -81,6 +98,10 @@ Treat cache offsets as a correctness invariant:
 Exercise mismatch at the first, middle, and final proposed token. Also test a
 fully accepted proposal and EOS inside a proposal. Compare the complete output
 with ordinary greedy generation from the target model.
+
+```bash
+pdm run test --week 3 --day 7
+```
 
 Run the integrated path with a small draft model and a larger target model:
 
