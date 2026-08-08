@@ -3,6 +3,7 @@ https://skyzh.github.io/tiny-llm/appendix-performance
 https://skyzh.github.io/tiny-llm/glossary
 https://skyzh.github.io/tiny-llm/preface
 https://skyzh.github.io/tiny-llm/setup
+https://skyzh.github.io/tiny-llm/sponsor
 https://skyzh.github.io/tiny-llm/week1-01-attention
 https://skyzh.github.io/tiny-llm/week1-02-positional-encodings
 https://skyzh.github.io/tiny-llm/week1-03-gqa
