@@ -89,3 +89,8 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 </div>
+
+## Start the Course
+
+- [View the Tiny-LLM GitHub repository](https://github.com/skyzh/tiny-llm)
+- [Start the course from the beginning](./preface.md)
