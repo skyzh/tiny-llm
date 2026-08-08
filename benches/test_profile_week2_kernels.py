@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import mlx.core as mx
+import pytest
 
 from benches import profile_week2_kernels as profile
 
@@ -65,6 +66,59 @@ def test_profile_reuses_the_model_decode_attention_boundaries():
             )
             is expected
         )
+
+
+@pytest.mark.parametrize(
+    ("phase", "tokens", "enabled", "expected_path", "expected_mask"),
+    (
+        ("decode", 128, True, "custom", None),
+        ("decode", 256, True, "custom", None),
+        ("decode", 257, True, "readable", None),
+        ("prefill", 2, True, "custom", "causal"),
+        ("prefill", 3, True, "readable", "causal"),
+        ("decode", 128, False, "readable", None),
+    ),
+)
+def test_kernel_replay_routes_attention_with_production_guard(
+    phase,
+    tokens,
+    enabled,
+    expected_path,
+    expected_mask,
+):
+    calls = []
+
+    def record(path):
+        def attention(query, _key, _value, *, scale, mask):
+            calls.append((path, scale, mask))
+            return query
+
+        return attention
+
+    implementation = SimpleNamespace(
+        decode_attention=record("custom"),
+        grouped_attention=record("readable"),
+        decode_attention_max_query=2,
+        decode_attention_max_context=256,
+    )
+    attention = SimpleNamespace(
+        num_kv_heads=1,
+        head_dim=4,
+        scale=0.5,
+        use_decode_attention=enabled,
+    )
+    layer = SimpleNamespace(
+        hidden_size=4,
+        num_attention_heads=1,
+        self_attn=attention,
+        mlp=SimpleNamespace(hidden_dim=8),
+    )
+    model = SimpleNamespace(layers_inner=[layer], precision=mx.float32)
+
+    replay = profile.KernelReplay(implementation, model, phase, tokens)
+    replay.attention()
+
+    assert calls == [(expected_path, 0.5, expected_mask)]
 
 
 def test_student_and_reference_profiles_share_the_production_guard():
