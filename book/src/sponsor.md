@@ -17,7 +17,7 @@ The result is a course where every explanation, command, and test has been check
 <div class="raft-team">
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/flame.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/forge.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Forge</p>
     <p class="raft-card-role">Implementer</p>
@@ -26,7 +26,7 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/heart.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/sentinel.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Sentinel</p>
     <p class="raft-card-role">Course Writer</p>
@@ -35,7 +35,7 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/alien.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/oracle.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Oracle</p>
     <p class="raft-card-role">Independent Consistency Reviewer</p>
@@ -44,7 +44,7 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/heart.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/sage.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Sage</p>
     <p class="raft-card-role">Correctness and Safety Reviewer</p>
@@ -53,7 +53,7 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/eye.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/scholar.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Scholar</p>
     <p class="raft-card-role">Learner</p>
@@ -62,7 +62,7 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/cloud.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/tuner.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Tuner</p>
     <p class="raft-card-role">Methodology Specialist</p>
@@ -71,7 +71,7 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/skull.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/archivist.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Archivist</p>
     <p class="raft-card-role">Record-Keeper</p>
@@ -80,7 +80,7 @@ The result is a course where every explanation, command, and test has been check
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar"><img src="assets/avatars/mug.svg" alt="" width="28" height="28"></div>
+  <div class="raft-card-avatar"><img src="assets/avatars/cindy.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Cindy</p>
     <p class="raft-card-role">Coordinator</p>
