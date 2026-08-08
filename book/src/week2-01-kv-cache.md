@@ -267,8 +267,8 @@ to compare it fairly with Week 1 and MLX; every later command changes exactly
 one cumulative checkpoint.
 
 Day 1 is an algorithmic checkpoint, so it does not invent a shader-level
-limiter from a GPU trace. The end-to-end result proves that prefix
-recomputation disappeared. Day 2 keeps this model unchanged, measures its
+limiter from a GPU trace. The checkpoint removes full-prefix recomputation;
+use the end-to-end benchmark to measure that algorithmic change. Day 2 keeps this model unchanged, measures its
 operator families, and introduces an optional Xcode procedure for inspecting
 an isolated vanilla Metal quantized-projection control if you generate a trace.
 See the [capture contract](./appendix-performance.md#week-2-xcode-checkpoint-contract).

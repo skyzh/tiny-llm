@@ -48,8 +48,8 @@ mx.eval(output)
 elapsed = perf_counter() - start
 ```
 
-The benchmark must also release request-owned caches after warmups and timed
-runs so a later sample does not inherit allocator state:
+The benchmark must also call the cache release hook after warmups and timed
+runs so cache implementations with owned or shared resources can return them:
 
 ```bash
 pdm run test --week 2 --day 2
