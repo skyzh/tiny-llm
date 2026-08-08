@@ -70,45 +70,43 @@ implementation, test, and publication readiness is tracked below.
 
 ## Roadmap
 
-The table distinguishes complete learner checkpoints (`Code`), focused tests
-(`Test`), and rendered chapters (`Doc`). Week 4's daily chapters are public for
-early review and may still change.
+The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4's daily chapters are public for early review and may still change. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
 
 Persistent Week 4 runs can store sensitive transcripts under
 `.tiny-llm/sessions`, and model-directed file or command tools are not sandboxed.
 Use a disposable workspace and read the
 [Week 4 overview](book/src/week4-overview.md) before enabling writes or commands.
 
-| Week + Chapter | Topic | Code | Test | Doc |
-|---|---|---|---|---|
-| 1.1 | Attention | ✅ | ✅ | ✅ |
-| 1.2 | RoPE | ✅ | ✅ | ✅ |
-| 1.3 | Grouped Query Attention | ✅ | ✅ | ✅ |
-| 1.4 | RMSNorm and MLP | ✅ | ✅ | ✅ |
-| 1.5 | Load the Model | ✅ | ✅ | ✅ |
-| 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ |
-| 1.7 | Sampling | ✅ | ✅ | ✅ |
-| 2.1 | KV Cache | ✅ | ✅ | ✅ |
-| 2.2 | Benchmark and Profile | ✅ | ✅ | ✅ |
-| 2.3 | Quantized Matvec | ✅ | ✅ | ✅ |
-| 2.4 | Fused Model Kernels | ✅ | ✅ | ✅ |
-| 2.5 | Fused Decode Attention | ✅ | ✅ | ✅ |
-| 2.6 | SIMD-Matrix Prefill | ✅ | ✅ | ✅ |
-| 2.7 | Split-K Prefill | ✅ | ✅ | ✅ |
-| 3.1 | Continuous Batching | ✅ | ✅ | ✅ |
-| 3.2 | Chunked Prefill | ✅ | ✅ | ✅ |
-| 3.3 | Paged KV Cache | ✅ | ✅ | ✅ |
-| 3.4 | Direct Paged Attention | ✅ | ✅ | ✅ |
-| 3.5 | Paged FlashAttention | ✅ | ✅ | ✅ |
-| 3.6 (optional) | Speculative Decoding | ✅ | ✅ | ✅ |
-| 3.x (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ |
-| 4.1 | Agent Loop | ✅ | ✅ | ✅ |
-| 4.2 | Tools | ✅ | ✅ | ✅ |
-| 4.3 | Safety and Validation | ✅ | ✅ | ✅ |
-| 4.4 | Interactive Sessions | ✅ | ✅ | ✅ |
-| 4.5 | Context Compaction | ✅ | ✅ | ✅ |
-| 4.6 | Control and Recovery | ✅ | ✅ | ✅ |
-| 4.7 | Evaluation | ✅ | ✅ | ✅ |
+| Week + Chapter | Topic | Code | Test | Doc | Audit |
+|---|---|---|---|---|---|
+| 1.1 | Attention | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 1.2 | RoPE | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 1.3 | Grouped Query Attention | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 1.4 | RMSNorm and MLP | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ | 🚧 |
+| 2.1 | KV Cache | ✅ | ✅ | ✅ | 🚧 |
+| 2.2 | Benchmark and Profile | ✅ | ✅ | ✅ | 🚧 |
+| 2.3 | Quantized Matvec | ✅ | ✅ | ✅ | 🚧 |
+| 2.4 | Fused Model Kernels | ✅ | ✅ | ✅ | 🚧 |
+| 2.5 | Fused Decode Attention | ✅ | ✅ | ✅ | 🚧 |
+| 2.6 | SIMD-Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 2.7 | Split-K Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
+| 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |
+| 3.4 | Direct Paged Attention | ✅ | ✅ | ✅ | 🚧 |
+| 3.5 | Paged FlashAttention | ✅ | ✅ | ✅ | 🚧 |
+| 3.6 (optional) | Speculative Decoding | ✅ | ✅ | ✅ | 🚧 |
+| 3.x (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ | 🚧 |
+| 4.1 | Agent Loop | ✅ | ✅ | ✅ | 🚧 |
+| 4.2 | Tools | ✅ | ✅ | ✅ | 🚧 |
+| 4.3 | Safety and Validation | ✅ | ✅ | ✅ | 🚧 |
+| 4.4 | Interactive Sessions | ✅ | ✅ | ✅ | 🚧 |
+| 4.5 | Context Compaction | ✅ | ✅ | ✅ | 🚧 |
+| 4.6 | Control and Recovery | ✅ | ✅ | ✅ | 🚧 |
+| 4.7 | Evaluation | ✅ | ✅ | ✅ | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.
