@@ -10,6 +10,7 @@ command = "mdbook-toc"
 renderer = ["html"]
 
 [output.html]
+additional-css = ["custom.css"]
 git-repository-url = "https://github.com/skyzh/tiny-llm"
 
 [preprocessor.katex]

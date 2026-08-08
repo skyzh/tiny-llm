@@ -1,0 +1,69 @@
+/* Raft-style sponsor cards */
+.raft-team {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 1.5em 0;
+}
+
+.raft-card {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color, #d0d7de);
+    border-radius: 8px;
+    background: var(--card-bg, #f6f8fa);
+    align-items: flex-start;
+}
+
+.raft-card-avatar {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--avatar-bg, #e8ecf0);
+    color: var(--avatar-fg, #57606a);
+}
+
+.raft-card-avatar svg {
+    width: 28px;
+    height: 28px;
+}
+
+.raft-card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.raft-card-name {
+    font-weight: 600;
+    font-size: 0.95em;
+    margin: 0 0 2px 0;
+    color: var(--name-color, inherit);
+}
+
+.raft-card-role {
+    font-size: 0.8em;
+    color: var(--role-color, #656d76);
+    margin: 0 0 6px 0;
+}
+
+.raft-card-body p {
+    margin: 0;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+@media (max-width: 480px) {
+    .raft-card {
+        flex-direction: column;
+        gap: 8px;
+    }
+    .raft-card-avatar {
+        width: 32px;
+        height: 32px;
+    }
+}
