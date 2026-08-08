@@ -18,19 +18,21 @@
 
 .raft-card-avatar {
     flex-shrink: 0;
-    width: 40px;
-    height: 40px;
-    
+    width: 48px;
+    height: 48px;
     display: flex;
     align-items: center;
     justify-content: center;
+    border: 2px solid var(--avatar-border, #141111);
+    overflow: hidden;
     background: var(--avatar-bg, #e8ecf0);
-    color: var(--avatar-fg, #57606a);
 }
 
-.raft-card-avatar svg {
-    width: 28px;
-    height: 28px;
+.raft-card-avatar svg,.raft-card-avatar img {
+    width: 44px;
+    height: 44px;
+    image-rendering: pixelated;
+    display: block;
 }
 
 .raft-card-body {
