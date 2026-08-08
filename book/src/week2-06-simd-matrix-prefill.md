@@ -14,7 +14,7 @@ Re-run the dependency-aware kernel profile from Day 2 with
 `--case decode-attention:prefill:128`. Continue only when projections dominate the
 attribution and the complete-model prefill phase moves with their latency. The
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
-shows that evidence chain. MLX remains an external performance denominator;
+is recorded in the performance appendix. MLX remains an external performance denominator;
 the performance-lab path in your solution continues to call the C++/Metal
 primitive you implement for every projection.
 
