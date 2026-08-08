@@ -470,7 +470,7 @@ The fresh-process samples for the short control point are checked in at
 `benchmark_results/m4-pro-qwen3-4b-week2-32-mlx-0.32.0.json`. The completed
 Week 2 path reaches 95.4% of MLX prefill, 84.4% of MLX decode, and 85.3% of MLX
 end-to-end output throughput at the 128-token acceptance shape. Both required
-phase ratios exceed 80%; output is also 85.3% of MLX. Longer static sweeps remain attention diagnostics;
+phase ratios exceed 80%. Longer static sweeps remain attention diagnostics;
 they do not test the memory-management reasons for paging.
 
 ## Week 3 Performance by Chapter
