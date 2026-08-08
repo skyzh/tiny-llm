@@ -53,7 +53,7 @@ purpose-built kernel versus a graph of several general-purpose kernels.
 ## Task 1: RMSNorm
 
 Begin with one SIMD group per input row, then profile it. A 2,560-element hidden
-row gives 32 lanes too much serial work. The optimized kernel launches 256
+row gives 32 lanes roughly 80 serial elements each; the optimized kernel launches 256
 threads, or eight SIMD groups, per row. Each group reduces its portion with
 `simd_sum`; lane zero writes eight partial sums to threadgroup memory; the first
 SIMD group performs the second reduction:

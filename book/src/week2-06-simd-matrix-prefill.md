@@ -84,8 +84,7 @@ column tiles. The result must retain the model-facing 16-bit dtype.
 
 Use a cooperative block loader so adjacent threads and each thread's local
 reads form contiguous transactions. This is a requirement of the schedule,
-not a cosmetic detail: fragment arithmetic cannot compensate for scalar,
-strided tile loads. Benchmark Q, K/V, gate/up, and down projections separately
+not a cosmetic detail: fragment arithmetic alone cannot hide the cost of scalar, strided tile loads. Benchmark both load styles and keep the faster one for each projection shape.
 at their Qwen3-4B dimensions so both wide and narrow output grids are covered.
 
 ## Task 3: Hoist Quantization Parameters
