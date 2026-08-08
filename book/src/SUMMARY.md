@@ -43,3 +43,4 @@
 ---
 
 [Glossary Index](./glossary.md)
+- [Sponsor](./sponsor.md)
