@@ -1,5 +1,9 @@
 # Day 1: From Generation to an Agent Loop
 
+> 🚧 **Early-review WIP:** This chapter is public for early review and may
+> change. Use a disposable workspace when running the agent or enabling writes
+> or commands.
+
 The decoder from Week 1 produces text once and exits. An agent repeatedly turns
 text into an action, executes that action, and gives the result back to the
 model. Today you will make that control flow explicit.

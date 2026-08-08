@@ -71,9 +71,8 @@ implementation, test, and publication readiness is tracked below.
 ## Roadmap
 
 The table distinguishes complete learner checkpoints (`Code`), focused tests
-(`Test`), and rendered chapters (`Doc`). Week 4 has tested reference checkpoints
-through Day 7, but its daily chapters are not yet published and Days 1–3 remain
-incomplete learner checkpoints.
+(`Test`), and rendered chapters (`Doc`). Week 4's daily chapters are public for
+early review, but Days 1–3 remain incomplete learner checkpoints.
 
 Persistent Week 4 runs can store sensitive transcripts under
 `.tiny-llm/sessions`, and model-directed file or command tools are not sandboxed.
@@ -103,13 +102,13 @@ Use a disposable workspace and read the
 | 3.5 | Paged FlashAttention | ✅ | ✅ | 🚧 |
 | 3.6 (optional) | Speculative Decoding | 🚧 | 🚧 | 🚧 |
 | 3.x (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ |
-| 4.1 | Agent Loop | 🚧 | 🚧 | 🚧 |
-| 4.2 | Tools | 🚧 | 🚧 | 🚧 |
-| 4.3 | Safety and Validation | 🚧 | 🚧 | 🚧 |
-| 4.4 | Interactive Sessions | ✅ | ✅ | 🚧 |
-| 4.5 | Context Compaction | ✅ | ✅ | 🚧 |
-| 4.6 | Control and Recovery | ✅ | ✅ | 🚧 |
-| 4.7 | Evaluation | ✅ | ✅ | 🚧 |
+| 4.1 | Agent Loop | 🚧 | 🚧 | ✅ |
+| 4.2 | Tools | 🚧 | 🚧 | ✅ |
+| 4.3 | Safety and Validation | 🚧 | 🚧 | ✅ |
+| 4.4 | Interactive Sessions | ✅ | ✅ | ✅ |
+| 4.5 | Context Compaction | ✅ | ✅ | ✅ |
+| 4.6 | Control and Recovery | ✅ | ✅ | ✅ |
+| 4.7 | Evaluation | ✅ | ✅ | ✅ |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

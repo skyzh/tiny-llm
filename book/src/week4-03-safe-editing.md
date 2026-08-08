@@ -1,5 +1,9 @@
 # Day 3: Safe Editing and Validation
 
+> 🚧 **Early-review WIP:** This chapter is public for early review and may
+> change. Use a disposable workspace when running the agent or enabling writes
+> or commands.
+
 Tools connect probabilistic model output to real side effects. Today you will
 make that boundary explicit. File tools should remain inside one workspace,
 mutations should require review, and successful work should be validated.

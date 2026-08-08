@@ -1,5 +1,9 @@
 # Day 6: Control and Recovery
 
+> 🚧 **Early-review WIP:** This chapter is public for early review and may
+> change. Use a disposable workspace when running the agent or enabling writes
+> or commands.
+
 Long-running agents need a way to stop, accept a correction, and recover from a
 file mutation that was interrupted at an awkward moment. Day 6 adds those
 controls without treating a working directory, a process group, or a model
@@ -8,9 +12,8 @@ response as a safety boundary.
 > **Implementation status:** The reference implementation, learner API surface,
 > and focused tests are executable. Ctrl-C interruption is integrated with the
 > CLI. Checkpoint, undo, branch, and steering operations are programmatic APIs;
-> the CLI does not yet expose commands for them. Like every Week 4 daily
-> chapter, this file remains unrendered pending course review; executable does
-> not mean published.
+> the CLI does not yet expose commands for them. The chapter remains WIP even
+> though the checkpoint is executable.
 
 ## Check the Chapter
 

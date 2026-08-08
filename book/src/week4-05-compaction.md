@@ -1,13 +1,16 @@
 # Day 5: Token-Aware Context Compaction
 
+> 🚧 **Early-review WIP:** This chapter is public for early review and may
+> change. Use a disposable workspace when running the agent or enabling writes
+> or commands.
+
 An append-only session grows forever, but the model has a finite context window.
 Day 5 derives a bounded model-visible working set without deleting or rewriting
 the durable trace from Day 4.
 
 > **Implementation status:** The reference implementation, learner API surface,
-> and focused tests in this chapter are executable. Like every Week 4 daily
-> chapter, this file remains unrendered pending course review; executable does
-> not mean published.
+> and focused tests in this chapter are executable. The chapter remains WIP even
+> though the checkpoint is executable.
 
 ## Check the Chapter
 

@@ -1,5 +1,9 @@
 # Day 2: Tools and Structured Actions
 
+> 🚧 **Early-review WIP:** This chapter is public for early review and may
+> change. Use a disposable workspace when running the agent or enabling writes
+> or commands.
+
 The agent loop becomes useful when actions can inspect and change a repository.
 The course protocol uses five actions: `list_files`, `read_file`, `edit_file`,
 `write_file`, and `run_command`.

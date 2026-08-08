@@ -1,13 +1,16 @@
 # Day 4: Interactive Sessions and Resume
 
+> 🚧 **Early-review WIP:** This chapter is public for early review and may
+> change. Use a disposable workspace when running the agent or enabling writes
+> or commands.
+
 The stateless loop from the first three days loses its conversation whenever the
 process exits. This chapter makes the event stream durable and adds a reusable
 generation cache without making either representation depend on the other.
 
 > **Implementation status:** The reference implementation, learner API surface,
-> and focused tests in this chapter are executable. Like every Week 4 daily
-> chapter, this file remains unrendered pending course review; executable does
-> not mean published.
+> and focused tests in this chapter are executable. The chapter remains WIP even
+> though the checkpoint is executable.
 
 ## Check the Chapter
 
