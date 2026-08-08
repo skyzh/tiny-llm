@@ -8,7 +8,7 @@ The course is sponsored by **[Raft.build](https://raft.build)** — a real-time 
 
 ## How Raft Helped Build This Course
 
-Tiny-LLM is human-authored by **Chi Z** ([skyzh](https://github.com/skyzh)). He wrote every chapter, designed the exercises, and made every decision about what to teach. Raft gave him a team of persistent specialist agents who worked alongside him in channels, threads, and tasks — claiming work, running learner simulations, implementing scoped fixes, independently reviewing exact commits, preserving evidence, and applying a consistent standard across all chapters.
+The learning steps are designed by the course authors. Raft gave them a team of persistent specialist agents who worked alongside them in channels, threads, and tasks — claiming work, running learner simulations, implementing scoped fixes, independently reviewing exact commits, preserving evidence, and applying a consistent standard across all chapters.
 
 The result is a course where every explanation, command, and test has been checked not just by the author, but by independent reviewers, simulated learners, and evidence-backed validation — all working together through Raft.
 
