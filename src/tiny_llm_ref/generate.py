@@ -7,6 +7,8 @@ from typing import Callable
 
 
 def _release_kv_cache(kv_cache):
+    if kv_cache is None:
+        return
     for layer in kv_cache:
         layer.release()
 
@@ -85,9 +87,51 @@ def speculative_generate(
     draft_tokenizer: TokenizerWrapper,
     tokenizer: TokenizerWrapper,
     prompt: str,
+    proposal_length: int = 4,
 ) -> str:
-    draft_kv_cache = draft_model.create_kv_cache()
+    if (
+        not isinstance(proposal_length, int)
+        or isinstance(proposal_length, bool)
+        or proposal_length < 0
+    ):
+        raise ValueError("proposal_length must be a non-negative integer")
+
+    def _encode(tokenizer):
+        return [
+            int(token) for token in tokenizer.encode(prompt, add_special_tokens=False)
+        ]
+
+    def _eos_ids(tokenizer):
+        eos_ids = getattr(tokenizer, "eos_token_ids", None)
+        if eos_ids is None:
+            eos_ids = {tokenizer.eos_token_id}
+        return {int(token) for token in eos_ids}
+
+    target_prompt_tokens = _encode(tokenizer)
+    draft_prompt_tokens = _encode(draft_tokenizer)
+    if not target_prompt_tokens:
+        raise ValueError("prompt must encode to at least one token")
+    if target_prompt_tokens != draft_prompt_tokens:
+        raise ValueError("draft and target tokenizers encode the prompt differently")
+    if _eos_ids(tokenizer) != _eos_ids(draft_tokenizer):
+        raise ValueError("draft and target tokenizers use different EOS token ids")
+
+    target_get_vocab = getattr(tokenizer, "get_vocab", None)
+    draft_get_vocab = getattr(draft_tokenizer, "get_vocab", None)
+    if not callable(target_get_vocab) or not callable(draft_get_vocab):
+        raise ValueError(
+            "draft and target tokenizers must expose comparable vocabularies"
+        )
+    if target_get_vocab() != draft_get_vocab():
+        raise ValueError("draft and target tokenizers use different token ids")
+
+    target_eos_ids = _eos_ids(tokenizer)
+    draft_eos_ids = _eos_ids(draft_tokenizer)
+    detokenizer = tokenizer.detokenizer
+    detokenizer.reset()
+
     kv_cache = model.create_kv_cache()
+    draft_kv_cache = None
 
     def _step(model, y, offset, kv_cache, n_tokens=1):
         logits = model(y[None], offset, kv_cache, logits_to_keep=n_tokens)
@@ -96,100 +140,183 @@ def speculative_generate(
         else:
             logits = logits[:, -1, :]
         logprobs = logits - mx.logsumexp(logits, keepdims=True)
-        sampler = lambda x: mx.argmax(x, axis=-1)
-        y = sampler(logprobs)
+        y = mx.argmax(logprobs, axis=-1).astype(mx.int32)
         return y, logprobs.squeeze(0)
 
-    # prefill with the prompt, using the large model
-    def _prefill(model, tokenizer, prompt, kv_cache):
-        prefill_tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
-        offset = 0
-        token, _ = _step(model, prefill_tokens, offset, kv_cache)
+    def _token_array(tokens):
+        return mx.array(tokens, dtype=mx.int32)
+
+    def _token_id(token):
+        return int(token.item())
+
+    def _prefill(model, prefill_tokens, kv_cache):
+        token, _ = _step(model, _token_array(prefill_tokens), 0, kv_cache)
         mx.eval(token)
-        if token.item() == tokenizer.eos_token_id:
+        return _token_id(token), len(prefill_tokens)
+
+    def _rewind_cache(kv_cache, revert_len):
+        if revert_len == 0:
             return
-        offset = prefill_tokens.size
-        return token, offset
+        for layer in kv_cache:
+            layer.rewind(revert_len)
+
+    def _assert_cache_offset(kv_cache, expected):
+        for layer in kv_cache:
+            if hasattr(layer, "offset"):
+                assert layer.offset == expected
+
+    def _print_text(text, progress):
+        newline = "\n"
+        print(f"+{progress} {text.replace(newline, ' ')[-80:]}")
+
+    def _emit(token_ids):
+        for token_id in token_ids:
+            detokenizer.add_token(token_id)
+        if token_ids:
+            _print_text(detokenizer.text, len(token_ids))
+
+    def _finish():
+        finalize = getattr(detokenizer, "finalize", None)
+        if callable(finalize):
+            finalize()
+        text = detokenizer.text
+        print(text)
+        return text
+
+    def _target_only(token_id, offset):
+        while True:
+            if token_id in target_eos_ids:
+                return _finish()
+            _emit([token_id])
+            token, _ = _step(
+                model,
+                _token_array([token_id]),
+                offset,
+                kv_cache,
+            )
+            mx.eval(token)
+            offset += 1
+            _assert_cache_offset(kv_cache, offset)
+            token_id = _token_id(token)
 
     try:
-        draft_token, draft_offset = _prefill(
-            draft_model, draft_tokenizer, prompt, draft_kv_cache
+        token_id, offset = _prefill(model, target_prompt_tokens, kv_cache)
+        _assert_cache_offset(kv_cache, offset)
+        if token_id in target_eos_ids:
+            return _finish()
+        if proposal_length == 0:
+            return _target_only(token_id, offset)
+
+        draft_kv_cache = draft_model.create_kv_cache()
+        draft_token_id, draft_offset = _prefill(
+            draft_model,
+            draft_prompt_tokens,
+            draft_kv_cache,
         )
-        token, offset = _prefill(model, tokenizer, prompt, kv_cache)
+        _assert_cache_offset(draft_kv_cache, draft_offset)
+        assert offset == draft_offset
+        if draft_token_id in draft_eos_ids:
+            return _target_only(token_id, offset)
 
-        def _decode_one(token, tokenizer):
-            if token.item() == tokenizer.eos_token_id:
-                return False
-            detokenizer = tokenizer.detokenizer
-            detokenizer.add_token(token.item())
-            return True
-
-        def draft_generate(model, last_token, offset, kv_cache, num_drafts):
-            tokens = []
+        def _draft_generate(last_token_id, offset, max_tokens):
+            tokens: list[int] = []
             current_offset = offset
-            for _ in range(num_drafts):
-                token, _ = _step(model, last_token, current_offset, kv_cache)
-                mx.eval(token)
-                tokens.append(token.item())
-                last_token = token
-                current_offset += 1
-            return tokens
-
-        num_drafts = 4
-
-        def _rewind_cache(kv_cache, revert_len):
-            for layer in kv_cache:
-                layer.rewind(revert_len)
-
-        def _print_text(text, progress):
-            newline = "\n"
-            print(f"+{progress} {text.replace(newline, ' ')[-80:]}")
-
-        # speculative decode
-        while True:
-            draft_tokens = draft_generate(
-                draft_model, token, draft_offset, draft_kv_cache, num_drafts
-            )
-            draft_offset += num_drafts
-            # assume both models use the same tokenizer
-            draft_tokens = mx.concat([token, mx.array(draft_tokens)])
-            new_tokens, _ = _step(model, draft_tokens, offset, kv_cache, num_drafts + 1)
-            new_tokens = new_tokens.tolist()[0]
-            offset += num_drafts + 1
-            last_new_token = new_tokens[-1]
-            new_tokens = mx.array([token.item()] + new_tokens[:-1])
-            assert len(new_tokens) == len(draft_tokens)
-            accept_all = True
-            for i in range(len(new_tokens)):
-                if new_tokens[i] != draft_tokens[i]:
-                    # revert the full draft generation; re-generate next time
-                    # or we matched full, then no rewind and use the last token
-                    assert i >= 1  # first token is always the same
-                    revert_len = len(draft_tokens) - i
-                    _rewind_cache(draft_kv_cache, revert_len - 1)
-                    draft_offset -= revert_len - 1
-                    _rewind_cache(kv_cache, revert_len)
-                    token = mx.array([new_tokens[i]])
-                    offset -= revert_len
-                    assert offset == draft_offset
-                    assert offset == kv_cache[0].offset
-                    _print_text(tokenizer._detokenizer.text, i)
-                    accept_all = False
-                    break
-                if not _decode_one(new_tokens[i], tokenizer):
-                    print(tokenizer._detokenizer.text)
-                    return tokenizer._detokenizer.text
-            if accept_all:
-                _print_text(tokenizer._detokenizer.text, len(new_tokens))
-                draft_generate(
+            for _ in range(max_tokens):
+                token, _ = _step(
                     draft_model,
-                    mx.array(draft_tokens[-1:]),
-                    draft_offset,
+                    _token_array([last_token_id]),
+                    current_offset,
                     draft_kv_cache,
-                    1,
                 )
-                token = mx.array([last_new_token])
-                draft_offset += 1
+                mx.eval(token)
+                last_token_id = _token_id(token)
+                tokens.append(last_token_id)
+                current_offset += 1
+                if last_token_id in draft_eos_ids:
+                    break
+            return tokens, current_offset
+
+        while True:
+            draft_tokens, draft_offset = _draft_generate(
+                token_id,
+                draft_offset,
+                proposal_length,
+            )
+            _assert_cache_offset(draft_kv_cache, draft_offset)
+
+            verification_ids = [token_id, *draft_tokens]
+            new_tokens, _ = _step(
+                model,
+                _token_array(verification_ids),
+                offset,
+                kv_cache,
+                len(verification_ids),
+            )
+            mx.eval(new_tokens)
+            target_predictions = [
+                int(value) for value in new_tokens.reshape(-1).tolist()
+            ]
+            assert len(target_predictions) == len(verification_ids)
+            offset += len(verification_ids)
+            _assert_cache_offset(kv_cache, offset)
+
+            aligned_target = [token_id, *target_predictions[:-1]]
+            mismatch_index = None
+            terminal_index = None
+            for i, (target_id, draft_id) in enumerate(
+                zip(aligned_target, verification_ids, strict=True)
+            ):
+                if target_id != draft_id:
+                    mismatch_index = i
+                    break
+                if target_id in target_eos_ids:
+                    terminal_index = i
+                    break
+
+            if terminal_index is not None:
+                _emit(aligned_target[:terminal_index])
+                target_rewind = len(verification_ids) - terminal_index
+                draft_rewind = len(draft_tokens) - terminal_index
+                _rewind_cache(kv_cache, target_rewind)
+                _rewind_cache(draft_kv_cache, draft_rewind)
+                offset -= target_rewind
+                draft_offset -= draft_rewind
+                assert offset == draft_offset
+                _assert_cache_offset(kv_cache, offset)
+                _assert_cache_offset(draft_kv_cache, draft_offset)
+                return _finish()
+
+            if mismatch_index is not None:
+                assert mismatch_index >= 1
+                _emit(aligned_target[:mismatch_index])
+                target_rewind = len(verification_ids) - mismatch_index
+                draft_rewind = len(draft_tokens) - mismatch_index
+                _rewind_cache(kv_cache, target_rewind)
+                _rewind_cache(draft_kv_cache, draft_rewind)
+                offset -= target_rewind
+                draft_offset -= draft_rewind
+                assert offset == draft_offset
+                _assert_cache_offset(kv_cache, offset)
+                _assert_cache_offset(draft_kv_cache, draft_offset)
+                token_id = aligned_target[mismatch_index]
+                if token_id in target_eos_ids:
+                    return _finish()
+                continue
+
+            _emit(aligned_target)
+            bonus_token_id = target_predictions[-1]
+            if bonus_token_id in target_eos_ids:
+                return _finish()
+
+            _, draft_offset = _draft_generate(
+                verification_ids[-1],
+                draft_offset,
+                1,
+            )
+            token_id = bonus_token_id
+            assert offset == draft_offset
+            _assert_cache_offset(kv_cache, offset)
+            _assert_cache_offset(draft_kv_cache, draft_offset)
     finally:
         _release_kv_cache(draft_kv_cache)
         _release_kv_cache(kv_cache)
