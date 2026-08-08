@@ -13,9 +13,7 @@ Qwen3 path for single-request decoding. It begins with the algorithm change:
 prefill once, retain a dense KV cache, and decode one new token at a time.
 Later chapters introduce kernels that address the costs the KV cache exposes.
 
-Week 2 inherits Week 1's BF16 model-storage contract. Dense and quantized
-weights, activations, projections, KV-cache entries, and model-facing kernel
-outputs are BF16. Numerically sensitive reductions, dot products, and
+Week 2 keeps BF16 for dense weights, quantization scales and biases, activations, projections, KV-cache entries, and model-facing kernel outputs. Packed W4 weight codes are stored as `uint32`. Numerically sensitive reductions, dot products, and
 online-softmax state accumulate in FP32 inside readable expressions or kernel
 registers. This contract remains in force for Week 3.
 
