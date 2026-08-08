@@ -195,8 +195,9 @@ validated range.
 
 Measure the attention operator and the cumulative checkpoint separately. The
 first progression is the matched short-context acceptance test for this
-bounded kernel. The second keeps the fixed Week 2 denominator as a neutral
-control and exposes its unchanged 128-token prefill profile:
+bounded kernel. The second keeps the fixed Week 2 denominator: its 128-token
+prefill remains outside the query-length guard, while timed one-token decode
+steps with `S=129` through `S=256` enter the current context guard:
 
 ```bash
 pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
@@ -260,8 +261,11 @@ and medians, is
 `benchmark_results/m4-pro-qwen3-4b-week2-attention-context-sweep-mlx-0.32.0.json`.
 
 The production-boundary sweep held context at 128, selected Qwen3-4B's 4:1 GQA
-ratio and causal mask, and balanced L1/L2/L4/L8 order over six passes. Each pass
-also rotated the three implementation orders and retained every sample:
+ratio, and balanced L1/L2/L4/L8 order over six passes. It used the causal form
+for every query length: at `L=1` that mask permits the entire existing cache and
+is equivalent to unmasked one-token decode, while `L>1` measures causal
+multi-token chunks. Each pass also rotated the three implementation orders and
+retained every sample:
 
 | Query length | Readable | Metal | MLX | Metal speedup | Pass wins |
 |---:|---:|---:|---:|---:|---:|
@@ -286,15 +290,15 @@ pdm run bench-week2-operators --solution tiny_llm_ref --model qwen3-4b \
 The checked raw record is
 `benchmark_results/m4-pro-qwen3-4b-week2-attention-query-sweep-mlx-0.32.0.json`.
 
-The fixed `128/129` control does not execute the custom attention kernel:
-prefill has `L=128`, and the first decode call appends the new token before the
-guard sees `S=129`. Treat any Day 4-to-Day 5 difference in that table as noise,
-not an attention gain. Return to its 128-token prefill attribution and continue
-to Day 6 only when quantized matrix-shaped projections dominate it.
+In the fixed `128/129` workload, prefill has `L=128` and uses the readable path.
+The first timed decode call appends the new token before the guard sees `S=129`;
+the one-token decode calls through `S=256` therefore use the custom path. Keep
+the prefill attribution separate from any decode change, and continue to Day 6
+only when quantized matrix-shaped projections dominate prefill.
 The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
 pairs the context microbenchmarks with the matched short-context model delta,
 fixed-workload control, and prefill attribution. The optional Xcode replay
-verifies the attention dispatch inside its measured guard; the fixed workload's
+can inspect the attention dispatch if you generate a trace; the fixed workload's
 unchanged prefill exposes the next matrix-shaped projection bottleneck.
 
 {{#include copyright.md}}

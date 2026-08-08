@@ -105,55 +105,35 @@ Logical weight matrix W: K × N
 Group size: G = 128
 Number of groups per row = N / G
 
-For each group of G consecutive values in a row:
-  1. Find min and max values
-  2. Compute scale and bias to map [min, max] → [0, 15] (4-bit range)
-  3. Quantize each value to an integer code from 0 through 15
+For each stored group of G consecutive values in a row:
+  1. Unpack each unsigned 4-bit code q in [0, 15]
+  2. Load the group's stored scale s and bias b
+  3. Reconstruct each value as q * s + b
 ```
 
-### Map a Group Into 16 Codes
+### Reconstruct a Stored Group
 
-Affine quantization maps the minimum and maximum weight in each group onto the
-lowest and highest 4-bit codes. For a weight $w$, compute its code $q$ and its
-reconstructed value $\hat{w}$ as:
-
-$$
-q = \operatorname{clamp}\left(\operatorname{round}\left(\frac{w - b}{s}\right), 0, 15\right)
-$$
+The checkpoint already contains the packed codes and their affine parameters.
+For an unpacked unsigned code $q$, use the stored scale $s$ and bias $b$
+directly:
 
 $$
 \hat{w} = q s + b
 $$
 
-Here $s$ is the scale and $b$ is the bias. Given a group with minimum value
-$v_{\min}$ and maximum value $v_{\max}$:
+The codes are unsigned, but the stored scale is signed. A positive scale maps
+code 0 to the lower endpoint and code 15 toward the upper endpoint. A negative
+scale reverses that orientation: code 0 is the upper endpoint and code 15 moves
+toward the lower endpoint. Both orientations occur in the shipped Qwen3-4B MLX
+checkpoint, so do not recompute `scale` and `bias` from an assumed min/max
+orientation.
 
-$$
-s = \frac{v_{\max} - v_{\min}}{2^4 - 1}
-  = \frac{v_{\max} - v_{\min}}{15}
-$$
-
-$$
-b = v_{\min}
-$$
-
-For example, consider a shortened group with five values:
+For example, these two stored parameter pairs reconstruct the same endpoint
+range in opposite code order:
 
 ```plain
-Group values: [-0.5, -0.3, 0.1, 0.4, 0.8]
-min = -0.5, max = 0.8
-
-scale = (0.8 - (-0.5)) / 15 = 1.3 / 15 ≈ 0.0867
-bias = -0.5
-
-Quantization:
-  -0.5 → round((-0.5 - (-0.5)) / 0.0867) = 0
-  -0.3 → round((-0.3 - (-0.5)) / 0.0867) = 2
-   0.1 → round((0.1 - (-0.5)) / 0.0867) = 7
-   0.4 → round((0.4 - (-0.5)) / 0.0867) = 10
-   0.8 → round((0.8 - (-0.5)) / 0.0867) = 15
-
-Quantized: [0, 2, 7, 10, 15] (4 bits each)
+positive orientation: scale =  0.0867, bias = -0.5  => q=0 is -0.5, q=15 is about 0.8
+negative orientation: scale = -0.0867, bias =  0.8  => q=0 is  0.8, q=15 is about -0.5
 ```
 
 All required quantized-matmul tests use `group_size = 128` and BF16 scales,
@@ -347,8 +327,8 @@ matrix and its dequantization parameters:
 | Field | Shape | Description |
 |-------|-------|-------------|
 | `weight` | $(K, N/8)$ uint32 | Packed quantized weights. Each uint32 stores eight consecutive 4-bit values. |
-| `scales` | $(K, N/G)$ bfloat16 | Per-group scale factors for dequantization. Each group of $G$ consecutive values shares one scale. Recall: $\text{scale} = (v_{max} - v_{min}) / 15$ |
-| `biases` | $(K, N/G)$ bfloat16 | Per-group bias (offset) for dequantization. Recall: $\text{bias} = v_{min}$ |
+| `scales` | $(K, N/G)$ bfloat16 | Stored signed per-group scale factors for dequantization. The sign determines which endpoint maps to the low codes. |
+| `biases` | $(K, N/G)$ bfloat16 | Stored per-group offsets. Code 0 reconstructs to this value. |
 | `group_size` | int | Number of consecutive values that share the same scale/bias. For the Qwen3 MLX 4-bit weights used here, this is `128`. |
 | `bits` | int | Quantization bit width (typically 4, meaning values are in range $[0, 15]$) |
 
@@ -660,16 +640,16 @@ them in every layer; once their operator latency is close to MLX, that bar is
 no longer the largest removable gap.
 
 The [Xcode checkpoint contract](./appendix-performance.md#week-2-xcode-checkpoint-contract)
-records the pipeline, limiters, memory traffic, and highest-cost source lines
-with the consistent screenshot set from the advanced appendix.
+describes how to inspect the pipeline, limiters, memory traffic, and
+highest-cost source lines if you generate the optional trace.
 Continue to Day 4 when the matched projection table is close to MLX and the
 post-Day-3 profile makes normalization, position, and activation the largest
 removable gap. If the projection comparison is still far behind, keep tuning
 the matvec instead. The
 [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
-pairs the model delta, projection microbenchmarks, attribution, and the
-source-enabled matvec trace. Its matched operator result is the reason the hot
-masked products do not become Day 4: after the projection gap shrinks, the
-pointwise cluster is the larger removable model cost.
+pairs the model delta, projection microbenchmarks, and attribution. Its matched
+operator result is the reason the hot matvec products do not remain the next
+target: after the projection gap shrinks, the pointwise cluster is the larger
+removable model cost.
 
 {{#include copyright.md}}

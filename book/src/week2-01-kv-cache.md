@@ -269,8 +269,8 @@ one cumulative checkpoint.
 Day 1 is an algorithmic checkpoint, so it does not invent a shader-level
 limiter from a GPU trace. The end-to-end result proves that prefix
 recomputation disappeared. Day 2 keeps this model unchanged, measures its
-operator families, and defines the consistent Xcode checkpoint series around
-an isolated vanilla Metal quantized-projection control in the
-[reference capture contract](./appendix-performance.md#week-2-xcode-checkpoint-contract).
+operator families, and introduces an optional Xcode procedure for inspecting
+an isolated vanilla Metal quantized-projection control if you generate a trace.
+See the [capture contract](./appendix-performance.md#week-2-xcode-checkpoint-contract).
 
 {{#include copyright.md}}

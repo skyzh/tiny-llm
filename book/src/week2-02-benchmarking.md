@@ -251,9 +251,9 @@ Attach two results to the checkpoint report: the fresh-process JSON with your
 solution and MLX, and the kernel-group JSON with absolute times as well as
 shares. The first says how far decode is from MLX; the second says which
 operator family owns the current implementation's time. The optional advanced
-lab replays an inspectable vanilla Metal quantized projection and captures the
-same Xcode views used by every later checkpoint. That isolated trace does not replace the
-dependency-aware attribution that ranks the complete operator families.
+lab can replay an inspectable vanilla Metal quantized projection if you generate
+a trace. That shader-local replay does not replace the dependency-aware
+attribution that ranks the complete operator families.
 
 Continue to Day 3 when projection work is the largest removable cost and its
 dense weight traffic scales with the roofline calculation. If another family
@@ -261,10 +261,10 @@ dominates your profile, inspect that family before copying the reference
 solution's next step. The
 [reference checkpoint](./appendix-performance.md#day-2-measure-before-optimizing)
 pairs its end-to-end result with the synchronized attribution while keeping
-machine-specific values in the appendix. Its Xcode control makes the schedule
-concrete: the vanilla packed-weight Metal projection spends each output thread
-walking the full reduction independently. The Day 2 model itself still uses
-dense weights; the complete-model attribution, not this isolated control,
-selects the Day 3 storage and scheduling change before the smaller families.
+machine-specific values in the appendix. The optional vanilla Metal control
+makes the schedule inspectable: each output thread walks the full reduction
+independently. The Day 2 model itself still uses dense weights; the
+complete-model attribution, not this isolated control, selects the Day 3
+storage and scheduling change before the smaller families.
 
 {{#include copyright.md}}
