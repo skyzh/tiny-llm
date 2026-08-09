@@ -296,6 +296,15 @@ Before implementing, make sure the following are clear:
 src/tiny_llm/paged_kv_cache.py
 ```
 
+Modify `TinyKvPagedPool.__init__`, `allocate_page`, `write_page_slice`, and
+`free_page` in this task. For the slice-sized device
+write, replace the Week 3 Day 3 stubs `tiny_llm_ext::paged_cache_update`,
+`PagedCacheUpdate::eval_cpu`, and `PagedCacheUpdate::eval_gpu` in
+`src/extensions/src/paged_attention.cpp`, and implement
+`paged_cache_update_kernel` in `src/extensions/src/paged_attention.metal`.
+Their declaration, binding, source/Metal files, and CMake registration already
+exist; do not create a second paged-cache API.
+
 Design layer-owned page pools that:
 
 - own a free-page allocator,
@@ -317,6 +326,10 @@ allocated page ids.
 src/tiny_llm/paged_kv_cache.py
 ```
 
+Modify `TinyKvPagedCache.__init__`, `update_and_fetch`, `release`, and
+`rewind`. Use `TinyKvPagedPool.write_page_slice` from Task 1 for
+every physical append.
+
 Replace the "one layer cache = one dense KV tensor" model with:
 
 - `page_ids`
@@ -331,6 +344,12 @@ Replace the "one layer cache = one dense KV tensor" model with:
 src/tiny_llm/paged_kv_cache.py
 src/tiny_llm/qwen3_week3.py
 ```
+
+Modify `TinyKvPagedCache.gather_dense` in
+`src/tiny_llm/paged_kv_cache.py`, plus `Qwen3ModelWeek3.__init__`,
+`Qwen3ModelWeek3.create_kv_cache`, and `Qwen3MultiHeadAttention.__call__` in
+`src/tiny_llm/qwen3_week3.py`. This checkpoint deliberately does not implement
+`paged_attention`; Day 4 owns that function.
 
 Build a compatibility path that reconstructs dense K/V from pages and compares it against `TinyKvFullCache`.
 

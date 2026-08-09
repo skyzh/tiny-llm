@@ -25,6 +25,10 @@ dispatch.
 
 ## Task 1: Preserve the Interface
 
+Modify `scaled_dot_product_attention` in
+`src/tiny_llm/week2_kernels.py`. Keep this readable function as the oracle and
+fallback; Task 2 modifies the separate `decode_attention_custom` entry point.
+
 Implement `scaled_dot_product_attention` in `week2_kernels.py` with these
 model-facing shapes:
 
@@ -53,6 +57,14 @@ correctness oracle and ablation, not as the completed optimized path: its
 matmuls are MLX-provided operator implementations.
 
 ## Task 2: Implement Online Softmax in Metal
+
+Modify `tiny_llm_ext::decode_attention`,
+`Week2DecodeAttention::eval_cpu`, and `Week2DecodeAttention::eval_gpu` in
+`src/extensions/src/week2_kernels.cpp`, the `week2_decode_attention` function
+in `src/extensions/src/week2_kernels.metal`, and `decode_attention_custom` in
+`src/tiny_llm/week2_kernels.py`. The starter declaration, binding, source
+stub, Metal file, and CMake registration are already present and labeled Week
+2 Day 5; replace those fail-closed bodies rather than adding new names.
 
 Expose `decode_attention_custom` for the Metal implementation. Cache the
 scaled query fragment in registers before walking the cache; loading it again
@@ -110,6 +122,11 @@ complete-model result for each schedule, then repeat the experiment when
 context length changes.
 
 ## Task 3: Integrate and Measure
+
+Modify `Qwen3MultiHeadAttention.__call__` in
+`src/tiny_llm/qwen3_week2.py` to apply the measured dispatch guard. Keep
+`scaled_dot_product_attention` as the explicit fallback and call
+`decode_attention_custom` only inside the supported region.
 
 Route short-query, short-context Week 2 attention through the Metal
 implementation. Dispatch back to the readable composition when the cached

@@ -52,6 +52,13 @@ purpose-built kernel versus a graph of several general-purpose kernels.
 
 ## Task 1: RMSNorm
 
+Modify `tiny_llm_ext::rms_norm`, `Week2RMSNorm::eval_cpu`, and
+`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the
+`week2_rms_norm` function in `src/extensions/src/week2_kernels.metal`, and
+`FastRMSNorm.__call__` in `src/tiny_llm/week2_kernels.py`. The starter header,
+binding, C++/Metal files, and CMake registration already exist for this
+checkpoint; replace the fail-closed bodies instead of adding parallel APIs.
+
 Begin with one SIMD group per input row, then profile it. A 2,560-element hidden
 row gives 32 lanes roughly 80 serial elements each; the optimized kernel launches 256
 threads, or eight SIMD groups, per row. Each group reduces its portion with
@@ -90,6 +97,11 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 ## Task 2: RoPE
 
+Modify `tiny_llm_ext::rope`, `Week2RoPE::eval_cpu`, and
+`Week2RoPE::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the
+`week2_rope` function in `src/extensions/src/week2_kernels.metal`, and
+`FastRoPE.__call__` in `src/tiny_llm/week2_kernels.py`.
+
 Implement RoPE for the model's native `B, L, H, D` layout. A naive element
 kernel calculates the same angle, sine, and cosine separately for both members
 of every pair and again for every head. Instead, assign one thread a pair index
@@ -126,6 +138,11 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 ## Task 3: SwiGLU
 
+Modify `tiny_llm_ext::swiglu`, `Week2SwiGLU::eval_cpu`, and
+`Week2SwiGLU::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the
+`week2_swiglu` function in `src/extensions/src/week2_kernels.metal`, and
+`swiglu` in `src/tiny_llm/week2_kernels.py`.
+
 SwiGLU combines the gate and up branches:
 
 ```plain
@@ -147,6 +164,11 @@ pdm run bench --solution tiny_llm --loader week2 \
 ```
 
 ## Task 4: Verify the Cumulative Model
+
+Verify the cumulative switches in `Qwen3ModelWeek2.__init__` and the call sites
+in `Qwen3MultiHeadAttention.__call__` and `Qwen3MLP.__call__`. Task 4 should not
+introduce another extension function; it composes the three functions from
+Tasks 1-3.
 
 After exposing all three kernels through C++ MLX primitives, run the complete
 test file to verify their composition. Keep `qwen3_week1.py` on its readable
