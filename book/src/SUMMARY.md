@@ -16,7 +16,7 @@
 - [🚧 Week 2: A Step Closer to vLLM](./week2-overview.md)
     - [🚧 KV Cache](./week2-01-kv-cache.md)
     - [🚧 Benchmarking and Profiling](./week2-02-benchmark-profile.md)
-    - [🚧 Optional: Metal Profiling](./week2-advanced-profiling.md)
+        - [🚧 Optional: Metal Profiling](./week2-advanced-profiling.md)
     - [🚧 Quantize the Model](./week2-03-quantize-model.md)
     - [🚧 Fused Model Kernels](./week2-04-fused-model-kernels.md)
     - [🚧 Fused Decode Attention](./week2-05-decode-attention.md)

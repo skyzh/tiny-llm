@@ -361,7 +361,7 @@ wrapper with two call patterns:
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
-## Task 2: Migrate the Cached Model to Quantized Weights
+## Task 2: Define the Quantized Matmul Primitive
 
 ```
 src/extensions/src/tiny_llm_ext.h
@@ -390,7 +390,9 @@ The extension API is infrastructure: it lets an `mx.array` graph node schedule
 the Metal loop you write in the next task. MLX owns the array lifetime and
 command encoder, but it does not supply the quantized multiplication.
 
-Build and test the extension:
+Build the extension to catch declaration, binding, and registration mismatches.
+The focused test below checks the Task 1 Python wrappers; the primitive becomes
+runnable after you implement its Metal schedules in Task 3:
 
 ```bash
 pdm run build-ext
