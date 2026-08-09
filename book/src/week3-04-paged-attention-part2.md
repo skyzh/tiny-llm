@@ -248,8 +248,12 @@ These are the invariants worth checking in tests:
    reads unwritten tail slots. Either case makes paged output diverge from the
    dense baseline.
 2. **`block_table` reconstructs the same logical K/V order as the dense
-   baseline.** A wrong or reordered page id pairs a query with the wrong token's
-   K/V, so the attention result changes even when every page contains valid data.
+   baseline.** A wrong mapping can pair a query with the wrong token's K/V and
+   change the output even when every page contains valid data. Reordering
+   complete pages can change a causal-prefix result because it changes which
+   K/V pairs each query can see. By contrast, one-token decode over all
+   positions in complete pages is permutation-invariant to their order when
+   each K/V pair moves together.
 3. **The allocator gives each page to only one live cache handle unless sharing
    is explicit.** If two live handles alias a page, a write for one request
    overwrites K/V that the other request can still attend to.
@@ -257,8 +261,9 @@ These are the invariants worth checking in tests:
    once.** Missing a page leaks pool capacity; returning one twice raises the
    pool's already-free error instead of completing cleanup.
 5. **Decode allocates a new page only when the tail page overflows.** Allocating
-   earlier strands writable tail slots and can exhaust the pool while existing
-   pages still have capacity.
+   earlier strands writable tail slots and inflates the used-page count. This
+   course pool grows instead of reporting exhaustion, so that waste can force
+   backing storage to grow and copy earlier, increasing memory pressure.
 
 ## Task 1: Add Batch Metadata
 
