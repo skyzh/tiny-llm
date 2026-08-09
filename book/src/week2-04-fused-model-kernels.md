@@ -4,15 +4,10 @@
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-The Day 3 evidence should now show many smaller pointwise and reduction
-dispatches behind the optimized projections.
-RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
-GPU duration—not an imagined single slow call—makes them the next target. Week
-1 expresses them as Python `mlx.core` equations. Confirm the cluster with the
-Day 3 kernel-group replay; the
-[reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
-shows the expected transition. Week 2 keeps those implementations intact and
-asks you to write three Metal kernels behind a separate interface:
+Day 3 removed the largest projection gap. Day 4 now targets RMSNorm, RoPE, and
+SwiGLU, which recur around those projections in every transformer layer. Week 1
+expresses them as Python `mlx.core` equations. Week 2 keeps those implementations
+intact and asks you to write three Metal kernels behind a separate interface:
 
 ```plain
 src/tiny_llm/week2_kernels.py
@@ -25,6 +20,11 @@ graph node, owns its buffers, and dispatches the Metal function, but your
 solution owns the arithmetic inside that function. Your solution does not call
 `mx.fast.rms_norm`,
 `mx.fast.rope`, or an MLX-provided SiLU implementation.
+
+> **Optional profiling evidence.** The Day 3 kernel-group replay and the
+> [reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
+> show the pointwise cluster behind the optimized projections. They explain the
+> chapter order but are not prerequisites or acceptance gates.
 
 ## Why Fusion Helps
 
@@ -210,17 +210,19 @@ rows, and the direct dispatch trace. Let the matched benchmark results decide
 whether the kernels stay.
 
 After the pointwise cluster shrinks, sweep cached context rather than assuming
-attention is next. Continue to Day 5 when attention is a removable gap at
-the measured contexts and the projection operators are already close to their
-denominator. The checked M4 Pro sweep covers `S=32,128,160,192,256` and the
-custom operator wins all six balanced passes at every point, which supports a
-context guard through `S <= 256` but says nothing about longer caches. Day 5
-must also test query length and prove that its replacement moves a
-complete-model workload that actually enters the final guard. The
-[reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
-pairs the cumulative gains with all three operator microbenchmarks and the
-updated attribution. Trace the intended three fused-kernel dispatches directly;
-the new context sweep, not the absolute projection share,
-selects attention next.
+attention is next. Continue to Day 5 when all three correctness gates pass, the
+direct trace reaches the intended fused kernels, the cumulative rows retain the
+gain, and attention remains a removable gap at the measured contexts. The
+checked M4 Pro sweep covers `S=32,128,160,192,256` and the custom operator wins
+all six balanced passes at every point, which supports a context guard through
+`S <= 256` but says nothing about longer caches. Day 5 must also test query
+length and prove that its replacement moves a complete-model workload that
+actually enters the final guard.
+
+> **Optional profiling evidence.** The
+> [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
+> pairs the required cumulative and operator measurements with an updated
+> attribution. That attribution can explain the transition, but the correctness
+> checks, direct dispatch trace, matched runs, and context sweep gate progress.
 
 {{#include copyright.md}}

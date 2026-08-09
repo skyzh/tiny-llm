@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from benches.bench_course_progression import WEEK2_VARIANTS
@@ -87,6 +88,37 @@ def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
     assert "capture-week2-shader" not in (ROOT / "pyproject.toml").read_text()
     assert "not required" in appendix
     assert "macOS 27" in appendix
+
+
+def test_required_week2_progression_never_depends_on_optional_profiling():
+    profiling_only = re.compile(
+        r"\bprofil(?:e|er|ing)\b|\battribut(?:e|ion)\b|\bkernel-group\b|\breplay\b",
+        re.IGNORECASE,
+    )
+    days = {
+        day: (ROOT / "book/src" / filename).read_text()
+        for day, filename in {
+            3: "week2-03-quantize-model.md",
+            4: "week2-04-fused-model-kernels.md",
+            5: "week2-05-decode-attention.md",
+            6: "week2-06-simd-matrix-prefill.md",
+        }.items()
+    }
+
+    for day, chapter in days.items():
+        paragraphs = re.split(r"\n\s*\n", chapter)
+        profiling_paragraphs = [
+            paragraph for paragraph in paragraphs if profiling_only.search(paragraph)
+        ]
+        assert profiling_paragraphs, f"Day {day} must label its optional evidence"
+        assert all(
+            paragraph.lstrip().startswith("> **Optional profiling evidence.**")
+            for paragraph in profiling_paragraphs
+        ), f"Day {day} makes profiling output part of required progression"
+
+    day3 = days[3]
+    assert "matrix schedule. Trace those branches" in day3
+    assert "source trace proves" in day3
 
 
 def test_historical_week2_artifact_keeps_original_labels():

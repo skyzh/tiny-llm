@@ -673,8 +673,7 @@ during model inference, not just registered and tested in isolation.
 > neither proves the live Metal pipeline identity by itself. Trace the dispatch
 > branches directly, then treat the throughput comparison as a separate result.
 
-Measure the cumulative model, the real projection shapes, and the updated
-operator attribution:
+Measure the cumulative model and the real projection shapes:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
@@ -693,14 +692,16 @@ Projections may remain the largest absolute category because the model performs
 them in every layer; once their operator latency is close to MLX, that bar is
 no longer the largest removable gap.
 
-Continue to Day 4 when the matched projection table is close to MLX and the
-post-Day-3 evidence makes normalization, position, and activation the largest
-removable gap. If the projection comparison is still far behind, keep tuning
-the matvec instead. The
-[reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
-pairs the model delta, projection microbenchmarks, and attribution. Its matched
-operator result is the reason the hot matvec products do not remain the next
-target: after the projection gap shrinks, the pointwise cluster is the larger
-removable model cost.
+Continue to Day 4 only after the correctness tests pass, the source trace proves
+that the live model selects the intended matrix and matvec branches, the matched
+model run improves decode over `kv-cache`, and the projection table is close to
+MLX at the same shapes. If the projection comparison is still far behind, keep
+tuning the matvec instead. Once that gap shrinks, Day 4 turns to the recurring
+normalization, position, and activation work around those projections.
+
+> **Optional profiling evidence.** A kernel-group replay or operator attribution
+> can corroborate that transition, but neither gates progress. The
+> [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
+> includes both alongside the required model and projection measurements.
 
 {{#include copyright.md}}

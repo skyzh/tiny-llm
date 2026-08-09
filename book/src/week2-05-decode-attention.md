@@ -238,11 +238,15 @@ Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
 attach that context sweep beside the short-context
 `swiglu`/`decode-attention` model rows.
 The intermediate points reveal whether the custom kernel has a useful measured
-crossover rather than assuming that an endpoint applies to every context. Also
-attach the decode and prefill kernel-group results. Reject the custom dispatch
-if repeated fresh-process short-context runs do not improve, even when the
-isolated kernel looks faster. If the operator wins only over a limited context
-range, encode that measured crossover in the dispatch guard.
+crossover rather than assuming that an endpoint applies to every context.
+Reject the custom dispatch if repeated fresh-process short-context runs do not
+improve, even when the isolated kernel looks faster. If the operator wins only
+over a limited context range, encode that measured crossover in the dispatch
+guard.
+
+> **Optional profiling evidence.** Decode and prefill kernel-group results can
+> explain how the workload divides its time, but they are reference evidence,
+> not required output for this checkpoint.
 
 The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
 rotated every implementation order, and recorded all 60 samples per
@@ -297,12 +301,17 @@ The checked raw record is
 In the fixed `128/129` workload, prefill has `L=128` and uses the Python path.
 The first timed decode call appends the new token before the guard sees `S=129`;
 the one-token decode calls through `S=256` therefore use the custom path. Keep
-the prefill attribution separate from any decode change, and continue to Day 6
-only when quantized matrix-shaped projections dominate prefill.
-The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
-pairs the context microbenchmarks with the matched short-context model delta,
-fixed-workload control, and prefill attribution. The direct dispatch trace and
-fixed workload's
-unchanged prefill exposes the next matrix-shaped projection bottleneck.
+the fixed workload separate from the short-context acceptance run. Continue to
+Day 6 after the correctness tests pass, the direct source trace proves the
+bounded attention dispatch and its fallback, repeated short-context runs retain
+the gain, and the fixed `128/129` control confirms that prefill is unchanged and
+still routes through Day 3's matrix-shaped projection path.
+
+> **Optional profiling evidence.** The
+> [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
+> pairs the required context sweep, short-context model delta, and fixed-workload
+> control with a separate prefill attribution. The attribution explains why the
+> course targets matrix-shaped projections next; it is not a prerequisite for
+> Day 6.
 
 {{#include copyright.md}}

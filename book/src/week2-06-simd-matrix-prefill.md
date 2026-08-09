@@ -5,18 +5,20 @@
 > what is continuously tested, locally measured, and still under review.
 
 Day 5 ends by switching the benchmark from one-token decode to multi-token
-prefill. The measured bottleneck changes with the workload: pointwise kernels
-no longer dominate, and Day 3 deliberately left `M > 8` on its
-correctness-first vanilla quantized matrix path. Quantized projections are now
-the largest cost, so today we replace that inherited multi-row schedule.
+prefill. Its source trace shows that the 128-token prefill still uses Day 3's
+correctness-first vanilla quantized matrix path for `M > 8`. Day 6 replaces that
+inherited multi-row schedule, then measures the complete model and the real
+projection shapes to decide whether the new path stays.
 
-Use the checked dependency-aware attribution from Day 3 with
-`--case decode-attention:prefill:128`. Continue only when projections dominate the
-attribution and the complete-model prefill phase moves with their latency. The
-[reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
-is recorded in the performance appendix. MLX remains an external performance denominator;
-the SIMD-matrix path in your solution continues to call the C++/Metal
-primitive you implement for every projection.
+MLX remains an external performance denominator; the SIMD-matrix path in your
+solution continues to call the C++/Metal primitive you implement for every
+projection.
+
+> **Optional profiling evidence.** The checked dependency-aware attribution and
+> the
+> [reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
+> explain why projections are the reference solution's next target. They are not
+> required learner output and do not gate this chapter.
 
 The implementation remains deliberately narrow:
 
@@ -174,10 +176,10 @@ done
 The dispatch formula gives the unsplit 32-row K projection 32 independent
 threadgroups.
 
-Attach the complete-model prefill delta, per-projection tables at 32, 128, and
-2,048 rows, and the 32/128-row attribution. Do not select Split-K merely because projections still occupy
-most of prefill. First require the long or wide controls to approach MLX,
-while the short, narrow projection remains disproportionately slow.
+Attach the complete-model prefill delta and per-projection tables at 32, 128,
+and 2,048 rows. Do not select Split-K merely because projections still occupy
+most of prefill. First require the long or wide controls to approach MLX while
+the short, narrow projection remains disproportionately slow.
 
 Use the dispatch calculation and short-shape operator sweep to establish that
 the unsplit result grid has too few independent threadgroups. Use the matched
@@ -187,5 +189,9 @@ a cost, repair Day 6 before multiplying the grid. The
 pairs the prefill gain with long and short operator controls and the dispatch
 geometry that motivates Split-K. A remaining arithmetic hot spot would send
 you back to Day 6 instead.
+
+> **Optional profiling evidence.** A 32/128-row attribution can corroborate the
+> shape analysis, but the required gate is the matched complete-model delta,
+> projection controls, and dispatch calculation above.
 
 {{#include copyright.md}}
