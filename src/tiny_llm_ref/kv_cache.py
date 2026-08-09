@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .attention import causal_mask
 import mlx.core as mx
+
+if TYPE_CHECKING:
+    from .paged_kv_cache import PagedKvMetadata
 
 
 class TinyKvCache(ABC):
@@ -147,41 +150,60 @@ class BatchingKvCache(TinyKvCache):
     ) -> "PagedKvMetadata":
         from .paged_kv_cache import PagedKvMetadata, TinyKvPagedCache
 
+        if len(keys.shape) != 4 or len(values.shape) != 4:
+            raise ValueError("Batched K/V chunks must be 4D [B, H, S, D]")
+        if keys.shape != values.shape:
+            raise ValueError("Batched K/V chunks must have the same shape")
         B, H, S, D = keys.shape
-        assert keys.shape == values.shape
-        if self.max_seq_len is not None:
-            assert S <= self.max_seq_len
-        if self.HD is None:
-            self.HD = (H, D)
-        else:
-            assert self.HD == (H, D), f"expect {self.HD} but got {H, D}"
-        assert B == self.max_active_requests
+        if B != self.max_active_requests:
+            raise ValueError(f"Expected batch size {self.max_active_requests}, got {B}")
+        if self.HD is not None and self.HD != (H, D):
+            raise ValueError(f"expect {self.HD} but got {H, D}")
 
+        # Validate the complete active set before any request or allocator is
+        # mutated. In particular, mixed pools must fail before row zero appends.
         pool = None
-        context_lens = []
-        max_pages = 0
+        active_caches = []
         for b in range(B):
             cache = self.kv_caches[b]
             if cache is None:
-                context_lens.append(0)
                 continue
             if not isinstance(cache, TinyKvPagedCache):
                 raise ValueError("BatchingKvCache contains a non-paged request cache")
-            cache.update_and_fetch_paged(
-                keys[b : b + 1],
-                values[b : b + 1],
-                mask_length=mask_length,
-                mask=mask,
-            )
             if pool is None:
                 pool = cache.pool
             elif pool is not cache.pool:
                 raise ValueError("Paged batch caches must share one page pool")
-            context_lens.append(cache.offset)
-            max_pages = max(max_pages, cache.num_pages)
+            if self.max_seq_len is not None and cache.offset + S > self.max_seq_len:
+                raise ValueError("Paged batch append exceeds max_seq_len")
+            cache.validate_append(keys[b : b + 1], values[b : b + 1])
+            active_caches.append((b, cache))
 
         if pool is None:
             raise ValueError("Cannot build paged metadata without active requests")
+
+        pool_state = pool._snapshot_state()
+        cache_states = [(cache, cache._snapshot_state()) for _, cache in active_caches]
+        old_hd = self.HD
+        context_lens = [0] * B
+        max_pages = 0
+        try:
+            for b, cache in active_caches:
+                cache.update_and_fetch_paged(
+                    keys[b : b + 1],
+                    values[b : b + 1],
+                    mask_length=mask_length,
+                    mask=mask,
+                )
+                context_lens[b] = cache.offset
+                max_pages = max(max_pages, cache.num_pages)
+            self.HD = (H, D)
+        except Exception:
+            pool._restore_state(pool_state)
+            for cache, state in cache_states:
+                cache._restore_state(state)
+            self.HD = old_hd
+            raise
 
         self.last_batch_bytes = 0
 

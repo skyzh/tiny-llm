@@ -3,8 +3,10 @@
 from types import SimpleNamespace
 
 import mlx.core as mx
+import pytest
 
 from .tiny_llm_base import (
+    BatchingKvCache,
     FastRMSNorm,
     FastRoPE,
     Qwen3ModelWeek2,
@@ -152,6 +154,85 @@ def test_task_1_paged_pool_reuses_freed_pages():
     assert set(second.page_ids) == {0, 1}
     assert_allclose(gathered_key, second_key, precision=mx.float32)
     assert_allclose(gathered_value, second_value, precision=mx.float32)
+
+
+def _paged_state(cache: TinyKvPagedCache) -> tuple:
+    pool = cache.pool
+    return (
+        tuple(cache.page_ids),
+        tuple(cache.page_lens),
+        cache.offset,
+        tuple(pool.free_page_ids),
+        frozenset(pool.used_page_ids),
+        pool.num_pages,
+        pool.capacity,
+        pool.reused_page_allocations,
+        pool.storage_growths,
+        pool.copied_pages_on_growth,
+        pool.copied_bytes_on_growth,
+    )
+
+
+def test_task_1_rejects_incompatible_dtype_before_allocating_a_page():
+    cache = TinyKvPagedCache(pool=TinyKvPagedPool(page_size=4))
+    cache.update_and_fetch_paged(*_random_chunk(4))
+    before = _paged_state(cache)
+    key, value = _random_chunk(1)
+
+    with pytest.raises(ValueError, match="existing page storage dtype"):
+        cache.update_and_fetch_paged(key.astype(mx.bfloat16), value.astype(mx.bfloat16))
+
+    assert _paged_state(cache) == before
+
+
+def test_task_1_rejects_shape_mismatch_without_mutating_cache():
+    cache = TinyKvPagedCache(pool=TinyKvPagedPool(page_size=4))
+    key, value = _random_chunk(2)
+    before = _paged_state(cache)
+
+    with pytest.raises(ValueError, match="same shape"):
+        cache.update_and_fetch_paged(key, value[:, :, :1, :])
+
+    assert _paged_state(cache) == before
+
+
+def test_task_1_rolls_back_every_page_when_a_later_write_fails(monkeypatch):
+    cache = TinyKvPagedCache(pool=TinyKvPagedPool(page_size=4))
+    key, value = _random_chunk(5)
+    before = _paged_state(cache)
+    original_write = cache.pool.write_page_slice
+    write_count = 0
+
+    def fail_second_write(*args, **kwargs):
+        nonlocal write_count
+        write_count += 1
+        if write_count == 2:
+            raise RuntimeError("injected page write failure")
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(cache.pool, "write_page_slice", fail_second_write)
+
+    with pytest.raises(RuntimeError, match="injected page write failure"):
+        cache.update_and_fetch_paged(key, value)
+
+    assert write_count == 2
+    assert _paged_state(cache) == before
+
+
+def test_task_2_mixed_pools_fail_before_any_batch_row_mutates():
+    first = TinyKvPagedCache(pool=TinyKvPagedPool(page_size=4))
+    second = TinyKvPagedCache(pool=TinyKvPagedPool(page_size=4))
+    batch = BatchingKvCache(max_active_requests=2, max_seq_len=8)
+    batch.add_request(first, 0)
+    batch.add_request(second, 1)
+    keys = mx.zeros((2, 2, 1, 4), dtype=mx.float32)
+    before = (_paged_state(first), _paged_state(second))
+
+    with pytest.raises(ValueError, match="share one page pool"):
+        batch.update_and_fetch_paged(keys, keys, mask_length=1)
+
+    assert (_paged_state(first), _paged_state(second)) == before
+    assert batch.HD is None
 
 
 def test_task_1_paged_pool_grows_storage_geometrically():

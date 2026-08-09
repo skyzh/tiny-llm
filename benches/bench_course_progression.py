@@ -335,6 +335,27 @@ def collect_host_metadata() -> dict:
     return metadata
 
 
+def collect_source_metadata(root: Path) -> dict:
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    tracked_status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return {
+        "git_commit": commit,
+        "git_tracked_dirty": bool(tracked_status),
+    }
+
+
 def relative_to(value: float, baseline: float) -> str:
     if value == baseline:
         return "baseline"
@@ -384,6 +405,7 @@ def main() -> None:
     host = collect_host_metadata()
     variants = [VARIANTS_BY_KEY[key] for key in args.variant]
     samples: dict[str, list[Throughput]] = {variant.key: [] for variant in variants}
+    execution_order: list[list[str]] = []
 
     print(f"Host: {host['platform']} ({host['machine']}); MLX {host['mlx_version']}")
     print(
@@ -400,6 +422,7 @@ def main() -> None:
     total_runs = args.repeats * len(variants)
     for repeat in range(args.repeats):
         ordered_variants = variants if repeat % 2 == 0 else list(reversed(variants))
+        execution_order.append([variant.key for variant in ordered_variants])
         for variant in ordered_variants:
             completed_runs += 1
             print(
@@ -419,6 +442,7 @@ def main() -> None:
 
     if args.json_output:
         payload = {
+            "source": collect_source_metadata(root),
             "host": host,
             "configuration": {
                 "model": args.model,
@@ -435,6 +459,7 @@ def main() -> None:
                 "cooldown_seconds": args.cooldown_seconds,
                 "variants": [variant.key for variant in variants],
             },
+            "execution_order": execution_order,
             "results": {
                 variant.key: {
                     "label": variant.label,

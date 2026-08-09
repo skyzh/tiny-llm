@@ -69,6 +69,35 @@ universal.
 ```bash
 pdm run test --week 3 --day 2
 pdm run batch-main
+
+pdm run bench-chunked-prefill --offline --model qwen3-0.6b \
+  --prefill-steps 32 128 512 --num-seqs 8 --batch-size 4 \
+  --min-input-len 64 --max-input-len 512 \
+  --min-output-len 32 --max-output-len 32 \
+  --warmup 1 --repeats 4 --cooldown-seconds 1 \
+  --json-output benchmark_results/m4-pro-qwen3-0.6b-week3-chunked-prefill-mlx-0.32.0.json
 ```
+
+The checked trace uses seed 0 and the same 32-token output budget for every
+request. Each chunk size runs twice in forward order and twice in reverse order
+in fresh processes. The JSON stores every prompt token id, the per-request
+output budget, and their canonical SHA-256 checksum.
+
+A decode-completion gap is the wall-clock interval between two consecutive
+synchronized decode calls while at least one decode request remains active. It
+therefore includes intervening prefill and scheduler work; idle time with no
+decode request is excluded. On the measured M4 Pro, the four-process medians
+were:
+
+| Prefill budget | Output tok/s | Requests/s | Decode step p95 | Decode gap p95 / max |
+|---:|---:|---:|---:|---:|
+| 32 | 105.47 | 3.296 | 17.52 ms | 30.39 / 32.47 ms |
+| 128 | 144.91 | 4.528 | 18.78 ms | 46.52 / 48.80 ms |
+| 512 | 157.00 | 4.906 | 19.57 ms | 76.04 / 122.16 ms |
+
+The 512-token row is the full-prompt Day 1 control for this trace. Reducing the
+budget makes the p95 completion gap monotonically smaller, while the 32-token
+budget gives up substantial throughput. The course uses 128 as a measured
+compromise for this workload, not as a universal optimum.
 
 {{#include copyright.md}}

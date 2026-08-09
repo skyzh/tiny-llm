@@ -87,25 +87,81 @@ def paged_attention(
     if mask is not None and mask != "causal":
         raise NotImplementedError
 
+    if len(query.shape) != 4:
+        raise ValueError("query must be 4D [B, H_q, L, D]")
+    if len(key_pages.shape) != 4 or len(value_pages.shape) != 4:
+        raise ValueError("page tensors must be 4D [P, H_kv, page_size, D]")
+    if key_pages.shape != value_pages.shape:
+        raise ValueError("key pages and value pages must have the same shape")
+    if len(block_table.shape) != 2 or len(context_lens.shape) != 1:
+        raise ValueError("block_table must be 2D and context_lens must be 1D")
+    if block_table.dtype != mx.int32 or context_lens.dtype != mx.int32:
+        raise ValueError("block_table and context_lens must be int32")
+    if not isinstance(page_size, int) or page_size <= 0:
+        raise ValueError("page_size must be a positive integer")
+
     factor = query.shape[-1] ** -0.5 if scale is None else float(scale)
     B, H_q, L, D = query.shape
-    _, H, stored_page_size, _ = key_pages.shape
-    assert H_q % H == 0
+    num_physical_pages, H, stored_page_size, stored_dim = key_pages.shape
+    if min(B, H_q, L, D, H, stored_page_size, stored_dim) <= 0:
+        raise ValueError("paged attention dimensions must be positive")
+    if num_physical_pages <= 0:
+        raise ValueError("paged attention requires nonempty physical page storage")
+    if H_q % H != 0:
+        raise ValueError("query heads must be divisible by K/V heads")
+    if stored_dim != D:
+        raise ValueError("query and page tensors must have the same head dimension")
     if stored_page_size != page_size:
         raise ValueError(
             f"page_size={page_size} does not match page storage {stored_page_size}"
         )
+    if block_table.shape[0] != B or context_lens.shape[0] != B:
+        raise ValueError("query, block_table, and context_lens batch sizes must match")
+    max_pages = block_table.shape[1]
+    if max_pages <= 0:
+        raise ValueError("block_table must provide at least one page slot")
 
     if query.dtype != key_pages.dtype or query.dtype != value_pages.dtype:
         raise ValueError("query, key pages, and value pages must have the same dtype")
     if query.dtype not in (mx.float32, mx.bfloat16):
         raise ValueError("paged attention supports float32 or bfloat16 inputs")
 
+    # Materialize and validate the small metadata tensors before the extension
+    # can dispatch either its direct-decode or FlashAttention Metal branch.
+    context_values = context_lens.tolist()
+    block_rows = block_table.tolist()
+    live_page_ids = set()
+    for batch_idx, (context_len, row) in enumerate(zip(context_values, block_rows)):
+        if context_len < 0:
+            raise ValueError(f"context_lens[{batch_idx}] must be nonnegative")
+        live_pages = (context_len + page_size - 1) // page_size
+        if live_pages > max_pages:
+            raise ValueError(f"context_lens[{batch_idx}] is not covered by block_table")
+        for logical_page, page_id in enumerate(row):
+            if logical_page < live_pages:
+                if page_id < 0 or page_id >= num_physical_pages:
+                    raise ValueError(
+                        f"Live page id {page_id} at [{batch_idx}, {logical_page}] "
+                        "is outside physical page storage"
+                    )
+                if page_id in live_page_ids:
+                    raise ValueError(f"Live page id {page_id} is aliased")
+                live_page_ids.add(page_id)
+            elif page_id != -1:
+                raise ValueError(
+                    f"Unused block_table entry [{batch_idx}, {logical_page}] "
+                    "must use the -1 sentinel"
+                )
+        if 0 < context_len < L:
+            raise ValueError(
+                f"context_lens[{batch_idx}] must be zero or at least query length {L}"
+            )
+
     query = mx.contiguous(query.reshape(B * H_q, L, D))
     key_pages = mx.contiguous(key_pages)
     value_pages = mx.contiguous(value_pages)
-    block_table = mx.contiguous(block_table.astype(mx.int32))
-    context_lens = mx.contiguous(context_lens.astype(mx.int32))
+    block_table = mx.contiguous(block_table)
+    context_lens = mx.contiguous(context_lens)
     is_causal = mask == "causal"
 
     result = tiny_llm_ext_ref.paged_attention(

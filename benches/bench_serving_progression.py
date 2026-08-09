@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import statistics
@@ -9,7 +10,10 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from benches.bench_course_progression import collect_host_metadata
+from benches.bench_course_progression import (
+    collect_host_metadata,
+    collect_source_metadata,
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,17 @@ class ServingResult:
     peak_live_pages: float
     peak_capacity_pages: float
     peak_tail_waste_slots: float
+    peak_tail_waste_live_slots: float
+    peak_tail_waste_bytes: float
+    peak_tail_waste_fraction: float
+    decode_step_count: float
+    decode_step_median_ms: float
+    decode_step_p95_ms: float
+    decode_step_max_ms: float
+    decode_gap_count: float
+    decode_gap_median_ms: float
+    decode_gap_p95_ms: float
+    decode_gap_max_ms: float
     reused_page_allocations: float
     storage_growths: float
     copied_pages_on_growth: float
@@ -70,7 +85,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-output-len", type=int, default=128)
     parser.add_argument("--prefill-step", type=int, default=128)
     parser.add_argument("--warmup", type=int, default=1)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--repeats", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--variant",
@@ -94,6 +109,12 @@ def parse_args() -> argparse.Namespace:
         parser.error("invalid prefill, warmup, or repeat count")
     if args.cooldown_seconds < 0:
         parser.error("--cooldown-seconds must be non-negative")
+    selected_variant_count = len(args.variant) if args.variant else len(VARIANTS)
+    if selected_variant_count > 1 and args.repeats % 2 != 0:
+        parser.error(
+            "--repeats must be even when comparing variants so forward and "
+            "reverse process order is balanced"
+        )
     return args
 
 
@@ -102,7 +123,7 @@ def run_variant(
     variant: ServingVariant,
     args: argparse.Namespace,
     result_path: Path,
-) -> ServingResult:
+) -> tuple[ServingResult, list[dict]]:
     command = [
         sys.executable,
         "-m",
@@ -113,6 +134,10 @@ def run_variant(
         variant.loader,
         "--model",
         args.model,
+        "--device",
+        "gpu",
+        "--prefill-logits",
+        "last",
         "--batch-decode",
         "--num-seqs",
         str(args.num_seqs),
@@ -157,10 +182,12 @@ def run_variant(
         sys.stderr.write(completed.stdout)
         sys.stderr.write(completed.stderr)
         raise subprocess.CalledProcessError(completed.returncode, command)
-    metrics = json.loads(result_path.read_text())["metrics"]
-    return ServingResult(
+    payload = json.loads(result_path.read_text())
+    metrics = payload["metrics"]
+    result = ServingResult(
         **{field: metrics[field] for field in ServingResult.__dataclass_fields__}
     )
+    return result, payload["request_trace"]
 
 
 def median_result(samples: list[ServingResult]) -> ServingResult:
@@ -182,6 +209,11 @@ def avoidable_copy_bytes(result: ServingResult) -> float:
         + result.dense_growth_copy_bytes
         + result.dense_staging_copy_bytes
     )
+
+
+def trace_sha256(trace: list[dict]) -> str:
+    encoded = json.dumps(trace, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def print_table(
@@ -221,8 +253,21 @@ def print_table(
             f"peak_live_pages={paged.peak_live_pages:.0f}, "
             f"peak_capacity_pages={paged.peak_capacity_pages:.0f}, "
             f"peak_tail_waste_slots={paged.peak_tail_waste_slots:.0f}, "
+            f"tail_waste_live_slots={paged.peak_tail_waste_live_slots:.0f}, "
+            f"tail_waste_fraction={paged.peak_tail_waste_fraction:.1%}, "
+            f"tail_waste_mib={format_mib(paged.peak_tail_waste_bytes)}, "
             f"reused_allocations={paged.reused_page_allocations:.0f}, "
             f"pool_growths={paged.storage_growths:.0f}."
+        )
+        print(
+            "Direct-paged decode step ms (median/p95/max): "
+            f"{paged.decode_step_median_ms:.2f}/"
+            f"{paged.decode_step_p95_ms:.2f}/"
+            f"{paged.decode_step_max_ms:.2f}; "
+            "completion gap ms (median/p95/max): "
+            f"{paged.decode_gap_median_ms:.2f}/"
+            f"{paged.decode_gap_p95_ms:.2f}/"
+            f"{paged.decode_gap_max_ms:.2f}."
         )
 
 
@@ -236,13 +281,14 @@ def main() -> None:
     )
     host = collect_host_metadata()
     samples = {variant.key: [] for variant in variants}
+    request_trace: list[dict] | None = None
     print(f"Host: {host['platform']} ({host['machine']}); MLX {host['mlx_version']}")
     print(
         f"Model={args.model} requests={args.num_seqs} batch={args.batch_size} "
         f"prompt={args.min_input_len}-{args.max_input_len} "
         f"output={args.min_output_len}-{args.max_output_len} "
         f"prefill_step={args.prefill_step} warmup={args.warmup} "
-        f"repeats={args.repeats}"
+        f"repeats={args.repeats} device=gpu prefill_logits=last"
     )
     print(
         "The measured run resets page pools after warmup; no request context "
@@ -251,10 +297,12 @@ def main() -> None:
 
     total_runs = args.repeats * len(variants)
     completed_runs = 0
+    execution_order: list[list[str]] = []
     with tempfile.TemporaryDirectory(prefix="tiny-llm-serving-") as directory:
         temp_dir = Path(directory)
         for repeat in range(args.repeats):
             ordered = variants if repeat % 2 == 0 else list(reversed(variants))
+            execution_order.append([variant.key for variant in ordered])
             for variant in ordered:
                 completed_runs += 1
                 print(
@@ -263,22 +311,36 @@ def main() -> None:
                     flush=True,
                 )
                 result_path = temp_dir / f"{repeat}-{variant.key}.json"
-                samples[variant.key].append(
-                    run_variant(root, variant, args, result_path)
-                )
+                result, current_trace = run_variant(root, variant, args, result_path)
+                if request_trace is None:
+                    request_trace = current_trace
+                elif current_trace != request_trace:
+                    raise RuntimeError("request trace changed between serving samples")
+                samples[variant.key].append(result)
                 if args.cooldown_seconds and completed_runs < total_runs:
                     time.sleep(args.cooldown_seconds)
 
     medians = {variant.key: median_result(samples[variant.key]) for variant in variants}
     print_table(variants, medians)
     if args.json_output:
+        assert request_trace is not None
         payload = {
+            "source": collect_source_metadata(root),
             "host": host,
             "configuration": {
-                key: value
-                for key, value in vars(args).items()
-                if key not in {"json_output", "variant"}
+                "device": "gpu",
+                "prefill_logits": "last",
+                **{
+                    key: value
+                    for key, value in vars(args).items()
+                    if key not in {"json_output", "variant"}
+                },
             },
+            "variants": [variant.key for variant in variants],
+            "variant_definitions": [asdict(variant) for variant in variants],
+            "execution_order": execution_order,
+            "request_trace": request_trace,
+            "request_trace_sha256": trace_sha256(request_trace),
             "samples": {
                 key: [asdict(sample) for sample in value]
                 for key, value in samples.items()

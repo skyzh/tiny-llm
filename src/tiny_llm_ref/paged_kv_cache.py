@@ -71,9 +71,63 @@ class TinyKvPagedPool:
             return 0
         return self._key_pages.nbytes + self._value_pages.nbytes
 
-    def _check_page_chunk(self, x: mx.array) -> None:
-        B, H, S, D = x.shape
-        assert 0 < S <= self.page_size
+    def validate_page_chunk(self, key: mx.array, value: mx.array) -> None:
+        if len(key.shape) != 4 or len(value.shape) != 4:
+            raise ValueError("Paged K/V chunks must be 4D [1, H, S, D]")
+        if key.shape != value.shape:
+            raise ValueError("Paged K/V chunks must have the same shape")
+        B, H, S, D = key.shape
+        if B != 1:
+            raise ValueError("Paged request cache only supports one request")
+        if H <= 0 or D <= 0 or S <= 0:
+            raise ValueError("Paged K/V chunks must have positive valid dimensions")
+        if key.dtype != value.dtype or key.dtype not in (mx.float32, mx.bfloat16):
+            raise ValueError(
+                "Paged K/V chunks must have the same float32 or bfloat16 dtype"
+            )
+        if (self._key_pages is None) != (self._value_pages is None):
+            raise ValueError("Paged K/V storage is incomplete")
+        if self._key_pages is not None and self._value_pages is not None:
+            expected_shape = (H, self.page_size, D)
+            if self._key_pages.shape[1:] != expected_shape:
+                raise ValueError(
+                    "Paged K/V chunks must match the existing page storage shape"
+                )
+            if self._value_pages.shape != self._key_pages.shape:
+                raise ValueError("Paged key and value storage must have the same shape")
+            if (
+                self._key_pages.dtype != key.dtype
+                or self._value_pages.dtype != value.dtype
+            ):
+                raise ValueError(
+                    "Paged K/V chunks must match the existing page storage dtype"
+                )
+
+    def _snapshot_state(self) -> tuple:
+        return (
+            self._key_pages,
+            self._value_pages,
+            list(self.free_page_ids),
+            set(self.used_page_ids),
+            self.num_allocated_pages,
+            self.reused_page_allocations,
+            self.storage_growths,
+            self.copied_pages_on_growth,
+            self.copied_bytes_on_growth,
+        )
+
+    def _restore_state(self, state: tuple) -> None:
+        (
+            self._key_pages,
+            self._value_pages,
+            self.free_page_ids,
+            self.used_page_ids,
+            self.num_allocated_pages,
+            self.reused_page_allocations,
+            self.storage_growths,
+            self.copied_pages_on_growth,
+            self.copied_bytes_on_growth,
+        ) = state
 
     def allocate_page(self) -> int:
         # The page id is allocated from a model-wide free list. In this teaching
@@ -146,10 +200,16 @@ class TinyKvPagedPool:
         key: mx.array,
         value: mx.array,
     ) -> None:
-        assert key.shape == value.shape
-        self._check_page_chunk(key)
+        self.validate_page_chunk(key, value)
+        if key.shape[2] > self.page_size:
+            raise ValueError("Paged K/V writes cannot exceed one physical page")
         if page_id not in self.used_page_ids:
             raise ValueError(f"Page {page_id} is free")
+        if page_id < 0 or page_id >= self.num_pages:
+            raise ValueError(f"Page {page_id} is out of range")
+        end = start + key.shape[2]
+        if start < 0 or end > self.page_size:
+            raise ValueError("Paged K/V write is outside page storage")
         self._ensure_page_storage(key, value)
         assert self._key_pages is not None
         assert self._value_pages is not None
@@ -158,9 +218,7 @@ class TinyKvPagedPool:
         assert capacity == self.page_size
         assert key.shape[:2] == (1, H)
         assert key.shape[3] == D
-        end = start + key.shape[2]
         assert 0 <= start <= capacity
-        assert end <= self.page_size
 
         self._key_pages = tiny_llm_ext_ref.paged_cache_update(
             self._key_pages,
@@ -211,41 +269,68 @@ class TinyKvPagedCache(TinyKvCache):
         return self.gather_dense()
 
     def _append_chunk(self, key: mx.array, value: mx.array) -> None:
-        assert key.shape == value.shape
-        B, H, S, D = key.shape
-        assert B == 1, "Paged request cache only supports one request at a time"
+        self.pool.validate_page_chunk(key, value)
+        S = key.shape[2]
+        cache_state = self._snapshot_state()
+        pool_state = self.pool._snapshot_state()
         start = 0
 
-        # First fill the existing tail page if it has free slots.
-        if self.page_ids and self.page_lens[-1] < self.page_size:
-            page_id = self.page_ids[-1]
-            page_start = self.page_lens[-1]
-            take = min(self.page_size - page_start, S)
-            self.pool.write_page_slice(
-                page_id,
-                page_start,
-                key[:, :, :take, :],
-                value[:, :, :take, :],
-            )
-            self.page_lens[-1] += take
-            start += take
+        try:
+            # First fill the existing tail page if it has free slots.
+            if self.page_ids and self.page_lens[-1] < self.page_size:
+                page_id = self.page_ids[-1]
+                page_start = self.page_lens[-1]
+                take = min(self.page_size - page_start, S)
+                self.pool.write_page_slice(
+                    page_id,
+                    page_start,
+                    key[:, :, :take, :],
+                    value[:, :, :take, :],
+                )
+                self.page_lens[-1] += take
+                start += take
 
-        # Then allocate fresh pages for the remaining chunk. We only write the
-        # valid prefix; unused tail slots are ignored by page_lens.
-        while start < S:
-            end = min(start + self.page_size, S)
-            page_id = self.pool.allocate_page()
-            self.pool.write_page_slice(
-                page_id,
-                0,
-                key[:, :, start:end, :],
-                value[:, :, start:end, :],
-            )
-            self.page_ids.append(page_id)
-            self.page_lens.append(end - start)
-            start = end
+            # Then allocate fresh pages for the remaining chunk. We only write
+            # the valid prefix; unused tail slots are ignored by page_lens.
+            while start < S:
+                end = min(start + self.page_size, S)
+                page_id = self.pool.allocate_page()
+                self.pool.write_page_slice(
+                    page_id,
+                    0,
+                    key[:, :, start:end, :],
+                    value[:, :, start:end, :],
+                )
+                self.page_ids.append(page_id)
+                self.page_lens.append(end - start)
+                start = end
 
-        self.offset += S
+            self.offset += S
+        except Exception:
+            self.pool._restore_state(pool_state)
+            self._restore_state(cache_state)
+            raise
+
+    def validate_append(self, key: mx.array, value: mx.array) -> None:
+        self.pool.validate_page_chunk(key, value)
+
+    def _snapshot_state(self) -> tuple:
+        return (
+            list(self.page_ids),
+            list(self.page_lens),
+            self.offset,
+            self._cached_block_table,
+            self._cached_block_table_key,
+        )
+
+    def _restore_state(self, state: tuple) -> None:
+        (
+            self.page_ids,
+            self.page_lens,
+            self.offset,
+            self._cached_block_table,
+            self._cached_block_table_key,
+        ) = state
 
     def gather_dense(self) -> tuple[mx.array, mx.array]:
         assert self.offset > 0
@@ -270,7 +355,6 @@ class TinyKvPagedCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
-        assert key.shape == value.shape
         self._append_chunk(key, value)
         # Keep the old dense interface for earlier callers. Paged attention
         # uses update_and_fetch_paged so it can read pages directly.
@@ -318,7 +402,6 @@ class TinyKvPagedCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> PagedKvMetadata:
-        assert key.shape == value.shape
         self._append_chunk(key, value)
         return self.paged_metadata(mask=mask)
 

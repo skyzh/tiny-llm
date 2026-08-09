@@ -1,0 +1,4 @@
+a55063c6a8a454b71f2ba4321fab3059a73fe5be6da9a76a3cb076dcdb3a2a75  benchmark_results/m4-pro-qwen3-0.6b-week3-chunked-prefill-mlx-0.32.0.json
+497c5c2f788bbf91b946a912c15f21ec021ecc7fcc8d24238ca38aa614fe1db4  benchmark_results/m4-pro-qwen3-4b-week3-attention-mlx-0.32.0.json
+6ef611b91e4f6e5b38f8c1cc452ff72ccac0696484bbd22794afd30dbefd33b7  benchmark_results/m4-pro-qwen3-4b-week3-8k-mlx-0.32.0.json
+0cd8eda58167a195058b08ce1911ca8c232f764131b7b464ea45cc028a05e909  benchmark_results/m4-pro-qwen3-4b-week3-serving-mlx-0.32.0.json
