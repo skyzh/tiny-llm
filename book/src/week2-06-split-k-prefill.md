@@ -39,7 +39,7 @@ original two-dimensional grid is under-filled.
 ## Task 1: Reproduce the Under-Filled Grid
 
 Task 1 changes no function. Benchmark the existing
-`quantized_matmul_simdgroup_w4a16_g128` Day 6 kernel before editing the Split-K
+`quantized_matmul_simdgroup_w4a16_g128` Day 5 kernel before editing the Split-K
 stubs.
 
 Begin with the narrow K projection at `M=32` before changing dispatch. This is
@@ -59,7 +59,7 @@ lengths may already have enough row-by-column tiles and should become controls.
 ## Task 2: Reuse the Day 5 Kernel for Each Partition
 
 Implement `quantized_matmul_simdgroup_splitk_w4a16_g128` in
-`src/extensions/src/quantized_matmul.metal`, reusing the Day 6 tiled helper
+`src/extensions/src/quantized_matmul.metal`, reusing the Day 5 tiled helper
 behind `quantized_matmul_simdgroup_w4a16_g128`.
 
 Add `group_id.z` as the partition index. Every partition must:

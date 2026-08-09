@@ -64,7 +64,7 @@ Modify `tiny_llm_ext::decode_attention`,
 in `src/extensions/src/week2_kernels.metal`, and `decode_attention_custom` in
 `src/tiny_llm/week2_kernels.py`. The starter declaration, binding, source
 stub, Metal file, and CMake registration are already present and labeled Week
-2 Day 5; replace those fail-closed bodies rather than adding new names.
+2 Day 4; replace those fail-closed bodies rather than adding new names.
 
 Expose `decode_attention_custom` for the Metal implementation. Cache the
 scaled query fragment in registers before walking the cache; loading it again
