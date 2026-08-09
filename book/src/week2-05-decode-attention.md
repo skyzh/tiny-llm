@@ -309,7 +309,7 @@ still routes through Day 3's matrix-shaped projection path.
 
 > **Optional profiling evidence.** The
 > [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
-> pairs the required context sweep, short-context model delta, and fixed-workload
+> pairs the context sweep, short-context model delta, and fixed-workload
 > control with a separate prefill attribution. The attribution explains why the
 > course targets matrix-shaped projections next; it is not a prerequisite for
 > Day 6.

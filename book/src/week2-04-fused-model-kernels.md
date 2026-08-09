@@ -189,7 +189,7 @@ transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
 timing no longer measures an equivalent operation.
 
-## Benchmark Analysis: Verify Attention Is the Next Bottleneck
+## Benchmark Analysis: Decide Whether the Fused Kernels Stay
 
 Keep the three cumulative checkpoints separate so a regression cannot hide
 inside their combined gain:
@@ -209,20 +209,16 @@ Attach each cumulative model row, the three Python-reference/optimized/MLX opera
 rows, and the direct dispatch trace. Let the matched benchmark results decide
 whether the kernels stay.
 
-After the pointwise cluster shrinks, sweep cached context rather than assuming
-attention is next. Continue to Day 5 when all three correctness gates pass, the
-direct trace reaches the intended fused kernels, the cumulative rows retain the
-gain, and attention remains a removable gap at the measured contexts. The
-checked M4 Pro sweep covers `S=32,128,160,192,256` and the custom operator wins
-all six balanced passes at every point, which supports a context guard through
-`S <= 256` but says nothing about longer caches. Day 5 must also test query
-length and prove that its replacement moves a complete-model workload that
-actually enters the final guard.
+Continue to Day 5 when all three correctness gates pass, the direct
+fused-dispatch source trace reaches the intended kernels, the cumulative rows
+retain the gain, and the three operator comparisons justify keeping the fused
+implementations. Day 5 then tests whether attention is the next removable gap
+by sweeping cached context and query length before setting a dispatch guard.
 
 > **Optional profiling evidence.** The
 > [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
-> pairs the required cumulative and operator measurements with an updated
-> attribution. That attribution can explain the transition, but the correctness
-> checks, direct dispatch trace, matched runs, and context sweep gate progress.
+> pairs the cumulative and operator measurements with an updated
+> attribution. That attribution can explain the transition, but it does not
+> replace the checkpoint evidence above.
 
 {{#include copyright.md}}

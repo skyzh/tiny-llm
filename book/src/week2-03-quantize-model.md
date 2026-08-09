@@ -667,11 +667,12 @@ during model inference, not just registered and tested in isolation.
 > must route through `quantized_linear` → `quantized_matvec_custom` → the
 > extension primitive → the Metal matvec. Matrix-shaped work must route through
 > `quantized_linear` → `quantized_matmul` → the extension primitive → its Metal
-> matrix schedule. Trace those branches in your completed dispatcher and model
-> wiring. The supplied tests validate packed model state and the direct
-> operators, while the matched benchmark reports complete-model throughput;
-> neither proves the live Metal pipeline identity by itself. Trace the dispatch
-> branches directly, then treat the throughput comparison as a separate result.
+> matrix schedule. Use a source trace through those branches in your completed
+> dispatcher and model wiring. The supplied tests validate packed model state
+> and the direct operators, while the matched benchmark reports complete-model
+> throughput; neither proves the live Metal pipeline identity by itself. Use a
+> direct source trace of the dispatch branches, then treat the throughput
+> comparison as a separate result.
 
 Measure the cumulative model and the real projection shapes:
 
@@ -702,6 +703,6 @@ normalization, position, and activation work around those projections.
 > **Optional profiling evidence.** A kernel-group replay or operator attribution
 > can corroborate that transition, but neither gates progress. The
 > [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
-> includes both alongside the required model and projection measurements.
+> includes both alongside the model and projection measurements above.
 
 {{#include copyright.md}}

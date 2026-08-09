@@ -2,10 +2,88 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from benches.bench_course_progression import WEEK2_VARIANTS
 
 
 ROOT = Path(__file__).resolve().parents[1]
+OPTIONAL_PROFILING_PREFIX = "> **Optional profiling evidence.**"
+APPROVED_REQUIRED_TRACE = re.compile(
+    r"\b(?:direct\s+)?(?:fused[- ]dispatch\s+)?"
+    r"(?:source|dispatch)\s+traces?\b",
+    re.IGNORECASE,
+)
+PROFILING_ONLY = re.compile(
+    r"\bprofil(?:e|ed|es|er|ers|ing)\b|"
+    r"\battribut(?:e|ed|es|ing|ion|ions)\b|"
+    r"\bkernel[- ]groups?\b|"
+    r"\breplay(?:ed|s|ing)?\b|"
+    r"\bxcode\b|"
+    r"\bcaptur(?:e|ed|es|ing)\b|"
+    r"\bgpudebug\b|"
+    r"(?:\.gputrace|\bgputrace\b)|"
+    r"\btimelines?\b|"
+    r"\bmetal system trace\b|"
+    r"\bscreenshots?\b|"
+    r"\bgpu durations?\b|"
+    r"\btrac(?:e|ed|es|ing)\b",
+    re.IGNORECASE,
+)
+NEGATED_OPTIONAL_GATE = re.compile(
+    r"\bnot required\b|"
+    r"\bdo(?:es)? not require\b|"
+    r"\bneither gates? progress\b|"
+    r"\bdo(?:es)? not gate(?: progress| this chapter| the checkpoint)?\b|"
+    r"\bnot prerequisites? or acceptance gates?\b|"
+    r"\bnot (?:a |an )?prerequisites?\b|"
+    r"\bnot (?:a |an )?acceptance gates?\b",
+    re.IGNORECASE,
+)
+OPTIONAL_GATE_SEMANTICS = re.compile(
+    r"\brequir(?:e|es|ed|ing)\b|"
+    r"\bmust\b|"
+    r"\bmandatory\b|"
+    r"\bbefore (?:the learner (?:may|can) )?"
+    r"(?:continue|continuing|proceeding|advancing|moving on|day \d+)\b|"
+    r"\b(?:do not|don't) continue\b|"
+    r"\b(?:cannot|can't) continue\b|"
+    r"\b(?:continue|proceed|advance) (?:only|after|when|once)\b|"
+    r"\bprerequisites?\b|"
+    r"\bgates?\b|"
+    r"\bblocks? progress\b|"
+    r"\bacceptance criteri(?:on|a)\b|"
+    r"\bprogression requirements?\b|"
+    r"\b(?:condition|criterion) (?:to|for) "
+    r"(?:continue|continuing|proceed|proceeding|advance|advancing)\b|"
+    r"\bincomplete until\b",
+    re.IGNORECASE,
+)
+
+
+def _assert_required_progression_is_profile_free(chapter: str, day: int) -> None:
+    optional_blocks = 0
+
+    for paragraph in re.split(r"\n\s*\n", chapter):
+        normalized = re.sub(r"\s+", " ", paragraph.replace("\n> ", "\n"))
+        if paragraph.lstrip().startswith(OPTIONAL_PROFILING_PREFIX):
+            optional_blocks += 1
+            gate_text = NEGATED_OPTIONAL_GATE.sub("", normalized)
+            gate_match = OPTIONAL_GATE_SEMANTICS.search(gate_text)
+            assert gate_match is None, (
+                f"Day {day} optional profiling block contains required semantics: "
+                f"{gate_match.group(0)!r}"
+            )
+            continue
+
+        required_text = APPROVED_REQUIRED_TRACE.sub("", normalized)
+        profiling_match = PROFILING_ONLY.search(required_text)
+        assert profiling_match is None, (
+            f"Day {day} makes profiling output part of required progression: "
+            f"{profiling_match.group(0)!r}"
+        )
+
+    assert optional_blocks, f"Day {day} must label its optional evidence"
 
 
 def test_week2_live_labels_follow_the_seven_day_book():
@@ -91,10 +169,6 @@ def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
 
 
 def test_required_week2_progression_never_depends_on_optional_profiling():
-    profiling_only = re.compile(
-        r"\bprofil(?:e|er|ing)\b|\battribut(?:e|ion)\b|\bkernel-group\b|\breplay\b",
-        re.IGNORECASE,
-    )
     days = {
         day: (ROOT / "book/src" / filename).read_text()
         for day, filename in {
@@ -106,19 +180,58 @@ def test_required_week2_progression_never_depends_on_optional_profiling():
     }
 
     for day, chapter in days.items():
-        paragraphs = re.split(r"\n\s*\n", chapter)
-        profiling_paragraphs = [
-            paragraph for paragraph in paragraphs if profiling_only.search(paragraph)
-        ]
-        assert profiling_paragraphs, f"Day {day} must label its optional evidence"
-        assert all(
-            paragraph.lstrip().startswith("> **Optional profiling evidence.**")
-            for paragraph in profiling_paragraphs
-        ), f"Day {day} makes profiling output part of required progression"
+        _assert_required_progression_is_profile_free(chapter, day)
 
     day3 = days[3]
-    assert "matrix schedule. Trace those branches" in day3
+    assert "matrix schedule. Use a source trace through those branches" in day3
+    assert "direct source trace of the dispatch branches" in day3
     assert "source trace proves" in day3
+
+
+@pytest.mark.parametrize(
+    "required_mutation",
+    (
+        "Attach the Xcode GPU capture before continuing.",
+        "Record a gpudebug timeline as the acceptance gate.",
+        "Require the Metal System Trace and screenshot before Day 5.",
+        "Continue only when cumulative GPU duration shrinks.",
+        "Attach the .gputrace before continuing.",
+        "Record a trace before continuing.",
+    ),
+)
+def test_required_profiling_vocabulary_mutations_fail_closed(required_mutation):
+    chapter = (
+        "> **Optional profiling evidence.** A replay can explain the result, "
+        "but it does not replace the checkpoint evidence.\n\n"
+        f"{required_mutation}"
+    )
+
+    with pytest.raises(AssertionError, match="profiling output part"):
+        _assert_required_progression_is_profile_free(chapter, 4)
+
+
+@pytest.mark.parametrize(
+    "optional_mutation",
+    (
+        "The replay is required.",
+        "The replay is required before the learner may continue.",
+        "You must attach the attribution.",
+        "Do not continue until the kernel-group replay is available.",
+        "The attribution is a prerequisite for Day 5.",
+        "The replay is a condition for advancing to Day 5.",
+        "Proceed only after attaching the attribution.",
+        "The screenshot is mandatory.",
+        "The replay is an acceptance criterion.",
+    ),
+)
+def test_optional_profiling_gate_mutations_fail_closed(optional_mutation):
+    chapter = (
+        "The direct dispatch trace reaches the intended kernel.\n\n"
+        f"> **Optional profiling evidence.** {optional_mutation}"
+    )
+
+    with pytest.raises(AssertionError, match="required semantics"):
+        _assert_required_progression_is_profile_free(chapter, 4)
 
 
 def test_historical_week2_artifact_keeps_original_labels():

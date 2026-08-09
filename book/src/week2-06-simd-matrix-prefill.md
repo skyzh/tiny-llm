@@ -191,7 +191,7 @@ geometry that motivates Split-K. A remaining arithmetic hot spot would send
 you back to Day 6 instead.
 
 > **Optional profiling evidence.** A 32/128-row attribution can corroborate the
-> shape analysis, but the required gate is the matched complete-model delta,
+> shape analysis, but it does not replace the matched complete-model delta,
 > projection controls, and dispatch calculation above.
 
 {{#include copyright.md}}
