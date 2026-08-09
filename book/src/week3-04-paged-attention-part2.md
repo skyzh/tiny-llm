@@ -239,7 +239,7 @@ Use this implementation order:
 
 Each step has a direct correctness check before the next abstraction is added.
 
-## Correctness Invariants
+## What Must Hold, and What Breaks If It Doesn't
 
 These are the invariants worth checking in tests:
 
@@ -270,6 +270,12 @@ for all active requests.
 src/tiny_llm/attention.py
 src/extensions/src/paged_attention.cpp
 src/extensions/src/paged_attention.metal
+```
+
+The extension build target from Day 3 already registers new Metal/C++ sources; run it again after adding these files:
+
+```bash
+pdm run build-ext
 ```
 
 Add a paged attention interface whose inputs come from the paged runtime rather

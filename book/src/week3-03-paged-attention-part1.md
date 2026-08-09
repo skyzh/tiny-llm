@@ -173,6 +173,12 @@ Its output aliases the existing page buffer, and its Metal grid
 covers only `H * new_tokens * D` elements. Page storage is request state, so
 this mutation boundary is explicit and safe as long as the cache owns its page
 and attention depends on the returned array. Full-buffer copies remain only
+
+After adding the extension source, rebuild:
+
+```bash
+pdm run build-ext
+```
 when geometric capacity grows.
 
 Test this behavior through the cache interface: append across a tail-page

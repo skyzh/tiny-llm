@@ -9,9 +9,6 @@ and the runtime metadata needed to read noncontiguous K/V directly. The final
 model uses one page-aware attention interface with separate schedules for
 one-token decode and multi-token prefill.
 
-As in Week 2, **MLX** names the framework or its production operators, the
-**reference solution** names `tiny_llm_ref`, and **your solution** names the
-code you write in `tiny_llm`.
 
 ## What We’ll Cover
 
@@ -22,7 +19,7 @@ code you write in `tiny_llm`.
 - Optional speculative decoding over rewindable caches
 - Optional Mixture-of-Experts model support
 
-The ordering is intentional. Day 1 batches independent request states. Day 2
+Day 1 batches independent request states. Day 2
 splits long prefills so they cannot monopolize the scheduler. Day 3 replaces a
 growing dense cache with fixed-size pages while retaining a dense-gather
 compatibility path. Day 4 removes that gather by teaching attention to walk the
