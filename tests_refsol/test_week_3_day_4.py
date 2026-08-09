@@ -294,6 +294,34 @@ def test_paged_attention_rejects_invalid_live_metadata_before_dispatch(
         )
 
 
+@pytest.mark.parametrize(
+    ("query_length", "context_len"),
+    [(2, 1), (9, 8), (65, 64)],
+    ids=["direct", "flash-9", "flash-65"],
+)
+def test_paged_attention_rejects_active_context_shorter_than_query(
+    query_length, context_len
+):
+    head_dim = 4 if query_length == 2 else 128
+    dtype = mx.float32 if query_length == 2 else mx.bfloat16
+    query = mx.zeros((1, 4, query_length, head_dim), dtype=dtype)
+    key_pages = mx.zeros((3, 2, 32, head_dim), dtype=dtype)
+    value_pages = mx.zeros((3, 2, 32, head_dim), dtype=dtype)
+    live_pages = (context_len + 31) // 32
+    block_table = [[*range(live_pages), *([-1] * (3 - live_pages))]]
+
+    with pytest.raises(ValueError, match="must be zero or at least query length"):
+        paged_attention(
+            query,
+            key_pages,
+            value_pages,
+            mx.array(block_table, dtype=mx.int32),
+            mx.array([context_len], dtype=mx.int32),
+            32,
+            mask="causal",
+        )
+
+
 def test_task_3_incremental_decode_matches_week2_with_paged_attention():
     mlx_model = _fake_qwen3_mlx_model()
     week2_model = Qwen3ModelWeek2(mlx_model)

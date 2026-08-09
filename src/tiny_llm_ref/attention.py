@@ -152,6 +152,10 @@ def paged_attention(
                     f"Unused block_table entry [{batch_idx}, {logical_page}] "
                     "must use the -1 sentinel"
                 )
+        if 0 < context_len < L:
+            raise ValueError(
+                f"context_lens[{batch_idx}] must be zero or at least query length {L}"
+            )
 
     query = mx.contiguous(query.reshape(B * H_q, L, D))
     key_pages = mx.contiguous(key_pages)
