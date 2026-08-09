@@ -273,6 +273,11 @@ src/tiny_llm/kv_cache.py
 src/tiny_llm/batch.py
 ```
 
+Modify `TinyKvPagedCache.block_table`, `context_lens`, `paged_metadata`, and
+`update_and_fetch_paged` in `src/tiny_llm/paged_kv_cache.py`. Then update
+`Request.try_prefill` and `_step` in `src/tiny_llm/batch.py` to carry those
+arrays for every active request.
+
 Extend the batch cache and scheduler so they can prepare:
 
 - `block_table`
@@ -288,21 +293,23 @@ src/extensions/src/paged_attention.cpp
 src/extensions/src/paged_attention.metal
 ```
 
-Complete every learner-extension integration point before rebuilding:
+Modify these exact starter functions:
 
-- extend `src/extensions/src/paged_attention.cpp` and
-  `src/extensions/src/paged_attention.metal` with the direct-attention
-  operation and kernel,
-- register those C++ and Metal sources in their respective lists in
-  `src/extensions/CMakeLists.txt`,
-- declare `paged_attention` in `src/extensions/src/tiny_llm_ext.h`, and
-- register its Python binding in `src/extensions/bindings.cpp`.
+- `paged_attention` in `src/tiny_llm/attention.py`;
+- `tiny_llm_ext::paged_attention`, `PagedAttention::eval_cpu`, and
+  `PagedAttention::eval_gpu` in `src/extensions/src/paged_attention.cpp`;
+- `paged_attention_decode` and `paged_attention_scalar_f32` in
+  `src/extensions/src/paged_attention.metal`.
 
-Then rebuild:
-
-```bash
-pdm run build-ext
-```
+This checkpoint also turns the already-readable quantized token lookup into
+the Week 3 one-dispatch path. Modify `QuantizedEmbedding.__call__` in
+`src/tiny_llm/embedding.py`, `tiny_llm_ext::quantized_embedding` plus
+`QuantizedEmbedding::eval_cpu`/`eval_gpu` in
+`src/extensions/src/quantized_matmul.cpp`, and
+`quantized_embedding_w4a16_g128` in
+`src/extensions/src/quantized_matmul.metal`. The starter declarations,
+bindings, stubs, and build registrations for both operations already exist and
+remain fail-closed until you replace them.
 
 Add a paged attention interface whose inputs come from the paged runtime rather
 than a dense reconstructed `S` dimension. Preserve the Week 2 precision
@@ -365,6 +372,10 @@ dense-only special case: Day 5 optimizes this same paged contract.
 src/tiny_llm/qwen3_week3.py
 ```
 
+Modify `Qwen3MultiHeadAttention.__call__`, `Qwen3ModelWeek3.__init__`, and
+`Qwen3ModelWeek3.__call__` to select the paged path and enable the custom
+embedding only at this cumulative checkpoint.
+
 Update the model so it can route to paged attention when the cache provides paged runtime metadata.
 
 Append K/V to the page pool and pass its metadata to attention for every query
@@ -388,6 +399,10 @@ dense-gather teaching ablation, not the completed serving path.
 ```
 src/tiny_llm/batch.py
 ```
+
+Modify `Request.try_prefill`, `Request.decode_done`, `_step`, and
+`batch_generate`. Request cleanup must call `TinyKvPagedCache.release` for
+every layer cache.
 
 Update request admission, slot reuse, and request removal so that:
 

@@ -121,6 +121,9 @@ pdm run build-ext-test
 ```
 
 It should print `correct: True`.
+The other exported extension names are fail-closed starter stubs labeled with
+the Week 2 or Week 3 checkpoint that implements them; this setup check calls
+only `axpby`.
 
 If you are new to C++ or Metal, try a few small exercises before continuing. For example, implement element-wise operations
 such as `exp`, `sin`, and `cos`, then use them in place of the corresponding MLX operations in your model

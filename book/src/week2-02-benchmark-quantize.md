@@ -552,6 +552,13 @@ src/tiny_llm/quantize.py
 src/tiny_llm/embedding.py
 ```
 
+Modify these exact starter functions:
+
+- `QuantizedWeights.from_mlx_layer`, `dequantize_weights`, and
+  `quantized_linear` in `src/tiny_llm/quantize.py`;
+- `QuantizedEmbedding.__call__` and `QuantizedEmbedding.as_linear` in
+  `src/tiny_llm/embedding.py`.
+
 The starter code provides `QuantizedWeights`, a container for a quantized
 matrix and its dequantization parameters:
 
@@ -594,22 +601,21 @@ src/extensions/src/quantized_matmul.cpp
 src/extensions/CMakeLists.txt
 ```
 
-Register quantized matrix multiplication as an MLX C++ extension. Follow the
-existing `axpby` example for array validation, lazy primitive construction,
-bindings, and Metal dispatch. Your solution is GPU-only; its `eval_cpu` method
-should raise a clear unsupported-device error.
+The starter already contains the declaration, fail-closed source stub, binding,
+and build registration. Keep the C++ declarations and definitions in the
+`tiny_llm_ext` namespace and modify these exact functions:
 
-You will update four files. Keep the C++ declarations and definitions in the
-`tiny_llm_ext` namespace:
-
-- **`tiny_llm_ext.h`** — Declare the `quantized_matmul(...)` function signature
-  and define a `QuantizedMatmul` primitive class (inheriting `mx::Primitive`).
-  Store `group_size` and `bits` as private members.
-- **`bindings.cpp`** — Add an `m.def(...)` call to expose the function to Python.
-- **`quantized_matmul.cpp`** — Implement `quantized_matmul(...)` to validate
+- **`tiny_llm_ext.h`** — Read the Week 2 Day 2 `quantized_matmul(...)`
+  declaration and `QuantizedMatmul` primitive interface; keep its signature in
+  sync with the binding.
+- **`bindings.cpp`** — Verify the existing `m.def("quantized_matmul", ...)`
+  entry; do not create a second binding.
+- **`quantized_matmul.cpp`** — Replace the body of
+  `tiny_llm_ext::quantized_matmul(...)` to validate
   inputs, determine the output shape, return a lazy `mx::array`, and reject CPU
-  evaluation explicitly.
-- **`CMakeLists.txt`** — Add the new C++ source to the extension target.
+  evaluation explicitly in `QuantizedMatmul::eval_cpu(...)`.
+- **`CMakeLists.txt`** — Verify the existing `quantized_matmul.cpp` source
+  registration; do not add a duplicate.
 
 The extension API is infrastructure: it lets an `mx.array` graph node schedule
 the Metal loop you write in the next task. MLX owns the array lifetime and
@@ -659,6 +665,14 @@ knob helped.
 src/extensions/src/quantized_matmul.metal
 src/extensions/src/quantized_matmul.cpp
 ```
+
+Modify these exact starter functions:
+
+- `QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`;
+- `quantized_matmul_vanilla_w4a16_g128` and
+  `quantized_matvec_x4_fast_w4a16_g128` in `quantized_matmul.metal`;
+- `quantized_matmul_vanilla` and `quantized_matvec_custom` in
+  `src/tiny_llm/quantize.py` for the explicit comparison paths.
 
 Write the Metal kernels and connect `eval_gpu` to them. The Python
 `quantized_matmul` wrapper always dispatches the primitive you implement on
@@ -817,6 +831,11 @@ it is not the implementation under test.
 ```
 src/tiny_llm/qwen3_week2.py
 ```
+
+Modify `Qwen3ModelWeek2.__init__`, `Qwen3MultiHeadAttention.__call__`,
+`Qwen3MLP.__call__`, and `Qwen3ModelWeek2.__call__` in this task. These are the
+exact points that load quantized weights, replace dense projections, and keep
+only the requested logits row.
 
 Integrate quantized matrix multiplication into the Week 2 Qwen3 model so that
 the linear layers remain quantized throughout inference.
