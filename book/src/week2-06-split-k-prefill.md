@@ -1,10 +1,10 @@
-# 🚧 Week 2 Day 7: Split-K Prefill
+# 🚧 Week 2 Day 6: Split-K Prefill
 
-> **Status: Experimental performance lab.** See the
+> **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-Day 6's cooperative loads brought long-row prefill near MLX. Its follow-up sweep shows a different
+Day 5's cooperative loads brought long-row prefill near MLX. Its follow-up sweep shows a different
 problem at short prefill: Qwen's narrow K/V projections do not launch enough
 independent result tiles to occupy the GPU. Today we split the reduction
 dimension only until that grid is large enough.
@@ -18,7 +18,7 @@ actually run:
 
 ## Why Split the Reduction Dimension?
 
-For `C = A @ W.T`, Day 6 launches:
+For `C = A @ W.T`, Day 5 launches:
 
 ```plain
 ceil(M / 32) * ceil(K / 32) threadgroups
@@ -39,7 +39,7 @@ original two-dimensional grid is under-filled.
 ## Task 1: Reproduce the Under-Filled Grid
 
 Begin with the narrow K projection at `M=32` before changing dispatch. This is
-the smallest baseline needed to reproduce the under-filled Day 6 grid; Task 4
+the smallest baseline needed to reproduce the under-filled Day 5 grid; Task 4
 runs the full all-projection, all-row sweep after Split-K exists:
 
 ```bash
@@ -48,17 +48,17 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --warmup 5 --iterations 30
 ```
 
-Record synchronized Day 6 and MLX latency before implementing Split-K. The
+Record synchronized Day 5 and MLX latency before implementing Split-K. The
 narrow K/V shape is the clearest small-grid case. Large output widths or prompt
 lengths may already have enough row-by-column tiles and should become controls.
 
-## Task 2: Reuse the Day 6 Kernel for Each Partition
+## Task 2: Reuse the Day 5 Kernel for Each Partition
 
 Add `group_id.z` as the partition index. Every partition must:
 
 - have the same reduction length;
 - start and end on a 128-value quantization-group boundary;
-- reuse the validated Day 6 loader, dequantizer, and 32×32 tile;
+- reuse the validated Day 5 loader, dequantizer, and 32×32 tile;
 - write to its own `[M, K]` plane without atomics.
 
 Store partial planes in BF16 to keep the temporary small and perform the final
@@ -75,7 +75,7 @@ Use a small explicit policy:
 base_groups = ceil(M / 32) * ceil(K / 32)
 split_k = min(16, floor(320 / base_groups), N / 128)
 decrease split_k until N is divisible by split_k * 128
-use Day 6 unchanged when split_k <= 1
+use Day 5 unchanged when split_k <= 1
 ```
 
 For the Qwen3-4B target, use roughly 320 threadgroups
@@ -94,12 +94,12 @@ For Qwen3-4B, the policy selects these schedules:
 | MLP gate/up, `2560 -> 9728` | 304 | 1 | 1 |
 | MLP down, `9728 -> 2560` | 80 | 4 | 1 |
 
-A split of one means the dispatcher uses the Day 6 kernel unchanged. At the
+A split of one means the dispatcher uses the Day 5 kernel unchanged. At the
 128-token acceptance shape only the narrow K/V projections remain eligible,
 with a two-way split; the other major projections already expose enough output
 tiles. At 2,048 tokens every projection uses the unsplit kernel.
 
-Expose the policy through a cumulative `split-k` checkpoint. Keep Day 6
+Expose the policy through a cumulative `split-k` checkpoint. Keep Day 5
 selectable so the benchmark always has an unsplit control.
 
 ## Task 4: Reduce and Verify
@@ -110,7 +110,7 @@ FP32 and cast once to the model dtype. Test:
 - Qwen3-4B's `2560 -> 1024` K/V projection;
 - a partial 32-column output tile;
 - a shape whose base grid already reaches 320 groups and therefore falls back
-  exactly to Day 6.
+  exactly to Day 5.
 
 ```bash
 pdm run build-ext
@@ -127,10 +127,10 @@ done
 
 ## Benchmark Analysis: Complete Week 2
 
-Compare Day 6, Day 7, and MLX at short, acceptance, and long prompt lengths.
+Compare Day 5, Day 6, and MLX at short, acceptance, and long prompt lengths.
 Split-K should help only while the unsplit output grid is under-filled. Verify
-that one-token decode remains unchanged because it still dispatches to Day 3's
-matvec, and that sufficiently large prefill shapes select the unsplit Day 6
+that one-token decode remains unchanged because it still dispatches to Day 2's
+matvec, and that sufficiently large prefill shapes select the unsplit Day 5
 kernel instead of paying for partial storage and reduction.
 
 Keep a short complete-model control beside the under-filled shape sweep, then
@@ -163,21 +163,21 @@ CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --solution tiny_llm --workload quantized-projection \
   --projection k --rows 32 --schedule split-k --iterations 10 \
-  --output /tmp/week2-day7-k-m32-split-k.gputrace
+  --output /tmp/week2-day6-k-m32-split-k.gputrace
 ```
 
 Repeat the operator comparison at the 128-token acceptance shape and at a long
 control such as 2,048 tokens. Attach the three end-to-end comparisons and the
 per-projection SIMD/Split-K/MLX table at each crossover candidate. Retain
 Split-K only below the measured crossover: it must improve the under-filled
-projection, preserve one-token decode, and fall back exactly to Day 6 when the
+projection, preserve one-token decode, and fall back exactly to Day 5 when the
 ordinary result grid is already occupied. Replay both the unsplit and Split-K
 traces when tuning your implementation; record the accumulation and reduction
 pipelines and total GPU time beside the calculated partition policy and
-operator table. The final performance-lab acceptance run must still reach 80%
+operator table. The final stretch-goal acceptance run must still reach 80%
 of MLX in both phases.
 
-The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
+The [reference checkpoint](./appendix-performance.md#day-6-split-k-only-below-the-crossover)
 pairs the short-shape operator gains with the end-to-end result and keeps the
 neutral acceptance and long controls separate. Use Xcode to verify that the
 short shape executes the accumulation and merge pipelines, while the calculated
@@ -196,6 +196,6 @@ optimize matvec -> profile decode -> optimize model kernels -> profile decode
 
 Week 3 inherits these projection schedules. Paging is evaluated separately on
 cache writes, direct page reads, attention time, and end-to-end throughput; it
-does not receive credit for the Day 7 projection gain.
+does not receive credit for the Day 6 projection gain.
 
 {{#include copyright.md}}

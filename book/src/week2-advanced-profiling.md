@@ -152,8 +152,8 @@ week2-dayN-xcode-memory-right.png
 week2-dayN-xcode-cost-source.png
 ```
 
-Keep every relevant pipeline visible in the overview. A Day 4 capture should
-show RMSNorm, RoPE, and SwiGLU together; a Day 7 capture should show both the
+Keep every relevant pipeline visible in the overview. A Day 3 capture should
+show RMSNorm, RoPE, and SwiGLU together; a Day 6 capture should show both the
 Split-K accumulation and reduction when the reduction has material cost. A
 useful Cost Graph image includes the hottest loop and its weighted source-line
 percentages, not only the function name.

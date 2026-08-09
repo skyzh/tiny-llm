@@ -8,14 +8,20 @@
 > carries its own verification notes; the summary below records what is
 > continuously tested versus what is one-machine research evidence.
 
-Week 2 keeps the readable Week 1 model intact and builds a separate optimized
-Qwen3 path for single-request decoding. It begins with the algorithm change:
-prefill once, retain a dense KV cache, and decode one new token at a time.
-Later chapters introduce kernels that address the costs the KV cache exposes.
+Week 2 keeps the Week 1 Python `mlx.core` model intact and builds a separate
+optimized Qwen3 path for single-request decoding. It begins with the algorithm
+change: prefill once, retain a dense KV cache, and decode one new token at a
+time. Later chapters introduce kernels that address the costs the KV cache
+exposes.
+
+> ⏱️ **Time commitment.** The second half of Day 2 and Days 3–6 write and tune
+> custom Metal kernels.
+> Completing the full Week 2 sequence typically takes substantially longer than
+> Week 1 Days 6–7. All six days are required core material; plan accordingly.
 
 Week 2 keeps BF16 for dense weights, quantization scales and biases, activations, projections, KV-cache entries, and model-facing kernel outputs. Packed W4 weight codes are stored as `uint32`. Numerically sensitive reductions, dot products, and
-online-softmax state accumulate in FP32 inside readable expressions or kernel
-registers. This contract remains in force for Week 3.
+online-softmax state accumulate in FP32 inside Python reference expressions or
+kernel registers. This contract remains in force for Week 3.
 
 ## Verification Status
 
@@ -26,33 +32,29 @@ Pro, not a cross-device guarantee. Raw measurements, rejected experiments, and
 retained dispatch choices live in the
 [performance evidence ledger](./appendix-performance.md).
 
-## Choose a Completion Track
+## Complete the Core Path
 
-The full reference solution is a small performance-engineering project, not a
-reasonable one-week requirement for every student. Pick one track:
+The full reference solution is a substantial performance-engineering project.
+All six days are required core material; schedule more than one week if needed:
 
-| Track | Required work | Provided infrastructure | Optional work |
-|---|---|---|---|
-| Core course | Days 1–5: cached model integration, matched benchmarking, packed W4 projections, fused model kernels, and a bounded decode-attention implementation | Model loading, extension build system, benchmark/profile runners, correctness tests, and the readable/reference implementations | Xcode counter capture, schedule searches, and hardware-specific retuning |
-| Performance lab | Core course plus Days 6–7: SIMD-matrix prefill and shape-aware Split-K | Balanced operator comparisons, fresh-process progression runner, and checked-in M4 Pro evidence | Rejected experiments, alternative schedules, cross-device sweeps, and the 80%-of-MLX target |
+| Required work | Provided infrastructure | Optional work |
+|---|---|---|
+| Days 1–6: cached model integration, benchmarking and quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark/profile runners, correctness tests, and the Python-reference implementations | Xcode counter capture, schedule searches, hardware-specific retuning, and the 80%-of-MLX stretch target |
 
 The tests define API and correctness contracts; they do not require a student
-to rediscover the reference schedule. If you are teaching the core course,
-stop after Day 5 and treat the remaining checkpoints as stretch work. The
-80%-of-MLX acceptance target applies only to the performance-lab track on a
-measured machine.
+to rediscover the reference schedule.
 
 ## What We Will Cover
 
 - A dense per-request key-value cache for incremental decoding
-- Synchronized benchmarking and Metal profiling of the cached baseline
-- A readable quantized matrix product and a SIMD matrix-vector decode kernel
-- The decode-attention primitive you implement
-- Fast RMSNorm, RoPE, and SwiGLU operations
+- Synchronized benchmarking, the decode roofline, and packed W4 quantization
+- A SIMD matrix-vector quantized decode kernel implemented in Metal
+- Fused RMSNorm, RoPE, and SwiGLU Metal kernels
+- An online-softmax decode-attention kernel
 - A BF16 SIMD-matrix quantized prefill kernel
 - A shape-aware split-K schedule for small Qwen prefill matrices
 - A last-token output interface for generation
-- An optional performance-lab target of 80% of MLX prefill and decode
+- An optional stretch target of 80% of MLX prefill and decode
   throughput on the fixed Week 2 checkpoint
 
 Week 2 does **not** call MLX-provided implementations of the operators we are
@@ -61,7 +63,7 @@ RMSNorm, RoPE, and SwiGLU in its own Python, C++, or Metal code. In
 particular, the completed checkpoint does not use `mx.quantized_matmul`,
 `mx.dequantize`, `mx.fast` operators, or
 `mx.fast.scaled_dot_product_attention` as shortcuts. The Day 1 baseline still
-uses Week 1's provided `mx.dequantize` loading helper; Day 3 replaces that
+uses Week 1's Python `mx.dequantize` loading helper; Day 2 replaces that
 loading path as part of keeping weights packed.
 
 Week 2 uses `mlx_lm` to load model weights and `mlx.core` for arrays, graph
@@ -69,24 +71,42 @@ evaluation, and device synchronization.
 
 ## Weekly Checkpoints
 
-1. **KV cache:** copy the readable Week 1 operators into a Week 2 model, add
+1. **KV cache:** port the Week 1 operators into a Week 2 model, add
    request-scoped state, and stop recomputing the prefix.
-2. **Benchmark and profile:** measure the cached model against MLX, then rank
-   real GPU costs rather than guessing what should be slow.
-3. **Quantized matvec:** the decode profile points at projection weight reads,
-   so keep weights packed and integrate the SIMD matrix-vector kernel.
-4. **Fused model kernels:** after packed projections narrow the measured gap
+2. **Benchmark, profile, and quantize:** measure the cached model against MLX,
+   identify projection weight reads as the bottleneck, replace dense 16-bit
+   weights with packed W4, and implement the SIMD matrix-vector Metal kernel.
+3. **Fused model kernels:** after packed projections narrow the measured gap
    with MLX, profile and fuse RMSNorm, RoPE, and SwiGLU one operator at a
    time.
-5. **Decode attention:** profile score computation, softmax, and value
+4. **Decode attention:** profile score computation, softmax, and value
    aggregation across cached context lengths. Introduce online softmax over
    its measured short-context range and verify with a matched workload.
-6. **SIMD-matrix prefill:** return to the fixed 128-token workload and its
+5. **SIMD-matrix prefill:** return to the fixed 128-token workload and its
    prefill profile, where the correctness-first quantized matrix path
    dominates. Introduce 8×8 matrix fragments with FP32 accumulation.
-7. **Split-K prefill:** the Day 6 shape sweep reveals under-filled grids at
+6. **Split-K prefill:** the Day 5 shape sweep reveals under-filled grids at
    short row counts, most clearly in narrow Qwen K/V projections. Partition
-   the reduction dimension and fall back to Day 6 at the measured crossover.
+   the reduction dimension and fall back to Day 5 at the measured crossover.
+
+### Run the Supplied Test Gates
+
+Day 2 combines the benchmark and quantization work, so it has two supplied test
+groups. The later course days each use the next existing test selector:
+
+| Course day | Test command selector |
+|---|---|
+| Day 1 | `--week 2 --day 1` |
+| Day 2 benchmark work | `--week 2 --day 2` |
+| Day 2 quantization and Metal work | `--week 2 --day 3` |
+| Day 3 | `--week 2 --day 4` |
+| Day 4 | `--week 2 --day 5` |
+| Day 5 | `--week 2 --day 6` |
+| Day 6 | `--week 2 --day 7` |
+
+Run every group assigned to the chapter before continuing. The selectors name
+the supplied test files; the chapter headings and navigation use the six-day
+course sequence.
 
 At each boundary, end-to-end and operator measurements select the next kernel
 family. An optional Xcode trace explains what happens inside a representative
@@ -96,7 +116,7 @@ GPU kernel.
 
 The completed Week 2 model decodes one token at a time from a dense KV cache,
 dispatches separate prefill and decode matrix schedules, and keeps weights
-quantized throughout. Week 1 continues to use its readable full-prefix
+quantized throughout. Week 1 continues to use its Python `mlx.core` full-prefix
 generation loop.
 
 Week 3 imports these Week 2 interfaces rather than copying or replacing them.

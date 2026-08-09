@@ -1,21 +1,21 @@
-# 🚧 Week 2 Day 5: Fused Decode Attention
+# 🚧 Week 2 Day 4: Fused Decode Attention
 
 > **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-This chapter starts only after the Day 4 profile has verified that the fused
+This chapter starts only after the Day 3 profile has verified that the fused
 model kernels reduced the repeated pointwise cluster. Linear projections remain
 important, but their operator latency is already close to the external
 denominator, while attention is the next measured removable gap through cached
-context `S <= 256`. Longer-context measurements use the readable fallback for
+context `S <= 256`. Longer-context measurements use the Week 1 Python fallback for
 caches beyond 256; every checked context through 256 uses the optimized path. During
 single-request decode, query length is normally one while the cached key/value
 sequence grows by one token at a time. Week 1 expresses attention as matrix
 multiplication, masking, softmax, and another matrix multiplication. That is
-readable, but it materializes the complete score and probability rows.
+expressed with `mlx.core`, but it materializes the complete score and probability rows.
 
-First write a readable composition to preserve the equation, then replace its
+First write a Python `mlx.core` composition to preserve the equation, then replace its
 matmuls and softmax with an online-softmax Metal kernel in your solution.
 Measure the complete model before deciding whether to retain the dispatch. The
 kernel does not call `mx.matmul` or an MLX-provided
@@ -45,7 +45,7 @@ kv_head = query_head / (H_q / H_kv)
 Normalize explicit masks to `B * H_q, L, S`. Also pass a causal flag so the
 kernel can skip future positions without constructing a causal-mask tensor.
 
-As a readable intermediate step, reshape query heads into `H_kv` groups and a
+As a Python intermediate step, reshape query heads into `H_kv` groups and a
 repeat dimension. Broadcasting then pairs several query heads with one KV head
 without physically repeating the key and value tensors. Express scaled scores,
 softmax, and the weighted-value product explicitly. Use this form as a
@@ -112,20 +112,20 @@ context length changes.
 ## Task 3: Integrate and Measure
 
 Route short-query, short-context Week 2 attention through the Metal
-implementation. Dispatch back to the readable composition when the cached
+implementation. Dispatch back to the Python `mlx.core` composition when the cached
 context exceeds the measured crossover; a schedule that wins at 128 tokens
-should not be forced onto 2,048 tokens. Retain the readable composition for
+should not be forced onto 2,048 tokens. Retain the Python composition for
 tests and ablations. Week 3 later combines this recurrence with paged K/V and
 SIMD-matrix tiles for FlashAttention; prefill is a different workload where
 both query and context lengths are large.
 
 Set a concrete dispatch guard: use your Metal kernel only when query length is
 at most two and cached context length is at most 256. Otherwise use the
-readable grouped-attention path. Keep this condition at the model call site so
+Python grouped-attention path. Keep this condition at the model call site so
 the benchmarked operating range remains reviewable instead of becoming a
 hidden performance policy inside the Metal kernel.
 
-Keep arbitrary dense, per-request masks on the readable model path. The
+Keep arbitrary dense, per-request masks on the Python model path. The
 primitive still accepts explicit masks so its arithmetic contract can be
 tested, but the Week 2 dispatch guard selects the custom kernel only for
 `None` or `"causal"`. Explicit masks appear in the first continuous-batching
@@ -139,7 +139,7 @@ pdm run test --week 2 --day 5
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit
-masks against the readable Week 1 implementation. The reference suite uses
+masks against the Python Week 1 implementation. The reference suite uses
 Qwen's `D = 128`, query lengths 1 and 8, GQA ratios 1 and 4, and cached contexts
 `1, 31, 32, 127, 128, 129, 255, 256`. It also checks both sides of the model's
 `L <= 2` and `S <= 256` dispatch guard. Use a tolerance because online softmax
@@ -188,10 +188,10 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 Prefill produces the first token, so the 96 timed decode calls grow the cache
 from `S=33` through `S=128`. Every one is inside the custom dispatch guard.
-Your solution falls back to the exact readable Week 1 composition outside that
+Your solution falls back to the exact Python Week 1 composition outside that
 validated range.
 
-## Benchmark Analysis: Select Day 6
+## Benchmark Analysis: Verify Prefill Projections Are the Next Bottleneck
 
 Measure the attention operator and the cumulative checkpoint separately. The
 first progression is the matched short-context acceptance test for this
@@ -227,7 +227,7 @@ optional profiling appendix:
 CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --solution tiny_llm --workload decode-attention --iterations 10 \
-  --output /tmp/week2-day5-decode-attention-s128.gputrace
+  --output /tmp/week2-day4-decode-attention-s128.gputrace
 ```
 
 Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
@@ -244,7 +244,7 @@ The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
 rotated every implementation order, and recorded all 60 samples per
 implementation and pass:
 
-| Context | Readable | Metal | MLX | Metal speedup |
+| Context | Python reference | Metal | MLX | Metal speedup |
 |---:|---:|---:|---:|---:|
 | 32 | 143.0 us | 125.7 us | 116.3 us | 1.138x |
 | 128 | 149.3 us | 136.3 us | 120.6 us | 1.095x |
@@ -253,7 +253,7 @@ implementation and pass:
 | 256 | 158.0 us | 150.7 us | 122.8 us | 1.048x |
 
 The Metal path wins at every measured point through 256, so 256 is the largest
-evidenced context guard. The readable path remains the policy beyond that
+evidenced context guard. The Python `mlx.core` path remains the policy beyond that
 range; do not extrapolate the final 4.8% operator win to longer caches. The raw
 record, including exact source SHA, model configuration, MLX and mlx-lm
 versions, Xcode/Metal versions, device information, execution order, samples,
@@ -267,7 +267,7 @@ is equivalent to unmasked one-token decode, while `L>1` measures causal
 multi-token chunks. Each pass also rotated the three implementation orders and
 retained every sample:
 
-| Query length | Readable | Metal | MLX | Metal speedup | Pass wins |
+| Query length | Python reference | Metal | MLX | Metal speedup | Pass wins |
 |---:|---:|---:|---:|---:|---:|
 | 1 | 244.4 us | 213.1 us | 155.9 us | 1.147x | 6/6 |
 | 2 | 341.4 us | 258.8 us | 185.3 us | 1.319x | 6/6 |
@@ -276,7 +276,7 @@ retained every sample:
 
 L4's aggregate median improved, but it lost two of six balanced passes. L2 is
 the largest repeat-consistent win, so the dispatch guard remains conservative
-at `L <= 2`; L4 and L8 use the readable path. Reproduce the recorded sweep with:
+at `L <= 2`; L4 and L8 use the Python path. Reproduce the recorded sweep with:
 
 ```bash
 pdm run bench-week2-operators --solution tiny_llm_ref --model qwen3-4b \
@@ -290,12 +290,12 @@ pdm run bench-week2-operators --solution tiny_llm_ref --model qwen3-4b \
 The checked raw record is
 `benchmark_results/m4-pro-qwen3-4b-week2-attention-query-sweep-mlx-0.32.0.json`.
 
-In the fixed `128/129` workload, prefill has `L=128` and uses the readable path.
+In the fixed `128/129` workload, prefill has `L=128` and uses the Python path.
 The first timed decode call appends the new token before the guard sees `S=129`;
 the one-token decode calls through `S=256` therefore use the custom path. Keep
-the prefill attribution separate from any decode change, and continue to Day 6
+the prefill attribution separate from any decode change, and continue to Day 5
 only when quantized matrix-shaped projections dominate prefill.
-The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
+The [reference checkpoint](./appendix-performance.md#day-4-fused-decode-attention)
 pairs the context microbenchmarks with the matched short-context model delta,
 fixed-workload control, and prefill attribution. The optional Xcode replay
 can inspect the attention dispatch if you generate a trace; the fixed workload's
