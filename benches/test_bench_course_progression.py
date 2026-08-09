@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -8,21 +9,47 @@ from benches.bench_course_progression import WEEK2_VARIANTS
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OPTIONAL_PROFILING_PREFIX = "> **Optional profiling evidence.**"
+OPTIONAL_PROFILING_LABEL = "optional profiling evidence"
+APPROVED_OPTIONAL_EVIDENCE = frozenset(
+    {
+        "optional profiling evidence a kernel group replay or operator attribution can "
+        "corroborate that transition but neither gates progress the reference checkpoint "
+        "includes both alongside the model and projection measurements above",
+        "optional profiling evidence the day 3 kernel group replay and the reference "
+        "solution attribution show the pointwise cluster behind the optimized projections "
+        "they explain the chapter order but are not prerequisites or acceptance gates",
+        "optional profiling evidence the reference checkpoint pairs the cumulative and "
+        "operator measurements with an updated attribution that attribution can explain the "
+        "transition but it does not replace the checkpoint evidence above",
+        "optional profiling evidence decode and prefill kernel group results can explain how "
+        "the workload divides its time but they are reference evidence not required output "
+        "for this checkpoint",
+        "optional profiling evidence the reference checkpoint pairs the context sweep short "
+        "context model delta and fixed workload control with a separate prefill attribution "
+        "the attribution explains why the course targets matrix shaped projections next it "
+        "is not a prerequisite for day 6",
+        "optional profiling evidence the checked dependency aware attribution and the "
+        "reference solution attribution explain why projections are the reference solution s "
+        "next target they are not required learner output and do not gate this chapter",
+        "optional profiling evidence a 32 128 row attribution can corroborate the shape "
+        "analysis but it does not replace the matched complete model delta projection "
+        "controls and dispatch calculation above",
+    }
+)
 APPROVED_REQUIRED_TRACE = re.compile(
-    r"\b(?:direct\s+)?(?:fused[- ]dispatch\s+)?"
-    r"(?:source|dispatch)\s+traces?\b",
+    r"\b(?:direct )?(?:fused dispatch )?(?:source|dispatch) traces?\b",
     re.IGNORECASE,
 )
 PROFILING_ONLY = re.compile(
     r"\bprofil(?:e|ed|es|er|ers|ing)\b|"
     r"\battribut(?:e|ed|es|ing|ion|ions)\b|"
-    r"\bkernel[- ]groups?\b|"
+    r"\bkernel groups?\b|"
+    r"\boperator breakdowns?\b|"
     r"\breplay(?:ed|s|ing)?\b|"
     r"\bxcode\b|"
     r"\bcaptur(?:e|ed|es|ing)\b|"
     r"\bgpudebug\b|"
-    r"(?:\.gputrace|\bgputrace\b)|"
+    r"\bgputrace\b|"
     r"\btimelines?\b|"
     r"\bmetal system trace\b|"
     r"\bscreenshots?\b|"
@@ -30,49 +57,28 @@ PROFILING_ONLY = re.compile(
     r"\btrac(?:e|ed|es|ing)\b",
     re.IGNORECASE,
 )
-NEGATED_OPTIONAL_GATE = re.compile(
-    r"\bnot required\b|"
-    r"\bdo(?:es)? not require\b|"
-    r"\bneither gates? progress\b|"
-    r"\bdo(?:es)? not gate(?: progress| this chapter| the checkpoint)?\b|"
-    r"\bnot prerequisites? or acceptance gates?\b|"
-    r"\bnot (?:a |an )?prerequisites?\b|"
-    r"\bnot (?:a |an )?acceptance gates?\b",
-    re.IGNORECASE,
-)
-OPTIONAL_GATE_SEMANTICS = re.compile(
-    r"\brequir(?:e|es|ed|ing)\b|"
-    r"\bmust\b|"
-    r"\bmandatory\b|"
-    r"\bbefore (?:the learner (?:may|can) )?"
-    r"(?:continue|continuing|proceeding|advancing|moving on|day \d+)\b|"
-    r"\b(?:do not|don't) continue\b|"
-    r"\b(?:cannot|can't) continue\b|"
-    r"\b(?:continue|proceed|advance) (?:only|after|when|once)\b|"
-    r"\bprerequisites?\b|"
-    r"\bgates?\b|"
-    r"\bblocks? progress\b|"
-    r"\bacceptance criteri(?:on|a)\b|"
-    r"\bprogression requirements?\b|"
-    r"\b(?:condition|criterion) (?:to|for) "
-    r"(?:continue|continuing|proceed|proceeding|advance|advancing)\b|"
-    r"\bincomplete until\b",
-    re.IGNORECASE,
-)
+
+
+def _normalize_contract_text(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"(?m)^\s*>\s?", "", text)
+    text = re.sub(r"[*_`~]+", " ", text)
+    text = re.sub(r"[-‐‑‒–—_/]+", " ", text)
+    text = re.sub(r"[^\w\s]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
 
 
 def _assert_required_progression_is_profile_free(chapter: str, day: int) -> None:
     optional_blocks = 0
 
     for paragraph in re.split(r"\n\s*\n", chapter):
-        normalized = re.sub(r"\s+", " ", paragraph.replace("\n> ", "\n"))
-        if paragraph.lstrip().startswith(OPTIONAL_PROFILING_PREFIX):
+        normalized = _normalize_contract_text(paragraph)
+        if normalized.startswith(OPTIONAL_PROFILING_LABEL):
             optional_blocks += 1
-            gate_text = NEGATED_OPTIONAL_GATE.sub("", normalized)
-            gate_match = OPTIONAL_GATE_SEMANTICS.search(gate_text)
-            assert gate_match is None, (
-                f"Day {day} optional profiling block contains required semantics: "
-                f"{gate_match.group(0)!r}"
+            assert normalized in APPROVED_OPTIONAL_EVIDENCE, (
+                f"Day {day} optional profiling block contains required semantics or is not "
+                f"an approved evidence-only contract: {normalized!r}"
             )
             continue
 
@@ -195,14 +201,21 @@ def test_required_week2_progression_never_depends_on_optional_profiling():
         "Record a gpudebug timeline as the acceptance gate.",
         "Require the Metal System Trace and screenshot before Day 5.",
         "Continue only when cumulative GPU duration shrinks.",
+        "Attach the GPU-duration result before Day 5.",
+        "Attach the kernel **group** evidence before Day 5.",
+        "The operator breakdown must be attached before Day 5.",
+        "Complete the checkpoint by attaching the operator breakdown.",
+        "Progress requires the operator breakdown attachment.",
         "Attach the .gputrace before continuing.",
         "Record a trace before continuing.",
     ),
 )
 def test_required_profiling_vocabulary_mutations_fail_closed(required_mutation):
     chapter = (
-        "> **Optional profiling evidence.** A replay can explain the result, "
-        "but it does not replace the checkpoint evidence.\n\n"
+        "> **Optional profiling evidence.** A kernel-group replay or operator attribution "
+        "can corroborate that transition, but neither gates progress. The "
+        "[reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed) "
+        "includes both alongside the model and projection measurements above.\n\n"
         f"{required_mutation}"
     )
 
@@ -222,6 +235,15 @@ def test_required_profiling_vocabulary_mutations_fail_closed(required_mutation):
         "Proceed only after attaching the attribution.",
         "The screenshot is mandatory.",
         "The replay is an acceptance criterion.",
+        "You need the attribution to continue.",
+        "The replay is necessary to advance to Day 5.",
+        "The screenshot is essential for Day 5.",
+        "Day 5 depends on attaching the attribution.",
+        "Only after the replay may you continue.",
+        "Day 5 starts only after the replay is attached.",
+        "Only learners with the replay may proceed.",
+        "Complete this checkpoint by attaching the operator breakdown.",
+        "Progress depends on the screenshot attachment.",
     ),
 )
 def test_optional_profiling_gate_mutations_fail_closed(optional_mutation):
