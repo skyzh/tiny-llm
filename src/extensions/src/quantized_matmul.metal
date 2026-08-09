@@ -5,12 +5,12 @@ using namespace metal;
 // Starter interface map. Implement the named kernels at these checkpoints;
 // their argument lists are defined by the matching C++ encoder you complete.
 //
-// Week 2, Day 2:
+// Week 2, Day 3:
 //   quantized_matmul_vanilla_w4a16_g128
 //   quantized_matvec_x4_fast_w4a16_g128
-// Week 2, Day 5:
-//   quantized_matmul_simdgroup_w4a16_g128
 // Week 2, Day 6:
+//   quantized_matmul_simdgroup_w4a16_g128
+// Week 2, Day 7:
 //   quantized_matmul_simdgroup_splitk_w4a16_g128
 //   quantized_matmul_splitk_reduce
 // Week 3, Day 4:

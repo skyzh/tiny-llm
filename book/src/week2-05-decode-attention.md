@@ -1,10 +1,10 @@
-# 🚧 Week 2 Day 4: Fused Decode Attention
+# 🚧 Week 2 Day 5: Fused Decode Attention
 
 > **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-This chapter starts only after the Day 3 profile has verified that the fused
+This chapter starts only after the Day 4 evidence has verified that the fused
 model kernels reduced the repeated pointwise cluster. Linear projections remain
 important, but their operator latency is already close to the external
 denominator, while attention is the next measured removable gap through cached
@@ -64,7 +64,7 @@ Modify `tiny_llm_ext::decode_attention`,
 in `src/extensions/src/week2_kernels.metal`, and `decode_attention_custom` in
 `src/tiny_llm/week2_kernels.py`. The starter declaration, binding, source
 stub, Metal file, and CMake registration are already present and labeled Week
-2 Day 4; replace those fail-closed bodies rather than adding new names.
+2 Day 5; replace those fail-closed bodies rather than adding new names.
 
 Expose `decode_attention_custom` for the Metal implementation. Cache the
 scaled query fragment in registers before walking the cache; loading it again
@@ -232,30 +232,21 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case decode-attention:decode:32 --case decode-attention:decode:128 \
-  --case decode-attention:prefill:128 --warmup 4 --iterations 12
-```
-
-Use a source-enabled `S=128` trace for your implementation only as part of the
-optional profiling appendix:
-
-```bash
-CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
-MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
-  --solution tiny_llm --workload decode-attention --iterations 10 \
-  --output /tmp/week2-day4-decode-attention-s128.gputrace
 ```
 
 Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
 attach that context sweep beside the short-context
 `swiglu`/`decode-attention` model rows.
 The intermediate points reveal whether the custom kernel has a useful measured
-crossover rather than assuming that an endpoint applies to every context. Also
-attach the decode and prefill kernel-group results. Reject the custom dispatch
-if repeated fresh-process short-context runs do not improve, even when the
-isolated kernel looks faster. If the operator wins only over a limited context
-range, encode that measured crossover in the dispatch guard.
+crossover rather than assuming that an endpoint applies to every context.
+Reject the custom dispatch if repeated fresh-process short-context runs do not
+improve, even when the isolated kernel looks faster. If the operator wins only
+over a limited context range, encode that measured crossover in the dispatch
+guard.
+
+> **Optional profiling evidence.** Decode and prefill kernel-group results can
+> explain how the workload divides its time, but they are reference evidence,
+> not required output for this checkpoint.
 
 The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
 rotated every implementation order, and recorded all 60 samples per
@@ -273,7 +264,7 @@ The Metal path wins at every measured point through 256, so 256 is the largest
 evidenced context guard. The Python `mlx.core` path remains the policy beyond that
 range; do not extrapolate the final 4.8% operator win to longer caches. The raw
 record, including exact source SHA, model configuration, MLX and mlx-lm
-versions, Xcode/Metal versions, device information, execution order, samples,
+versions, Metal compiler version, device information, execution order, samples,
 and medians, is
 `benchmark_results/m4-pro-qwen3-4b-week2-attention-context-sweep-mlx-0.32.0.json`.
 
@@ -310,12 +301,17 @@ The checked raw record is
 In the fixed `128/129` workload, prefill has `L=128` and uses the Python path.
 The first timed decode call appends the new token before the guard sees `S=129`;
 the one-token decode calls through `S=256` therefore use the custom path. Keep
-the prefill attribution separate from any decode change, and continue to Day 5
-only when quantized matrix-shaped projections dominate prefill.
-The [reference checkpoint](./appendix-performance.md#day-4-fused-decode-attention)
-pairs the context microbenchmarks with the matched short-context model delta,
-fixed-workload control, and prefill attribution. The optional Xcode replay
-can inspect the attention dispatch if you generate a trace; the fixed workload's
-unchanged prefill exposes the next matrix-shaped projection bottleneck.
+the fixed workload separate from the short-context acceptance run. Continue to
+Day 6 after the correctness tests pass, the direct source trace proves the
+bounded attention dispatch and its fallback, repeated short-context runs retain
+the gain, and the fixed `128/129` control confirms that prefill is unchanged and
+still routes through Day 3's matrix-shaped projection path.
+
+> **Optional profiling evidence.** The
+> [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
+> pairs the context sweep, short-context model delta, and fixed-workload
+> control with a separate prefill attribution. The attribution explains why the
+> course targets matrix-shaped projections next; it is not a prerequisite for
+> Day 6.
 
 {{#include copyright.md}}

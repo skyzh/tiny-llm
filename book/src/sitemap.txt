@@ -13,11 +13,12 @@ https://skyzh.github.io/tiny-llm/week1-06-generate-response
 https://skyzh.github.io/tiny-llm/week1-07-sampling-prepare
 https://skyzh.github.io/tiny-llm/week1-overview
 https://skyzh.github.io/tiny-llm/week2-01-kv-cache
-https://skyzh.github.io/tiny-llm/week2-02-benchmark-quantize
-https://skyzh.github.io/tiny-llm/week2-03-fused-model-kernels
-https://skyzh.github.io/tiny-llm/week2-04-decode-attention
-https://skyzh.github.io/tiny-llm/week2-05-simd-matrix-prefill
-https://skyzh.github.io/tiny-llm/week2-06-split-k-prefill
+https://skyzh.github.io/tiny-llm/week2-02-benchmark-profile
+https://skyzh.github.io/tiny-llm/week2-03-quantize-model
+https://skyzh.github.io/tiny-llm/week2-04-fused-model-kernels
+https://skyzh.github.io/tiny-llm/week2-05-decode-attention
+https://skyzh.github.io/tiny-llm/week2-06-simd-matrix-prefill
+https://skyzh.github.io/tiny-llm/week2-07-split-k-prefill
 https://skyzh.github.io/tiny-llm/week2-advanced-profiling
 https://skyzh.github.io/tiny-llm/week2-overview
 https://skyzh.github.io/tiny-llm/week3-01-continuous-batching

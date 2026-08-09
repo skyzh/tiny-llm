@@ -1,18 +1,13 @@
-# 🚧 Week 2 Day 3: Fused Model Kernels
+# 🚧 Week 2 Day 4: Fused Model Kernels
 
 > **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-The Day 2 profile should now show many smaller pointwise and reduction
-dispatches behind the optimized projections.
-RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
-GPU duration—not an imagined single slow call—makes them the next target. Week
-1 expresses them as Python `mlx.core` equations. Confirm the cluster with the
-Day 2 kernel-group replay; the
-[reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
-shows the expected transition. Week 2 keeps those implementations intact and
-asks you to write three Metal kernels behind a separate interface:
+Day 3 removed the largest projection gap. Day 4 now targets RMSNorm, RoPE, and
+SwiGLU, which recur around those projections in every transformer layer. Week 1
+expresses them as Python `mlx.core` equations. Week 2 keeps those implementations
+intact and asks you to write three Metal kernels behind a separate interface:
 
 ```plain
 src/tiny_llm/week2_kernels.py
@@ -25,6 +20,11 @@ graph node, owns its buffers, and dispatches the Metal function, but your
 solution owns the arithmetic inside that function. Your solution does not call
 `mx.fast.rms_norm`,
 `mx.fast.rope`, or an MLX-provided SiLU implementation.
+
+> **Optional profiling evidence.** The Day 3 kernel-group replay and the
+> [reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
+> show the pointwise cluster behind the optimized projections. They explain the
+> chapter order but are not prerequisites or acceptance gates.
 
 ## Why Fusion Helps
 
@@ -58,7 +58,7 @@ Modify `tiny_llm_ext::rms_norm`, `Week2RMSNorm::eval_cpu`, and
 binding, C++/Metal files, and CMake registration already exist for this
 checkpoint; replace the fail-closed bodies instead of adding parallel APIs.
 
-Begin with one SIMD group per input row, then profile it. A 2,560-element hidden
+Begin with one SIMD group per input row, then benchmark it. A 2,560-element hidden
 row gives 32 lanes roughly 80 serial elements each; the optimized kernel launches 256
 threads, or eight SIMD groups, per row. Each group reduces its portion with
 `simd_sum`; lane zero writes eight partial sums to threadgroup memory; the first
@@ -189,7 +189,7 @@ transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
 timing no longer measures an equivalent operation.
 
-## Benchmark Analysis: Verify Attention Is the Next Bottleneck
+## Benchmark Analysis: Decide Whether the Fused Kernels Stay
 
 Keep the three cumulative checkpoints separate so a regression cannot hide
 inside their combined gain:
@@ -203,39 +203,22 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
 
 pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --section model-kernels --context 128
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case swiglu:decode:32 --case swiglu:decode:128 \
-  --case swiglu:decode:160 --warmup 4 --iterations 12
-```
-
-Use a source-enabled pointwise capture for your implementation only as part of
-the optional profiling appendix:
-
-```bash
-CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
-MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
-  --solution tiny_llm --workload pointwise --iterations 10 \
-  --output /tmp/week2-day3-pointwise.gputrace
 ```
 
 Attach each cumulative model row, the three Python-reference/optimized/MLX operator
-rows, and the post-SwiGLU kernel-group profile. Use Xcode to verify the three
-pipeline identities, but let your benchmark results decide whether the kernels
-stay.
+rows, and the direct dispatch trace. Let the matched benchmark results decide
+whether the kernels stay.
 
-After the pointwise cluster shrinks, sweep cached context rather than assuming
-attention is next. Continue to Day 4 when attention is a removable gap at
-the measured contexts and the projection operators are already close to their
-denominator. The checked M4 Pro sweep covers `S=32,128,160,192,256` and the
-custom operator wins all six balanced passes at every point, which supports a
-context guard through `S <= 256` but says nothing about longer caches. Day 4
-must also test query length and prove that its replacement moves a
-complete-model workload that actually enters the final guard. The
-[reference checkpoint](./appendix-performance.md#day-3-fused-model-kernels)
-pairs the cumulative gains with all three operator microbenchmarks and the
-updated attribution. Use the optional trace to verify that the intended three
-fused kernels ran; the new context sweep, not the absolute projection share,
-selects attention next.
+Continue to Day 5 when all three correctness gates pass, the direct
+fused-dispatch source trace reaches the intended kernels, the cumulative rows
+retain the gain, and the three operator comparisons justify keeping the fused
+implementations. Day 5 then tests whether attention is the next removable gap
+by sweeping cached context and query length before setting a dispatch guard.
+
+> **Optional profiling evidence.** The
+> [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
+> pairs the cumulative and operator measurements with an updated
+> attribution. That attribution can explain the transition, but it does not
+> replace the checkpoint evidence above.
 
 {{#include copyright.md}}

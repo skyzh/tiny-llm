@@ -6,7 +6,7 @@ In this chapter, we will build **direct paged attention**. The scheduler passes
 request-local block tables and context lengths to a GPU kernel, which reads K/V
 from the shared layer pool without gathering a dense batch first.
 
-> **Prerequisite:** Complete Week 3 Day 3's paged storage and Week 2 Day 4's
+> **Prerequisite:** Complete Week 3 Day 3's paged storage and Week 2 Day 5's
 > online-softmax attention. The new concept here is translating logical K/V
 > positions through a block table. Tiled FlashAttention comes only after this
 > direct path works.
