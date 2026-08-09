@@ -13,18 +13,18 @@ namespace {
 
 }  // namespace
 
-// Week 2, Day 2. Days 5 and 6 extend the dispatch policy behind this API.
+// Week 2, Day 3. Days 6 and 7 extend the dispatch policy behind this API.
 mx::array quantized_matmul(const mx::array &, const mx::array &, int, int, const mx::array &, const mx::array &, bool,
                            bool, bool, mx::StreamOrDevice) {
-    checkpoint_todo("quantized_matmul", "Week 2, Day 2");
+    checkpoint_todo("quantized_matmul", "Week 2, Day 3");
 }
 
 void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
-    checkpoint_todo("QuantizedMatmul::eval_cpu", "Week 2, Day 2");
+    checkpoint_todo("QuantizedMatmul::eval_cpu", "Week 2, Day 3");
 }
 
 void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
-    checkpoint_todo("QuantizedMatmul::eval_gpu", "Week 2, Day 2");
+    checkpoint_todo("QuantizedMatmul::eval_gpu", "Week 2, Day 3");
 }
 
 // Week 3, Day 4. The earlier Week 2 checkpoints keep the readable row lookup.

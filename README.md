@@ -28,7 +28,7 @@ The course follows a four-week learning path:
   array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
 - **Week 2: A Step Closer to vLLM.** Add a KV cache, establish a
-  synchronized MLX baseline, and let profiles choose the next optimization.
+  synchronized MLX baseline, and let matched benchmarks choose each optimization.
   The path moves from quantized decode matvec to fused model kernels, tiled
   prefill, and split-K where the measured Qwen shapes need it.
 - **Week 3: Build a Mini vLLM.** Introduce continuous
@@ -87,11 +87,12 @@ Use a disposable workspace and read the
 | 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
 | 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
 | 2.1 | KV Cache | ✅ | ✅ | ✅ | 🚧 |
-| 2.2 | Benchmark, Profile, and Quantize | ✅ | ✅ | ✅ | 🚧 |
-| 2.3 | Fused Model Kernels | ✅ | ✅ | ✅ | 🚧 |
-| 2.4 | Fused Decode Attention | ✅ | ✅ | ✅ | 🚧 |
-| 2.5 | SIMD-Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
-| 2.6 | Split-K Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 2.2 | Benchmarking and Profiling | ✅ | ✅ | ✅ | 🚧 |
+| 2.3 | Quantize the Model | ✅ | ✅ | ✅ | 🚧 |
+| 2.4 | Fused Model Kernels | ✅ | ✅ | ✅ | 🚧 |
+| 2.5 | Fused Decode Attention | ✅ | ✅ | ✅ | 🚧 |
+| 2.6 | SIMD-Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 2.7 | Split-K Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |

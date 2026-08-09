@@ -1,14 +1,14 @@
-# 🚧 Week 2 Day 2: Benchmark, Profile, and Quantize
+# 🚧 Week 2 Day 3: Quantize the Model
 
 > **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-Day 1 gave us a cached model. Day 2 starts by measuring it: how fast is decode,
-and which operator family owns the time? The profile points at projection weight
-reads as the largest removable cost. The rest of the chapter replaces dense
-16-bit weights with a 4-bit quantized representation and implements the
-matrix-vector kernel that operates on it directly.
+Day 2 established a synchronized dense BF16 baseline. Day 3 reduces projection
+weight traffic with packed W4A16 weights, implements the Metal operators that
+consume them directly, wires those operators into the live model, and reruns
+the same benchmark. Packed storage or an isolated fast kernel is not completion:
+the cached model must use the quantized path.
 
 **📚 Readings**
 
@@ -16,96 +16,10 @@ matrix-vector kernel that operates on it directly.
 - [MLX Extensions Development Guide](https://ml-explore.github.io/mlx/build/html/dev/extensions.html)
 - [Quantized Matmul on GPU (Video)](https://www.youtube.com/watch?v=jYCxVirq4d0)
 
-## Benchmark the Cached Model
+## Debug Metal Without a CPU Twin
 
-Optimization starts with a trustworthy comparison. Prefill processes many prompt
-tokens at once; decode usually processes one token per request and is dominated
-by repeatedly reading dense BF16 projection weights at this checkpoint. A
-change can improve one phase while hurting the other, so `benches/bench.py`
-reports both:
-
-- prefill tokens per second: prompt tokens divided by prefill time;
-- decode tokens per second: generated tokens after the first token divided by
-  decode time.
-
-The first generated token belongs to prefill. Excluding it from decode prevents
-prompt length from distorting the decode number.
-
-Choose the prefill workload before comparing implementations. Prompt scoring
-needs logits for every position, while serving needs only the final prompt
-logit. Use `--prefill-logits all` for the former and
-`--prefill-logits last` for the latter. The runner applies the choice to your
-solution and MLX alike. Never compare a final-row run from your solution with an
-all-row MLX run.
-
-Both sides of the Week 2 comparison use a KV cache: prefill the prompt once,
-then pass only the newly generated token on each decode step. Comparing a cached
-MLX baseline with your solution recomputing the full prefix would measure two
-different algorithms and make the kernel target meaningless.
-
-### Record a Matched Baseline
-
-Use the same model, prompt length, output length, device, and warmup count for
-your solution and MLX:
-
-```bash
-pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-4b \
-  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2 \
-  --prefill-logits last
-
-pdm run bench --solution mlx --loader week2 --model qwen3-4b \
-  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2 \
-  --prefill-logits last
-```
-
-Use `--solution tiny_llm_ref` with the same arguments when you want to compare
-your solution with the reference solution instead of MLX.
-
-Or run the cumulative ladder in fresh processes:
-
-```bash
-pdm run bench-week2-progression --offline --repeats 4 \
-  --solution tiny_llm \
-  --variant week2-kv-cache --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-baseline.json
-```
-
-Benchmark on an otherwise idle machine: stop other CPU- and GPU-intensive
-workloads, keep power mode and ambient conditions fixed, and let the machine
-return to a stable temperature before comparing runs. Run each command several
-times, report the median, and include the hardware, MLX and mlx-lm versions,
-prefill-logit mode, and exact model with the result. A dependency upgrade
-changes the comparison baseline, so remeasure MLX rather than carrying an old
-denominator forward.
-
-### Synchronize Lazy Work
-
-MLX builds lazy computation graphs. Timing only the Python call measures graph
-construction, not GPU execution. Every timed iteration must evaluate the output:
-
-```python
-start = perf_counter()
-output = function()
-mx.eval(output)
-elapsed = perf_counter() - start
-```
-
-The benchmark must also call the cache release hook after warmups and timed
-runs so cache implementations with owned or shared resources can return them:
-
-```bash
-pdm run test --week 2 --day 2
-```
-
-### Debug Metal Without a CPU Twin
-
-> **Note:** The second half of Day 2 and the later chapters add GPU-only
-> extensions. A C++ CPU version is possible but not required. Use the
-> three-level validation ladder below instead.
+A C++ CPU version is possible but not required. Use this three-level validation
+ladder instead:
 
 1. Write the equation in Python with `mlx.core`. This is the semantic oracle.
 2. Translate it into a deliberately simple Metal kernel, usually with one
@@ -155,151 +69,6 @@ dequantized weight group, a partial dot product, or an online-softmax row. A
 small debug-only output buffer is often more useful than printing from every
 GPU thread. Restore one optimization at a time and rerun both the aligned and
 tail-shape tests after each change.
-
-Metal API Validation and an Xcode GPU capture can help diagnose dispatch and
-resource problems, but they supplement this ladder rather than replace its
-small deterministic comparisons. Only profile after the vanilla and optimized
-kernels agree with the Python reference oracle.
-
-### Benchmark Protocol (Reference)
-
-The isolated operator benchmarks use the same synchronization rule. Evaluate
-input setup before invoking the benchmark fixture so setup does not leak into
-the result. The Week 2 operator ladder compares the Python reference equation,
-the optimized kernel in your solution, and MLX at the selected model's real
-tensor shapes:
-
-```bash
-pdm run bench-week2-operators --solution tiny_llm \
-  --model qwen3-4b --context 128 --section decode-projections
-```
-
-The runner rotates through every implementation order so thermal or GPU
-performance-state drift does not consistently favor one path. Choose enough
-warmup iterations to exclude compilation, synchronize every timed iteration,
-and repeat the run in fresh processes. Report the median with the exact
-hardware, dependency versions, model, and tensor shapes. The
-[performance appendix](./appendix-performance.md) applies this protocol to the
-reference-solution checkpoints and keeps the resulting machine-specific numbers
-in one place.
-
-To rank complete model work without requiring a GUI, replay your current
-kernel groups at Qwen3-4B shapes and dispatch counts:
-
-```bash
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --warmup 4 --iterations 12 \
-  --json-output week2-kernel-profile.json
-```
-
-The projection group preserves the transformer dependency order, including the
-attention projections before the output projection and the MLP after the
-attention residual. This matters for occupancy: making every layer independent
-would let unrelated work hide an under-filled kernel and produce a false
-Split-K conclusion. Each measured round rotates the group order, synchronizes
-once per group, and normalizes the group medians into an attribution profile.
-
-The resulting shares are not a throughput benchmark. Group boundaries force
-materialization that a complete lazy graph may fuse, while a capture adds its
-own overhead. Use the profile to rank kernel groups, then require the ordinary
-fresh-process model benchmark to confirm the change.
-
-### Optional Advanced Investigation
-
-The required Day 2 lab ends after you save the fresh-process benchmark JSON and
-the dependency-aware operator attribution. If those two measurements disagree,
-or if you want to investigate a course-owned Metal shader, continue with the
-[advanced Metal profiling appendix](./week2-advanced-profiling.md).
-
-That appendix contains the `.gputrace` capture and Xcode GUI replay workflow,
-the consistent screenshot checklist for Pipeline Statistics, memory, and
-Shader Cost Graph evidence, Instruments commands, and the evidence order for
-schedule tuning. Keeping those steps out of the required lab makes the
-boundary explicit: they are useful performance research, not prerequisites
-for understanding prefill, decode, synchronization, or matched baselines.
-
-### Optional Stretch Target
-
-The stretch-goal targets are:
-
-```plain
-your solution's prefill throughput / MLX prefill throughput >= 0.80
-your solution's decode throughput / MLX decode throughput >= 0.80
-```
-
-Both ratios use Qwen3-4B, a 128-token prompt,
-128 timed decode steps, and last-row logits. `--output-len 129` includes the
-first token produced by prefill. Reaching 80% is an optional stretch target,
-not a promise that every educational kernel individually matches
-its MLX counterpart. MLX is the comparison baseline; the stretch-goal
-solution must reach both targets with its own operator implementations. If either
-ratio misses, the next chapter starts from the new benchmark and profile rather
-than a predetermined optimization.
-
-Keep a 2K context run in the report as a stress diagnostic. It is useful for
-showing when attention overtakes fixed-shape projections, but changing context
-also changes the problem. Do not move the acceptance shape after seeing a
-result.
-
-## Why Quantize: The Decode Roofline
-
-Profile only the checkpoint you have completed. The decode phase of LLM
-inference is typically **memory-bandwidth bound**: each token requires reading
-the model's weights but performs relatively little work with them. Attach two
-results to the checkpoint report: the fresh-process JSON with your solution and
-MLX, and the kernel-group JSON with absolute times as well as shares. The first
-says how far decode is from MLX; the second says which operator family owns the
-current implementation's time.
-
-Use the dimensions in the official
-[Qwen3-4B configuration](https://huggingface.co/Qwen/Qwen3-4B/blob/main/config.json)
-to calculate the ideal bound:
-
-```plain
-Qwen3-4B dimensions:
-  hidden size        h = 2,560
-  MLP size           i = 9,728
-  query width        q = 4,096
-  key/value width   kv = 1,024
-  layers             L = 36
-  vocabulary         V = 151,936
-
-Projection weights per layer:
-  Q and O: 2 × h × q       =  20,971,520
-  K and V: 2 × h × kv      =   5,242,880
-  MLP:     3 × h × i       =  74,711,040
-  total per layer          = 100,925,440
-
-All transformer layers: L × 100,925,440 = 3,633,315,840
-Tied vocabulary head:    V × h           =   388,956,160
-Total streamed weights:                    4,022,272,000
-
-FLOPs per token: 2 × 4,022,272,000 = 8.045 GFLOPs
-```
-
-The tied embedding matrix is counted once as the vocabulary projection. The
-single-row embedding lookup, normalization weights, activations, KV reads, and
-attention work are omitted. This makes the result an upper bound for linear
-layers, not a prediction of complete-model throughput. A dense FP16 or BF16
-weight occupies two bytes:
-
-```plain
-4,022,272,000 weights × 2 bytes = 8.045 GB per token
-arithmetic intensity = 8.045 GFLOPs / 8.045 GB = 1.0 FLOP/byte
-```
-
-FP16 and BF16 divide their 16 bits differently: FP16 gives more bits to the
-significand, while BF16 gives more bits to the exponent. That affects numerical
-range and precision, but not this bandwidth calculation. The course uses BF16
-for activations and outputs.
-
-| Dense weight format | Bits per weight | Bytes per weight | Streamed weight bytes per token | Weight arithmetic intensity |
-|---|---:|---:|---:|---:|
-| FP16 | 16 | 2 | 8.045 GB | 1.0 FLOP/byte |
-| BF16 | 16 | 2 | 8.045 GB | 1.0 FLOP/byte |
-
-This is the baseline to improve: both dense formats must stream roughly 8 GB of
-projection weights to generate one token.
 
 ## Represent Weights With Fewer Bits
 
@@ -605,7 +374,7 @@ The starter already contains the declaration, fail-closed source stub, binding,
 and build registration. Keep the C++ declarations and definitions in the
 `tiny_llm_ext` namespace and modify these exact functions:
 
-- **`tiny_llm_ext.h`** — Read the Week 2 Day 2 `quantized_matmul(...)`
+- **`tiny_llm_ext.h`** — Read the Week 2 Day 3 `quantized_matmul(...)`
   declaration and `QuantizedMatmul` primitive interface; keep its signature in
   sync with the binding.
 - **`bindings.cpp`** — Verify the existing `m.def("quantized_matmul", ...)`
@@ -657,7 +426,7 @@ the grid change how the output or reduction work is partitioned. Neither change
 guarantees higher throughput.
 
 Use the required two-SIMD-group matvec schedule as the Qwen starting point, then
-profile two, four, eight, and sixteen groups per threadgroup as described below.
+benchmark two, four, eight, and sixteen groups per threadgroup as described below.
 Change the grid partition separately so each measurement answers which launch
 knob helped.
 
@@ -689,16 +458,16 @@ different shapes differently:
    activation row and calculate several output columns together.
 
 Here, `M` is the number of activation rows after flattening every leading
-dimension. Day 2 uses this explicit dispatch:
+dimension. Day 3 uses this explicit dispatch:
 
 | Activation rows | Kernel | Role at this checkpoint |
 |---:|---|---|
 | `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
-| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 5 replaces it with a cooperative tiled kernel. |
+| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 6 replaces it with a cooperative tiled kernel. |
 
 The cutoff does not mean the SIMD kernel expands to cover larger `M`. The two
-paths are separate schedules: Day 2 optimizes the vector-shaped decode
-bottleneck and leaves matrix-shaped prefill visible for the later profile to
+paths are separate schedules: Day 3 optimizes the vector-shaped decode
+bottleneck and leaves matrix-shaped prefill visible for the later benchmark to
 select.
 
 Keep the vanilla function callable as `quantized_matmul_vanilla`. An
@@ -715,7 +484,7 @@ control flow mirrors the equation and makes it a useful debugging control. The
 Python `mlx.core` equation remains the correctness oracle for both Metal
 schedules.
 
-Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 5
+Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 6
 revisits that workload with cooperative tiling.
 
 ### Stage 2: SIMD Matvec
@@ -782,7 +551,7 @@ Implement both required kernel layouts in `quantized_matmul.metal`:
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
 - For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
-  SIMD matvec schedule; Day 5 introduces the tiled prefill schedule.
+  SIMD matvec schedule; Day 6 introduces the tiled prefill schedule.
 - The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
@@ -898,10 +667,9 @@ during model inference, not just registered and tested in isolation.
 > `quantized_linear` → `quantized_matmul` → the extension primitive → its Metal
 > matrix schedule. Trace those branches in your completed dispatcher and model
 > wiring. The supplied tests validate packed model state and the direct
-> operators, while the profile below reports aggregate operator categories;
-> neither observes the live Metal pipeline identity. Treat the throughput
-> comparison as a separate performance result. If you need runtime dispatch
-> evidence, use the optional source-enabled Xcode capture below.
+> operators, while the matched benchmark reports complete-model throughput;
+> neither proves the live Metal pipeline identity by itself. Trace the dispatch
+> branches directly, then treat the throughput comparison as a separate result.
 
 Measure the cumulative model, the real projection shapes, and the updated
 operator attribution:
@@ -914,37 +682,20 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
 
 pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --section decode-projections --context 128
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case quantized-matvec:decode:128 --warmup 4 --iterations 12
-```
-
-Use this optional advanced capture only when you are tuning the shader or the
-model and operator results disagree:
-
-```bash
-CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
-MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
-  --solution tiny_llm --workload quantized-projection \
-  --projection q --rows 1 --schedule matvec --iterations 10 \
-  --output /tmp/week2-day2-packed-q-m1.gputrace
 ```
 
 Attach the complete-model before/after rows, the per-projection latency table,
-and the new kernel-group profile. First require a clear decode gain over
+and the direct dispatch trace. First require a clear decode gain over
 `kv-cache`. Then compare each projection with MLX at the identical shape.
 Projections may remain the largest absolute category because the model performs
 them in every layer; once their operator latency is close to MLX, that bar is
 no longer the largest removable gap.
 
-The [Xcode checkpoint contract](./appendix-performance.md#week-2-xcode-checkpoint-contract)
-describes how to inspect the pipeline, limiters, memory traffic, and
-highest-cost source lines if you generate the optional trace.
-Continue to Day 3 when the matched projection table is close to MLX and the
-post-Day-2 profile makes normalization, position, and activation the largest
+Continue to Day 4 when the matched projection table is close to MLX and the
+post-Day-3 evidence makes normalization, position, and activation the largest
 removable gap. If the projection comparison is still far behind, keep tuning
 the matvec instead. The
-[reference checkpoint](./appendix-performance.md#day-2-keep-weights-packed)
+[reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
 pairs the model delta, projection microbenchmarks, and attribution. Its matched
 operator result is the reason the hot matvec products do not remain the next
 target: after the projection gap shrinks, the pointwise cluster is the larger

@@ -1,19 +1,19 @@
-# 🚧 Week 2 Day 5: SIMD-Matrix Prefill
+# 🚧 Week 2 Day 6: SIMD-Matrix Prefill
 
 > **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-Day 4 ends by switching the profile from one-token decode to multi-token
+Day 5 ends by switching the benchmark from one-token decode to multi-token
 prefill. The measured bottleneck changes with the workload: pointwise kernels
-no longer dominate, and Day 2 deliberately left `M > 8` on its
+no longer dominate, and Day 3 deliberately left `M > 8` on its
 correctness-first vanilla quantized matrix path. Quantized projections are now
 the largest cost, so today we replace that inherited multi-row schedule.
 
-Re-run the dependency-aware kernel profile from Day 2 with
+Use the checked dependency-aware attribution from Day 3 with
 `--case decode-attention:prefill:128`. Continue only when projections dominate the
 attribution and the complete-model prefill phase moves with their latency. The
-[reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
+[reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
 is recorded in the performance appendix. MLX remains an external performance denominator;
 the SIMD-matrix path in your solution continues to call the C++/Metal
 primitive you implement for every projection.
@@ -24,7 +24,7 @@ The implementation remains deliberately narrow:
 - BF16 activations, quantization parameters, and output;
 - Qwen3-4B projection dimensions;
 - FP32 matrix accumulators;
-- the Day 2 SIMD matvec remains in use for `M <= 8`.
+- the Day 3 SIMD matvec remains in use for `M <= 8`.
 
 ## From a Matvec to a Cooperative Tile
 
@@ -71,10 +71,10 @@ it does not call MLX's quantized-matmul operator.
 Modify `QuantizedMatmul::eval_gpu` in
 `src/extensions/src/quantized_matmul.cpp` and
 `quantized_matmul_simdgroup_w4a16_g128` in
-`src/extensions/src/quantized_matmul.metal`. Keep the Day 2
+`src/extensions/src/quantized_matmul.metal`. Keep the Day 3
 `quantized_matvec_x4_fast_w4a16_g128` function intact for `M <= 8`.
 
-Keep the Day 2 decode schedule and add the matrix schedule behind the same
+Keep the Day 3 decode schedule and add the matrix schedule behind the same
 quantized-linear interface:
 
 ```plain
@@ -146,7 +146,7 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
 ```
 
 Inspect the projection sweep as well as complete-model throughput. Continue to
-Day 6 when the long-`M` projections are healthy but short, narrow K/V
+Day 7 when the long-`M` projections are healthy but short, narrow K/V
 projections launch too few 32×32 result tiles to fill the GPU. If the same
 kernel remains slow at large `M`, improve its loads or matrix schedule before
 adding reduction partitions.
@@ -158,7 +158,7 @@ temporary buffer and another launch.
 ## Benchmark Analysis: Identify Under-Filled Prefill Shapes
 
 Compare the matrix kernel at both an occupied control shape and the short K/V
-shape, then profile the latter without enabling Split-K:
+shape, then benchmark the latter without enabling Split-K:
 
 ```bash
 for context in 32 128 2048; do
@@ -169,37 +169,23 @@ for context in 32 128 2048; do
   done
 done
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:prefill:128 --case simd-matmul:prefill:32 \
-  --warmup 4 --iterations 12
 ```
 
 The dispatch formula gives the unsplit 32-row K projection 32 independent
-threadgroups. Capture your implementation only as part of the optional
-profiling appendix:
-
-```bash
-CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
-MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
-  --solution tiny_llm --workload quantized-projection \
-  --projection k --rows 32 --schedule simd-matmul \
-  --iterations 10 --output /tmp/week2-k-m32-unsplit.gputrace
-```
+threadgroups.
 
 Attach the complete-model prefill delta, per-projection tables at 32, 128, and
-2,048 rows, and the 32/128-row attribution. In the optional Xcode capture,
-record the unsplit pipeline, its limiters and memory traffic, and the weighted
-tile source. Do not select Split-K merely because projections still occupy
+2,048 rows, and the 32/128-row attribution. Do not select Split-K merely because projections still occupy
 most of prefill. First require the long or wide controls to approach MLX,
 while the short, narrow projection remains disproportionately slow.
 
 Use the dispatch calculation and short-shape operator sweep to establish that
-the unsplit result grid has too few independent threadgroups. Then use Pipeline
-Statistics and weighted source lines to rule out costly work inside each tile;
-if they expose such a cost, repair Day 5 before multiplying the grid. The
-[reference checkpoint](./appendix-performance.md#day-5-use-cooperative-loads-for-quantized-prefill)
+the unsplit result grid has too few independent threadgroups. Use the matched
+long-shape control to rule out costly work inside each tile; if it exposes such
+a cost, repair Day 6 before multiplying the grid. The
+[reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
 pairs the prefill gain with long and short operator controls and the dispatch
 geometry that motivates Split-K. A remaining arithmetic hot spot would send
-you back to Day 5 instead.
+you back to Day 6 instead.
 
 {{#include copyright.md}}
