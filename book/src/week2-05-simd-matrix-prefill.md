@@ -1,6 +1,6 @@
 # 🚧 Week 2 Day 5: SIMD-Matrix Prefill
 
-> **Status: Experimental performance lab.** See the
+> **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
@@ -15,7 +15,7 @@ Re-run the dependency-aware kernel profile from Day 2 with
 attribution and the complete-model prefill phase moves with their latency. The
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 is recorded in the performance appendix. MLX remains an external performance denominator;
-the performance-lab path in your solution continues to call the C++/Metal
+the SIMD-matrix path in your solution continues to call the C++/Metal
 primitive you implement for every projection.
 
 The implementation remains deliberately narrow:

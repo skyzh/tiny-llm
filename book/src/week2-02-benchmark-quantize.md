@@ -217,9 +217,9 @@ schedule tuning. Keeping those steps out of the required lab makes the
 boundary explicit: they are useful performance research, not prerequisites
 for understanding prefill, decode, synchronization, or matched baselines.
 
-### Optional Performance-Lab Acceptance Target
+### Optional Stretch Target
 
-The performance-lab targets are:
+The stretch-goal targets are:
 
 ```plain
 your solution's prefill throughput / MLX prefill throughput >= 0.80
@@ -228,9 +228,9 @@ your solution's decode throughput / MLX decode throughput >= 0.80
 
 Both ratios use Qwen3-4B, a 128-token prompt,
 128 timed decode steps, and last-row logits. `--output-len 129` includes the
-first token produced by prefill. Reaching 80% is the optional performance-lab
-threshold, not a promise that every educational kernel individually matches
-its MLX counterpart. MLX is the comparison baseline; the performance-lab
+first token produced by prefill. Reaching 80% is an optional stretch target,
+not a promise that every educational kernel individually matches
+its MLX counterpart. MLX is the comparison baseline; the stretch-goal
 solution must reach both targets with its own operator implementations. If either
 ratio misses, the next chapter starts from the new benchmark and profile rather
 than a predetermined optimization.

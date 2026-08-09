@@ -1,6 +1,6 @@
 # 🚧 Week 2 Day 6: Split-K Prefill
 
-> **Status: Experimental performance lab.** See the
+> **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
@@ -174,7 +174,7 @@ projection, preserve one-token decode, and fall back exactly to Day 5 when the
 ordinary result grid is already occupied. Replay both the unsplit and Split-K
 traces when tuning your implementation; record the accumulation and reduction
 pipelines and total GPU time beside the calculated partition policy and
-operator table. The final performance-lab acceptance run must still reach 80%
+operator table. The final stretch-goal acceptance run must still reach 80%
 of MLX in both phases.
 
 The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)

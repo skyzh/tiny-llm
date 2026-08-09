@@ -16,8 +16,7 @@ exposes.
 
 > ⏱️ **Time commitment.** Days 3–6 write and tune custom Metal kernels.
 > Completing the full Week 2 sequence typically takes substantially longer than
-> Week 1 Days 6–7. The core course track stops after Day 4; Days 5–6 are the
-> optional performance lab.
+> Week 1 Days 6–7. All six days are required core material; plan accordingly.
 
 Week 2 keeps BF16 for dense weights, quantization scales and biases, activations, projections, KV-cache entries, and model-facing kernel outputs. Packed W4 weight codes are stored as `uint32`. Numerically sensitive reductions, dot products, and
 online-softmax state accumulate in FP32 inside Python reference expressions or
@@ -35,18 +34,16 @@ retained dispatch choices live in the
 ## Choose a Completion Track
 
 The full reference solution is a small performance-engineering project, not a
-reasonable one-week requirement for every student. Pick one track:
+reasonable one-week requirement for every student. All six days are required
+core material:
 
 | Track | Required work | Provided infrastructure | Optional work |
 |---|---|---|---|
-| Core course | Days 1–4: cached model integration, benchmarking and quantization, fused model kernels, and a bounded decode-attention implementation | Model loading, extension build system, benchmark/profile runners, correctness tests, and the Python-reference implementations | Xcode counter capture, schedule searches, and hardware-specific retuning |
-| Performance lab | Core course plus Days 5–6: SIMD-matrix prefill and shape-aware Split-K | Balanced operator comparisons, fresh-process progression runner, and checked-in M4 Pro evidence | Rejected experiments, alternative schedules, cross-device sweeps, and the 80%-of-MLX target |
+| Core course | Days 1–6: cached model integration, benchmarking and quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark/profile runners, correctness tests, and the Python-reference implementations | Xcode counter capture, schedule searches, and hardware-specific retuning |
 
 The tests define API and correctness contracts; they do not require a student
-to rediscover the reference schedule. If you are teaching the core course,
-stop after Day 4 and treat the remaining checkpoints as stretch work. The
-80%-of-MLX acceptance target applies only to the performance-lab track on a
-measured machine.
+to rediscover the reference schedule. The 80%-of-MLX acceptance target is an
+optional stretch goal measured on your own hardware.
 
 ## What We Will Cover
 
@@ -55,10 +52,10 @@ measured machine.
 - A SIMD matrix-vector quantized decode kernel implemented in Metal
 - Fused RMSNorm, RoPE, and SwiGLU Metal kernels
 - An online-softmax decode-attention kernel
-- A BF16 SIMD-matrix quantized prefill kernel (performance lab)
-- A shape-aware split-K schedule for small Qwen prefill matrices (performance lab)
+- A BF16 SIMD-matrix quantized prefill kernel
+- A shape-aware split-K schedule for small Qwen prefill matrices
 - A last-token output interface for generation
-- An optional performance-lab target of 80% of MLX prefill and decode
+- An optional stretch target of 80% of MLX prefill and decode
   throughput on the fixed Week 2 checkpoint
 
 Week 2 does **not** call MLX-provided implementations of the operators we are
