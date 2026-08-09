@@ -381,6 +381,30 @@ Record three operator baselines on the same machine:
 2. your direct paged-attention path,
 3. the MLX attention path as a production-library baseline.
 
+Use the same Qwen3-4B decode shape for all three paths. The dense control must
+include its required page-to-dense gather; the direct path reads the same page
+metadata; the MLX row measures its fused attention operator on the already
+gathered tensor:
+
+```bash
+pdm run bench-week3-attention --offline --contexts 128 1024 \
+  --page-size 128 --warmup 5 --iterations 60 --repeats 4 \
+  --cooldown-seconds 1 \
+  --json-output benchmark_results/m4-pro-qwen3-4b-week3-attention-mlx-0.32.0.json
+```
+
+Each value is the median of four balanced fresh-process medians, with 60
+synchronized calls after five warmups per process:
+
+| Context | Dense + gather | Direct paged | MLX fused |
+|---:|---:|---:|---:|
+| 128 | 184.01 us | 187.55 us | 153.59 us |
+| 1,024 | 420.88 us | 249.79 us | 207.18 us |
+
+Direct traversal is 1.9% slower than dense-plus-gather at 128 tokens, but 40.7%
+faster at 1,024 tokens. MLX remains faster at both shapes. The checked BF16
+outputs match the readable dense equation within the documented 2e-2 tolerance.
+
 ### Checkpoint 1: Establish a Correct Direct Path
 
 Implement the simplest page-walking kernel first. Verify that it:
@@ -435,23 +459,30 @@ end-to-end workload with requests entering and leaving the batch, then report:
 
 Keep the dense path as a teaching ablation so you can measure when contiguous
 attention is faster. The completed serving route stays paged: it eliminates
-repacks, reuses pages across scheduler steps, and can admit more concurrent
-requests. Day 5 optimizes its long-prefill schedule rather than routing around
-the page-table contract.
+repacks, reuses pages across scheduler steps, and leaves more measured KV
+headroom in the fixed-batch trace. Proving that it admits more concurrent
+requests requires a memory-capped admission sweep. Day 5 optimizes its
+long-prefill schedule rather than routing around the page-table contract.
 
 Use the paired serving runner rather than a preallocated static request:
 
 ```bash
-pdm run bench-serving-progression --offline --repeats 3 \
+pdm run bench-serving-progression --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
-  --min-output-len 32 --max-output-len 128 --prefill-step 128
+  --min-output-len 32 --max-output-len 128 --prefill-step 128 \
+  --warmup 1 --cooldown-seconds 1 \
+  --json-output benchmark_results/m4-pro-qwen3-4b-week3-serving-mlx-0.32.0.json
 ```
 
 It compares Week 2 dense batch reconstruction, Week 3 paged storage with the
 dense-gather compatibility path, and Week 3 direct paged attention. It resets
 page capacity after warmup and reports prefill, output, and decode throughput
-alongside peak KV bytes, copy volume, page reuse, and tail fragmentation.
+alongside peak KV bytes, copy volume, page reuse, and tail fragmentation. The
+direct path's four-process medians are 679.56 prefill tok/s, 41.88 output tok/s,
+82.11 decode tok/s, and 0.558 requests/s. Its synchronized decode calls take
+38.27/39.83/43.46 ms at median/p95/max; the completion gaps, which include
+intervening scheduler and prefill work, are 39.13/224.70/240.99 ms.
 
 ```bash
 pdm run test --week 3 --day 4

@@ -132,6 +132,10 @@ pdm run batch-main
 By default, this command uses Qwen3-0.6B with a batch size of five and a fixed
 set of prompts. Record the longest interval between consecutive decode steps
 when one queued request has a much longer prompt. That interval is the baseline
-for Day 2.
+for Day 2. Use Day 2's `bench-chunked-prefill` runner for a publishable
+comparison: its 512-token budget processes every prompt in the checked
+64–512-token trace in one chunk, so that row is the reproducible Day 1 control.
+The runner records the exact token ids, output budget, seed, process order, and
+decode-completion gaps rather than relying on the interactive prompts above.
 
 {{#include copyright.md}}

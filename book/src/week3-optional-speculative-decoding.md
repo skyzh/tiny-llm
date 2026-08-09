@@ -110,15 +110,21 @@ pdm run main --solution tiny_llm_ref --loader week3 \
   --draft-model qwen3-0.6b --model qwen3-4b
 ```
 
-## Measure the Decision
+## Design the Measurement
 
-Report proposal length, accepted tokens per proposal, target verification
-calls, draft-model time, target-model time, and end-to-end tokens per second.
-Compare against ordinary cached target generation on the same prompt. Keep
-speculative decoding optional when draft quality, cache rewind, or verification
-overhead makes it slower.
+The `main` command above is a functional smoke test. It does not emit paired
+target-only and speculative timings, so it is not performance evidence.
 
-Do not infer a speedup from acceptance rate alone: a successful serving result
-must include both models, verification, synchronization, and cache maintenance.
+For a performance decision, run ordinary cached target generation and
+speculative generation in balanced fresh processes with the same prompt,
+tokenizer, output budget, seed, and synchronization boundary. Verify identical
+greedy output, then report proposal length, accepted tokens per proposal,
+target verification calls, draft-model time, target-model time, cache
+maintenance time, and end-to-end tokens per second for both paths. Record the
+raw samples and process order.
+
+Until such a paired artifact exists, this chapter makes no speedup claim.
+Acceptance rate alone omits draft work, verification, synchronization, and
+cache maintenance.
 
 {{#include copyright.md}}

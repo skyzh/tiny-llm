@@ -359,9 +359,16 @@ but it does not remove allocation, fragmentation, or copying inside the
 GPU-visible heap.
 Fixed-size pages still let a server reuse freed capacity, grow requests without
 reserving their maximum sequence length, and batch requests with different
-context lengths. These are capacity and lifecycle wins. They should be measured
-with live-request count, allocated bytes, fragmentation, and scheduler
-throughput—not inferred from one request's token latency.
+context lengths. These are useful lifecycle mechanisms, but a fixed-batch trace
+measures KV-storage headroom rather than admission capacity. Claiming that more
+requests can be admitted requires a separate memory-capped sweep.
+
+Report fragmentation with an aligned numerator and denominator. The benchmark
+finds the snapshot with the largest sum of unused slots in the final live page
+of every request/layer cache, then divides that sum by all token slots in live
+pages at the same snapshot. It reports the unused-slot bytes as well. Unused
+physical pool capacity is excluded from that fraction and remains visible in
+the separate live-page and capacity-page counters.
 
 ```bash
 pdm run test --week 3 --day 3

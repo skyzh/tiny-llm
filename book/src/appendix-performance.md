@@ -19,11 +19,12 @@ pdm run bench-week2-progression --offline --repeats 4 --cooldown-seconds 1 \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last --json-output week2-128.json
 
-pdm run bench-serving-progression --offline --repeats 3 \
+pdm run bench-serving-progression --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 \
-  --prefill-step 128 --json-output serving-qwen3-4b.json
+  --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
+  --json-output benchmark_results/m4-pro-qwen3-4b-week3-serving-mlx-0.32.0.json
 ```
 
 `--prefill-logits last` is a generation-serving workload: both the reference
@@ -50,7 +51,7 @@ universal workloads. Always publish the exact prompt and output lengths.
 The measured machine below is an Apple M4 Pro with a 20-core GPU and 64 GB of
 memory. Static Week 2 rows use two complete warmups and the median of four
 balanced fresh processes; the continuous-serving rows use one warmup and the
-median of three fresh processes.
+median of four balanced fresh processes.
 
 ## Week 2 Checkpoint Retention Ledger
 
@@ -481,25 +482,53 @@ serving workload with request turnover, incremental unknown-size growth,
 chunked admission, dense batch reconstruction, and page reuse:
 
 ```bash
-pdm run bench-serving-progression --offline --repeats 3 \
+pdm run bench-serving-progression --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 \
-  --prefill-step 128 --warmup 1 \
-  --json-output serving-qwen3-4b.json
+  --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
+  --json-output benchmark_results/m4-pro-qwen3-4b-week3-serving-mlx-0.32.0.json
 ```
 
 A complete warmup compiles the kernels. The runner then synchronizes and resets
 every page pool, so the measured paged run starts with zero pages and zero
 backing capacity.
 
+The Days 1–2 chunk-size control uses one deterministic Qwen3-0.6B trace with
+seed 0, eight 64–512-token prompts, a fixed 32-token output budget, and four
+balanced fresh processes. A gap is measured between synchronized decode-call
+completions only while a decode request is active:
+
+| Prefill budget | Output tok/s | Requests/s | Decode step p95 | Decode gap p95 / max |
+|---:|---:|---:|---:|---:|
+| 32 | 105.47 | 3.296 | 17.52 ms | 30.39 / 32.47 ms |
+| 128 | 144.91 | 4.528 | 18.78 ms | 46.52 / 48.80 ms |
+| 512 | 157.00 | 4.906 | 19.57 ms | 76.04 / 122.16 ms |
+
+Because 512 covers every prompt in this trace, that row is the full-prompt Day
+1 control. The monotonically smaller p95 gap at smaller budgets comes with
+lower throughput; 128 is the measured course compromise.
+
+The Day 4 operator control uses `B=1`, `Hq=32`, `Hkv=8`, `L=1`, `D=128`, BF16,
+and 128-token pages. Each row is the median of four balanced fresh-process
+medians, each containing 60 synchronized calls after five warmups:
+
+| Context | Dense + gather | Direct paged | MLX fused |
+|---:|---:|---:|---:|
+| 128 | 184.01 us | 187.55 us | 153.59 us |
+| 1,024 | 420.88 us | 249.79 us | 207.18 us |
+
+The direct operator is 1.9% slower than dense-plus-gather at 128 tokens and
+40.7% faster at 1,024 tokens. MLX remains faster at both shapes. All three
+paths pass the checked BF16 correctness tolerance before timing.
+
 | Chapter | Measured checkpoint | Primary result | Change from the preceding comparable path |
 |---|---|---|---|
 | Day 1 | Continuous scheduler | Defines request turnover and active-batch throughput. | Establishes the serving workload. |
-| Day 2 | Chunked admission with dense reconstruction | 653.24 prefill; 32.77 output; 53.99 decode tok/s | Establishes the dense serving baseline. |
-| Day 3 | Paged storage with compatibility gather | 662.69 prefill; 38.38 output; 71.02 decode tok/s | +17.1% output; +31.5% decode; -50.6% copy volume. |
-| Day 4 | Direct paged decode schedule | 100.35 aggregate decode tok/s | +41.3% decode over the compatibility gather path. |
-| Day 5 | Complete direct paged path | 650.10 prefill; 45.05 output; 100.35 decode tok/s | +37.4% output and request throughput over dense serving. |
+| Day 2 | Chunked admission with dense reconstruction | 718.30 prefill; 32.54 output; 50.42 decode tok/s | Establishes the dense serving baseline. |
+| Day 3 | Paged storage with compatibility gather | 730.69 prefill; 38.44 output; 65.88 decode tok/s | +18.1% output; +30.7% decode; -50.6% copy volume. |
+| Day 4 | Direct paged decode schedule | 82.11 aggregate decode tok/s | +24.6% decode over the compatibility gather path. |
+| Day 5 | Complete direct paged path | 679.56 prefill; 41.88 output; 82.11 decode tok/s | +28.7% output and request throughput over dense serving. |
 
 Day 1 introduces scheduling, not a kernel speedup. Day 2 makes the hidden cost
 measurable: appending one token still reconstructs a padded dense batch. Day 3
@@ -517,35 +546,53 @@ cumulative serving endpoints are:
 
 | Storage and attention path | Prefill tok/s | Output tok/s | Decode tok/s | Requests/s | Peak KV MiB | Avoidable KV copy MiB |
 |---|---:|---:|---:|---:|---:|---:|
-| Dense growth and reconstruction | 653.24 | 32.77 | 53.99 | 0.437 | 1,096 | 209,532 |
-| Paged storage plus dense gather | 662.69 | 38.38 | 71.02 | 0.511 | — | 103,445 |
-| Direct paged attention | 650.10 | 45.05 | 100.35 | 0.600 | 576 | 504 |
+| Dense growth and reconstruction | 718.30 | 32.54 | 50.42 | 0.433 | 1,096 | 209,532 |
+| Paged storage plus dense gather | 730.69 | 38.44 | 65.88 | 0.512 | — | 103,445 |
+| Direct paged attention | 679.56 | 41.88 | 82.11 | 0.558 | 576 | 504 |
+
+The same raw serving artifact reports synchronized decode-call latency and the
+completion gaps that include intervening prefill and scheduler work:
+
+| Path | Decode step median / p95 / max | Completion gap median / p95 / max |
+|---|---:|---:|
+| Dense reconstruction | 58.95 / 90.60 / 169.01 ms | 62.61 / 241.29 / 344.04 ms |
+| Paged + gather | 48.86 / 53.64 / 57.82 ms | 50.65 / 221.90 / 233.89 ms |
+| Direct paged | 38.27 / 39.83 / 43.46 ms | 39.13 / 224.70 / 240.99 ms |
 
 The compatibility row omits peak storage because an exact peak must include
 both the page pool and temporary dense staging allocation. Its other counters
 remain directly comparable.
 
-Direct paged attention improves output and request throughput by 37.4%,
-aggregate decode by 85.9%, and peak KV storage by 47.4% relative to dense
+Direct paged attention improves output and request throughput by 28.7%,
+aggregate decode by 62.8%, and peak KV storage by 47.4% relative to dense
 serving. Avoidable logical copy volume falls by 99.8%. Relative to paged
-storage plus gather, the direct operator adds 17.4% output throughput, 41.3%
+storage plus gather, the direct operator adds 9.0% output throughput, 24.6%
 decode throughput, and removes 99.5% of the remaining copy volume. Prefill is
-0.5% below dense and 1.9% below gather at the 128-token serving chunk, so the
+5.4% below dense and 7.0% below gather at the 128-token serving chunk, so the
 chapter does not claim a short-chunk FlashAttention speedup.
 
 The 8K static run remains a secondary kernel diagnostic, not a Week 3 headline
 or acceptance result. At that shape, paged FlashAttention raises prefill from
-384.88 to 427.01 tok/s. MLX reaches 568.74 tok/s, so the page-aware path in the
-reference solution reaches 75.1%. This explains where query tiling begins to
-help without mixing a static denominator into the serving progression.
+323.26 to 424.14 tok/s. MLX reaches 594.21 tok/s, so the complete Week 3 path in
+the reference solution reaches 71.4%. This shows where the cumulative paged
+prefill path begins to help without mixing a static denominator into the
+serving progression.
 One-token decode continues to dispatch to the Day 4 vector schedule.
 
-The checked-in file
-`benchmark_results/m4-pro-qwen3-4b-mlx-0.32.0.json` contains
-direct-serving data plus a separate 3-repeat static control. The published
-four-repeat acceptance samples are in `benchmark_results/m4-pro-qwen3-4b-week2-progression-mlx-0.32.0.json`. Chapter
-checkpoint rows use the same fresh-process runner and
-hardware.
+The checked-in Week 3 files contain the complete raw samples, exact source
+commit and tracked-clean flag, host, configuration, execution order, and—where
+requests are generated—the exact request trace and its checksum:
+
+- `benchmark_results/m4-pro-qwen3-0.6b-week3-chunked-prefill-mlx-0.32.0.json`
+- `benchmark_results/m4-pro-qwen3-4b-week3-attention-mlx-0.32.0.json`
+- `benchmark_results/m4-pro-qwen3-4b-week3-8k-mlx-0.32.0.json`
+- `benchmark_results/m4-pro-qwen3-4b-week3-serving-mlx-0.32.0.json`
+
+Verify all four file hashes from the repository root with:
+
+```bash
+shasum -a 256 -c benchmark_results/m4-pro-week3-evidence-mlx-0.32.0.sha256
+```
 
 Copy counters report logical operation volume, not hardware DRAM traffic.
 Dense volume includes old K/V copied during each request-cache growth and live
@@ -556,9 +603,13 @@ pages.
 
 The direct-paged median reaches 1,116 live pages out of 1,152 reserved pages,
 reuses 2,196 page allocations, and records 15,840 unused tail slots across
-layer caches. It grows the layer pools 144 times because the measured run
-starts empty. These counters make reuse and fragmentation visible; static
-single-request latency cannot.
+layer caches. At the same peak-tail-waste snapshot, all live pages contain
+133,632 token slots, so tail waste is 11.9%, or 61.9 MiB of KV storage. This
+denominator excludes unused reserved pool capacity. The run grows the layer
+pools 144 times because it starts empty. These counters make reuse,
+fragmentation, and measured KV headroom visible; static single-request latency
+cannot. They do not establish admission capacity without a memory-capped
+sweep.
 
 The workload validates continuous batching, chunked prefill, incremental
 growth, and page reuse. Prefix sharing and speculative decoding require
