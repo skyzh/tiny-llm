@@ -37,7 +37,7 @@ q = rope(q, offset=slice(offset, offset + L))
 k = rope(k, offset=slice(offset, offset + L))
 (transpose as needed)
 x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L, H_q, D
-# q/k/v and the returned model tensor are BF16; the readable expression may use FP32 intermediates
+# q/k/v and the returned model tensor are BF16; the Python `mlx.core` expression may use FP32 intermediates
 (transpose as needed)
 x = linear(x, wo) -> B, L, E
 ```
@@ -149,7 +149,7 @@ can keep it separate from attention. Week 3 replaces this baseline with
 preallocated pages; do not copy the repeated-concatenation design into a
 serving cache.
 
-## Task 2: Preserve the Week 1 Boundary
+## Task 2: Build the Cached Week 2 Model
 
 ```
 src/tiny_llm/qwen3_week2.py

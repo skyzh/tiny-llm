@@ -102,9 +102,9 @@ pdm run test --week 2 --day 2
 
 ### Debug Metal Without a CPU Twin
 
-> **Note:** Day 3 onward adds GPU-only extensions. A C++ CPU version is
-> possible but not required. Use the three-level validation ladder below
-> instead.
+> **Note:** The second half of Day 2 and the later chapters add GPU-only
+> extensions. A C++ CPU version is possible but not required. Use the
+> three-level validation ladder below instead.
 
 1. Write the equation in Python with `mlx.core`. This is the semantic oracle.
 2. Translate it into a deliberately simple Metal kernel, usually with one
@@ -127,7 +127,7 @@ test. This turns a delayed compile or GPU execution failure into a failure at
 the responsible call site:
 
 ```python
-expected = readable_operator(*inputs)
+expected = python_reference(*inputs)
 actual = metal_operator(*inputs)
 mx.eval(expected, actual)
 
@@ -621,7 +621,7 @@ Build and test the extension:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k task_1
+pdm run test --week 2 --day 3 -- -k task_1
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -642,10 +642,11 @@ organizes GPU work in three nested scopes:
   `threadgroup_barrier`). The grid is a 1D/2D/3D array of threadgroups.
 - **Grid.** The total work dispatched. `dispatchThreadgroups` launches a grid
   of threadgroups; the GPU schedules them across available cores. More
-  threadgroups expose more parallelism, but each threadgroup consumes
-  registers and threadgroup memory. Too many threadgroups per core reduces
-  occupancy — fewer in-flight threadgroups mean less ability to hide memory
-  latency by switching between them.
+  threadgroups can expose more parallelism, but splitting work more finely can
+  duplicate reads and partial results. Increasing the SIMD groups or tile size
+  within each threadgroup also consumes more registers and threadgroup memory,
+  which can leave fewer threadgroups resident on a core. Launching more groups
+  therefore does not guarantee higher throughput.
 
 Key tradeoff: when you increase the work per SIMD group (more output columns,
 larger tiles), you increase register pressure and can reduce occupancy. Start
@@ -803,7 +804,7 @@ You can test your solution by running:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 2 -- -k gpu
+pdm run test --week 2 --day 3 -- -k gpu
 ```
 
 The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
@@ -843,6 +844,8 @@ assumptions: `group_size = 128` and `bits = 4`.
 You can test your solution by running:
 
 ```bash
+pdm run test --week 2 --day 3
+
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint quantized-matvec --model qwen3-4b
 ```
@@ -873,10 +876,11 @@ during model inference, not just registered and tested in isolation.
 > implementation at inference time. Registering the extension and passing the
 > direct Metal tests is not enough — the model must route through
 > `quantized_linear` → `quantized_matmul` → your Metal kernel for every
-> attention and MLP projection. Verify this by running the end-to-end
-> benchmark below and confirming the decode throughput is higher than the
-> `kv-cache` checkpoint. If throughput is unchanged, the model is still using
-> dense 16-bit weights through a fallback path.
+> attention and MLP projection. Run the full Day 2 quantization test group,
+> then inspect the end-to-end profile below and confirm that it reports the
+> quantized-matvec pipeline rather than a dense fallback. Treat the throughput
+> comparison as a separate performance result: timing alone cannot prove which
+> implementation ran.
 
 Measure the cumulative model, the real projection shapes, and the updated
 operator attribution:
@@ -919,7 +923,7 @@ Continue to Day 3 when the matched projection table is close to MLX and the
 post-Day-2 profile makes normalization, position, and activation the largest
 removable gap. If the projection comparison is still far behind, keep tuning
 the matvec instead. The
-[reference checkpoint](./appendix-performance.md#day-2-quantize-weights)
+[reference checkpoint](./appendix-performance.md#day-2-keep-weights-packed)
 pairs the model delta, projection microbenchmarks, and attribution. Its matched
 operator result is the reason the hot matvec products do not remain the next
 target: after the projection gap shrinks, the pointwise cluster is the larger

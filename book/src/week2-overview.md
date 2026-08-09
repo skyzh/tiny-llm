@@ -14,7 +14,8 @@ change: prefill once, retain a dense KV cache, and decode one new token at a
 time. Later chapters introduce kernels that address the costs the KV cache
 exposes.
 
-> ⏱️ **Time commitment.** Days 3–6 write and tune custom Metal kernels.
+> ⏱️ **Time commitment.** The second half of Day 2 and Days 3–6 write and tune
+> custom Metal kernels.
 > Completing the full Week 2 sequence typically takes substantially longer than
 > Week 1 Days 6–7. All six days are required core material; plan accordingly.
 
@@ -31,19 +32,17 @@ Pro, not a cross-device guarantee. Raw measurements, rejected experiments, and
 retained dispatch choices live in the
 [performance evidence ledger](./appendix-performance.md).
 
-## Choose a Completion Track
+## Complete the Core Path
 
-The full reference solution is a small performance-engineering project, not a
-reasonable one-week requirement for every student. All six days are required
-core material:
+The full reference solution is a substantial performance-engineering project.
+All six days are required core material; schedule more than one week if needed:
 
-| Track | Required work | Provided infrastructure | Optional work |
-|---|---|---|---|
-| Core course | Days 1–6: cached model integration, benchmarking and quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark/profile runners, correctness tests, and the Python-reference implementations | Xcode counter capture, schedule searches, and hardware-specific retuning |
+| Required work | Provided infrastructure | Optional work |
+|---|---|---|
+| Days 1–6: cached model integration, benchmarking and quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark/profile runners, correctness tests, and the Python-reference implementations | Xcode counter capture, schedule searches, hardware-specific retuning, and the 80%-of-MLX stretch target |
 
 The tests define API and correctness contracts; they do not require a student
-to rediscover the reference schedule. The 80%-of-MLX acceptance target is an
-optional stretch goal measured on your own hardware.
+to rediscover the reference schedule.
 
 ## What We Will Cover
 
@@ -89,6 +88,25 @@ evaluation, and device synchronization.
 6. **Split-K prefill:** the Day 5 shape sweep reveals under-filled grids at
    short row counts, most clearly in narrow Qwen K/V projections. Partition
    the reduction dimension and fall back to Day 5 at the measured crossover.
+
+### Run the Supplied Test Gates
+
+Day 2 combines the benchmark and quantization work, so it has two supplied test
+groups. The later course days each use the next existing test selector:
+
+| Course day | Test command selector |
+|---|---|
+| Day 1 | `--week 2 --day 1` |
+| Day 2 benchmark work | `--week 2 --day 2` |
+| Day 2 quantization and Metal work | `--week 2 --day 3` |
+| Day 3 | `--week 2 --day 4` |
+| Day 4 | `--week 2 --day 5` |
+| Day 5 | `--week 2 --day 6` |
+| Day 6 | `--week 2 --day 7` |
+
+Run every group assigned to the chapter before continuing. The selectors name
+the supplied test files; the chapter headings and navigation use the six-day
+course sequence.
 
 At each boundary, end-to-end and operator measurements select the next kernel
 family. An optional Xcode trace explains what happens inside a representative

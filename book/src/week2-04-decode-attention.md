@@ -135,7 +135,7 @@ performance policy in this focused model path.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 5
 ```
 
 Test grouped-query head mapping, output shape, causal behavior, and explicit
@@ -191,7 +191,7 @@ from `S=33` through `S=128`. Every one is inside the custom dispatch guard.
 Your solution falls back to the exact Python Week 1 composition outside that
 validated range.
 
-## Benchmark Analysis: Select Day 5
+## Benchmark Analysis: Verify Prefill Projections Are the Next Bottleneck
 
 Measure the attention operator and the cumulative checkpoint separately. The
 first progression is the matched short-context acceptance test for this
@@ -227,7 +227,7 @@ optional profiling appendix:
 CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --solution tiny_llm --workload decode-attention --iterations 10 \
-  --output /tmp/week2-day5-decode-attention-s128.gputrace
+  --output /tmp/week2-day4-decode-attention-s128.gputrace
 ```
 
 Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
@@ -244,7 +244,7 @@ The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
 rotated every implementation order, and recorded all 60 samples per
 implementation and pass:
 
-| Context | Readable | Metal | MLX | Metal speedup |
+| Context | Python reference | Metal | MLX | Metal speedup |
 |---:|---:|---:|---:|---:|
 | 32 | 143.0 us | 125.7 us | 116.3 us | 1.138x |
 | 128 | 149.3 us | 136.3 us | 120.6 us | 1.095x |
@@ -267,7 +267,7 @@ is equivalent to unmasked one-token decode, while `L>1` measures causal
 multi-token chunks. Each pass also rotated the three implementation orders and
 retained every sample:
 
-| Query length | Readable | Metal | MLX | Metal speedup | Pass wins |
+| Query length | Python reference | Metal | MLX | Metal speedup | Pass wins |
 |---:|---:|---:|---:|---:|---:|
 | 1 | 244.4 us | 213.1 us | 155.9 us | 1.147x | 6/6 |
 | 2 | 341.4 us | 258.8 us | 185.3 us | 1.319x | 6/6 |
@@ -295,7 +295,7 @@ The first timed decode call appends the new token before the guard sees `S=129`;
 the one-token decode calls through `S=256` therefore use the custom path. Keep
 the prefill attribution separate from any decode change, and continue to Day 5
 only when quantized matrix-shaped projections dominate prefill.
-The [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
+The [reference checkpoint](./appendix-performance.md#day-4-fused-decode-attention)
 pairs the context microbenchmarks with the matched short-context model delta,
 fixed-workload control, and prefill attribution. The optional Xcode replay
 can inspect the attention dispatch if you generate a trace; the fixed workload's

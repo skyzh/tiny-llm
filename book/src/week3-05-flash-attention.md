@@ -17,8 +17,8 @@ students to relearn its memory schedule around page translation.
 
 This chapter combines four prerequisites:
 
-- Week 2 Day 5 introduced the online-softmax recurrence.
-- Week 2 Day 6 introduced the cooperative 32×32 tile built from BF16 8×8
+- Week 2 Day 4 introduced the online-softmax recurrence.
+- Week 2 Day 5 introduced the cooperative 32×32 tile built from BF16 8×8
   SIMD-matrix fragments.
 - Week 3 Day 3 introduced physical pages and block tables.
 - Week 3 Day 4 introduced direct page-walking attention and the decode

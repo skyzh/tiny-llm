@@ -114,7 +114,7 @@ FP32 and cast once to the model dtype. Test:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 6
+pdm run test --week 2 --day 7
 
 for context in 16 32 64 128 2048; do
   for projection in q k v o gate up down; do
@@ -129,7 +129,7 @@ done
 
 Compare Day 5, Day 6, and MLX at short, acceptance, and long prompt lengths.
 Split-K should help only while the unsplit output grid is under-filled. Verify
-that one-token decode remains unchanged because it still dispatches to Day 3's
+that one-token decode remains unchanged because it still dispatches to Day 2's
 matvec, and that sufficiently large prefill shapes select the unsplit Day 5
 kernel instead of paying for partial storage and reduction.
 
@@ -163,7 +163,7 @@ CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --solution tiny_llm --workload quantized-projection \
   --projection k --rows 32 --schedule split-k --iterations 10 \
-  --output /tmp/week2-day7-k-m32-split-k.gputrace
+  --output /tmp/week2-day6-k-m32-split-k.gputrace
 ```
 
 Repeat the operator comparison at the 128-token acceptance shape and at a long
@@ -177,7 +177,7 @@ pipelines and total GPU time beside the calculated partition policy and
 operator table. The final stretch-goal acceptance run must still reach 80%
 of MLX in both phases.
 
-The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
+The [reference checkpoint](./appendix-performance.md#day-6-split-k-only-below-the-crossover)
 pairs the short-shape operator gains with the end-to-end result and keeps the
 neutral acceptance and long controls separate. Use Xcode to verify that the
 short shape executes the accumulation and merge pipelines, while the calculated

@@ -4,9 +4,9 @@
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-Day 5 ends by switching the profile from one-token decode to multi-token
+Day 4 ends by switching the profile from one-token decode to multi-token
 prefill. The measured bottleneck changes with the workload: pointwise kernels
-no longer dominate, and Day 3 deliberately left `M > 8` on its
+no longer dominate, and Day 2 deliberately left `M > 8` on its
 correctness-first vanilla quantized matrix path. Quantized projections are now
 the largest cost, so today we replace that inherited multi-row schedule.
 
@@ -24,7 +24,7 @@ The implementation remains deliberately narrow:
 - BF16 activations, quantization parameters, and output;
 - Qwen3-4B projection dimensions;
 - FP32 matrix accumulators;
-- the Day 3 SIMD matvec remains in use for `M <= 8`.
+- the Day 2 SIMD matvec remains in use for `M <= 8`.
 
 ## From a Matvec to a Cooperative Tile
 
@@ -68,7 +68,7 @@ it does not call MLX's quantized-matmul operator.
 
 ## Task 1: Preserve the Workload Dispatch
 
-Keep the Day 3 decode schedule and add the matrix schedule behind the same
+Keep the Day 2 decode schedule and add the matrix schedule behind the same
 quantized-linear interface:
 
 ```plain
@@ -109,7 +109,7 @@ callers can still request every logit row.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 6
 
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
   --variant week2-decode-attention --variant week2-simd-matmul --variant mlx \
@@ -132,7 +132,7 @@ At long `M`, the two-dimensional tile grid is already large. Do not force the
 next optimization there: additional reduction partitions would only add a
 temporary buffer and another launch.
 
-## Benchmark Analysis: Select Day 6
+## Benchmark Analysis: Identify Under-Filled Prefill Shapes
 
 Compare the matrix kernel at both an occupied control shape and the short K/V
 shape, then profile the latter without enabling Split-K:
@@ -174,7 +174,7 @@ Use the dispatch calculation and short-shape operator sweep to establish that
 the unsplit result grid has too few independent threadgroups. Then use Pipeline
 Statistics and weighted source lines to rule out costly work inside each tile;
 if they expose such a cost, repair Day 5 before multiplying the grid. The
-[reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
+[reference checkpoint](./appendix-performance.md#day-5-use-cooperative-loads-for-quantized-prefill)
 pairs the prefill gain with long and short operator controls and the dispatch
 geometry that motivates Split-K. A remaining arithmetic hot spot would send
 you back to Day 5 instead.

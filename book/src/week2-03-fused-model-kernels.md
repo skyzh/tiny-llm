@@ -1,10 +1,10 @@
-# 🚧 Week 2 Day 4: Fused Model Kernels
+# 🚧 Week 2 Day 3: Fused Model Kernels
 
 > **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-The Day 3 profile should now show many smaller pointwise and reduction
+The Day 2 profile should now show many smaller pointwise and reduction
 dispatches behind the optimized projections.
 RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
@@ -114,7 +114,7 @@ optimization. Use Metal's `fast::exp2`, `fast::sin`, and `fast::cos` for the
 BF16 path. Normalize a batch's offsets once in the model call,
 outside the layer loop, instead of rebuilding the same array in every layer.
 
-Replace the readable RoPE in the already optimized model, then test and measure
+Replace the Python `mlx.core` RoPE in the already optimized model, then test and measure
 that cumulative checkpoint before implementing SwiGLU:
 
 ```bash
@@ -153,7 +153,7 @@ Python operators, and make the Week 2 interfaces reusable by the Week 3 serving 
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3
+pdm run test --week 2 --day 4
 ```
 
 Compare against the Python reference equations with tolerances rather than bit-for-bit
@@ -167,7 +167,7 @@ transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
 timing no longer measures an equivalent operation.
 
-## Benchmark Analysis: Select Day 5
+## Benchmark Analysis: Verify Attention Is the Next Bottleneck
 
 Keep the three cumulative checkpoints separate so a regression cannot hide
 inside their combined gain:
@@ -203,14 +203,14 @@ pipeline identities, but let your benchmark results decide whether the kernels
 stay.
 
 After the pointwise cluster shrinks, sweep cached context rather than assuming
-attention is next. Continue to Day 5 when attention is a removable gap at
+attention is next. Continue to Day 4 when attention is a removable gap at
 the measured contexts and the projection operators are already close to their
 denominator. The checked M4 Pro sweep covers `S=32,128,160,192,256` and the
 custom operator wins all six balanced passes at every point, which supports a
-context guard through `S <= 256` but says nothing about longer caches. Day 5
+context guard through `S <= 256` but says nothing about longer caches. Day 4
 must also test query length and prove that its replacement moves a
 complete-model workload that actually enters the final guard. The
-[reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
+[reference checkpoint](./appendix-performance.md#day-3-fused-model-kernels)
 pairs the cumulative gains with all three operator microbenchmarks and the
 updated attribution. Use the optional trace to verify that the intended three
 fused kernels ran; the new context sweep, not the absolute projection share,
