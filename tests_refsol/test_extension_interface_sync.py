@@ -252,6 +252,10 @@ EXTENSION_TASK_PAIRS = {
                 "QuantizedEmbedding::eval_cpu",
             ),
             (
+                "src/extensions/src/quantized_matmul.cpp",
+                "QuantizedEmbedding::eval_gpu",
+            ),
+            (
                 "src/extensions/src/quantized_matmul.metal",
                 "quantized_embedding_w4a16_g128",
             ),
@@ -380,11 +384,61 @@ def _task_body(chapter: str, task: str) -> str:
     return match.group(0)
 
 
+def _functions_in_code_tokens(
+    tokens: list[str], expected_functions: set[str]
+) -> list[tuple[int, str]]:
+    functions = []
+    for index, token in enumerate(tokens):
+        for function in expected_functions:
+            if token == function or token.startswith(f"{function}("):
+                functions.append((index, function))
+                continue
+
+            if "::" not in function:
+                continue
+            owner, short_name = function.rsplit("::", 1)
+            if token == short_name and any(
+                previous.startswith(f"{owner}::") for previous in tokens[:index]
+            ):
+                functions.append((index, function))
+    return functions
+
+
 def _assert_task_pairs(chapter: str, task: str, pairs: set[tuple[str, str]]) -> None:
     body = _task_body(chapter, task)
-    for filename, function in pairs:
-        assert filename in body, f"{task} does not name {filename} for {function}"
-        assert function in body, f"{task} does not name {function} in {filename}"
+    expected_files = {filename for filename, _ in pairs}
+    expected_functions = {function for _, function in pairs}
+    associations: set[tuple[str, str]] = set()
+
+    blocks = re.split(r"\n\s*\n|(?=^\s*-\s)", body, flags=re.MULTILINE)
+    for block in blocks:
+        tokens = re.findall(r"`([^`\n]+)`", block)
+        files = []
+        for index, token in enumerate(tokens):
+            for filename in expected_files:
+                if token in {filename, Path(filename).name}:
+                    files.append((index, filename))
+        functions = _functions_in_code_tokens(tokens, expected_functions)
+
+        cursor = 0
+        for index, filename in files:
+            for function_index, function in functions:
+                if cursor <= function_index < index:
+                    associations.add((filename, function))
+            cursor = index + 1
+
+        if files and not any(
+            function_index < files[0][0] for function_index, _ in functions
+        ):
+            filename = files[-1][1]
+            for function_index, function in functions:
+                if function_index >= cursor:
+                    associations.add((filename, function))
+
+    missing = pairs - associations
+    assert not missing, (
+        f"{task} does not bind exact starter file/function pairs: {missing}"
+    )
 
 
 def test_starter_and_reference_publish_the_same_learner_extension_functions():
@@ -586,6 +640,40 @@ def test_task_pair_guard_rejects_a_nonexistent_source_path():
             "Task 1",
             EXTENSION_TASK_PAIRS[path]["Task 1"],
         )
+
+
+def test_task_pair_guard_rejects_cross_swapped_valid_week_3_day_4_pairs():
+    path = "book/src/week3-04-paged-attention-part2.md"
+    source = _read(path)
+    paged_swapped = source.replace(
+        "`tiny_llm_ext::paged_attention`, `PagedAttention::eval_cpu`, and\n"
+        "  `PagedAttention::eval_gpu` in `src/extensions/src/paged_attention.cpp`;",
+        "`tiny_llm_ext::paged_attention` and `PagedAttention::eval_cpu` in\n"
+        "  `src/extensions/src/paged_attention.cpp`; `PagedAttention::eval_gpu` in\n"
+        "  `src/extensions/src/quantized_matmul.cpp`;",
+        1,
+    )
+    assert paged_swapped != source
+    cross_swapped = paged_swapped.replace(
+        "`tiny_llm_ext::quantized_embedding` plus\n"
+        "`QuantizedEmbedding::eval_cpu`/`eval_gpu` in\n"
+        "`src/extensions/src/quantized_matmul.cpp`,",
+        "`tiny_llm_ext::quantized_embedding` in\n"
+        "`src/extensions/src/quantized_matmul.cpp` plus\n"
+        "`QuantizedEmbedding::eval_cpu` and `QuantizedEmbedding::eval_gpu` in\n"
+        "`src/extensions/src/paged_attention.cpp`,",
+        1,
+    )
+    assert cross_swapped != paged_swapped
+
+    pairs = EXTENSION_TASK_PAIRS[path]["Task 2"]
+    body = _task_body(cross_swapped, "Task 2")
+    for filename, function in pairs:
+        assert filename in body
+        assert function in body
+
+    with pytest.raises(AssertionError):
+        _assert_task_pairs(cross_swapped, "Task 2", pairs)
 
 
 def test_metal_guard_rejects_a_leaked_kernel_body():
