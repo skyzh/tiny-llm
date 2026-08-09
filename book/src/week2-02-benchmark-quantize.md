@@ -863,7 +863,20 @@ The vanilla matrix product remains callable as an inspectable Metal control,
 but the Python `mlx.core` equation is the correctness oracle and only the SIMD
 matvec is integrated into decode.
 
-## Benchmark Analysis: Select Day 3
+## Verify Quantization in the Complete Model
+
+Before moving on, confirm that the quantized matvec kernel is actually called
+during model inference, not just registered and tested in isolation.
+
+> **🚧 Acceptance criterion.** Your checkpoint is incomplete until the model's
+> live matmul and linear call path actually invokes your custom Metal
+> implementation at inference time. Registering the extension and passing the
+> direct Metal tests is not enough — the model must route through
+> `quantized_linear` → `quantized_matmul` → your Metal kernel for every
+> attention and MLP projection. Verify this by running the end-to-end
+> benchmark below and confirming the decode throughput is higher than the
+> `kv-cache` checkpoint. If throughput is unchanged, the model is still using
+> dense 16-bit weights through a fallback path.
 
 Measure the cumulative model, the real projection shapes, and the updated
 operator attribution:
