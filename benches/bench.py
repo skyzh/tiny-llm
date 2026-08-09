@@ -1,8 +1,10 @@
 import argparse
 import json
 from dataclasses import asdict, dataclass
+from math import ceil
 from pathlib import Path
 from random import Random
+from statistics import median
 from time import perf_counter
 
 import mlx.core as mx
@@ -40,7 +42,18 @@ class ServingMetrics:
     peak_live_pages: int = 0
     peak_capacity_pages: int = 0
     peak_tail_waste_slots: int = 0
+    peak_tail_waste_live_slots: int = 0
+    peak_tail_waste_bytes: int = 0
+    peak_tail_waste_fraction: float = 0.0
     peak_kv_bytes: int = 0
+    decode_step_count: int = 0
+    decode_step_median_ms: float = 0.0
+    decode_step_p95_ms: float = 0.0
+    decode_step_max_ms: float = 0.0
+    decode_gap_count: int = 0
+    decode_gap_median_ms: float = 0.0
+    decode_gap_p95_ms: float = 0.0
+    decode_gap_max_ms: float = 0.0
     reused_page_allocations: int = 0
     storage_growths: int = 0
     copied_pages_on_growth: int = 0
@@ -354,6 +367,9 @@ def run_batch_requests_serving(
     pending_prefill: BatchRequestState | None = None
     next_request_idx = 0
     metrics = ServingMetrics()
+    decode_step_samples_ms: list[float] = []
+    decode_gap_samples_ms: list[float] = []
+    last_decode_completion: float | None = None
 
     def live_states() -> list[BatchRequestState]:
         states = [state for state in decode_requests if state is not None]
@@ -365,7 +381,9 @@ def run_batch_requests_serving(
         states = live_states()
         metrics.peak_active_requests = max(metrics.peak_active_requests, len(states))
         live_pages = 0
+        live_page_slots = 0
         tail_waste = 0
+        tail_waste_bytes = 0
         dense_bytes = 0
         for state in states:
             for cache in state.kv_cache:
@@ -375,7 +393,20 @@ def run_batch_requests_serving(
                 if page_ids is not None:
                     live_pages += len(page_ids)
                     if page_lens and page_size is not None:
-                        tail_waste += page_size - page_lens[-1]
+                        live_page_slots += len(page_ids) * page_size
+                        cache_tail_waste = page_size - page_lens[-1]
+                        tail_waste += cache_tail_waste
+                        pool = getattr(cache, "pool", None)
+                        capacity_slots = (
+                            getattr(pool, "capacity", 0) * page_size
+                            if pool is not None
+                            else 0
+                        )
+                        storage_nbytes = getattr(pool, "storage_nbytes", 0)
+                        if capacity_slots > 0:
+                            tail_waste_bytes += cache_tail_waste * (
+                                storage_nbytes // capacity_slots
+                            )
                 else:
                     key_values = getattr(cache, "key_values", None)
                     if key_values is not None:
@@ -389,7 +420,13 @@ def run_batch_requests_serving(
         )
         metrics.peak_live_pages = max(metrics.peak_live_pages, live_pages)
         metrics.peak_capacity_pages = max(metrics.peak_capacity_pages, capacity_pages)
-        metrics.peak_tail_waste_slots = max(metrics.peak_tail_waste_slots, tail_waste)
+        if tail_waste > metrics.peak_tail_waste_slots:
+            metrics.peak_tail_waste_slots = tail_waste
+            metrics.peak_tail_waste_live_slots = live_page_slots
+            metrics.peak_tail_waste_bytes = tail_waste_bytes
+            metrics.peak_tail_waste_fraction = (
+                tail_waste / live_page_slots if live_page_slots else 0.0
+            )
         metrics.peak_kv_bytes = max(metrics.peak_kv_bytes, dense_bytes, paged_bytes)
 
     def record_dense_growth(state: BatchRequestState) -> None:
@@ -483,7 +520,15 @@ def run_batch_requests_serving(
                 batch_kv_cache,
             )
             mx.eval(decoded)
-            metrics.decode_time += perf_counter() - t1
+            decode_completed_at = perf_counter()
+            decode_step_ms = (decode_completed_at - t1) * 1_000
+            decode_step_samples_ms.append(decode_step_ms)
+            metrics.decode_time += decode_step_ms / 1_000
+            if last_decode_completion is not None:
+                decode_gap_samples_ms.append(
+                    (decode_completed_at - last_decode_completion) * 1_000
+                )
+            last_decode_completion = decode_completed_at
             record_cache_state()
 
             for slot in active_slots:
@@ -498,6 +543,9 @@ def run_batch_requests_serving(
                     for layer_cache in batch_kv_cache:
                         layer_cache.remove_request(slot)
                     decode_requests[slot] = None
+        else:
+            # Idle time without an active decode request is not a fairness gap.
+            last_decode_completion = None
 
     pools = getattr(model, "page_pools", ())
     metrics.reused_page_allocations = sum(
@@ -513,7 +561,28 @@ def run_batch_requests_serving(
     metrics.dense_staging_copy_bytes = sum(
         getattr(cache, "staging_copy_bytes", 0) for cache in batch_kv_cache
     )
+    metrics.decode_step_count = len(decode_step_samples_ms)
+    metrics.decode_step_median_ms = sample_median(decode_step_samples_ms)
+    metrics.decode_step_p95_ms = nearest_rank_percentile(decode_step_samples_ms, 0.95)
+    metrics.decode_step_max_ms = max(decode_step_samples_ms, default=0.0)
+    metrics.decode_gap_count = len(decode_gap_samples_ms)
+    metrics.decode_gap_median_ms = sample_median(decode_gap_samples_ms)
+    metrics.decode_gap_p95_ms = nearest_rank_percentile(decode_gap_samples_ms, 0.95)
+    metrics.decode_gap_max_ms = max(decode_gap_samples_ms, default=0.0)
     return metrics
+
+
+def sample_median(samples: list[float]) -> float:
+    return float(median(samples)) if samples else 0.0
+
+
+def nearest_rank_percentile(samples: list[float], quantile: float) -> float:
+    if not samples:
+        return 0.0
+    if not 0.0 < quantile <= 1.0:
+        raise ValueError("quantile must be in (0, 1]")
+    ordered = sorted(samples)
+    return float(ordered[ceil(quantile * len(ordered)) - 1])
 
 
 def safe_div(num: float, den: float) -> float:
@@ -720,6 +789,27 @@ def main() -> None:
         print(f"Peak live KV pages: {serving_metrics.peak_live_pages}")
         print(f"Peak KV capacity pages: {serving_metrics.peak_capacity_pages}")
         print(f"Peak tail waste slots: {serving_metrics.peak_tail_waste_slots}")
+        print(
+            "Tail-waste snapshot live slots: "
+            f"{serving_metrics.peak_tail_waste_live_slots}"
+        )
+        print(f"Tail-waste snapshot bytes: {serving_metrics.peak_tail_waste_bytes}")
+        print(
+            "Tail-waste snapshot fraction: "
+            f"{serving_metrics.peak_tail_waste_fraction:.6f}"
+        )
+        print(
+            "Decode step latency ms (median/p95/max): "
+            f"{serving_metrics.decode_step_median_ms:.3f}/"
+            f"{serving_metrics.decode_step_p95_ms:.3f}/"
+            f"{serving_metrics.decode_step_max_ms:.3f}"
+        )
+        print(
+            "Decode completion gap ms (median/p95/max): "
+            f"{serving_metrics.decode_gap_median_ms:.3f}/"
+            f"{serving_metrics.decode_gap_p95_ms:.3f}/"
+            f"{serving_metrics.decode_gap_max_ms:.3f}"
+        )
         print(f"Reused page allocations: {serving_metrics.reused_page_allocations}")
         print(f"Page-pool growths: {serving_metrics.storage_growths}")
         print(
@@ -752,8 +842,19 @@ def main() -> None:
                 "batch_decode": args.batch_decode,
                 "batch_size": args.batch_size,
                 "prefill_step": args.prefill_step,
+                "warmup": args.warmup,
+                "device": args.device,
+                "prefill_logits": effective_prefill_logits,
                 "seed": args.seed,
             },
+            "request_trace": [
+                {
+                    "request_id": request_id,
+                    "prompt_token_ids": request.prompt_token_ids,
+                    "max_new_tokens": request.max_new_tokens,
+                }
+                for request_id, request in enumerate(requests)
+            ],
             "metrics": {
                 "elapsed_seconds": total_time,
                 "output_tokens_per_second": safe_div(
