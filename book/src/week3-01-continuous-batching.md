@@ -41,7 +41,7 @@ policy easy to inspect and exposes an important limitation: one long prefill
 can delay every active request's next decode step. Day 2 will add a bounded
 prefill budget to solve that fairness problem.
 
-## Task 1: Verify the Week 2 Batch Contract
+## Task 1: Reuse RoPE and Causal Masking for Batched Requests
 
 ```
 src/tiny_llm/week2_kernels.py::FastRoPE  (reuse unchanged)

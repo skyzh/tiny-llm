@@ -239,15 +239,31 @@ Use this implementation order:
 
 Each step has a direct correctness check before the next abstraction is added.
 
-## Correctness Invariants
+## What Must Hold, and What Breaks If It Doesn't
 
 These are the invariants worth checking in tests:
 
-1. `context_len` always equals the number of written logical token positions.
-2. `block_table` reconstructs the same logical KV order as the dense baseline.
-3. the allocator never hands the same page to two live cache handles unless explicit sharing is implemented.
-4. releasing a request returns all pages owned by all of its layer caches exactly once.
-5. decode allocates a new page only when the tail page overflows.
+1. **`context_len` equals the number of written logical token positions.** If it
+   is too small, attention skips written K/V; if it is too large, attention
+   reads unwritten tail slots. Either case makes paged output diverge from the
+   dense baseline.
+2. **`block_table` reconstructs the same logical K/V order as the dense
+   baseline.** A wrong mapping can pair a query with the wrong token's K/V and
+   change the output even when every page contains valid data. Reordering
+   complete pages can change a causal-prefix result because it changes which
+   K/V pairs each query can see. By contrast, one-token decode over all
+   positions in complete pages is permutation-invariant to their order when
+   each K/V pair moves together.
+3. **The allocator gives each page to only one live cache handle unless sharing
+   is explicit.** If two live handles alias a page, a write for one request
+   overwrites K/V that the other request can still attend to.
+4. **Releasing a request returns every page owned by every layer cache exactly
+   once.** Missing a page leaks pool capacity; returning one twice raises the
+   pool's already-free error instead of completing cleanup.
+5. **Decode allocates a new page only when the tail page overflows.** Allocating
+   earlier strands writable tail slots and inflates the used-page count. This
+   course pool grows instead of reporting exhaustion, so that waste can force
+   backing storage to grow and copy earlier, increasing memory pressure.
 
 ## Task 1: Add Batch Metadata
 
@@ -270,6 +286,22 @@ for all active requests.
 src/tiny_llm/attention.py
 src/extensions/src/paged_attention.cpp
 src/extensions/src/paged_attention.metal
+```
+
+Complete every learner-extension integration point before rebuilding:
+
+- extend `src/extensions/src/paged_attention.cpp` and
+  `src/extensions/src/paged_attention.metal` with the direct-attention
+  operation and kernel,
+- register those C++ and Metal sources in their respective lists in
+  `src/extensions/CMakeLists.txt`,
+- declare `paged_attention` in `src/extensions/src/tiny_llm_ext.h`, and
+- register its Python binding in `src/extensions/bindings.cpp`.
+
+Then rebuild:
+
+```bash
+pdm run build-ext
 ```
 
 Add a paged attention interface whose inputs come from the paged runtime rather

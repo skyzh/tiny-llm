@@ -175,6 +175,21 @@ this mutation boundary is explicit and safe as long as the cache owns its page
 and attention depends on the returned array. Full-buffer copies remain only
 when geometric capacity grows.
 
+Complete every learner-extension integration point before rebuilding:
+
+- create `src/extensions/src/paged_attention.cpp` for the primitive and
+  `src/extensions/src/paged_attention.metal` for its kernel,
+- register those C++ and Metal sources in their respective lists in
+  `src/extensions/CMakeLists.txt`,
+- declare `paged_cache_update` in `src/extensions/src/tiny_llm_ext.h`, and
+- register its Python binding in `src/extensions/bindings.cpp`.
+
+Then rebuild:
+
+```bash
+pdm run build-ext
+```
+
 Test this behavior through the cache interface: append across a tail-page
 boundary, grow the slab, release and reuse page ids, and compare the gathered
 logical sequence with `TinyKvFullCache`.

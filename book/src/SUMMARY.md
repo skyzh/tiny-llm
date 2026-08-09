@@ -28,7 +28,7 @@
     - [🚧 Direct Paged Attention](./week3-04-paged-attention-part2.md)
     - [🚧 Paged FlashAttention](./week3-05-flash-attention.md)
     - [🚧 Optional: Speculative Decoding](./week3-optional-speculative-decoding.md)
-    - [Optional: Mixture of Experts](./week3-optional-moe.md)
+    - [🚧 Optional: Mixture of Experts](./week3-optional-moe.md)
 - [🚧 Week 4: Build a Coding Agent](./week4-overview.md)
     - [🚧 Agent Loop](./week4-01-agent-loop.md)
     - [🚧 Tools](./week4-02-tools.md)
