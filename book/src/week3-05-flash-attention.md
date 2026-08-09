@@ -70,6 +70,11 @@ workload-specific GPU schedules.
 
 ## Task 1: Tile Queries and Paged K/V
 
+Begin `paged_attention_mma_bf16_d128` in
+`src/extensions/src/paged_attention.metal`. Keep
+`paged_attention_decode` and `paged_attention_scalar_f32` from Day 4 unchanged;
+they remain the short-query and generic controls.
+
 Use eight SIMD groups to cover a 64-row query block. Each SIMD group owns eight
 query rows and represents matrix operands as 8×8 fragments. Stage 32 logical
 K/V positions per iteration.
@@ -101,6 +106,10 @@ partially full, and physical page ids need not be consecutive.
 
 ## Task 2: Compute Tiled Online Softmax
 
+Continue modifying `paged_attention_mma_bf16_d128` in
+`src/extensions/src/paged_attention.metal`. This task fills the tiled
+online-softmax body; it does not add another public function.
+
 For each query tile, maintain one running maximum, one running sum, and an
 unnormalized output accumulator per row. For each K/V tile:
 
@@ -131,6 +140,12 @@ optimization.
 
 ## Task 3: Validate the Page Boundary
 
+Complete the long-query selection in `PagedAttention::eval_gpu` in
+`src/extensions/src/paged_attention.cpp`, then test
+`paged_attention_mma_bf16_d128` against the Day 4 kernels. Keep
+`tiny_llm_ext::paged_attention` and the Python `paged_attention` signature
+unchanged.
+
 Use the GPU-debugging ladder from Week 2 Day 2:
 
 1. compare Day 4 page-walking attention with the readable equation written
@@ -156,6 +171,10 @@ pdm run test --week 3 --day 5
 ```
 
 ## Task 4: Integrate and Measure
+
+Verify the existing dispatch in `Qwen3MultiHeadAttention.__call__` and the
+shape selection inside `PagedAttention::eval_gpu`. Task 4 adds no new
+extension function.
 
 The Week 3 model should use the tiled paged path automatically for supported
 long prefills. Short queries continue through the vector paged-decode schedule.

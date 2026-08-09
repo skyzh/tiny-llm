@@ -38,6 +38,10 @@ original two-dimensional grid is under-filled.
 
 ## Task 1: Reproduce the Under-Filled Grid
 
+Task 1 changes no function. Benchmark the existing
+`quantized_matmul_simdgroup_w4a16_g128` Day 5 kernel before editing the Split-K
+stubs.
+
 Begin with the narrow K projection at `M=32` before changing dispatch. This is
 the smallest baseline needed to reproduce the under-filled Day 5 grid; Task 4
 runs the full all-projection, all-row sweep after Split-K exists:
@@ -54,6 +58,10 @@ lengths may already have enough row-by-column tiles and should become controls.
 
 ## Task 2: Reuse the Day 5 Kernel for Each Partition
 
+Implement `quantized_matmul_simdgroup_splitk_w4a16_g128` in
+`src/extensions/src/quantized_matmul.metal`, reusing the Day 5 tiled helper
+behind `quantized_matmul_simdgroup_w4a16_g128`.
+
 Add `group_id.z` as the partition index. Every partition must:
 
 - have the same reduction length;
@@ -68,6 +76,12 @@ BF16-appropriate tolerance. An FP32 temporary is a useful bring-up oracle, but
 it doubles the partial-buffer traffic.
 
 ## Task 3: Choose Partitions From Occupancy
+
+Modify `QuantizedMatmul::eval_gpu` in
+`src/extensions/src/quantized_matmul.cpp` to select the partition count and
+dispatch the Split-K kernel. Keep `tiny_llm_ext::quantized_matmul` and its
+Python binding unchanged; the existing `use_split_k` argument carries this
+cumulative checkpoint.
 
 Use a small explicit policy:
 
@@ -103,6 +117,11 @@ Expose the policy through a cumulative `split-k` checkpoint. Keep Day 5
 selectable so the benchmark always has an unsplit control.
 
 ## Task 4: Reduce and Verify
+
+Implement `quantized_matmul_splitk_reduce` in
+`src/extensions/src/quantized_matmul.metal` and complete the corresponding
+reduction dispatch in `QuantizedMatmul::eval_gpu`. Do not add a second public
+matmul function.
 
 Launch one reduction thread per output element. Sum all partition values in
 FP32 and cast once to the model dtype. Test:

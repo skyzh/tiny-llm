@@ -68,6 +68,12 @@ it does not call MLX's quantized-matmul operator.
 
 ## Task 1: Preserve the Workload Dispatch
 
+Modify `QuantizedMatmul::eval_gpu` in
+`src/extensions/src/quantized_matmul.cpp` and
+`quantized_matmul_simdgroup_w4a16_g128` in
+`src/extensions/src/quantized_matmul.metal`. Keep the Day 2
+`quantized_matvec_x4_fast_w4a16_g128` function intact for `M <= 8`.
+
 Keep the Day 2 decode schedule and add the matrix schedule behind the same
 quantized-linear interface:
 
@@ -82,12 +88,21 @@ column tiles. The result must retain the model-facing 16-bit dtype.
 
 ## Task 2: Make Device Loads Contiguous
 
+Continue modifying `quantized_matmul_simdgroup_w4a16_g128` (and its private
+Metal helper, if you factor one) in
+`src/extensions/src/quantized_matmul.metal`; do not change the public
+`quantized_matmul` binding.
+
 Use a cooperative block loader so adjacent threads and each thread's local
 reads form contiguous transactions. This is a requirement of the schedule,
 not a cosmetic detail. Benchmark Q, K/V, gate/up, and down projections separately
 at their Qwen3-4B dimensions so both wide and narrow output grids are covered.
 
 ## Task 3: Hoist Quantization Parameters
+
+Continue modifying `quantized_matmul_simdgroup_w4a16_g128` in
+`src/extensions/src/quantized_matmul.metal`. This task changes the tiled
+kernel's load/reuse strategy, not its C++ or Python signature.
 
 One scale and bias apply to 128 reduction values. Loading them for every
 32-value tile repeats the same device access four times. Have one thread load
@@ -100,12 +115,20 @@ accumulator remains FP32. Cast once when writing the final model output.
 
 ## Task 4: Project Only Required Logits
 
+Modify `Qwen3ModelWeek2.__call__` in `src/tiny_llm/qwen3_week2.py` so
+`logits_to_keep=1` slices before the vocabulary projection. Do not add a new
+extension function for this model-level optimization.
+
 Generation needs only the final prompt row to produce the first sampled token.
 Accept `logits_to_keep=1` and apply the vocabulary projection only to that row.
 The benchmark applies the same last-logit workload to MLX, while prompt-scoring
 callers can still request every logit row.
 
 ## Task 5: Verify, Benchmark, and Name the Next Bottleneck
+
+Task 5 adds no function. Verify the cumulative
+`QuantizedMatmul::eval_gpu`/`quantized_matmul_simdgroup_w4a16_g128` path and
+the `Qwen3ModelWeek2.__call__` projection boundary from Tasks 1-4.
 
 ```bash
 pdm run build-ext

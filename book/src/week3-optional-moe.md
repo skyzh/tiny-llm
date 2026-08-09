@@ -181,6 +181,17 @@ src/tiny_llm/moe.py
 Implement `grouped_quantized_matmul`, then use it from `grouped_expert_linear`.
 This is the quantized grouped-matmul core of MoE.
 
+This optional interface is **intentionally not predeclared** in
+`src/extensions/src/tiny_llm_ext.h`, the bindings, or the core CMake target.
+The required Week 2/3 interfaces are scaffolded from setup, but this optional
+chapter is a staged reveal: if you choose the extension variant, add the new
+`tiny_llm_ext::grouped_quantized_matmul` declaration, binding, C++ source
+function, `grouped_quantized_matmul` Metal kernel, and build registration here.
+Then modify the existing `grouped_expert_linear` function in
+`src/tiny_llm/moe.py` to call it. Keeping it out of the core starter prevents
+an optional future interface from appearing to be required by earlier
+checkpoints.
+
 `grouped_quantized_matmul` accepts:
 
 ```plain
@@ -244,6 +255,8 @@ right matrix.
 src/tiny_llm/moe.py
 ```
 
+Modify the existing `route_topk` function in this file.
+
 Implement `route_topk`. It accepts hidden states and router weights, then
 returns:
 
@@ -262,6 +275,9 @@ the model config.
 ```
 src/tiny_llm/moe.py
 ```
+
+Modify `Moe.__init__` and `Moe.__call__`, composing the
+`grouped_expert_linear` and `route_topk` functions from Tasks 1-2.
 
 Implement `Moe` by composing Task 1 and Task 2:
 
@@ -282,6 +298,10 @@ branch in this block.
 src/tiny_llm/qwen3_week3.py
 src/tiny_llm/models.py
 ```
+
+Modify `is_qwen3_moe_sparse_layer` and `Qwen3ModelWeek3.__init__` in
+`src/tiny_llm/qwen3_week3.py`, plus `dispatch_model` in
+`src/tiny_llm/models.py`.
 
 Add a Qwen3-MoE loader path that reuses the Week 3 Qwen3 attention and paged KV
 cache behavior, but swaps selected block MLPs for `Moe`.
