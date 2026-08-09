@@ -48,8 +48,8 @@ mx.eval(output)
 elapsed = perf_counter() - start
 ```
 
-The benchmark must also release request-owned caches after warmups and timed
-runs so a later sample does not inherit allocator state:
+The benchmark must also call the cache release hook after warmups and timed
+runs so cache implementations with owned or shared resources can return them:
 
 ```bash
 pdm run test --week 2 --day 2
@@ -223,7 +223,7 @@ your solution's prefill throughput / MLX prefill throughput >= 0.80
 your solution's decode throughput / MLX decode throughput >= 0.80
 ```
 
-The prefill ratio is also 0.80; both ratios use Qwen3-4B, a 128-token prompt,
+Both ratios use Qwen3-4B, a 128-token prompt,
 128 timed decode steps, and last-row logits. `--output-len 129` includes the
 first token produced by prefill. Reaching 80% is the optional performance-lab
 threshold, not a promise that every educational kernel individually matches

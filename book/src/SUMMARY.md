@@ -1,4 +1,4 @@
-# LLM Serving in a Week
+# Tiny-LLM
 
 [Learn LLM Serving](./preface.md)
 [Setting Up the Environment](./setup.md)

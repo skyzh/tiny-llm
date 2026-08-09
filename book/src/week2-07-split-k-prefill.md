@@ -4,7 +4,7 @@
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-Day 6 made each 32×32×32 tile efficient. Its follow-up sweep shows a different
+Day 6's cooperative loads brought long-row prefill near MLX. Its follow-up sweep shows a different
 problem at short prefill: Qwen's narrow K/V projections do not launch enough
 independent result tiles to occupy the GPU. Today we split the reduction
 dimension only until that grid is large enough.

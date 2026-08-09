@@ -14,7 +14,7 @@ Re-run the dependency-aware kernel profile from Day 2 with
 `--case decode-attention:prefill:128`. Continue only when projections dominate the
 attribution and the complete-model prefill phase moves with their latency. The
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
-shows that evidence chain. MLX remains an external performance denominator;
+is recorded in the performance appendix. MLX remains an external performance denominator;
 the performance-lab path in your solution continues to call the C++/Metal
 primitive you implement for every projection.
 
@@ -84,8 +84,7 @@ column tiles. The result must retain the model-facing 16-bit dtype.
 
 Use a cooperative block loader so adjacent threads and each thread's local
 reads form contiguous transactions. This is a requirement of the schedule,
-not a cosmetic detail: fragment arithmetic cannot compensate for scalar,
-strided tile loads. Benchmark Q, K/V, gate/up, and down projections separately
+not a cosmetic detail. Benchmark Q, K/V, gate/up, and down projections separately
 at their Qwen3-4B dimensions so both wide and narrow output grids are covered.
 
 ## Task 3: Hoist Quantization Parameters
