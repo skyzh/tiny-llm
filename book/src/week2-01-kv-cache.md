@@ -140,7 +140,7 @@ key, value = self.key_values  # B, H, offset, D
 return key, value, self.offset, mask
 ```
 
-This is deliberately a readable dense baseline, not a production KV cache.
+This is deliberately a simple dense baseline, not a production KV cache.
 `mx.concat` allocates a larger buffer and copies the previous K/V contents on
 every growth step. Over a token-by-token decode of length `S`, those copies add
 up to `O(S²)` bytes even though caching avoids `O(S²)` prefix recomputation.
@@ -155,9 +155,9 @@ serving cache.
 src/tiny_llm/qwen3_week2.py
 ```
 
-Keep the readable Week 1 model and its full-prefix generation loop unchanged.
-Start a separate `qwen3_week2.py` model with the same dense weights and readable
-RMSNorm, RoPE, SwiGLU, and attention equations. Change only the state flow in
+Keep the Week 1 Python model and its full-prefix generation loop unchanged.
+Start a separate `qwen3_week2.py` model with the same dense weights and the
+Week 1 `mlx.core` RMSNorm, RoPE, SwiGLU, and attention equations. Change only the state flow in
 this chapter: the Week 2 model accepts a cache and an offset while Week 1 keeps
 recomputing the full prefix. This produces the baseline that every later Week 2
 chapter will optimize.
@@ -183,7 +183,7 @@ k = rope(k, offset=slice(offset, offset + L))
 transpose q, k, v to B, H, L, D
 k, v = cache.update_and_fetch(k, v)  # k/v: B, H, S, D; q: B, H_q, L, D
 x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, H_q, L, D
-# q/k/v and the returned model tensor are BF16; attention arithmetic is still the readable Week 1 path
+# q/k/v and the returned model tensor are BF16; attention arithmetic is still the Week 1 `mlx.core` path
 transpose and reshape x to B, L, H_q * D
 x = linear(x, wo) -> B, L, E
 ```
@@ -193,11 +193,11 @@ sequence length after the update. This matches the Week 1 GQA convention: `L`
 is the query length, while `S` is the key/value source length. During
 single-token decoding, `L = 1` and `S` grows by one on each call.
 
-The linear layers, RMSNorm, RoPE, SwiGLU, and attention remain the readable
-implementations at this checkpoint. Do not introduce packed weights or fast
+The linear layers, RMSNorm, RoPE, SwiGLU, and attention remain the Week 1
+Python implementations at this checkpoint. Do not introduce packed weights or fast
 kernels yet: measuring one algorithmic change makes the gain attributable.
-The model still uses BF16 storage; "readable" describes the implementation, not
-a return to an FP32 model.
+The model still uses BF16 storage; "Week 1 Python" describes the
+implementation style, not a return to an FP32 model.
 
 ## Task 3: Create Request-Scoped Caches
 
@@ -253,7 +253,7 @@ pdm run main --solution tiny_llm_ref --loader week2 \
 
 ## Integrate and Measure
 
-Run the cached readable checkpoint end to end before changing any operator:
+Run the cached Week 1 checkpoint end to end before changing any operator:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
@@ -268,9 +268,9 @@ one cumulative checkpoint.
 
 Day 1 is an algorithmic checkpoint, so it does not invent a shader-level
 limiter from a GPU trace. The checkpoint removes full-prefix recomputation;
-use the end-to-end benchmark to measure that algorithmic change. Day 2 keeps this model unchanged, measures its
-operator families, and introduces an optional Xcode procedure for inspecting
-an isolated vanilla Metal quantized-projection control if you generate a trace.
+use the end-to-end benchmark to measure that algorithmic change. Day 2 measures this model, identifies the projection-weight bandwidth
+bottleneck, introduces 4-bit quantization, and implements the SIMD matvec
+kernel that operates on packed weights directly.
 See the [capture contract](./appendix-performance.md#week-2-xcode-checkpoint-contract).
 
 {{#include copyright.md}}

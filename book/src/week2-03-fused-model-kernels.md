@@ -8,7 +8,7 @@ The Day 3 profile should now show many smaller pointwise and reduction
 dispatches behind the optimized projections.
 RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
-1 expresses them as readable `mlx.core` equations. Confirm the cluster with the
+1 expresses them as Python `mlx.core` equations. Confirm the cluster with the
 Day 2 kernel-group replay; the
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 shows the expected transition. Week 2 keeps those implementations intact and
@@ -26,20 +26,19 @@ solution owns the arithmetic inside that function. Your solution does not call
 `mx.fast.rms_norm`,
 `mx.fast.rope`, or an MLX-provided SiLU implementation.
 
-## Why a Metal Kernel Helps
+## Why Fusion Helps
 
-Calling the Week 1 code "Python" does not mean Python visits every tensor
-element. Python builds a lazy graph whose individual array operations already
-run as native kernels. The important difference is how many operations and
-memory passes the graph describes.
+Week 1's Python `mlx.core` equations already run as native GPU kernels inside
+the lazy graph. The important difference is how many operations and memory
+passes the graph describes.
 
-For example, readable RMSNorm casts, squares, reduces, takes a reciprocal square
-root, multiplies, casts again, and applies a learned weight. A compiler may fuse
-some adjacent element-by-element work, but the row reduction is a boundary. Intermediate
-values and multiple dispatches remain possible.
+For example, RMSNorm expressed as `mlx.core` operations casts, squares,
+reduces, takes a reciprocal square root, multiplies, casts again, and applies a
+learned weight. A compiler may fuse some adjacent element-by-element work, but
+the row reduction is a boundary. Intermediate values and multiple dispatches
+remain possible.
 
-A Metal kernel in your solution gives you explicit control over the whole
-operator:
+A single fused Metal kernel gives you explicit control over the whole operator:
 
 - one dispatch replaces several graph operations;
 - values stay in registers or SIMD-group storage between steps;
@@ -47,7 +46,7 @@ operator:
 - inputs are read once when practical, and only the final tensor is written;
 - the grid matches decode shapes instead of a generic tensor operation.
 
-That is the useful comparison: not "Metal versus Python arithmetic," but one
+The useful comparison is not "Metal versus Python arithmetic," but one
 purpose-built kernel versus a graph of several general-purpose kernels.
 
 ## Task 1: RMSNorm
@@ -68,7 +67,7 @@ All 256 lanes then normalize and scale their strided elements. This fuses the
 reduction and output pass into one dispatch and avoids materializing the
 squared tensor. Instantiate the required kernel for bfloat16. Keep
 the reduction, normalization, and weight multiplication in float, then cast the
-final result once. The readable Week 1 equation rounds once before applying the
+final result once. The Python reference equation rounds once before applying the
 weight, so compare the two with a tolerance rather than expecting bit-identical
 results.
 
@@ -149,15 +148,15 @@ pdm run bench --solution tiny_llm --loader week2 \
 ## Task 4: Verify the Cumulative Model
 
 After exposing all three kernels through C++ MLX primitives, run the complete
-test file to verify their composition. Keep `qwen3_week1.py` on its readable
-operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
+test file to verify their composition. Keep `qwen3_week1.py` on its Week 1
+Python operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 3
 ```
 
-Compare against the readable equations with tolerances rather than bit-for-bit
+Compare against the Python reference equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
 inside a timed iteration when measuring these lazy operations.
 
@@ -195,10 +194,10 @@ the optional profiling appendix:
 CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --solution tiny_llm --workload pointwise --iterations 10 \
-  --output /tmp/week2-day4-pointwise.gputrace
+  --output /tmp/week2-day3-pointwise.gputrace
 ```
 
-Attach each cumulative model row, the three readable/optimized/MLX operator
+Attach each cumulative model row, the three Python-reference/optimized/MLX operator
 rows, and the post-SwiGLU kernel-group profile. Use Xcode to verify the three
 pipeline identities, but let your benchmark results decide whether the kernels
 stay.
