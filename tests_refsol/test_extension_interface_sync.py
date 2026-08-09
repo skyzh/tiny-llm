@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -140,6 +142,72 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text()
 
 
+def _strip_comments(source: str) -> str:
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", "", source)
+
+
+def _cpp_function_body(source: str, symbol: str) -> str:
+    source = _strip_comments(source)
+    definitions = list(
+        re.finditer(rf"\b(?:mx::array|void)\s+{re.escape(symbol)}\s*\(", source)
+    )
+    assert len(definitions) == 1, f"expected one definition of {symbol}"
+
+    opening_brace = source.find("{", definitions[0].end())
+    assert opening_brace != -1, f"missing body for {symbol}"
+    assert ";" not in source[definitions[0].end() : opening_brace], (
+        f"found a declaration instead of a definition for {symbol}"
+    )
+
+    depth = 0
+    for index in range(opening_brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening_brace + 1 : index]
+    raise AssertionError(f"unterminated body for {symbol}")
+
+
+def _normalized_cpp_body(body: str) -> str:
+    return " ".join(body.split())
+
+
+def _learner_owned_cpp_definitions(source: str) -> set[str]:
+    source = _strip_comments(source)
+    wrappers = set(re.findall(r"\bmx::array\s+([a-z][a-z0-9_]*)\s*\(", source))
+    evaluators = set(
+        re.findall(r"\bvoid\s+([A-Z][A-Za-z0-9_]*::eval_(?:cpu|gpu))\s*\(", source)
+    )
+    return wrappers | evaluators
+
+
+def _assert_checkpoint_call(source: str, symbol: str, checkpoint: str) -> None:
+    assert _normalized_cpp_body(_cpp_function_body(source, symbol)) == (
+        f'checkpoint_todo("{symbol}", "{checkpoint}");'
+    )
+
+
+def _assert_checkpoint_helper_throws(source: str) -> None:
+    assert "[[noreturn]] void checkpoint_todo" in _strip_comments(source)
+    assert _normalized_cpp_body(_cpp_function_body(source, "checkpoint_todo")) == (
+        'throw std::runtime_error(std::string(function) + " is a starter stub; '
+        'implement it in " + checkpoint);'
+    )
+
+
+def _assert_metal_scaffold_only(source: str) -> None:
+    executable = _strip_comments(source)
+    assert "[[kernel]]" not in executable
+    executable = re.sub(r"^\s*#.*$", "", executable, flags=re.MULTILINE)
+    executable = re.sub(r"\busing\s+namespace\s+metal\s*;", "", executable)
+    assert not executable.strip(), (
+        "starter Metal file contains executable declarations or bodies"
+    )
+
+
 def _header_functions(path: str) -> set[str]:
     return set(re.findall(r"mx::array\s+([a-z][a-z0-9_]*)\s*\(", _read(path)))
 
@@ -191,22 +259,36 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
 def test_starter_cpp_stubs_are_registered_and_checkpoint_labeled():
     cmake = _read("src/extensions/CMakeLists.txt")
     header = _read("src/extensions/src/tiny_llm_ext.h")
+    starter_cpp_files = {filename for _, filename in INTERFACES.values()} | {
+        filename for _, filename in PRIMITIVE_CLASSES.values()
+    }
+    actual_definitions = set()
+    for filename in starter_cpp_files:
+        actual_definitions |= _learner_owned_cpp_definitions(
+            _read(f"src/extensions/src/{filename}")
+        )
+    expected_definitions = set(INTERFACES)
+    for primitive in PRIMITIVE_CLASSES:
+        expected_definitions.add(f"{primitive}::eval_cpu")
+        expected_definitions.add(f"{primitive}::eval_gpu")
+    assert actual_definitions == expected_definitions
+
     for function, (checkpoint, filename) in INTERFACES.items():
         source = _read(f"src/extensions/src/{filename}")
-        assert function in source
+        _assert_checkpoint_call(source, function, checkpoint)
         assert checkpoint in source
         assert f"src/{filename}" in cmake
 
     for primitive, (checkpoint, filename) in PRIMITIVE_CLASSES.items():
         source = _read(f"src/extensions/src/{filename}")
         assert f"class {primitive}" in header
-        assert f"{primitive}::eval_cpu" in source
-        assert f"{primitive}::eval_gpu" in source
+        _assert_checkpoint_call(source, f"{primitive}::eval_cpu", checkpoint)
+        _assert_checkpoint_call(source, f"{primitive}::eval_gpu", checkpoint)
         assert checkpoint in source
 
     for filename in {filename for _, filename in INTERFACES.values()}:
         source = _read(f"src/extensions/src/{filename}")
-        assert "starter stub" in source
+        _assert_checkpoint_helper_throws(source)
         assert "get_kernel" not in source
         assert "dispatch_thread" not in source
 
@@ -219,6 +301,7 @@ def test_starter_metal_stubs_name_each_learner_owned_kernel_and_checkpoint():
         for kernel, checkpoint in kernels.items():
             assert kernel in source
             assert checkpoint in source
+        _assert_metal_scaffold_only(source)
 
 
 def test_each_extension_task_names_the_exact_starter_functions_to_modify():
@@ -234,13 +317,61 @@ def test_each_extension_task_names_the_exact_starter_functions_to_modify():
 
 
 def test_optional_grouped_moe_interface_remains_a_staged_reveal():
-    starter_header = _read("src/extensions/src/tiny_llm_ext.h")
     reference_header = _read("src/extensions_ref/src/tiny_llm_ext.h")
     optional_chapter = _read("book/src/week3-optional-moe.md")
-    assert "grouped_quantized_matmul" not in starter_header
+
+    starter_surfaces = [
+        "src/extensions/src/tiny_llm_ext.h",
+        "src/extensions/bindings.cpp",
+        "src/extensions/CMakeLists.txt",
+        *(
+            str(path.relative_to(ROOT))
+            for path in (ROOT / "src/extensions/src").glob("*.cpp")
+        ),
+        *(
+            str(path.relative_to(ROOT))
+            for path in (ROOT / "src/extensions/src").glob("*.metal")
+        ),
+    ]
+    withheld_symbols = {
+        "grouped_quantized_matmul",
+        "quantized_matvec_x2",
+        "quantized_matvec_x8",
+    }
+    for path in starter_surfaces:
+        source = _read(path)
+        for symbol in withheld_symbols:
+            assert symbol not in source, f"{symbol} leaked into {path}"
+
     assert "grouped_quantized_matmul" not in reference_header
     assert "intentionally not predeclared" in optional_chapter
     assert "`grouped_quantized_matmul` Metal kernel" in optional_chapter
+
+
+def test_cpp_fail_closed_guard_rejects_a_fake_success_body():
+    source = _read("src/extensions/src/week2_kernels.cpp")
+    fake_success = source.replace(
+        'checkpoint_todo("rms_norm", "Week 2, Day 4");',
+        "return mx::zeros({1});",
+        1,
+    )
+    assert fake_success != source
+    with pytest.raises(AssertionError):
+        _assert_checkpoint_call(fake_success, "rms_norm", "Week 2, Day 4")
+
+
+def test_metal_guard_rejects_a_leaked_kernel_body():
+    source = _read("src/extensions/src/week2_kernels.metal")
+    leaked_kernel = (
+        source
+        + """
+    [[kernel]] void week2_rms_norm(device float *output [[buffer(0)]]) {
+        output[0] = 0.0f;
+    }
+    """
+    )
+    with pytest.raises(AssertionError):
+        _assert_metal_scaffold_only(leaked_kernel)
 
 
 def test_setup_distinguishes_the_runnable_demo_from_future_stubs():
