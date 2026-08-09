@@ -526,7 +526,7 @@ paths pass the checked BF16 correctness tolerance before timing.
 |---|---|---|---|
 | Day 1 | Continuous scheduler | Defines request turnover and active-batch throughput. | Establishes the serving workload. |
 | Day 2 | Chunked admission with dense reconstruction | 718.30 prefill; 32.54 output; 50.42 decode tok/s | Establishes the dense serving baseline. |
-| Day 3 | Paged storage with compatibility gather | 730.69 prefill; 38.44 output; 65.88 decode tok/s | +18.1% output; +30.7% decode; -50.6% copy volume. |
+| Day 3 | Paged storage with compatibility gather | 730.69 prefill; 38.44 output; 65.88 decode tok/s | +18.1% output; +30.6% decode; -50.6% copy volume. |
 | Day 4 | Direct paged decode schedule | 82.11 aggregate decode tok/s | +24.6% decode over the compatibility gather path. |
 | Day 5 | Complete direct paged path | 679.56 prefill; 41.88 output; 82.11 decode tok/s | +28.7% output and request throughput over dense serving. |
 

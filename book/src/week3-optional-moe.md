@@ -1,5 +1,4 @@
-# Week 3 Optional Extension: Mixture of Experts
-
+# 🚧 Week 3 Optional Extension: Mixture of Experts
 
 > 🚧 This chapter is under review and may change.
 In this chapter, we will implement the feed-forward shape of **Mixture of

@@ -272,7 +272,17 @@ src/extensions/src/paged_attention.cpp
 src/extensions/src/paged_attention.metal
 ```
 
-The extension build target from Day 3 already registers new Metal/C++ sources; run it again after adding these files:
+Complete every learner-extension integration point before rebuilding:
+
+- extend `src/extensions/src/paged_attention.cpp` and
+  `src/extensions/src/paged_attention.metal` with the direct-attention
+  operation and kernel,
+- register those C++ and Metal sources in their respective lists in
+  `src/extensions/CMakeLists.txt`,
+- declare `paged_attention` in `src/extensions/src/tiny_llm_ext.h`, and
+- register its Python binding in `src/extensions/bindings.cpp`.
+
+Then rebuild:
 
 ```bash
 pdm run build-ext
