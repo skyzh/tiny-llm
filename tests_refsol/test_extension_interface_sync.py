@@ -10,22 +10,22 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 INTERFACES = {
-    "quantized_matmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
-    "rms_norm": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "decode_attention": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "quantized_matmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
+    "rms_norm": ("Week 2, Day 3", "week2_kernels.cpp"),
+    "rope": ("Week 2, Day 3", "week2_kernels.cpp"),
+    "swiglu": ("Week 2, Day 3", "week2_kernels.cpp"),
+    "decode_attention": ("Week 2, Day 4", "week2_kernels.cpp"),
     "paged_cache_update": ("Week 3, Day 3", "paged_attention.cpp"),
     "quantized_embedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "paged_attention": ("Week 3, Day 4", "paged_attention.cpp"),
 }
 
 PRIMITIVE_CLASSES = {
-    "QuantizedMatmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
-    "Week2RMSNorm": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2DecodeAttention": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "QuantizedMatmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
+    "Week2RMSNorm": ("Week 2, Day 3", "week2_kernels.cpp"),
+    "Week2RoPE": ("Week 2, Day 3", "week2_kernels.cpp"),
+    "Week2SwiGLU": ("Week 2, Day 3", "week2_kernels.cpp"),
+    "Week2DecodeAttention": ("Week 2, Day 4", "week2_kernels.cpp"),
     "PagedCacheUpdate": ("Week 3, Day 3", "paged_attention.cpp"),
     "QuantizedEmbedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "PagedAttention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -33,18 +33,18 @@ PRIMITIVE_CLASSES = {
 
 METAL_CHECKPOINTS = {
     "quantized_matmul.metal": {
-        "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 3",
-        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 3",
-        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 6",
-        "quantized_matmul_simdgroup_splitk_w4a16_g128": "Week 2, Day 7",
-        "quantized_matmul_splitk_reduce": "Week 2, Day 7",
+        "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 2",
+        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 2",
+        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 5",
+        "quantized_matmul_simdgroup_splitk_w4a16_g128": "Week 2, Day 6",
+        "quantized_matmul_splitk_reduce": "Week 2, Day 6",
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
     },
     "week2_kernels.metal": {
-        "week2_rms_norm": "Week 2, Day 4",
-        "week2_rope": "Week 2, Day 4",
-        "week2_swiglu": "Week 2, Day 4",
-        "week2_decode_attention": "Week 2, Day 5",
+        "week2_rms_norm": "Week 2, Day 3",
+        "week2_rope": "Week 2, Day 3",
+        "week2_swiglu": "Week 2, Day 3",
+        "week2_decode_attention": "Week 2, Day 4",
     },
     "paged_attention.metal": {
         "paged_cache_update_kernel": "Week 3, Day 3",
@@ -55,7 +55,7 @@ METAL_CHECKPOINTS = {
 }
 
 DOC_TASK_MARKERS = {
-    "book/src/week2-03-quantized-matvec.md": {
+    "book/src/week2-02-benchmark-quantize.md": {
         "Task 1": {"QuantizedWeights.from_mlx_layer", "QuantizedEmbedding.__call__"},
         "Task 2": {"tiny_llm_ext::quantized_matmul", "QuantizedMatmul::eval_cpu"},
         "Task 3": {
@@ -65,7 +65,7 @@ DOC_TASK_MARKERS = {
         },
         "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MultiHeadAttention.__call__"},
     },
-    "book/src/week2-04-fused-model-kernels.md": {
+    "book/src/week2-03-fused-model-kernels.md": {
         "Task 1": {
             "tiny_llm_ext::rms_norm",
             "Week2RMSNorm::eval_gpu",
@@ -75,7 +75,7 @@ DOC_TASK_MARKERS = {
         "Task 3": {"tiny_llm_ext::swiglu", "Week2SwiGLU::eval_gpu", "week2_swiglu"},
         "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MLP.__call__"},
     },
-    "book/src/week2-05-decode-attention.md": {
+    "book/src/week2-04-decode-attention.md": {
         "Task 1": {"scaled_dot_product_attention"},
         "Task 2": {
             "tiny_llm_ext::decode_attention",
@@ -84,7 +84,7 @@ DOC_TASK_MARKERS = {
         },
         "Task 3": {"Qwen3MultiHeadAttention.__call__", "decode_attention_custom"},
     },
-    "book/src/week2-06-simd-matrix-prefill.md": {
+    "book/src/week2-05-simd-matrix-prefill.md": {
         "Task 1": {
             "QuantizedMatmul::eval_gpu",
             "quantized_matmul_simdgroup_w4a16_g128",
@@ -94,7 +94,7 @@ DOC_TASK_MARKERS = {
         "Task 4": {"Qwen3ModelWeek2.__call__"},
         "Task 5": {"QuantizedMatmul::eval_gpu", "Qwen3ModelWeek2.__call__"},
     },
-    "book/src/week2-07-split-k-prefill.md": {
+    "book/src/week2-06-split-k-prefill.md": {
         "Task 1": {"quantized_matmul_simdgroup_w4a16_g128"},
         "Task 2": {"quantized_matmul_simdgroup_splitk_w4a16_g128"},
         "Task 3": {"QuantizedMatmul::eval_gpu"},
@@ -141,7 +141,7 @@ DOC_TASK_MARKERS = {
 }
 
 EXTENSION_TASK_PAIRS = {
-    "book/src/week2-03-quantized-matvec.md": {
+    "book/src/week2-02-benchmark-quantize.md": {
         "Task 2": {
             (
                 "src/extensions/src/quantized_matmul.cpp",
@@ -161,7 +161,7 @@ EXTENSION_TASK_PAIRS = {
             ),
         },
     },
-    "book/src/week2-04-fused-model-kernels.md": {
+    "book/src/week2-03-fused-model-kernels.md": {
         "Task 1": {
             ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::rms_norm"),
             ("src/extensions/src/week2_kernels.cpp", "Week2RMSNorm::eval_cpu"),
@@ -181,7 +181,7 @@ EXTENSION_TASK_PAIRS = {
             ("src/extensions/src/week2_kernels.metal", "week2_swiglu"),
         },
     },
-    "book/src/week2-05-decode-attention.md": {
+    "book/src/week2-04-decode-attention.md": {
         "Task 2": {
             (
                 "src/extensions/src/week2_kernels.cpp",
@@ -563,13 +563,13 @@ def test_optional_grouped_moe_interface_remains_a_staged_reveal():
 def test_cpp_fail_closed_guard_rejects_a_fake_success_body():
     source = _read("src/extensions/src/week2_kernels.cpp")
     fake_success = source.replace(
-        'checkpoint_todo("rms_norm", "Week 2, Day 4");',
+        'checkpoint_todo("rms_norm", "Week 2, Day 3");',
         "return mx::zeros({1});",
         1,
     )
     assert fake_success != source
     with pytest.raises(AssertionError):
-        _assert_checkpoint_call(fake_success, "rms_norm", "Week 2, Day 4")
+        _assert_checkpoint_call(fake_success, "rms_norm", "Week 2, Day 3")
 
 
 def test_built_starter_extension_fails_closed_for_every_public_operation(monkeypatch):
@@ -626,7 +626,7 @@ def test_binding_guard_rejects_a_changed_python_default():
 
 
 def test_task_pair_guard_rejects_a_nonexistent_source_path():
-    path = "book/src/week2-04-fused-model-kernels.md"
+    path = "book/src/week2-03-fused-model-kernels.md"
     source = _read(path)
     wrong_path = source.replace(
         "`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`",
