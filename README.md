@@ -24,8 +24,8 @@ and performance baseline.
 
 The course follows a four-week learning path:
 
-- **Week 1: From Matmul to Text.** Build a Qwen3 model from direct `mlx.core`
-  from array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
+- **Week 1: From Matmul to Text.** Build a Qwen3 model directly from `mlx.core`
+  array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
 - **Week 2: A Step Closer to vLLM.** Add a KV cache, establish a
   synchronized MLX baseline, and let profiles choose the next optimization.

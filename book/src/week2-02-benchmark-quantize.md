@@ -20,8 +20,9 @@ matrix-vector kernel that operates on it directly.
 
 Optimization starts with a trustworthy comparison. Prefill processes many prompt
 tokens at once; decode usually processes one token per request and is dominated
-by repeatedly reading quantized weights. A change can improve one phase while
-hurting the other, so `benches/bench.py` reports both:
+by repeatedly reading dense BF16 projection weights at this checkpoint. A
+change can improve one phase while hurting the other, so `benches/bench.py`
+reports both:
 
 - prefill tokens per second: prompt tokens divided by prefill time;
 - decode tokens per second: generated tokens after the first token divided by
@@ -584,9 +585,6 @@ wrapper with two call patterns:
   starts working once the quantized matmul kernel is implemented in the next
   tasks.
 
-Day 5 briefly revisits row lookup as an optional one-dispatch fusion; keep the
-Day 2 implementation simple and explicit.
-
 ## Task 2: Migrate the Cached Model to Quantized Weights
 
 ```
@@ -627,7 +625,7 @@ pdm run test --week 2 --day 3 -- -k task_1
 ## Task 3: Implement Metal Matrix Products
 
 Before writing your first Metal kernel, understand the execution model. Metal
-organizes GPU work in three nested scopes:
+organizes GPU work in four nested scopes:
 
 - **Lane (thread).** The smallest unit. Each lane executes the same
   instruction stream with its own register file. Lanes within a SIMD group
@@ -641,18 +639,21 @@ organizes GPU work in three nested scopes:
   with `threadgroup` address space and synchronized with
   `threadgroup_barrier`). The grid is a 1D/2D/3D array of threadgroups.
 - **Grid.** The total work dispatched. `dispatchThreadgroups` launches a grid
-  of threadgroups; the GPU schedules them across available cores. More
-  threadgroups can expose more parallelism, but splitting work more finely can
-  duplicate reads and partial results. Increasing the SIMD groups or tile size
-  within each threadgroup also consumes more registers and threadgroup memory,
-  which can leave fewer threadgroups resident on a core. Launching more groups
-  therefore does not guarantee higher throughput.
+  of threadgroups; the GPU schedules them across available cores. Increasing
+  the grid's threadgroup count can expose more independent work, but a finer
+  partition can also duplicate reads or require partial-result merging.
 
-Key tradeoff: when you increase the work per SIMD group (more output columns,
-larger tiles), you increase register pressure and can reduce occupancy. Start
-with one SIMD group per threadgroup and profile. Add threadgroups only when
-the measured gain justifies the resource cost. "Start with one SIMD group, then
-profile" is a launch-shape strategy, not just a debugging suggestion.
+Keep two launch knobs separate. More SIMD groups within one threadgroup add
+threads and can raise register demand; they increase threadgroup-memory use
+only when the schedule allocates shared storage per group or tile. Either
+resource can reduce the number of resident threadgroups. More threadgroups in
+the grid change how the output or reduction work is partitioned. Neither change
+guarantees higher throughput.
+
+Use the required two-SIMD-group matvec schedule as the Qwen starting point, then
+profile two, four, eight, and sixteen groups per threadgroup as described below.
+Change the grid partition separately so each measurement answers which launch
+knob helped.
 
 ```
 src/extensions/src/quantized_matmul.metal
@@ -872,15 +873,16 @@ Before moving on, confirm that the quantized matvec kernel is actually called
 during model inference, not just registered and tested in isolation.
 
 > **🚧 Acceptance criterion.** Your checkpoint is incomplete until the model's
-> live matmul and linear call path actually invokes your custom Metal
-> implementation at inference time. Registering the extension and passing the
-> direct Metal tests is not enough — the model must route through
-> `quantized_linear` → `quantized_matmul` → your Metal kernel for every
-> attention and MLP projection. Run the full Day 2 quantization test group,
-> then inspect the end-to-end profile below and confirm that it reports the
-> quantized-matvec pipeline rather than a dense fallback. Treat the throughput
-> comparison as a separate performance result: timing alone cannot prove which
-> implementation ran.
+> projection dispatcher is wired to your custom primitive. Decode-shaped work
+> must route through `quantized_linear` → `quantized_matvec_custom` → the
+> extension primitive → the Metal matvec. Matrix-shaped work must route through
+> `quantized_linear` → `quantized_matmul` → the extension primitive → its Metal
+> matrix schedule. Trace those branches in your completed dispatcher and model
+> wiring. The supplied tests validate packed model state and the direct
+> operators, while the profile below reports aggregate operator categories;
+> neither observes the live Metal pipeline identity. Treat the throughput
+> comparison as a separate performance result. If you need runtime dispatch
+> evidence, use the optional source-enabled Xcode capture below.
 
 Measure the cumulative model, the real projection shapes, and the updated
 operator attribution:
