@@ -1,14 +1,14 @@
-# 🚧 Week 2 Day 4: Fused Model Kernels
+# 🚧 Week 2 Day 3: Fused Model Kernels
 
 > **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-The Day 3 profile should now show many smaller pointwise and reduction
+The Day 2 profile should now show many smaller pointwise and reduction
 dispatches behind the optimized projections.
 RMSNorm, RoPE, and SwiGLU recur in every transformer layer, so their cumulative
 GPU duration—not an imagined single slow call—makes them the next target. Week
-1 expresses them as readable `mlx.core` equations. Confirm the cluster with the
+1 expresses them as Python `mlx.core` equations. Confirm the cluster with the
 Day 2 kernel-group replay; the
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 shows the expected transition. Week 2 keeps those implementations intact and
@@ -26,20 +26,19 @@ solution owns the arithmetic inside that function. Your solution does not call
 `mx.fast.rms_norm`,
 `mx.fast.rope`, or an MLX-provided SiLU implementation.
 
-## Why a Metal Kernel Helps
+## Why Fusion Helps
 
-Calling the Week 1 code "Python" does not mean Python visits every tensor
-element. Python builds a lazy graph whose individual array operations already
-run as native kernels. The important difference is how many operations and
-memory passes the graph describes.
+Week 1's Python `mlx.core` equations already run as native GPU kernels inside
+the lazy graph. The important difference is how many operations and memory
+passes the graph describes.
 
-For example, readable RMSNorm casts, squares, reduces, takes a reciprocal square
-root, multiplies, casts again, and applies a learned weight. A compiler may fuse
-some adjacent element-by-element work, but the row reduction is a boundary. Intermediate
-values and multiple dispatches remain possible.
+For example, RMSNorm expressed as `mlx.core` operations casts, squares,
+reduces, takes a reciprocal square root, multiplies, casts again, and applies a
+learned weight. A compiler may fuse some adjacent element-by-element work, but
+the row reduction is a boundary. Intermediate values and multiple dispatches
+remain possible.
 
-A Metal kernel in your solution gives you explicit control over the whole
-operator:
+A single fused Metal kernel gives you explicit control over the whole operator:
 
 - one dispatch replaces several graph operations;
 - values stay in registers or SIMD-group storage between steps;
@@ -47,7 +46,7 @@ operator:
 - inputs are read once when practical, and only the final tensor is written;
 - the grid matches decode shapes instead of a generic tensor operation.
 
-That is the useful comparison: not "Metal versus Python arithmetic," but one
+The useful comparison is not "Metal versus Python arithmetic," but one
 purpose-built kernel versus a graph of several general-purpose kernels.
 
 ## Task 1: RMSNorm
@@ -68,7 +67,7 @@ All 256 lanes then normalize and scale their strided elements. This fuses the
 reduction and output pass into one dispatch and avoids materializing the
 squared tensor. Instantiate the required kernel for bfloat16. Keep
 the reduction, normalization, and weight multiplication in float, then cast the
-final result once. The readable Week 1 equation rounds once before applying the
+final result once. The Python reference equation rounds once before applying the
 weight, so compare the two with a tolerance rather than expecting bit-identical
 results.
 
@@ -115,7 +114,7 @@ optimization. Use Metal's `fast::exp2`, `fast::sin`, and `fast::cos` for the
 BF16 path. Normalize a batch's offsets once in the model call,
 outside the layer loop, instead of rebuilding the same array in every layer.
 
-Replace the readable RoPE in the already optimized model, then test and measure
+Replace the Python `mlx.core` RoPE in the already optimized model, then test and measure
 that cumulative checkpoint before implementing SwiGLU:
 
 ```bash
@@ -149,15 +148,15 @@ pdm run bench --solution tiny_llm --loader week2 \
 ## Task 4: Verify the Cumulative Model
 
 After exposing all three kernels through C++ MLX primitives, run the complete
-test file to verify their composition. Keep `qwen3_week1.py` on its readable
-operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
+test file to verify their composition. Keep `qwen3_week1.py` on its Week 1
+Python operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 4
 ```
 
-Compare against the readable equations with tolerances rather than bit-for-bit
+Compare against the Python reference equations with tolerances rather than bit-for-bit
 equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
 inside a timed iteration when measuring these lazy operations.
 
@@ -168,7 +167,7 @@ transpose its result back afterward. Without those transposes, a one-token
 benchmark accidentally treats the head axis as sequence positions and the
 timing no longer measures an equivalent operation.
 
-## Benchmark Analysis: Select Day 5
+## Benchmark Analysis: Verify Attention Is the Next Bottleneck
 
 Keep the three cumulative checkpoints separate so a regression cannot hide
 inside their combined gain:
@@ -195,23 +194,23 @@ the optional profiling appendix:
 CMAKE_ARGS="-DMLX_METAL_DEBUG=ON" pdm run build-ext
 MLX_METAL_DEBUG=1 MTL_CAPTURE_ENABLED=1 pdm run capture-week2-shader \
   --solution tiny_llm --workload pointwise --iterations 10 \
-  --output /tmp/week2-day4-pointwise.gputrace
+  --output /tmp/week2-day3-pointwise.gputrace
 ```
 
-Attach each cumulative model row, the three readable/optimized/MLX operator
+Attach each cumulative model row, the three Python-reference/optimized/MLX operator
 rows, and the post-SwiGLU kernel-group profile. Use Xcode to verify the three
 pipeline identities, but let your benchmark results decide whether the kernels
 stay.
 
 After the pointwise cluster shrinks, sweep cached context rather than assuming
-attention is next. Continue to Day 5 when attention is a removable gap at
+attention is next. Continue to Day 4 when attention is a removable gap at
 the measured contexts and the projection operators are already close to their
 denominator. The checked M4 Pro sweep covers `S=32,128,160,192,256` and the
 custom operator wins all six balanced passes at every point, which supports a
-context guard through `S <= 256` but says nothing about longer caches. Day 5
+context guard through `S <= 256` but says nothing about longer caches. Day 4
 must also test query length and prove that its replacement moves a
 complete-model workload that actually enters the final guard. The
-[reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
+[reference checkpoint](./appendix-performance.md#day-3-fused-model-kernels)
 pairs the cumulative gains with all three operator microbenchmarks and the
 updated attribution. Use the optional trace to verify that the intended three
 fused kernels ran; the new context sweep, not the absolute projection share,

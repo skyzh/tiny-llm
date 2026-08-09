@@ -1,12 +1,12 @@
-# 🚧 Week 2 Day 6: SIMD-Matrix Prefill
+# 🚧 Week 2 Day 5: SIMD-Matrix Prefill
 
-> **Status: Experimental performance lab.** See the
+> **Status: Experimental.** See the
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-Day 5 ends by switching the profile from one-token decode to multi-token
+Day 4 ends by switching the profile from one-token decode to multi-token
 prefill. The measured bottleneck changes with the workload: pointwise kernels
-no longer dominate, and Day 3 deliberately left `M > 8` on its
+no longer dominate, and Day 2 deliberately left `M > 8` on its
 correctness-first vanilla quantized matrix path. Quantized projections are now
 the largest cost, so today we replace that inherited multi-row schedule.
 
@@ -15,7 +15,7 @@ Re-run the dependency-aware kernel profile from Day 2 with
 attribution and the complete-model prefill phase moves with their latency. The
 [reference-solution profile](./appendix-performance.md#the-kernel-profile-that-selects-each-chapter)
 is recorded in the performance appendix. MLX remains an external performance denominator;
-the performance-lab path in your solution continues to call the C++/Metal
+the SIMD-matrix path in your solution continues to call the C++/Metal
 primitive you implement for every projection.
 
 The implementation remains deliberately narrow:
@@ -24,13 +24,13 @@ The implementation remains deliberately narrow:
 - BF16 activations, quantization parameters, and output;
 - Qwen3-4B projection dimensions;
 - FP32 matrix accumulators;
-- the Day 3 SIMD matvec remains in use for `M <= 8`.
+- the Day 2 SIMD matvec remains in use for `M <= 8`.
 
 ## From a Matvec to a Cooperative Tile
 
 The vanilla one-thread dot product and a single-group 8×8 tile are useful
 Metal bring-up controls, but neither provides enough cooperative reuse for
-multi-row prefill. Compare both with the readable MLX correctness oracle. The
+multi-row prefill. Compare both with the Python MLX correctness oracle. The
 performance schedule must share both activations and dequantized weights across
 a larger result tile.
 
@@ -68,7 +68,7 @@ it does not call MLX's quantized-matmul operator.
 
 ## Task 1: Preserve the Workload Dispatch
 
-Keep the Day 3 decode schedule and add the matrix schedule behind the same
+Keep the Day 2 decode schedule and add the matrix schedule behind the same
 quantized-linear interface:
 
 ```plain
@@ -123,7 +123,7 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
 ```
 
 Inspect the projection sweep as well as complete-model throughput. Continue to
-Day 7 when the long-`M` projections are healthy but short, narrow K/V
+Day 6 when the long-`M` projections are healthy but short, narrow K/V
 projections launch too few 32×32 result tiles to fill the GPU. If the same
 kernel remains slow at large `M`, improve its loads or matrix schedule before
 adding reduction partitions.
@@ -132,7 +132,7 @@ At long `M`, the two-dimensional tile grid is already large. Do not force the
 next optimization there: additional reduction partitions would only add a
 temporary buffer and another launch.
 
-## Benchmark Analysis: Select Day 7
+## Benchmark Analysis: Identify Under-Filled Prefill Shapes
 
 Compare the matrix kernel at both an occupied control shape and the short K/V
 shape, then profile the latter without enabling Split-K:
@@ -173,10 +173,10 @@ while the short, narrow projection remains disproportionately slow.
 Use the dispatch calculation and short-shape operator sweep to establish that
 the unsplit result grid has too few independent threadgroups. Then use Pipeline
 Statistics and weighted source lines to rule out costly work inside each tile;
-if they expose such a cost, repair Day 6 before multiplying the grid. The
-[reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
+if they expose such a cost, repair Day 5 before multiplying the grid. The
+[reference checkpoint](./appendix-performance.md#day-5-use-cooperative-loads-for-quantized-prefill)
 pairs the prefill gain with long and short operator controls and the dispatch
 geometry that motivates Split-K. A remaining arithmetic hot spot would send
-you back to Day 6 instead.
+you back to Day 5 instead.
 
 {{#include copyright.md}}

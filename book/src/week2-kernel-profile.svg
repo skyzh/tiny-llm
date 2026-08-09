@@ -66,8 +66,8 @@
     <text class="detail" x="846" y="117">41.3 ms attributed</text>
   </g>
 
-  <g aria-label="Day 3 quantized matvec decode: projections 57.9 percent, attention 4.5 percent, pointwise 35.8 percent, KV growth 1.8 percent">
-    <text class="label" x="0" y="176">Day 3 · packed matvec</text>
+  <g aria-label="Day 2 complete quantized matvec decode: projections 57.9 percent, attention 4.5 percent, pointwise 35.8 percent, KV growth 1.8 percent">
+    <text class="label" x="0" y="176">Day 2 · packed matvec</text>
     <rect class="projection" x="220" y="153" width="353.2" height="34" />
     <rect class="attention" x="573.2" y="153" width="27.6" height="34" />
     <rect class="pointwise" x="600.8" y="153" width="218.1" height="34" />
@@ -77,8 +77,8 @@
     <text class="detail" x="846" y="174">17.9 ms attributed</text>
   </g>
 
-  <g aria-label="Day 4 fused model kernels: projections 80.5 percent, attention 6.4 percent, pointwise 10.5 percent, KV growth 2.6 percent">
-    <text class="label" x="0" y="233">Day 4 · fused model kernels</text>
+  <g aria-label="Day 3 fused model kernels: projections 80.5 percent, attention 6.4 percent, pointwise 10.5 percent, KV growth 2.6 percent">
+    <text class="label" x="0" y="233">Day 3 · fused model kernels</text>
     <rect class="projection" x="220" y="210" width="491.2" height="34" />
     <rect class="attention" x="711.2" y="210" width="38.8" height="34" />
     <rect class="pointwise" x="750.0" y="210" width="64.2" height="34" />
@@ -88,8 +88,8 @@
     <text class="detail" x="846" y="231">12.9 ms attributed</text>
   </g>
 
-  <g aria-label="Day 5 fused decode attention: projections 81.1 percent, attention 6.2 percent, pointwise 10.3 percent, KV growth 2.4 percent">
-    <text class="label" x="0" y="290">Day 5 · fused decode attention</text>
+  <g aria-label="Day 4 fused decode attention: projections 81.1 percent, attention 6.2 percent, pointwise 10.3 percent, KV growth 2.4 percent">
+    <text class="label" x="0" y="290">Day 4 · fused decode attention</text>
     <rect class="projection" x="220" y="267" width="494.7" height="34" />
     <rect class="attention" x="714.7" y="267" width="37.9" height="34" />
     <rect class="pointwise" x="752.6" y="267" width="62.6" height="34" />
@@ -102,8 +102,8 @@
   <text class="heading" x="0" y="359">Prefill</text>
   <line class="axis" x1="220" y1="367" x2="830" y2="367" />
 
-  <g aria-label="Day 5 fused decode attention prefill at 128 tokens: projections 99.0 percent, attention 0.5 percent, pointwise 0.5 percent">
-    <text class="label" x="0" y="402">Day 5 · 128-token prefill</text>
+  <g aria-label="Day 4 fused decode attention prefill at 128 tokens: projections 99.0 percent, attention 0.5 percent, pointwise 0.5 percent">
+    <text class="label" x="0" y="402">Day 4 · 128-token prefill</text>
     <rect class="projection" x="220" y="379" width="603.7" height="34" />
     <rect class="attention" x="823.7" y="379" width="3.1" height="34" />
     <rect class="pointwise" x="826.8" y="379" width="3.2" height="34" />
@@ -111,8 +111,8 @@
     <text class="detail" x="846" y="400">1,208.8 ms attributed</text>
   </g>
 
-  <g aria-label="Day 6 prefill at 128 tokens: projections 92.7 percent, attention 3.6 percent, pointwise 3.7 percent">
-    <text class="label" x="0" y="459">Day 6 · 128-token prefill</text>
+  <g aria-label="Day 5 prefill at 128 tokens: projections 92.7 percent, attention 3.6 percent, pointwise 3.7 percent">
+    <text class="label" x="0" y="459">Day 5 · 128-token prefill</text>
     <rect class="projection" x="220" y="436" width="565.7" height="34" />
     <rect class="attention" x="785.7" y="436" width="21.8" height="34" />
     <rect class="pointwise" x="807.5" y="436" width="22.5" height="34" />
@@ -120,8 +120,8 @@
     <text class="detail" x="846" y="457">159.2 ms attributed</text>
   </g>
 
-  <g aria-label="Day 6 prefill at 32 tokens: projections 91.6 percent, attention 3.9 percent, pointwise 4.5 percent">
-    <text class="label" x="0" y="516">Day 6 · 32-token prefill</text>
+  <g aria-label="Day 5 prefill at 32 tokens: projections 91.6 percent, attention 3.9 percent, pointwise 4.5 percent">
+    <text class="label" x="0" y="516">Day 5 · 32-token prefill</text>
     <rect class="projection" x="220" y="493" width="558.7" height="34" />
     <rect class="attention" x="778.7" y="493" width="23.8" height="34" />
     <rect class="pointwise" x="802.5" y="493" width="27.5" height="34" />
@@ -129,8 +129,8 @@
     <text class="detail" x="846" y="514">47.9 ms attributed</text>
   </g>
 
-  <g aria-label="Day 7 prefill at 32 tokens: projections 91.3 percent, attention 4.0 percent, pointwise 4.7 percent">
-    <text class="label" x="0" y="573">Day 7 · 32-token prefill</text>
+  <g aria-label="Day 6 prefill at 32 tokens: projections 91.3 percent, attention 4.0 percent, pointwise 4.7 percent">
+    <text class="label" x="0" y="573">Day 6 · 32-token prefill</text>
     <rect class="projection" x="220" y="550" width="556.8" height="34" />
     <rect class="attention" x="776.8" y="550" width="24.7" height="34" />
     <rect class="pointwise" x="801.5" y="550" width="28.5" height="34" />
