@@ -232,3 +232,65 @@ def test_task_1_resume_rejects_a_different_prefix(monkeypatch):
             tool_catalog_hash="t" * 64,
             workspace_fingerprint="w" * 64,
         )
+
+
+def _make_branch_session(monkeypatch, layers=2, max_tokens=8):
+    return _make_session(monkeypatch, layers=layers, max_tokens=max_tokens)
+
+
+def test_task_2_sequential_branch_checkpoint_act_rewind_do_again(monkeypatch):
+    from .tiny_llm_base import SequentialBranch
+
+    session = _make_branch_session(monkeypatch)
+    branch = SequentialBranch(session)
+    branch.session([{"role": "user", "content": "setup"}])
+    boundary = branch.checkpoint()
+
+    first, first_stats = branch.act([{"role": "user", "content": "try A"}])
+    assert first_stats.checkpoint_tokens == len(boundary)
+
+    rewound = branch.rewind()
+    assert rewound == len(boundary)
+
+    second, second_stats = branch.do_again([{"role": "user", "content": "try B"}])
+    assert second_stats.checkpoint_tokens == len(boundary)
+    branch.close()
+
+
+def test_task_2_branch_requires_checkpoint_before_act(monkeypatch):
+    from .tiny_llm_base import RewindError, SequentialBranch
+
+    branch = SequentialBranch(_make_branch_session(monkeypatch))
+
+    with pytest.raises(RewindError, match="checkpoint"):
+        branch.act([{"role": "user", "content": "try A"}])
+    with pytest.raises(RewindError, match="checkpoint"):
+        branch.rewind()
+    branch.close()
+
+
+def test_task_2_rewind_never_exceeds_the_checkpoint(monkeypatch):
+    from .tiny_llm_base import SequentialBranch
+
+    session = _make_branch_session(monkeypatch)
+    branch = SequentialBranch(session)
+    branch.session([{"role": "user", "content": "setup"}])
+    branch.checkpoint()
+    branch.rewind()
+
+    assert len(branch.session.cached_token_ids) == len(branch.checkpoint_tokens)
+    branch.close()
+
+
+def test_task_2_closed_branch_rejects_all_operations(monkeypatch):
+    from .tiny_llm_base import RewindError, SequentialBranch
+
+    branch = SequentialBranch(_make_branch_session(monkeypatch))
+    branch.close()
+
+    with pytest.raises(RewindError, match="closed"):
+        branch.checkpoint()
+    with pytest.raises(RewindError, match="closed"):
+        branch.rewind()
+    with pytest.raises(RewindError, match="closed"):
+        branch.act([{"role": "user", "content": "try A"}])
