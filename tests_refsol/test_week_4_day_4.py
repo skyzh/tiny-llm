@@ -600,3 +600,76 @@ def test_task_4_model_failure_releases_the_live_cache(monkeypatch):
 
     assert generation.cached_token_ids == ()
     assert all(cache.released == 1 for cache in caches)
+
+
+def test_task_5_active_path_of_root_session_is_just_the_root(tmp_path):
+    store = SessionStore(tmp_path, "test-model")
+    root = store.create()
+
+    assert store.active_path(root.session_id) == (root.session_id,)
+    assert store.parent_of(root.session_id) is None
+
+
+def test_task_5_branch_builds_a_two_level_active_path(tmp_path):
+    store = SessionStore(tmp_path, "test-model")
+    root = store.create()
+    root.append("user_message", content="task one")
+    branch = store.branch(root.session_id, at_event_id=root.events[-1].id)
+
+    path = store.active_path(branch.session_id)
+    assert path == (root.session_id, branch.session_id)
+    assert store.parent_of(branch.session_id) == (
+        root.session_id,
+        root.events[-1].id,
+    )
+
+
+def test_task_5_active_path_events_are_deterministic(tmp_path):
+    store = SessionStore(tmp_path, "test-model")
+    root = store.create()
+    root.append("user_message", content="task one")
+    branch = store.branch(root.session_id, at_event_id=root.events[-1].id)
+    branch.append("user_message", content="branch follow-up")
+
+    first = branch.active_path_events()
+    second = branch.active_path_events()
+
+    assert [event.id for event in first] == [event.id for event in second]
+    assert first[-1].data.get("content") == "branch follow-up"
+    assert [event.type for event in first].count("user_message") == 2
+
+
+def test_task_5_branch_keeps_the_full_inherited_prefix(tmp_path):
+    store = SessionStore(tmp_path, "test-model")
+    root = store.create()
+    root.append("user_message", content="task one")
+    branch = store.branch(root.session_id, at_event_id=root.events[-1].id)
+
+    events = branch.active_path_events()
+    types = [event.type for event in events]
+    assert "session_started" in types
+    assert "branch_created" in types
+    assert "branch_completed" in types
+    assert [event.type for event in events].count("user_message") == 1
+
+
+def test_task_5_active_path_rejects_an_unknown_session(tmp_path):
+    store = SessionStore(tmp_path, "test-model")
+
+    with pytest.raises(ValueError):
+        store.active_path("0" * 32)
+
+
+def test_task_5_grandchild_path_orders_root_first(tmp_path):
+    store = SessionStore(tmp_path, "test-model")
+    root = store.create()
+    root.append("user_message", content="task one")
+    branch = store.branch(root.session_id, at_event_id=root.events[-1].id)
+    branch.append("user_message", content="branch follow-up")
+    child = store.branch(branch.session_id, at_event_id=branch.events[-1].id)
+
+    assert store.active_path(child.session_id) == (
+        root.session_id,
+        branch.session_id,
+        child.session_id,
+    )
