@@ -32,6 +32,13 @@ from .evaluation import (
     aggregate_metrics,
     evaluate_task,
 )
+from .harness import (
+    EquivalenceReport,
+    PlaneResult,
+    RunSnapshot,
+    compare_runs,
+    snapshot_run,
+)
 from .generation import (
     GenerationSession,
     GenerationStats,
@@ -89,6 +96,7 @@ __all__ = [
     "ContextPolicy",
     "ContextWindow",
     "DirectorySnapshot",
+    "EquivalenceReport",
     "EffectReceipt",
     "EpochMismatch",
     "EvaluatedRun",
@@ -103,10 +111,12 @@ __all__ = [
     "MutationIntent",
     "MutationJournal",
     "PlannedRestore",
+    "PlaneResult",
     "PrefixError",
     "PrefixRegistry",
     "PrefixStats",
     "ReceiptStore",
+    "RunSnapshot",
     "ReconciliationResult",
     "RecoveryResult",
     "SafeCheckpoint",
@@ -131,6 +141,7 @@ __all__ = [
     "aggregate_metrics",
     "build_system_prompt",
     "build_state_card",
+    "compare_runs",
     "compact_messages",
     "generate_response",
     "evaluate_task",
@@ -144,6 +155,7 @@ __all__ = [
     "reconcile_interrupted_effects",
     "run_agent",
     "snapshot_world",
+    "snapshot_run",
     "tool_catalog_hash",
     "validate_resume",
 ]
