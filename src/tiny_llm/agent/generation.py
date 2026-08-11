@@ -62,6 +62,29 @@ class GenerationSession:
 
         pass
 
+    @property
+    def model_identity(self) -> str:
+        """Content-addressable model identity used by checkpoint manifests."""
+
+        pass
+
+    @property
+    def tokenizer_identity(self) -> str:
+        """Content-addressable tokenizer identity used by checkpoint manifests."""
+
+        pass
+
+    @property
+    def layer_count(self) -> int:
+        """Number of layer caches currently materialized (0 when cold)."""
+
+        pass
+
+    def rewind_to(self, token_count: int) -> int:
+        """Discard the cache tail so exactly ``token_count`` tokens remain."""
+
+        pass
+
     def close(self) -> None:
         """Release every layer cache. Closing more than once is safe."""
 

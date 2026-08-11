@@ -31,6 +31,28 @@ class ToolAction:
 AgentAction = FinalAction | ToolAction
 
 
+TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "list_files": (frozenset(), frozenset({"path"})),
+    "read_file": (frozenset({"path"}), frozenset()),
+    "write_file": (frozenset({"path", "content"}), frozenset()),
+    "edit_file": (frozenset({"path", "old", "new"}), frozenset()),
+    "run_command": (frozenset({"argv"}), frozenset()),
+}
+
+
+def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
+    """Stable content hash of the enabled tool schema catalog.
+
+    The checkpoint validity rule binds a KV checkpoint to the exact schema
+    set the model saw; changing the tool set invalidates continuations.
+    """
+
+    pass
+
+
+TOOL_CATALOG_HASH = ""
+
+
 def parse_action(
     response: str,
     available_tools: frozenset[str] | None = None,

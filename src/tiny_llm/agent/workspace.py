@@ -119,7 +119,14 @@ class Workspace:
 
         pass
 
-    def execute(self, action: ToolAction) -> str:
+    def bind_receipt_store(self, store) -> None:
+        """Attach a durable receipt store; every effect after this is recorded."""
+
+        pass
+
+    def execute(
+        self, action: ToolAction, *, tool_call_id: str | None = None
+    ) -> str:
         """Week 4, Day 3: dispatch a validated action and return recoverable errors."""
 
         pass
