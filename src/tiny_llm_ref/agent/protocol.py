@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -32,6 +33,28 @@ class ToolAction:
 AgentAction = FinalAction | ToolAction
 
 
+def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
+    """Stable content hash of the enabled tool schema catalog.
+
+    The checkpoint validity rule binds a KV checkpoint to the exact schema
+    set the model saw.  Changing the tool set changes the hash, which
+    invalidates every continuation that assumed the old schema set.
+    """
+
+    if available_tools is None:
+        return hashlib.sha256(b"all-tools").hexdigest()
+    catalog = {
+        tool: {
+            "required": sorted(TOOL_FIELDS[tool][0]),
+            "optional": sorted(TOOL_FIELDS[tool][1]),
+        }
+        for tool in sorted(available_tools)
+        if tool in TOOL_FIELDS
+    }
+    payload = json.dumps(catalog, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "list_files": (frozenset(), frozenset({"path"})),
     "read_file": (frozenset({"path"}), frozenset()),
@@ -39,6 +62,9 @@ TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "edit_file": (frozenset({"path", "old", "new"}), frozenset()),
     "run_command": (frozenset({"argv"}), frozenset()),
 }
+
+
+TOOL_CATALOG_HASH = tool_catalog_hash(frozenset(TOOL_FIELDS))
 
 
 def parse_action(
@@ -115,8 +141,7 @@ def build_system_prompt(workspace: Workspace) -> str:
     if workspace.policy.allowed_commands:
         lines.append("The operator allowed only these exact command arrays:")
         lines += [
-            json.dumps(list(command))
-            for command in workspace.policy.allowed_commands
+            json.dumps(list(command)) for command in workspace.policy.allowed_commands
         ]
         lines.append('Use: {"tool":"run_command","argv":["exact","arguments"]}')
     else:

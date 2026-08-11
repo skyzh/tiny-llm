@@ -35,9 +35,11 @@ from .loop import AgentEvent, AgentLimits, AgentRun, run_agent
 from .protocol import (
     AgentError,
     FinalAction,
+    TOOL_CATALOG_HASH,
     ToolAction,
     build_system_prompt,
     parse_action,
+    tool_catalog_hash,
 )
 from .recovery import (
     Checkpoint,
@@ -82,6 +84,7 @@ __all__ = [
     "SessionLog",
     "SessionStore",
     "StaticHeldOutGrader",
+    "TOOL_CATALOG_HASH",
     "StagedTask",
     "SteeringHandle",
     "ToolAction",
@@ -98,6 +101,7 @@ __all__ = [
     "compact_messages",
     "generate_response",
     "evaluate_task",
+    "tool_catalog_hash",
     "initial_messages",
     "memory_session",
     "parse_action",

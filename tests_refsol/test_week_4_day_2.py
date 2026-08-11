@@ -125,3 +125,30 @@ def test_task_2_rejects_a_known_but_disabled_tool():
             '{"tool":"write_file","path":"x","content":"y"}',
             read_only.available_tools,
         )
+
+
+def test_task_3_tool_catalog_hash_is_stable_and_schema_bound():
+    from .tiny_llm_base import tool_catalog_hash
+
+    same = tool_catalog_hash(frozenset({"read_file", "list_files"}))
+    assert same == tool_catalog_hash(frozenset({"read_file", "list_files"}))
+    assert tool_catalog_hash(frozenset({"read_file"})) != same
+    assert tool_catalog_hash(frozenset({"read_file", "write_file"})) != same
+
+
+def test_task_3_enabled_tools_change_the_catalog_hash():
+    from .tiny_llm_base import tool_catalog_hash
+
+    read_only = tool_catalog_hash(frozenset({"read_file"}))
+    writable = tool_catalog_hash(frozenset({"read_file", "write_file"}))
+    assert read_only != writable
+
+
+def test_task_3_catalog_hash_covers_field_contracts():
+    from .tiny_llm_base import TOOL_CATALOG_HASH, tool_catalog_hash
+
+    all_tools = frozenset(
+        {"list_files", "read_file", "write_file", "edit_file", "run_command"}
+    )
+    assert TOOL_CATALOG_HASH == tool_catalog_hash(all_tools)
+    assert len(TOOL_CATALOG_HASH) == 64
