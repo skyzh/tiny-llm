@@ -191,6 +191,8 @@ class Workspace:
         action: ToolAction,
         result: str,
         changed_artifacts: tuple[str, ...],
+        *,
+        tool_call_id: str | None = None,
     ) -> None:
         """Persist one immutable effect receipt for a dispatched tool."""
 
@@ -203,7 +205,7 @@ class Workspace:
         ):
             exit_state = "ok"
         receipt = EffectReceipt(
-            tool_call_id=f"{uuid.uuid4().hex}",
+            tool_call_id=tool_call_id or f"{uuid.uuid4().hex}",
             tool=action.tool,
             arguments=action.arguments,
             exit_state=exit_state,
@@ -734,7 +736,7 @@ class Workspace:
         if self.cancellation is not None:
             self.cancellation.raise_if_cancelled(phase)
 
-    def execute(self, action: ToolAction) -> str:
+    def execute(self, action: ToolAction, *, tool_call_id: str | None = None) -> str:
         """Week 4, Day 3: dispatch a validated action and return recoverable errors."""
 
         self._raise_if_cancelled("tool")
@@ -787,6 +789,7 @@ class Workspace:
                     - (before_modified | before_uncertain)
                 )
             ),
+            tool_call_id=tool_call_id,
         )
         return truncated
 

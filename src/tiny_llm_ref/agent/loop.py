@@ -424,7 +424,9 @@ def run_agent(
                 )
             if cancellation is not None:
                 cancellation.raise_if_cancelled("tool_dispatch")
-            result = workspace.execute(action)
+            result = workspace.execute(
+                action, tool_call_id=tool_call.id if tool_call is not None else None
+            )
             if session is not None:
                 session.append(
                     "tool_result",

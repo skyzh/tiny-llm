@@ -50,6 +50,13 @@ from .protocol import (
     tool_catalog_hash,
 )
 from .receipts import EffectReceipt, ReceiptStore
+from .reconcile import (
+    ReconciliationResult,
+    SafeCheckpoint,
+    largest_safe_checkpoint,
+    reconcile_effect,
+    reconcile_interrupted_effects,
+)
 from .recovery import (
     Checkpoint,
     MutationIntent,
@@ -100,7 +107,9 @@ __all__ = [
     "PrefixRegistry",
     "PrefixStats",
     "ReceiptStore",
+    "ReconciliationResult",
     "RecoveryResult",
+    "SafeCheckpoint",
     "SessionEvent",
     "SessionLog",
     "SessionStore",
@@ -127,9 +136,12 @@ __all__ = [
     "evaluate_task",
     "export_cache_manifest",
     "initial_messages",
+    "largest_safe_checkpoint",
     "memory_session",
     "open_status_fork",
     "parse_action",
+    "reconcile_effect",
+    "reconcile_interrupted_effects",
     "run_agent",
     "snapshot_world",
     "tool_catalog_hash",

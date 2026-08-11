@@ -206,6 +206,7 @@ class ReceiptStore:
     def __init__(self, path: Path | None = None):
         self._path = path
         self._receipts: dict[str, EffectReceipt] = {}
+        self._by_tool_call: dict[str, str] = {}
         self._order: list[str] = []
         if path is not None:
             self._load(path)
@@ -222,6 +223,9 @@ class ReceiptStore:
                     if receipt.receipt_id not in self._receipts:
                         self._receipts[receipt.receipt_id] = receipt
                         self._order.append(receipt.receipt_id)
+                    self._by_tool_call.setdefault(
+                        receipt.tool_call_id, receipt.receipt_id
+                    )
 
     def put(self, receipt: EffectReceipt) -> str:
         """Durably publish one receipt; idempotent by content address."""
@@ -247,11 +251,25 @@ class ReceiptStore:
                 os.fsync(handle.fileno())
         self._receipts[receipt_id] = receipt
         self._order.append(receipt_id)
+        self._by_tool_call.setdefault(receipt.tool_call_id, receipt_id)
         return receipt_id
 
     def get(self, receipt_id: str) -> EffectReceipt | None:
         """Return the verified receipt or None when absent."""
 
+        return self._receipts.get(receipt_id)
+
+    def by_tool_call(self, tool_call_id: str) -> EffectReceipt | None:
+        """Return the receipt recorded for one tool-call event, if any.
+
+        Receipts are content-addressed, so this is an explicit secondary index
+        keyed by the session tool-call ID — the link an exactly-once
+        reconciler needs after a crash.
+        """
+
+        receipt_id = self._by_tool_call.get(tool_call_id)
+        if receipt_id is None:
+            return None
         return self._receipts.get(receipt_id)
 
     def require(self, receipt_id: str) -> EffectReceipt:
@@ -292,4 +310,5 @@ class ReceiptStore:
         """Drop the in-memory index; the durable file is already fsynced."""
 
         self._receipts.clear()
+        self._by_tool_call.clear()
         self._order = []
