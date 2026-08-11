@@ -316,10 +316,26 @@ def _assert_no_reference_imports(starter_dir: Path) -> None:
                     )
 
 
+def _assert_no_reference_guidance(starter_dir: Path) -> None:
+    """Reject learner-facing package or path guidance to the reference tree."""
+
+    for path in starter_dir.glob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        assert "tiny_llm_ref" not in source, (
+            f"starter {path.name} guides learners to the reference solution"
+        )
+
+
 def test_starter_package_does_not_import_reference():
     """The normal CI guard scans the complete real starter tree."""
 
     _assert_no_reference_imports(STARTER)
+
+
+def test_starter_does_not_guide_learners_to_reference():
+    """Public starter source must not point learners at reference code."""
+
+    _assert_no_reference_guidance(STARTER)
 
 
 def test_day1_loop_has_no_session_contract():
@@ -773,6 +789,23 @@ def test_real_tree_dynamic_import_mutations_fail_normal_guard(tmp_path, form, pa
     path.write_text(path.read_text(encoding="utf-8") + payload, encoding="utf-8")
     with pytest.raises(AssertionError, match="dynamically imports"):
         _assert_no_reference_imports(starter)
+
+
+@pytest.mark.parametrize(
+    ("form", "payload"),
+    (
+        ("package", "\n# Copy the answer from tiny_llm_ref.\n"),
+        ("path", "\n# See src/tiny_llm_ref/agent/generation.py.\n"),
+    ),
+)
+def test_real_tree_reference_guidance_mutations_fail_normal_guard(
+    tmp_path, form, payload
+):
+    starter = _copy_starter_tree(tmp_path)
+    path = starter / "generation.py"
+    path.write_text(path.read_text(encoding="utf-8") + payload, encoding="utf-8")
+    with pytest.raises(AssertionError, match="guides learners"):
+        _assert_no_reference_guidance(starter)
 
 
 def test_real_tree_starter_only_session_id_fails_normal_guard(tmp_path):
