@@ -1669,3 +1669,262 @@ def test_task_5_compaction_reconciles_the_warm_cache_and_records_metrics(
     assert stats.cold_start is False
     assert stats.latency_seconds is not None
     assert stats.latency_seconds >= 0
+
+
+class _CheckpointCache:
+    def __init__(self):
+        self.offset = 0
+        self.released = 0
+
+    def rewind(self, count):
+        if count < 0 or count > self.offset:
+            raise ValueError("bad rewind")
+        self.offset -= count
+
+    def release(self):
+        self.released += 1
+
+
+class _CheckpointArray:
+    def __init__(self, values):
+        self.values = list(values)
+
+    def __getitem__(self, _key):
+        return self
+
+
+class _CheckpointLogits:
+    def __init__(self, token):
+        self.token = token
+
+    def __getitem__(self, _key):
+        return self
+
+
+class _CheckpointScalar:
+    def __init__(self, value):
+        self.value = value
+
+    def item(self):
+        return self.value
+
+
+class _CheckpointTokenizer:
+    eos_token_id = 0
+
+    def apply_chat_template(self, messages, **_kwargs):
+        return "|".join(
+            f"{message['role']}:{message['content']}" for message in messages
+        )
+
+    def encode(self, prompt, **_kwargs):
+        return [(ord(character) % 251) + 1 for character in prompt]
+
+    def decode(self, tokens):
+        return ",".join(map(str, tokens))
+
+
+class _CheckpointModel:
+    def __call__(self, tokens, _offset, caches):
+        for cache in caches:
+            cache.offset += len(tokens.values)
+        return _CheckpointLogits(0 if tokens.values[-1] == 7 else 7)
+
+
+def _install_checkpoint_mlx(monkeypatch):
+    mlx = ModuleType("mlx")
+    core = ModuleType("mlx.core")
+    core.array = _CheckpointArray
+    core.argmax = lambda logits, axis: _CheckpointScalar(logits.token)
+    mlx.core = core
+    monkeypatch.setitem(sys.modules, "mlx", mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", core)
+
+
+def _checkpoint_session(monkeypatch, *, layers=2, model_hash=None, tokenizer_hash=None):
+    _install_checkpoint_mlx(monkeypatch)
+    model = _CheckpointModel()
+    tokenizer = _CheckpointTokenizer()
+
+    def cache_factory():
+        return [_CheckpointCache() for _ in range(layers)]
+
+    return GenerationSession(
+        model,
+        tokenizer,
+        cache_factory,
+        max_tokens=8,
+        model_hash=model_hash,
+        tokenizer_hash=tokenizer_hash,
+    )
+
+
+def test_task_5_checkpoint_exports_content_addressed_manifest(monkeypatch):
+    from .tiny_llm_base import export_cache_manifest
+
+    session = _checkpoint_session(monkeypatch)
+    session([{"role": "user", "content": "hello"}])
+
+    manifest = export_cache_manifest(
+        session,
+        session.cached_token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+    assert manifest.position == len(session.cached_token_ids)
+    assert manifest.layers == 2
+    assert manifest.tool_catalog_hash == "t" * 64
+    assert len(manifest.digest()) == 64
+
+
+def test_task_5_manifest_round_trips_and_verifies_its_digest(monkeypatch):
+    from .tiny_llm_base import CacheManifest, export_cache_manifest
+
+    session = _checkpoint_session(monkeypatch)
+    session([{"role": "user", "content": "hello"}])
+
+    manifest = export_cache_manifest(
+        session,
+        session.cached_token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+    restored = CacheManifest.from_dict(manifest.to_dict())
+
+    assert restored == manifest
+    assert restored.digest() == manifest.digest()
+
+
+def test_task_5_tampered_manifest_fails_closed():
+    from .tiny_llm_base import CacheManifest, ManifestError
+
+    manifest = CacheManifest(
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        position=10,
+        prefix_hash="c" * 64,
+    )
+    payload = manifest.to_dict()
+    payload["position"] = 999
+
+    with pytest.raises(ManifestError):
+        CacheManifest.from_dict(payload)
+
+
+def test_task_5_resume_accepts_an_exact_manifest(monkeypatch):
+    from .tiny_llm_base import export_cache_manifest, validate_resume
+
+    session = _checkpoint_session(monkeypatch)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(
+        session,
+        token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+    validate_resume(
+        manifest,
+        session,
+        token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+
+def test_task_5_resume_rejects_a_different_model(monkeypatch):
+    from .tiny_llm_base import ManifestError, export_cache_manifest, validate_resume
+
+    session = _checkpoint_session(monkeypatch, model_hash="a" * 64)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(
+        session,
+        token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+    other = _checkpoint_session(monkeypatch, model_hash="b" * 64)
+    other([{"role": "user", "content": "hello"}])
+
+    with pytest.raises(ManifestError, match="model"):
+        validate_resume(
+            manifest,
+            other,
+            other.cached_token_ids,
+            tool_catalog_hash="t" * 64,
+            workspace_fingerprint="w" * 64,
+        )
+
+
+def test_task_5_resume_rejects_a_changed_workspace(monkeypatch):
+    from .tiny_llm_base import ManifestError, export_cache_manifest, validate_resume
+
+    session = _checkpoint_session(monkeypatch)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(
+        session,
+        token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+    with pytest.raises(ManifestError, match="workspace"):
+        validate_resume(
+            manifest,
+            session,
+            token_ids,
+            tool_catalog_hash="t" * 64,
+            workspace_fingerprint="x" * 64,
+        )
+
+
+def test_task_5_resume_rejects_a_changed_tool_catalog(monkeypatch):
+    from .tiny_llm_base import ManifestError, export_cache_manifest, validate_resume
+
+    session = _checkpoint_session(monkeypatch)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(
+        session,
+        token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+    with pytest.raises(ManifestError, match="tool catalog"):
+        validate_resume(
+            manifest,
+            session,
+            token_ids,
+            tool_catalog_hash="u" * 64,
+            workspace_fingerprint="w" * 64,
+        )
+
+
+def test_task_5_resume_rejects_a_different_prefix(monkeypatch):
+    from .tiny_llm_base import ManifestError, export_cache_manifest, validate_resume
+
+    session = _checkpoint_session(monkeypatch)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(
+        session,
+        token_ids,
+        tool_catalog_hash="t" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+    with pytest.raises(ManifestError, match="position|prefix"):
+        validate_resume(
+            manifest,
+            session,
+            token_ids[:-1],
+            tool_catalog_hash="t" * 64,
+            workspace_fingerprint="w" * 64,
+        )

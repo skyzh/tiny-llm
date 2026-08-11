@@ -25,6 +25,12 @@ from .evaluation import (
     aggregate_metrics,
     evaluate_task,
 )
+from .checkpoint import (
+    CacheManifest,
+    ManifestError,
+    export_cache_manifest,
+    validate_resume,
+)
 from .generation import (
     GenerationSession,
     GenerationStats,
@@ -62,6 +68,7 @@ __all__ = [
     "AgentRun",
     "AgentInterrupted",
     "CancellationToken",
+    "CacheManifest",
     "CandidateSnapshot",
     "CheckResult",
     "Checkpoint",
@@ -77,6 +84,7 @@ __all__ = [
     "GenerationSession",
     "GenerationStats",
     "GradeReport",
+    "ManifestError",
     "MutationIntent",
     "MutationJournal",
     "EffectReceipt",
@@ -104,7 +112,9 @@ __all__ = [
     "compact_messages",
     "generate_response",
     "evaluate_task",
+    "export_cache_manifest",
     "tool_catalog_hash",
+    "validate_resume",
     "initial_messages",
     "memory_session",
     "parse_action",
