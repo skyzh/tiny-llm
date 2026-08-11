@@ -890,3 +890,256 @@ def test_task_5_compaction_reconciles_the_warm_cache_and_records_metrics(
     assert stats.cold_start is False
     assert stats.latency_seconds is not None
     assert stats.latency_seconds >= 0
+
+
+class _CheckpointCache:
+    def __init__(self):
+        self.offset = 0
+        self.released = 0
+
+    def rewind(self, count):
+        if count < 0 or count > self.offset:
+            raise ValueError("bad rewind")
+        self.offset -= count
+
+    def release(self):
+        self.released += 1
+
+
+class _CheckpointArray:
+    def __init__(self, values):
+        self.values = list(values)
+
+    def __getitem__(self, _key):
+        return self
+
+
+class _CheckpointLogits:
+    def __init__(self, token):
+        self.token = token
+
+    def __getitem__(self, _key):
+        return self
+
+
+class _CheckpointScalar:
+    def __init__(self, value):
+        self.value = value
+
+    def item(self):
+        return self.value
+
+
+class _CheckpointTokenizer:
+    eos_token_id = 0
+
+    def apply_chat_template(self, messages, **_kwargs):
+        return "|".join(
+            f"{message['role']}:{message['content']}" for message in messages
+        )
+
+    def encode(self, prompt, **_kwargs):
+        return [(ord(character) % 251) + 1 for character in prompt]
+
+    def decode(self, tokens):
+        return ",".join(map(str, tokens))
+
+
+class _CheckpointModel:
+    def __call__(self, tokens, _offset, caches):
+        for cache in caches:
+            cache.offset += len(tokens.values)
+        return _CheckpointLogits(0 if tokens.values[-1] == 7 else 7)
+
+
+def _install_checkpoint_mlx(monkeypatch):
+    mlx = ModuleType("mlx")
+    core = ModuleType("mlx.core")
+    core.array = _CheckpointArray
+    core.argmax = lambda logits, axis: _CheckpointScalar(logits.token)
+    mlx.core = core
+    monkeypatch.setitem(sys.modules, "mlx", mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", core)
+
+
+def _checkpoint_session(monkeypatch, *, layers=2, model_hash=None, tokenizer_hash=None):
+    _install_checkpoint_mlx(monkeypatch)
+    model = _CheckpointModel()
+    tokenizer = _CheckpointTokenizer()
+
+    def cache_factory():
+        return [_CheckpointCache() for _ in range(layers)]
+
+    return GenerationSession(
+        model,
+        tokenizer,
+        cache_factory,
+        max_tokens=8,
+        model_hash=model_hash,
+        tokenizer_hash=tokenizer_hash,
+    )
+
+
+def test_task_5_checkpoint_exports_content_addressed_manifest(monkeypatch):
+    from .tiny_llm_base import WorldStamp, ApprovalEpoch, export_cache_manifest
+
+    session = _checkpoint_session(monkeypatch)
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    messages = [{"role": "user", "content": "hello"}]
+    session(messages)
+
+    manifest = export_cache_manifest(
+        session, session.cached_token_ids, world=world, approval=approval
+    )
+
+    assert manifest.position == len(session.cached_token_ids)
+    assert manifest.layers == 2
+    assert manifest.world_epoch == 0
+    assert len(manifest.digest()) == 64
+
+
+def test_task_5_manifest_round_trips_and_verifies_its_digest(monkeypatch):
+    from .tiny_llm_base import (
+        CacheManifest,
+        WorldStamp,
+        ApprovalEpoch,
+        export_cache_manifest,
+    )
+
+    session = _checkpoint_session(monkeypatch)
+    world = WorldStamp(epoch=2, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=1)
+    session([{"role": "user", "content": "hello"}])
+
+    manifest = export_cache_manifest(
+        session, session.cached_token_ids, world=world, approval=approval
+    )
+    restored = CacheManifest.from_dict(manifest.to_dict())
+
+    assert restored == manifest
+    assert restored.digest() == manifest.digest()
+
+
+def test_task_5_tampered_manifest_fails_closed():
+    from .tiny_llm_base import CacheManifest, ManifestError
+
+    manifest = CacheManifest(
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        position=10,
+        prefix_hash="c" * 64,
+    )
+    payload = manifest.to_dict()
+    payload["position"] = 999
+
+    with pytest.raises(ManifestError):
+        CacheManifest.from_dict(payload)
+
+
+def test_task_5_resume_accepts_an_exact_manifest(monkeypatch):
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        WorldStamp,
+        export_cache_manifest,
+        validate_resume,
+    )
+
+    session = _checkpoint_session(monkeypatch)
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(session, token_ids, world=world, approval=approval)
+
+    validate_resume(manifest, session, token_ids, world=world, approval=approval)
+
+
+def test_task_5_resume_rejects_a_different_model(monkeypatch):
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        ManifestError,
+        WorldStamp,
+        export_cache_manifest,
+        validate_resume,
+    )
+
+    session = _checkpoint_session(monkeypatch, model_hash="a" * 64)
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(session, token_ids, world=world, approval=approval)
+
+    other = _checkpoint_session(monkeypatch, model_hash="b" * 64)
+    other([{"role": "user", "content": "hello"}])
+
+    with pytest.raises(ManifestError, match="model"):
+        validate_resume(
+            manifest, other, other.cached_token_ids, world=world, approval=approval
+        )
+
+
+def test_task_5_resume_rejects_a_changed_world_epoch(monkeypatch):
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        ManifestError,
+        WorldStamp,
+        export_cache_manifest,
+        validate_resume,
+    )
+
+    session = _checkpoint_session(monkeypatch)
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(session, token_ids, world=world, approval=approval)
+
+    changed = WorldStamp(epoch=1, root="/tmp", tool_catalog_hash="t" * 64)
+    with pytest.raises(ManifestError, match="world epoch"):
+        validate_resume(manifest, session, token_ids, world=changed, approval=approval)
+
+
+def test_task_5_resume_rejects_a_changed_approval_epoch(monkeypatch):
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        ManifestError,
+        WorldStamp,
+        export_cache_manifest,
+        validate_resume,
+    )
+
+    session = _checkpoint_session(monkeypatch)
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(session, token_ids, world=world, approval=approval)
+
+    changed = ApprovalEpoch(epoch=1)
+    with pytest.raises(ManifestError, match="approval epoch"):
+        validate_resume(manifest, session, token_ids, world=world, approval=changed)
+
+
+def test_task_5_resume_rejects_a_different_prefix(monkeypatch):
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        ManifestError,
+        WorldStamp,
+        export_cache_manifest,
+        validate_resume,
+    )
+
+    session = _checkpoint_session(monkeypatch)
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    session([{"role": "user", "content": "hello"}])
+    token_ids = session.cached_token_ids
+    manifest = export_cache_manifest(session, token_ids, world=world, approval=approval)
+
+    with pytest.raises(ManifestError, match="position|prefix"):
+        validate_resume(
+            manifest, session, token_ids[:-1], world=world, approval=approval
+        )

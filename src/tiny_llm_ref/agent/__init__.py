@@ -9,6 +9,12 @@ from .context import (
     append_tool_result,
     compact_messages,
 )
+from .checkpoint import (
+    CacheManifest,
+    ManifestError,
+    export_cache_manifest,
+    validate_resume,
+)
 from .control import AgentInterrupted, CancellationToken, SteeringHandle
 from .epoch import ApprovalEpoch, EpochMismatch, WorldStamp, snapshot_world
 from .evaluation import (
@@ -64,6 +70,7 @@ __all__ = [
     "AgentInterrupted",
     "ApprovalEpoch",
     "CancellationToken",
+    "CacheManifest",
     "CandidateSnapshot",
     "CheckResult",
     "Checkpoint",
@@ -81,6 +88,7 @@ __all__ = [
     "GenerationSession",
     "GenerationStats",
     "GradeReport",
+    "ManifestError",
     "MutationIntent",
     "MutationJournal",
     "PlannedRestore",
@@ -108,10 +116,12 @@ __all__ = [
     "compact_messages",
     "generate_response",
     "evaluate_task",
+    "export_cache_manifest",
     "initial_messages",
     "memory_session",
     "parse_action",
     "run_agent",
     "snapshot_world",
     "tool_catalog_hash",
+    "validate_resume",
 ]
