@@ -15,6 +15,13 @@ from .compaction import (
     reexpand_receipt_message,
 )
 from .control import AgentInterrupted, CancellationToken, SteeringHandle
+from .harness import (
+    EquivalenceReport,
+    PlaneResult,
+    RunSnapshot,
+    compare_runs,
+    snapshot_run,
+)
 from .generation import (
     GenerationSession,
     GenerationStats,
@@ -54,6 +61,7 @@ __all__ = [
     "CancellationToken",
     "BranchStats",
     "EffectReceipt",
+    "EquivalenceReport",
     "CacheManifest",
     "CompactionError",
     "CompactionResult",
@@ -61,9 +69,11 @@ __all__ = [
     "GenerationSession",
     "GenerationStats",
     "ManifestError",
+    "PlaneResult",
     "ReceiptStore",
     "ReconciliationResult",
     "RewindError",
+    "RunSnapshot",
     "SafeCheckpoint",
     "SequentialBranch",
     "StatusQuery",
@@ -78,6 +88,7 @@ __all__ = [
     "ToolPolicy",
     "Workspace",
     "build_state_card",
+    "compare_runs",
     "build_system_prompt",
     "generate_response",
     "export_cache_manifest",
@@ -91,6 +102,7 @@ __all__ = [
     "reconcile_interrupted_effects",
     "reexpand_receipt_message",
     "run_agent",
+    "snapshot_run",
     "validate_resume",
     "tool_catalog_hash",
 ]
