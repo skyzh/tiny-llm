@@ -33,7 +33,7 @@ class FakeWorkspace:
         self.command_cleanup_incomplete = False
         self.executed = []
 
-    def execute(self, action):
+    def execute(self, action, *, tool_call_id=None):
         self.executed.append(action)
         return "README contents"
 

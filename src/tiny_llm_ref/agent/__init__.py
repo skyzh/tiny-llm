@@ -32,6 +32,7 @@ from .generation import (
     initial_messages,
 )
 from .loop import AgentEvent, AgentLimits, AgentRun, run_agent
+from .receipts import EffectReceipt, ReceiptStore
 from .protocol import (
     AgentError,
     FinalAction,
@@ -78,7 +79,9 @@ __all__ = [
     "GradeReport",
     "MutationIntent",
     "MutationJournal",
+    "EffectReceipt",
     "PlannedRestore",
+    "ReceiptStore",
     "RecoveryResult",
     "SessionEvent",
     "SessionLog",

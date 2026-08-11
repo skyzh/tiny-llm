@@ -15,6 +15,7 @@ from time import monotonic
 
 from .control import AgentInterrupted, CancellationToken
 from .protocol import AgentError, ToolAction
+from .receipts import EffectReceipt, ReceiptStore
 from .recovery import MutationJournal, RecoveryResult
 from .session import SessionLog
 
@@ -137,6 +138,8 @@ class Workspace:
     command_cleanup_incomplete: bool = field(default=False, init=False)
     journal: MutationJournal | None = field(default=None, init=False)
     recovery_results: tuple[RecoveryResult, ...] = field(default=(), init=False)
+    receipt_store: ReceiptStore | None = field(default=None, init=False)
+    last_receipt: EffectReceipt | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         """Bind durable mutation recovery to the matching session, when present."""
@@ -145,6 +148,48 @@ class Workspace:
             self.journal = MutationJournal(self.session_log, self.policy.root)
             self.recover_pending()
             self._recover_command_state()
+
+    def bind_receipt_store(self, store: ReceiptStore) -> None:
+        """Attach a durable receipt store; every effect after this is recorded."""
+
+        if self.last_receipt is not None or store is None:
+            raise ValueError("receipt store must be bound before any effect")
+        self.receipt_store = store
+
+    def _record_receipt(
+        self,
+        action: ToolAction,
+        result: str,
+        changed_artifacts: tuple[str, ...],
+        *,
+        tool_call_id: str | None = None,
+    ) -> None:
+        """Persist one immutable effect receipt for a dispatched tool.
+
+        The receipt is keyed to the session ``tool_call`` event id so an
+        exactly-once reconciler can later match it without guessing which
+        effect ran.
+        """
+
+        exit_state = "uncertain"
+        if result.startswith("error:"):
+            exit_state = "error"
+        elif (
+            not self.uncertain_modified_files
+            and not self.command_side_effects_untracked
+        ):
+            exit_state = "ok"
+        receipt = EffectReceipt(
+            tool_call_id=tool_call_id or f"{uuid.uuid4().hex}",
+            tool=action.tool,
+            arguments=action.arguments,
+            exit_state=exit_state,
+            result=result,
+            changed_artifacts=changed_artifacts,
+        )
+        self.last_receipt = receipt
+        if self.receipt_store is not None:
+            self.receipt_store.put(receipt)
 
     def bind_session(self, session_log: SessionLog) -> tuple[RecoveryResult, ...]:
         """Bind a pristine workspace to the exact log used by its agent loop."""
@@ -664,11 +709,13 @@ class Workspace:
         if self.cancellation is not None:
             self.cancellation.raise_if_cancelled(phase)
 
-    def execute(self, action: ToolAction) -> str:
+    def execute(self, action: ToolAction, *, tool_call_id: str | None = None) -> str:
         """Week 4, Day 3: dispatch a validated action and return recoverable errors."""
 
         self._raise_if_cancelled("tool")
         preserve_command_warnings: tuple[str, ...] = ()
+        before_modified = frozenset(self.modified_files)
+        before_uncertain = frozenset(self.uncertain_modified_files)
         try:
             if action.tool == "list_files":
                 result = self.list_files(action.arguments.get("path", "."))
@@ -701,10 +748,23 @@ class Workspace:
             ValueError,
         ) as error:
             result = f"error: {error}"
-        return self._truncate_result(
+        truncated = self._truncate_result(
             result,
             preserve_command_warnings=preserve_command_warnings,
         )
+        self._record_receipt(
+            action,
+            truncated,
+            tuple(
+                sorted(
+                    str(path.relative_to(self.policy.root))
+                    for path in (self.modified_files | self.uncertain_modified_files)
+                    - (before_modified | before_uncertain)
+                )
+            ),
+            tool_call_id=tool_call_id,
+        )
+        return truncated
 
     def _truncate_result(
         self,

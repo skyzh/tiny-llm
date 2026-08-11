@@ -175,3 +175,126 @@ def test_task_2_rejects_workspace_roots_inside_protected_paths(tmp_path, protect
 
     with pytest.raises(ValueError, match="workspace root is protected"):
         ToolPolicy(root)
+
+
+def test_task_4_receipt_is_immutable_and_content_addressed(tmp_path):
+    from .tiny_llm_base import EffectReceipt
+
+    receipt = EffectReceipt(
+        tool_call_id="a" * 32,
+        tool="read_file",
+        arguments={"path": "README.md"},
+        exit_state="ok",
+        result="hello",
+        changed_artifacts=(),
+    )
+
+    assert len(receipt.receipt_id) == 64
+    assert receipt.receipt_id == EffectReceipt.from_dict(receipt.to_dict()).receipt_id
+
+
+def test_task_4_receipt_store_persists_and_verifies(tmp_path):
+    from .tiny_llm_base import EffectReceipt, ReceiptStore
+
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    receipt = EffectReceipt(
+        tool_call_id="b" * 32,
+        tool="write_file",
+        arguments={"path": "new.txt", "content": "data"},
+        exit_state="ok",
+        result="wrote new.txt",
+        changed_artifacts=("new.txt",),
+    )
+    receipt_id = store.put(receipt)
+
+    assert store.require(receipt_id) == receipt
+    assert len(store) == 1
+
+    reopened = ReceiptStore(tmp_path / "receipts.jsonl")
+    assert reopened.require(receipt_id) == receipt
+    assert reopened.require(receipt_id).receipt_id == receipt_id
+
+
+def test_task_4_workspace_records_an_effect_receipt_on_execute(tmp_path):
+    from .tiny_llm_base import ReceiptStore
+
+    workspace = Workspace(
+        ToolPolicy(tmp_path, allow_writes=True),
+        confirm_tool=lambda action: True,
+    )
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    workspace.bind_receipt_store(store)
+
+    result = workspace.execute(
+        ToolAction("write_file", {"path": "new.txt", "content": "data"})
+    )
+
+    assert result == "wrote new.txt"
+    assert workspace.last_receipt is not None
+    assert workspace.last_receipt.tool == "write_file"
+    assert workspace.last_receipt.changed_artifacts == ("new.txt",)
+    assert workspace.last_receipt.exit_state == "ok"
+    assert len(store) == 1
+    assert store.require(workspace.last_receipt.receipt_id) == workspace.last_receipt
+
+
+def test_task_4_denied_effect_receipt_records_error_state(tmp_path):
+    from .tiny_llm_base import ReceiptStore
+
+    workspace = Workspace(ToolPolicy(tmp_path, allow_writes=True))
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    workspace.bind_receipt_store(store)
+
+    result = workspace.execute(
+        ToolAction("write_file", {"path": "new.txt", "content": "data"})
+    )
+
+    assert result == "error: operator denied write_file"
+    assert workspace.last_receipt is not None
+    assert workspace.last_receipt.exit_state == "error"
+    assert workspace.last_receipt.changed_artifacts == ()
+
+
+def test_task_4_receipt_is_keyed_to_the_session_tool_call(tmp_path):
+    from .tiny_llm_base import ReceiptStore
+
+    workspace = Workspace(
+        ToolPolicy(tmp_path, allow_writes=True),
+        confirm_tool=lambda action: True,
+    )
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    workspace.bind_receipt_store(store)
+    call_id = "c" * 32
+
+    workspace.execute(
+        ToolAction("write_file", {"path": "new.txt", "content": "data"}),
+        tool_call_id=call_id,
+    )
+
+    assert workspace.last_receipt is not None
+    assert workspace.last_receipt.tool_call_id == call_id
+    assert store.by_tool_call(call_id) == workspace.last_receipt
+
+
+def test_task_4_tampered_receipt_store_fails_closed(tmp_path):
+    from .tiny_llm_base import EffectReceipt, ReceiptStore
+
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    receipt = EffectReceipt(
+        tool_call_id="d" * 32,
+        tool="write_file",
+        arguments={"path": "x.txt", "content": "data"},
+        exit_state="ok",
+        result="wrote x.txt",
+        changed_artifacts=("x.txt",),
+    )
+    store.put(receipt)
+
+    path = tmp_path / "receipts.jsonl"
+    mutated = path.read_text(encoding="utf-8").replace(
+        '"result":"wrote x.txt"', '"result":"wrote x.txt hacked"'
+    )
+    path.write_text(mutated, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="digest"):
+        ReceiptStore(path)
