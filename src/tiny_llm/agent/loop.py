@@ -7,8 +7,8 @@ response.  It stops by budget, returns invalid actions to the model, and
 guards against repeated identical actions.  This file keeps only the
 validated Day 1 core.
 
-Implement the bodies yourself; the reference solution lives in
-``tiny_llm_ref``.
+Implement the bodies yourself; use the Day 1 chapter and public tests as the
+learner contract.
 """
 
 from collections.abc import Callable

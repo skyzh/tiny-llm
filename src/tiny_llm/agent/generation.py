@@ -5,8 +5,8 @@
 Day 1 needs only the message types, the initial conversation messages, and
 a single-shot ``generate_response`` helper.
 
-Implement the bodies yourself; the reference solution lives in
-``tiny_llm_ref``.
+Implement the bodies yourself; use the Day 1 chapter and public tests as the
+learner contract.
 """
 
 from collections.abc import Callable, Sequence
