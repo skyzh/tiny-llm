@@ -10,6 +10,7 @@ from .context import (
     compact_messages,
 )
 from .control import AgentInterrupted, CancellationToken, SteeringHandle
+from .epoch import ApprovalEpoch, EpochMismatch, WorldStamp, snapshot_world
 from .evaluation import (
     CandidateSnapshot,
     CheckResult,
@@ -35,10 +36,13 @@ from .loop import AgentEvent, AgentLimits, AgentRun, run_agent
 from .protocol import (
     AgentError,
     FinalAction,
+    TOOL_CATALOG_HASH,
     ToolAction,
     build_system_prompt,
     parse_action,
+    tool_catalog_hash,
 )
+from .receipts import EffectReceipt, ReceiptStore
 from .recovery import (
     Checkpoint,
     MutationIntent,
@@ -58,6 +62,7 @@ __all__ = [
     "AgentLimits",
     "AgentRun",
     "AgentInterrupted",
+    "ApprovalEpoch",
     "CancellationToken",
     "CandidateSnapshot",
     "CheckResult",
@@ -67,6 +72,8 @@ __all__ = [
     "ContextPolicy",
     "ContextWindow",
     "DirectorySnapshot",
+    "EffectReceipt",
+    "EpochMismatch",
     "EvaluatedRun",
     "EvaluationMetrics",
     "FileSnapshot",
@@ -77,6 +84,7 @@ __all__ = [
     "MutationIntent",
     "MutationJournal",
     "PlannedRestore",
+    "ReceiptStore",
     "RecoveryResult",
     "SessionEvent",
     "SessionLog",
@@ -84,6 +92,7 @@ __all__ = [
     "StaticHeldOutGrader",
     "StagedTask",
     "SteeringHandle",
+    "TOOL_CATALOG_HASH",
     "ToolAction",
     "ToolPolicy",
     "TaskManifest",
@@ -91,6 +100,7 @@ __all__ = [
     "UndoPlan",
     "UndoResult",
     "Workspace",
+    "WorldStamp",
     "WorkingSummary",
     "append_tool_result",
     "aggregate_metrics",
@@ -102,4 +112,6 @@ __all__ = [
     "memory_session",
     "parse_action",
     "run_agent",
+    "snapshot_world",
+    "tool_catalog_hash",
 ]

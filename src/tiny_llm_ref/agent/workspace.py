@@ -14,7 +14,9 @@ from threading import Event, Thread
 from time import monotonic
 
 from .control import AgentInterrupted, CancellationToken
-from .protocol import AgentError, ToolAction
+from .epoch import ApprovalEpoch, WorldStamp, snapshot_world
+from .protocol import AgentError, ToolAction, tool_catalog_hash
+from .receipts import EffectReceipt, ReceiptStore
 from .recovery import MutationJournal, RecoveryResult
 from .session import SessionLog
 
@@ -137,6 +139,12 @@ class Workspace:
     command_cleanup_incomplete: bool = field(default=False, init=False)
     journal: MutationJournal | None = field(default=None, init=False)
     recovery_results: tuple[RecoveryResult, ...] = field(default=(), init=False)
+    world_epoch: int = field(default=0, init=False)
+    approval_epoch: ApprovalEpoch = field(
+        default_factory=lambda: ApprovalEpoch(epoch=0), init=False
+    )
+    receipt_store: ReceiptStore | None = field(default=None, init=False)
+    last_receipt: EffectReceipt | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         """Bind durable mutation recovery to the matching session, when present."""
@@ -145,6 +153,68 @@ class Workspace:
             self.journal = MutationJournal(self.session_log, self.policy.root)
             self.recover_pending()
             self._recover_command_state()
+
+    def snapshot_world(self) -> WorldStamp:
+        """Build the immutable world stamp for this workspace's live state.
+
+        Every previously observed file is re-verified against the live
+        filesystem: an external edit, deletion, or mode change produces a
+        different stamp, so a cached continuation bound to the old stamp fails
+        closed at the next ``require_current`` check.
+        """
+
+        observed: dict[Path, bytes] = {}
+        for path in sorted(self.observed_files):
+            try:
+                data = self._read_bounded_file(path, tool="read_file")
+            except (OSError, ValueError):
+                observed[path] = b"missing"
+            else:
+                observed[path] = self._digest(data)
+        return snapshot_world(
+            self.policy.root,
+            observed,
+            tool_catalog_hash=tool_catalog_hash(self.available_tools),
+            approval_epoch=self.approval_epoch.epoch,
+            world_epoch=self.world_epoch,
+        )
+
+    def bind_receipt_store(self, store: ReceiptStore) -> None:
+        """Attach a durable receipt store; every effect after this is recorded."""
+
+        if self.last_receipt is not None or store is None:
+            raise ValueError("receipt store must be bound before any effect")
+        self.receipt_store = store
+
+    def _record_receipt(
+        self,
+        action: ToolAction,
+        result: str,
+        changed_artifacts: tuple[str, ...],
+    ) -> None:
+        """Persist one immutable effect receipt for a dispatched tool."""
+
+        exit_state = "uncertain"
+        if result.startswith("error:"):
+            exit_state = "error"
+        elif (
+            not self.uncertain_modified_files
+            and not self.command_side_effects_untracked
+        ):
+            exit_state = "ok"
+        receipt = EffectReceipt(
+            tool_call_id=f"{uuid.uuid4().hex}",
+            tool=action.tool,
+            arguments=action.arguments,
+            exit_state=exit_state,
+            result=result,
+            changed_artifacts=changed_artifacts,
+            world_stamp=self.snapshot_world(),
+            approval_epoch=self.approval_epoch,
+        )
+        self.last_receipt = receipt
+        if self.receipt_store is not None:
+            self.receipt_store.put(receipt)
 
     def bind_session(self, session_log: SessionLog) -> tuple[RecoveryResult, ...]:
         """Bind a pristine workspace to the exact log used by its agent loop."""
@@ -669,6 +739,8 @@ class Workspace:
 
         self._raise_if_cancelled("tool")
         preserve_command_warnings: tuple[str, ...] = ()
+        before_modified = frozenset(self.modified_files)
+        before_uncertain = frozenset(self.uncertain_modified_files)
         try:
             if action.tool == "list_files":
                 result = self.list_files(action.arguments.get("path", "."))
@@ -701,10 +773,22 @@ class Workspace:
             ValueError,
         ) as error:
             result = f"error: {error}"
-        return self._truncate_result(
+        truncated = self._truncate_result(
             result,
             preserve_command_warnings=preserve_command_warnings,
         )
+        self._record_receipt(
+            action,
+            truncated,
+            tuple(
+                sorted(
+                    str(path.relative_to(self.policy.root))
+                    for path in (self.modified_files | self.uncertain_modified_files)
+                    - (before_modified | before_uncertain)
+                )
+            ),
+        )
+        return truncated
 
     def _truncate_result(
         self,
