@@ -3382,3 +3382,91 @@ def test_task_5_closed_branch_rejects_all_operations(monkeypatch):
         branch.rewind()
     with pytest.raises(RewindError, match="closed"):
         branch.act([{"role": "user", "content": "try A"}])
+
+
+def test_task_6_state_card_derives_only_public_ledger_state(tmp_path):
+    from .tiny_llm_base import build_state_card, memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    session.append("tool_call", tool="read_file", arguments={"path": "a.py"})
+
+    card = build_state_card(session, goal="fix the parser")
+
+    assert card.goal == "fix the parser"
+    assert "read_file" in card.current_action
+    assert card.phase == "running"
+
+
+def test_task_6_state_card_tracks_tool_evidence(tmp_path):
+    from .tiny_llm_base import build_state_card, memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    call = session.append("tool_call", tool="read_file", arguments={"path": "a.py"})
+    session.append(
+        "tool_result",
+        tool_call_id=call.id,
+        tool="read_file",
+        is_error=False,
+        content="line 1: def parse()",
+    )
+
+    card = build_state_card(session, goal="fix the parser")
+
+    assert "line 1: def parse()" in card.last_evidence
+    assert card.next_safe_step == "continue the loop"
+
+
+def test_task_6_state_card_finished_phase_is_terminal(tmp_path):
+    from .tiny_llm_base import build_state_card, memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    session.append("run_finished", completed=True, reason="completed", final="done")
+
+    card = build_state_card(session, goal="fix the parser")
+
+    assert card.phase == "finished"
+    assert card.current_action == "none"
+    assert card.next_safe_step == "none"
+
+
+def test_task_6_status_query_rewinds_and_leaves_the_main_run_unchanged(
+    monkeypatch, tmp_path
+):
+    from pathlib import Path
+
+    from .tiny_llm_base import StatusQuery, build_state_card, memory_session
+
+    session = memory_session(Path(tmp_path), "test-model")
+    session.append("user_message", content="fix the parser")
+    generation = _make_branch_session(monkeypatch)
+    generation([{"role": "user", "content": "fix the parser"}])
+    prefix_before = generation.cached_token_ids
+    query = StatusQuery(generation)
+    answered = []
+
+    card = build_state_card(session, goal="fix the parser")
+    result = query.ask(
+        card, lambda messages: answered.append(messages) or "working on it"
+    )
+
+    assert result.response == "working on it"
+    assert answered[0][-1]["content"].startswith("Current public state:")
+    assert generation.cached_token_ids == prefix_before
+    query.close()
+    assert all(event.type != "status_query" for event in session.events)
+
+
+def test_task_6_status_card_never_exposes_hidden_reasoning(tmp_path):
+    from .tiny_llm_base import build_state_card, memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    session.append("assistant_message", content="I will now reason internally")
+
+    card = build_state_card(session, goal="fix the parser")
+
+    assert "internally" not in card.render()
+    assert card.current_action == "generating"

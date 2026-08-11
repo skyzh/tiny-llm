@@ -66,6 +66,7 @@ from .recovery import (
     UndoResult,
 )
 from .session import SessionEvent, SessionLog, SessionStore, memory_session
+from .status import AgentStateCard, StatusQuery, StatusQueryResult, build_state_card
 from .workspace import ToolPolicy, Workspace
 
 
@@ -74,6 +75,7 @@ __all__ = [
     "AgentEvent",
     "AgentLimits",
     "AgentRun",
+    "AgentStateCard",
     "AgentInterrupted",
     "CancellationToken",
     "BranchStats",
@@ -111,6 +113,8 @@ __all__ = [
     "StaticHeldOutGrader",
     "TOOL_CATALOG_HASH",
     "StagedTask",
+    "StatusQuery",
+    "StatusQueryResult",
     "SteeringHandle",
     "ToolAction",
     "ToolPolicy",
@@ -123,6 +127,7 @@ __all__ = [
     "append_tool_result",
     "aggregate_metrics",
     "build_system_prompt",
+    "build_state_card",
     "compact_messages",
     "generate_response",
     "evaluate_task",
