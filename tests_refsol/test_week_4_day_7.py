@@ -1054,3 +1054,133 @@ def test_evaluation_events_precede_hidden_grading_and_preserve_unknown_metrics(
     assert result.metrics.wall_time_seconds == 2.5
     assert result.metrics.terminal_reason == "completed"
     assert aggregate_metrics(reloaded, result.agent_run, 2.5) == result.metrics
+
+
+def _compaction_session(tmp_path):
+    from .tiny_llm_base import memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="inspect the log")
+    call = session.append("tool_call", tool="read_file", arguments={"path": "log"})
+    session.append(
+        "tool_result",
+        tool_call_id=call.id,
+        tool="read_file",
+        is_error=False,
+        content="line " * 500,
+    )
+    return session, call
+
+
+def test_task_5_compact_replaces_oversized_tool_results(tmp_path):
+    from .tiny_llm_base import (
+        EffectReceipt,
+        ReceiptStore,
+        compact_tool_results,
+    )
+
+    session, call = _compaction_session(tmp_path)
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    store.put(
+        EffectReceipt(
+            tool_call_id=call.id,
+            tool="read_file",
+            arguments={"path": "log"},
+            exit_state="ok",
+            result="line " * 500,
+            changed_artifacts=(),
+        )
+    )
+
+    result = compact_tool_results(session, store, max_result_bytes=100)
+
+    assert result.compacted == 1
+    assert result.saved_bytes > 0
+    assert "compacted" in result.messages[0]["content"]
+
+
+def test_task_5_compact_never_mutates_the_durable_trace(tmp_path):
+    from .tiny_llm_base import (
+        EffectReceipt,
+        ReceiptStore,
+        compact_tool_results,
+    )
+
+    session, call = _compaction_session(tmp_path)
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    store.put(
+        EffectReceipt(
+            tool_call_id=call.id,
+            tool="read_file",
+            arguments={"path": "log"},
+            exit_state="ok",
+            result="line " * 500,
+            changed_artifacts=(),
+        )
+    )
+    before = [event.to_dict() for event in session.events]
+
+    compact_tool_results(session, store, max_result_bytes=100)
+
+    assert [event.to_dict() for event in session.events] == before
+
+
+def test_task_5_compact_leaves_results_without_receipts_untouched(tmp_path):
+    from .tiny_llm_base import ReceiptStore, compact_tool_results
+
+    session, _ = _compaction_session(tmp_path)
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+
+    result = compact_tool_results(session, store, max_result_bytes=100)
+
+    assert result.compacted == 0
+    assert "compacted" not in result.messages[0]["content"]
+
+
+def test_task_5_compact_then_expand_recovers_the_omitted_middle(tmp_path):
+    from .tiny_llm_base import (
+        EffectReceipt,
+        ReceiptStore,
+        compact_tool_results,
+        expand_receipt_range,
+        reexpand_receipt_message,
+    )
+
+    session, call = _compaction_session(tmp_path)
+    body = "\n".join(f"fact {number}" for number in range(1, 401)) + "\n"
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    receipt = EffectReceipt(
+        tool_call_id=call.id,
+        tool="read_file",
+        arguments={"path": "log"},
+        exit_state="ok",
+        result=body,
+        changed_artifacts=(),
+    )
+    store.put(receipt)
+
+    result = compact_tool_results(session, store, max_result_bytes=100)
+    rendering = result.messages[0]["content"]
+    assert result.compacted == 1
+
+    assert reexpand_receipt_message(store, rendering, start=0, end=9) == body[:9]
+    assert reexpand_receipt_message(store, rendering) == body
+    assert (
+        expand_receipt_range(store, receipt.receipt_id, start=len(body) - 10)
+        == body[-10:]
+    )
+
+
+def test_task_5_reexpansion_rejects_an_invalid_handle(tmp_path):
+    from .tiny_llm_base import (
+        CompactionError,
+        ReceiptStore,
+        reexpand_receipt_message,
+    )
+
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+
+    with pytest.raises(CompactionError, match="does not reference"):
+        reexpand_receipt_message(store, "no handle here")
+    with pytest.raises(CompactionError, match="invalid receipt ID"):
+        reexpand_receipt_message(store, "expand via receipt not-a-hash")

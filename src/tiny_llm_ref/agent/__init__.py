@@ -9,6 +9,13 @@ from .context import (
     append_tool_result,
     compact_messages,
 )
+from .compaction import (
+    CompactionError,
+    CompactionResult,
+    compact_tool_results,
+    expand_receipt_range,
+    reexpand_receipt_message,
+)
 from .control import AgentInterrupted, CancellationToken, SteeringHandle
 from .evaluation import (
     CandidateSnapshot,
@@ -72,12 +79,15 @@ __all__ = [
     "BranchStats",
     "CacheManifest",
     "CandidateSnapshot",
+    "CompactionError",
+    "CompactionResult",
     "CheckResult",
     "Checkpoint",
     "ContextLimitError",
     "ContextManager",
     "ContextPolicy",
     "ContextWindow",
+    "compact_tool_results",
     "DirectorySnapshot",
     "EvaluatedRun",
     "EvaluationMetrics",
@@ -116,11 +126,13 @@ __all__ = [
     "compact_messages",
     "generate_response",
     "evaluate_task",
+    "expand_receipt_range",
     "export_cache_manifest",
     "tool_catalog_hash",
     "validate_resume",
     "initial_messages",
     "memory_session",
     "parse_action",
+    "reexpand_receipt_message",
     "run_agent",
 ]

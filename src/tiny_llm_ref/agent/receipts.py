@@ -160,18 +160,28 @@ class EffectReceipt:
             raise ValueError("max_chars must leave room for the receipt handle")
         head = self.head or self.result[:80]
         tail = self.tail or (self.result[-80:] if len(self.result) > 160 else "")
-        rendered = (
+        handle = f"expand via receipt {self.receipt_id}"
+        header = (
             f"[tool result {self.tool_call_id[:8]} "
             f"{self.exit_state} sha256:{self.receipt_id[:16]} "
-            f"bytes:{len(self.result.encode('utf-8'))}]\n"
-            f"head: {head[:40]!r}\n"
-            f"tail: {tail[:40]!r}\n"
-            f"expand via receipt {self.receipt_id}"
+            f"bytes:{len(self.result.encode('utf-8'))}]"
         )
+        head_line = f"head: {head[:40]!r}"
+        tail_line = f"tail: {tail[:40]!r}"
+        rendered = f"{header}\n{head_line}\n{tail_line}\n{handle}"
         encoded = rendered.encode("utf-8")
         if len(encoded) <= max_chars:
             return rendered
-        return encoded[: max_chars - 3].decode("utf-8", errors="ignore") + "..."
+        # The receipt handle must stay whole so re-expansion can verify the
+        # exact content address; only the head/tail previews are shortened.
+        fixed = f"{header}\n{handle}"
+        budget = max_chars - len(fixed.encode("utf-8"))
+        if budget < 0:
+            raise ValueError("max_chars is too small to keep the receipt handle")
+        preview_budget = budget // 2
+        head_preview = head[: max(0, preview_budget - 7)]
+        tail_preview = tail[: max(0, preview_budget - 7)]
+        return f"{header}\nhead: {head_preview!r}\ntail: {tail_preview!r}\n{handle}"
 
 
 class ReceiptStore:
