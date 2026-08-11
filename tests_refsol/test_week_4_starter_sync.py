@@ -16,6 +16,8 @@ silently drifting:
 """
 
 import ast
+import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -239,14 +241,15 @@ def _callables(path: Path):
 def test_starter_public_signatures_match_reference(module):
     """Public callables must bind kinds, order, annotations, and exact defaults."""
 
-    starter = _callables(STARTER / f"{module}.py")
-    refsol = _callables(REFSOL / f"{module}.py")
-    for name in sorted(refsol):
-        assert name in starter, f"starter missing callable {module}.{name}"
-        assert starter[name] == refsol[name], (
-            f"signature drift {module}.{name}: "
-            f"starter {starter[name]} vs reference {refsol[name]}"
-        )
+    _assert_signature_parity(module, STARTER, REFSOL)
+
+
+def _assert_signature_parity(module: str, starter_dir: Path, refsol_dir: Path) -> None:
+    starter = _callables(starter_dir / f"{module}.py")
+    refsol = _callables(refsol_dir / f"{module}.py")
+    assert starter == refsol, (
+        f"signature drift {module}: starter {starter} vs reference {refsol}"
+    )
 
 
 @pytest.mark.parametrize("module", MODULES)
@@ -266,49 +269,57 @@ def test_starter_does_not_import_reference(module):
                 )
 
 
-def test_starter_package_does_not_import_reference():
-    """The starter package must never import tiny_llm_ref."""
+def _assert_no_reference_imports(starter_dir: Path) -> None:
+    """Reject static and aliased dynamic imports of the reference package."""
 
-    for path in STARTER.glob("*.py"):
+    for path in starter_dir.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        importlib_aliases = {"importlib"}
+        import_module_aliases = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 assert "tiny_llm_ref" not in (node.module or ""), (
                     f"starter {path.name} imports the reference solution"
                 )
+                if node.module == "importlib":
+                    for alias in node.names:
+                        if alias.name == "import_module":
+                            import_module_aliases.add(alias.asname or alias.name)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     assert not alias.name.startswith("tiny_llm_ref"), (
                         f"starter {path.name} imports the reference solution"
                     )
-            elif isinstance(node, ast.Call):
-                # Catch both module-level and attribute dynamic imports:
-                # __import__("tiny_llm_ref..."), importlib.import_module(...)
-                func_name = ""
-                if isinstance(node.func, ast.Name):
-                    func_name = node.func.id
-                elif isinstance(node.func, ast.Attribute):
-                    func_name = node.func.attr
-                if func_name in {"__import__", "import_module"}:
-                    for arg in node.args:
-                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                            assert "tiny_llm_ref" not in arg.value, (
-                                f"starter {path.name} dynamically imports the reference"
-                            )
-                if isinstance(node.func, ast.Attribute) and isinstance(
-                    node.func.value, ast.Name
-                ):
-                    if (
-                        node.func.value.id == "importlib"
-                        and func_name == "import_module"
-                    ):
-                        for arg in node.args:
-                            if isinstance(arg, ast.Constant) and isinstance(
-                                arg.value, str
-                            ):
-                                assert "tiny_llm_ref" not in arg.value, (
-                                    f"starter {path.name} dynamically imports the reference"
-                                )
+                    if alias.name == "importlib":
+                        importlib_aliases.add(alias.asname or alias.name)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            dynamic_import = False
+            if isinstance(node.func, ast.Name):
+                dynamic_import = node.func.id in (
+                    {"__import__"} | import_module_aliases
+                )
+            elif isinstance(node.func, ast.Attribute):
+                dynamic_import = (
+                    node.func.attr == "import_module"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in importlib_aliases
+                )
+            if not dynamic_import:
+                continue
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    assert "tiny_llm_ref" not in arg.value, (
+                        f"starter {path.name} dynamically imports the reference"
+                    )
+
+
+def test_starter_package_does_not_import_reference():
+    """The normal CI guard scans the complete real starter tree."""
+
+    _assert_no_reference_imports(STARTER)
 
 
 def test_day1_loop_has_no_session_contract():
@@ -432,13 +443,9 @@ FUTURE_CONCEPTS = (
 )
 
 
-@pytest.mark.parametrize("module", MODULES)
-def test_day1_starter_has_no_future_symbols(module):
-    """Day-1 files must not expose or promise later-day concepts."""
-
-    source = (STARTER / f"{module}.py").read_text(encoding="utf-8")
+def _assert_no_future_symbols(path: Path) -> None:
+    source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
-    # Check identifiers in the AST (excludes string literals/comments we allow)
     identifiers = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
@@ -446,46 +453,38 @@ def test_day1_starter_has_no_future_symbols(module):
         elif isinstance(node, ast.Attribute):
             identifiers.add(node.attr)
     forbidden = sorted(identifiers & set(FUTURE_CONCEPTS))
-    assert not forbidden, f"starter {module} exposes future symbols: {forbidden}"
+    assert not forbidden, f"starter {path.name} exposes future symbols: {forbidden}"
 
 
-@pytest.mark.parametrize("module", MODULES)
-def test_day1_starter_has_no_future_imports(module):
-    """Day-1 files must not import later-day modules."""
-
-    tree = ast.parse((STARTER / f"{module}.py").read_text(encoding="utf-8"))
+def _assert_no_future_imports(path: Path) -> None:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module_name = node.module or ""
-            imported = [a.name for a in node.names]
-            assert module_name.split(".")[-1] not in {
-                "session",
-                "workspace",
-                "checkpoint",
-                "branch",
-                "receipts",
-                "compaction",
-                "control",
-                "status",
-                "reconcile",
-                "harness",
-                "context",
-                "recovery",
-                "evaluation",
-            }, f"starter {module} imports future module {module_name}"
-            assert not (set(imported) & set(FUTURE_CONCEPTS)), (
-                f"starter {module} imports future symbols {imported}"
-            )
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module_name = node.module or ""
+        imported = [alias.name for alias in node.names]
+        assert module_name.split(".")[-1] not in {
+            "session",
+            "workspace",
+            "checkpoint",
+            "branch",
+            "receipts",
+            "compaction",
+            "control",
+            "status",
+            "reconcile",
+            "harness",
+            "context",
+            "recovery",
+            "evaluation",
+        }, f"starter {path.name} imports future module {module_name}"
+        assert not (set(imported) & set(FUTURE_CONCEPTS)), (
+            f"starter {path.name} imports future symbols {imported}"
+        )
 
 
-@pytest.mark.parametrize("module", MODULES)
-def test_day1_starter_has_no_future_prose_promises(module):
-    """Day-1 docstrings/comments must not promise later-day behavior."""
-
-    source = (STARTER / f"{module}.py").read_text(encoding="utf-8")
-    lower = source.lower()
-    # "workspace" is the Day-1 tool-boundary parameter name, not a future
-    # module; only later-day *features* are forbidden in prose.
+def _assert_no_future_prose(path: Path) -> None:
+    lower = path.read_text(encoding="utf-8").lower()
     for concept in (
         "generationsession",
         "rewind",
@@ -499,8 +498,39 @@ def test_day1_starter_has_no_future_prose_promises(module):
         "harness",
     ):
         assert concept not in lower, (
-            f"starter {module} promises future concept '{concept}' in prose"
+            f"starter {path.name} promises future concept '{concept}' in prose"
         )
+
+
+def _assert_future_surface_clean(starter_dir: Path) -> None:
+    """Run every normal future-surface guard over a starter tree."""
+
+    for module in MODULES:
+        path = starter_dir / f"{module}.py"
+        _assert_no_future_symbols(path)
+        _assert_no_future_imports(path)
+        _assert_no_future_prose(path)
+
+
+@pytest.mark.parametrize("module", MODULES)
+def test_day1_starter_has_no_future_symbols(module):
+    """Day-1 files must not expose or promise later-day concepts."""
+
+    _assert_no_future_symbols(STARTER / f"{module}.py")
+
+
+@pytest.mark.parametrize("module", MODULES)
+def test_day1_starter_has_no_future_imports(module):
+    """Day-1 files must not import later-day modules."""
+
+    _assert_no_future_imports(STARTER / f"{module}.py")
+
+
+@pytest.mark.parametrize("module", MODULES)
+def test_day1_starter_has_no_future_prose_promises(module):
+    """Day-1 docstrings/comments must not promise later-day behavior."""
+
+    _assert_no_future_prose(STARTER / f"{module}.py")
 
 
 def _dataclasses(path: Path):
@@ -552,212 +582,332 @@ def _public_constants(path: Path):
 def test_starter_dataclass_fields_match_reference(module):
     """Dataclass field names, order, types, and defaults must match exactly."""
 
-    starter = _dataclasses(STARTER / f"{module}.py")
-    refsol = _dataclasses(REFSOL / f"{module}.py")
-    for cls, fields in refsol.items():
-        assert cls in starter, f"starter missing dataclass {module}.{cls}"
-        assert starter[cls] == fields, (
-            f"dataclass drift {module}.{cls}: "
-            f"starter {starter[cls]} vs reference {fields}"
-        )
+    _assert_dataclass_parity(module, STARTER, REFSOL)
+
+
+def _assert_dataclass_parity(module: str, starter_dir: Path, refsol_dir: Path) -> None:
+    starter = _dataclasses(starter_dir / f"{module}.py")
+    refsol = _dataclasses(refsol_dir / f"{module}.py")
+    assert starter == refsol, (
+        f"dataclass drift {module}: starter {starter} vs reference {refsol}"
+    )
+
+
+def _runtime_constant(path: Path, name: str):
+    """Load one standalone module and return a public runtime constant."""
+
+    module_name = f"_week4_guard_{path.stem}_{abs(hash(path))}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec and spec.loader, f"cannot load module for constant guard: {path}"
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        return getattr(module, name)
+    finally:
+        sys.modules.pop(module_name, None)
+
+
+def _package_exports(starter_dir: Path) -> set[str]:
+    tree = ast.parse((starter_dir / "__init__.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        ):
+            value = ast.literal_eval(node.value)
+            return set(value)
+    raise AssertionError(f"starter package has no literal __all__: {starter_dir}")
+
+
+def _assert_public_constant_parity(
+    module: str, starter_dir: Path, refsol_dir: Path
+) -> None:
+    starter_path = starter_dir / f"{module}.py"
+    refsol_path = refsol_dir / f"{module}.py"
+    starter = _public_constants(starter_path)
+    refsol = _public_constants(refsol_path)
+    assert set(starter) == set(refsol), (
+        f"public constant names drift {module}: "
+        f"starter {sorted(starter)} vs reference {sorted(refsol)}"
+    )
+    for name, value in refsol.items():
+        if name == "TOOL_CATALOG_HASH":
+            assert name in _package_exports(starter_dir), (
+                "TOOL_CATALOG_HASH must be exported by the starter package"
+            )
+            starter_value = _runtime_constant(starter_path, name)
+            refsol_value = _runtime_constant(refsol_path, name)
+            assert starter_value == refsol_value, (
+                f"constant drift {module}.{name}: "
+                f"starter {starter_value!r} vs reference {refsol_value!r}"
+            )
+        else:
+            assert starter[name] == value, (
+                f"constant drift {module}.{name}: "
+                f"starter {starter[name]} vs reference {value}"
+            )
 
 
 @pytest.mark.parametrize("module", MODULES)
 def test_starter_public_constants_match_reference(module):
     """Public UPPER_CASE constants must have identical values."""
 
-    starter = _public_constants(STARTER / f"{module}.py")
-    refsol = _public_constants(REFSOL / f"{module}.py")
-    for name, value in refsol.items():
-        assert name in starter, f"starter missing constant {module}.{name}"
-        # TOOL_CATALOG_HASH is derived from the catalog; the starter declares
-        # the schema via TOOL_FIELDS and the reference derives the hash, so
-        # compare the TOOL_FIELDS schema (above) rather than the derived hash.
-        if name == "TOOL_CATALOG_HASH":
-            continue
-        assert starter[name] == value, (
-            f"constant drift {module}.{name}: "
-            f"starter {starter[name]} vs reference {value}"
-        )
+    _assert_public_constant_parity(module, STARTER, REFSOL)
 
 
-# --- End-to-end mutation controls: mutate a real file, then prove the
-# actual guard path rejects it. ---
+# --- End-to-end mutation controls: copy the real starter/test tree, mutate a
+# production input, then invoke the same guard entry point as normal CI. ---
 
-MUTATION_DIMENSIONS = (
-    ("parameter order", "def f(a, b):\n    pass\n", "def f(b, a):\n    pass\n"),
-    ("parameter kind", "def f(*, a):\n    pass\n", "def f(a):\n    pass\n"),
-    ("annotation", "def f(a: int):\n    pass\n", "def f(a: str):\n    pass\n"),
-    ("default value", "def f(a=1):\n    pass\n", "def f(a=2):\n    pass\n"),
-    ("return annotation", "def f() -> int:\n    pass\n", "def f() -> str:\n    pass\n"),
-    ("dataclass field", "class C:\n    a: int = 1\n", "class C:\n    a: int = 2\n"),
-    ("public constant", "X = 1\n", "X = 2\n"),
-    ("annotated constant", "X: int = 1\n", "X: int = 2\n"),
+
+def _copy_starter_tree(tmp_path: Path) -> Path:
+    target = tmp_path / "starter"
+    shutil.copytree(STARTER, target)
+    return target
+
+
+def _replace_once(path: Path, old: str, new: str) -> None:
+    source = path.read_text(encoding="utf-8")
+    assert old in source, f"mutation anchor not found in {path.name}: {old!r}"
+    path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+
+PARITY_MUTATIONS = (
+    (
+        "parameter order",
+        "signature",
+        "generation",
+        "def initial_messages(task: str, system_prompt: str) -> list[Message]:",
+        "def initial_messages(system_prompt: str, task: str) -> list[Message]:",
+    ),
+    (
+        "parameter kind",
+        "signature",
+        "generation",
+        "def initial_messages(task: str, system_prompt: str) -> list[Message]:",
+        "def initial_messages(task: str, *, system_prompt: str) -> list[Message]:",
+    ),
+    (
+        "annotation",
+        "signature",
+        "generation",
+        "def initial_messages(task: str, system_prompt: str) -> list[Message]:",
+        "def initial_messages(task: int, system_prompt: str) -> list[Message]:",
+    ),
+    (
+        "default value",
+        "signature",
+        "generation",
+        "enable_thinking: bool = False,",
+        "enable_thinking: bool = True,",
+    ),
+    (
+        "return annotation",
+        "signature",
+        "generation",
+        "def initial_messages(task: str, system_prompt: str) -> list[Message]:",
+        "def initial_messages(task: str, system_prompt: str) -> tuple[Message, ...]:",
+    ),
+    (
+        "dataclass default",
+        "dataclass",
+        "loop",
+        "max_steps: int = 8",
+        "max_steps: int = 9",
+    ),
+    (
+        "exported TOOL_CATALOG_HASH",
+        "constant",
+        "protocol",
+        "23d57058bc0b7dc18c6352fcd0d9bf4c8b3b39306f987ade5cff93eae6bacaab",
+        "03d57058bc0b7dc18c6352fcd0d9bf4c8b3b39306f987ade5cff93eae6bacaab",
+    ),
+    (
+        "annotated constant",
+        "constant",
+        "protocol",
+        "TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]]",
+        "TOOL_FIELDS: object",
+    ),
 )
-
-
-def _write_and_bind(tempdir, text, kind):
-    """Write one mutation file and bind it with the real guard helper."""
-
-    path = Path(tempdir) / "module.py"
-    path.write_text(text, encoding="utf-8")
-    if kind == "callable":
-        return _callables(path)
-    if kind == "dataclass":
-        return _dataclasses(path)
-    if kind == "constant":
-        return _public_constants(path)
-    raise AssertionError(f"unknown mutation kind {kind}")
 
 
 @pytest.mark.parametrize(
-    ("dimension", "good", "bad"),
-    [d for d in MUTATION_DIMENSIONS],
+    ("dimension", "guard", "module", "old", "new"), PARITY_MUTATIONS
 )
-def test_parity_mutation_controls_are_catchable(dimension, good, bad):
-    """Each mutation must change the real guard binding."""
-
-    import tempfile
-
-    if dimension in {
-        "parameter order",
-        "parameter kind",
-        "annotation",
-        "default value",
-        "return annotation",
-    }:
-        kind = "callable"
-    elif dimension == "dataclass field":
-        kind = "dataclass"
-    else:
-        kind = "constant"
-    with tempfile.TemporaryDirectory() as d:
-        good_binding = _write_and_bind(d, good, kind)
-        bad_binding = _write_and_bind(d, bad, kind)
-        assert good_binding != bad_binding, (
-            f"mutation control failed (not caught): {dimension}"
-        )
+def test_real_tree_parity_mutations_fail_normal_guard(
+    tmp_path, dimension, guard, module, old, new
+):
+    starter = _copy_starter_tree(tmp_path)
+    _replace_once(starter / f"{module}.py", old, new)
+    with pytest.raises(AssertionError, match="drift"):
+        if guard == "signature":
+            _assert_signature_parity(module, starter, REFSOL)
+        elif guard == "dataclass":
+            _assert_dataclass_parity(module, starter, REFSOL)
+        elif guard == "constant":
+            _assert_public_constant_parity(module, starter, REFSOL)
+        else:
+            raise AssertionError(f"unknown parity guard: {guard}")
 
 
-def test_mutation_synthetic_and_end_to_end_agree():
-    """The end-to-end binding must match what the real tests compare."""
-
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as d:
-        a = _write_and_bind(d, "def f(a: int) -> str:\n    pass\n", "callable")
-        b = _write_and_bind(d, "def f(a: int) -> str:\n    pass\n", "callable")
-        assert a == b
-
-
-# --- Killing controls for Sage's fail-open classes: each mutation must fail. ---
-
-
-def _starter_source_with(module, old, new):
-    """Return a mutated starter source for one module."""
-
-    path = STARTER / f"{module}.py"
-    source = path.read_text(encoding="utf-8")
-    assert old in source, f"mutation anchor not found in {module}: {old!r}"
-    return source.replace(old, new, 1)
+DYNAMIC_IMPORT_MUTATIONS = (
+    (
+        "attribute",
+        "\nimport importlib\nimportlib.import_module('tiny_llm_ref.agent')\n",
+    ),
+    (
+        "aliased",
+        "\nfrom importlib import import_module as load\nload('tiny_llm_ref.agent')\n",
+    ),
+    ("builtin", "\n__import__('tiny_llm_ref.agent')\n"),
+)
 
 
-def test_mutation_dynamic_import_importlib_module_is_caught():
-    """importlib.import_module('tiny_llm_ref...') must fail the leak guard."""
-
-    tree = ast.parse("import importlib\nimportlib.import_module('tiny_llm_ref.agent')")
-    found = False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr == "import_module":
-                for arg in node.args:
-                    if isinstance(arg, ast.Constant) and "tiny_llm_ref" in arg.value:
-                        found = True
-    assert found, "mutation anchor itself is not recognized"
+@pytest.mark.parametrize(("form", "payload"), DYNAMIC_IMPORT_MUTATIONS)
+def test_real_tree_dynamic_import_mutations_fail_normal_guard(tmp_path, form, payload):
+    starter = _copy_starter_tree(tmp_path)
+    path = starter / "generation.py"
+    path.write_text(path.read_text(encoding="utf-8") + payload, encoding="utf-8")
+    with pytest.raises(AssertionError, match="dynamically imports"):
+        _assert_no_reference_imports(starter)
 
 
-def test_mutation_starter_only_session_id_is_caught():
-    """A starter-only AgentRun.session_id field must fail dataclass parity."""
-
-    refsol = (REFSOL / "loop.py").read_text(encoding="utf-8")
-    assert "session_id" not in refsol
-    # Inject a session_id field into the starter AgentRun and prove parity
-    # would flag it (the reference dataclass lacks the field).
-    injected = "modified_files: tuple[str, ...] = ()\n    session_id: str | None = None"
-    src = _starter_source_with("loop", "modified_files: tuple[str, ...] = ()", injected)
-    tree = ast.parse(src)
-    agent_run = next(
-        n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "AgentRun"
+def test_real_tree_starter_only_session_id_fails_normal_guard(tmp_path):
+    starter = _copy_starter_tree(tmp_path)
+    _replace_once(
+        starter / "loop.py",
+        "modified_files: tuple[str, ...] = ()",
+        "modified_files: tuple[str, ...] = ()\n    session_id: str | None = None",
     )
-    field_names = [
-        item.target.id
-        for item in agent_run.body
-        if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
-    ]
-    assert "session_id" in field_names, "mutation anchor did not inject the field"
-    assert "session_id" not in refsol
+    with pytest.raises(AssertionError, match="dataclass drift"):
+        _assert_dataclass_parity("loop", starter, REFSOL)
 
 
-def test_mutation_future_fakeworkspace_session_log_is_caught():
-    """A future FakeWorkspace.session_log field must fail the future scan."""
-
-    src = _starter_source_with(
-        "generation", "from typing import Any", "from typing import Any"
+def _assert_fake_workspace_day1_surface(path: Path) -> None:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    fake_workspace = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "FakeWorkspace"
     )
-    # The fake workspace lives in the day-1 test file, not the starter; the
-    # guard is the day-1 test itself. Simulate the forbidden field:
-    mutated = src.replace(
-        "def generate_response(", "def generate_response(\n    session_log=None,"
+    fields = set()
+    for node in ast.walk(fake_workspace):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            if (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "self"
+            ):
+                fields.add(target.attr)
+    expected = {"policy", "available_tools", "modified_files", "executed"}
+    assert fields == expected, (
+        f"FakeWorkspace future-surface drift: fields {sorted(fields)} "
+        f"vs Day-1 {sorted(expected)}"
     )
-    assert "session_log" in mutated
 
 
-def test_mutation_restored_checkpoint_prose_is_caught():
-    """Restored 'checkpoint validity' prose must fail the future-text scan."""
+def test_day1_fake_workspace_has_only_current_surface():
+    _assert_fake_workspace_day1_surface(ROOT / "tests_refsol" / "test_week_4_day_1.py")
 
-    src = _starter_source_with(
-        "protocol",
+
+def test_real_fakeworkspace_session_log_mutation_fails_normal_guard(tmp_path):
+    source = ROOT / "tests_refsol" / "test_week_4_day_1.py"
+    mutated = tmp_path / source.name
+    shutil.copy2(source, mutated)
+    _replace_once(
+        mutated,
+        "self.executed = []",
+        "self.executed = []\n        self.session_log = []",
+    )
+    with pytest.raises(AssertionError, match="FakeWorkspace future-surface drift"):
+        _assert_fake_workspace_day1_surface(mutated)
+
+
+def test_real_tree_checkpoint_prose_mutation_fails_normal_guard(tmp_path):
+    starter = _copy_starter_tree(tmp_path)
+    _replace_once(
+        starter / "protocol.py",
         "so the exact set the\n    model saw stays identifiable.",
         "so the checkpoint validity rule binds a KV checkpoint.",
     )
-    lower = src.lower()
-    assert "checkpoint" in lower  # the prose promise is present again
+    with pytest.raises(AssertionError, match="checkpoint"):
+        _assert_future_surface_clean(starter)
 
 
-def _book_required_api_names():
-    """Parse the Day-1 book checkpoint table for required starter names.
+BOOK_API_TABLES = (
+    ROOT / "book" / "src" / "week4-01-agent-loop.md",
+    ROOT / "book" / "src" / "week4-overview.md",
+)
 
-    Returns the set of backticked identifiers in the ``File | Function or
-    type`` checkpoint table of week4-01-agent-loop.md.
-    """
+
+def _book_required_api_names(book: Path) -> set[str]:
+    """Parse one Day-1 required-API table into its backticked names."""
 
     import re
 
-    book = ROOT / "book" / "src" / "week4-01-agent-loop.md"
     text = book.read_text(encoding="utf-8")
-    # Only the checkpoint table region (between the first table header and
-    # the next heading).
     start = text.find("| File |")
-    end = text.find("\n##", start)
-    table = text[start:end] if start != -1 else ""
+    table_lines = []
+    if start != -1:
+        for line in text[start:].splitlines():
+            if not line.startswith("|"):
+                break
+            table_lines.append(line)
+    table = "\n".join(table_lines)
     names = set()
     for match in re.finditer(r"`([A-Za-z_][A-Za-z_0-9]*)(?:\(\))?`", table):
         names.add(match.group(1))
     return names
 
 
-def test_book_day1_required_api_is_exported_by_starter():
-    """Every Day-1-required name in the book must exist in the starter.
+def _assert_book_starter_api_parity(
+    book_paths: tuple[Path, ...], starter_dir: Path
+) -> None:
+    """Bind every book table bidirectionally to the public starter exports."""
 
-    This is an expected-dependency signal: the book currently requires
-    ``GenerationStats`` (a Day-4 concept), which the starter no longer
-    exports, so this test FAILS until Sentinel's minimal material successor
-    removes the stale requirement.  Once the book is fixed, this must pass.
-    """
+    exported = _package_exports(starter_dir)
+    for book in book_paths:
+        required = _book_required_api_names(book)
+        assert required, f"no Day-1 required API names found in {book.name}"
+        book_only = sorted(required - exported)
+        starter_only = sorted(exported - required)
+        assert not book_only and not starter_only, (
+            f"book/starter API drift in {book.name}: "
+            f"book-only={book_only}, starter-only={starter_only}"
+        )
 
-    import tiny_llm.agent as starter
 
-    required = _book_required_api_names()
-    assert required, "no Day-1 required API names found in the book"
-    missing = sorted(name for name in required if name not in starter.__all__)
-    assert not missing, f"book requires starter names that are not exported: {missing}"
+def test_book_day1_required_api_matches_starter_bidirectionally():
+    _assert_book_starter_api_parity(BOOK_API_TABLES, STARTER)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "old", "new"),
+    (
+        (
+            "book-only",
+            "`initial_messages()`, `generate_response()`",
+            "`initial_messages()`, `generate_response()`, `GenerationStats`",
+        ),
+        (
+            "starter-only",
+            "`initial_messages()`, `generate_response()`",
+            "`initial_messages()`",
+        ),
+    ),
+)
+def test_real_book_api_mutations_fail_bidirectional_guard(tmp_path, mutation, old, new):
+    source = BOOK_API_TABLES[0]
+    mutated = tmp_path / source.name
+    shutil.copy2(source, mutated)
+    _replace_once(mutated, old, new)
+    with pytest.raises(AssertionError, match="book/starter API drift"):
+        _assert_book_starter_api_parity((mutated,), STARTER)
