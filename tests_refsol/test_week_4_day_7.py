@@ -1369,3 +1369,139 @@ def test_task_6_model_mismatch_rejects_every_checkpoint():
 
     assert not result.can_resume
     assert "model" in result.reason
+
+
+def test_task_7_warm_and_cold_runs_are_equivalent(tmp_path):
+    from .tiny_llm_base import compare_runs, memory_session, snapshot_run
+
+    def make():
+        session = memory_session(tmp_path, "test-model")
+        session.append("user_message", content="inspect")
+        call = session.append("tool_call", tool="read_file", arguments={"path": "a"})
+        session.append(
+            "tool_result",
+            tool_call_id=call.id,
+            tool="read_file",
+            is_error=False,
+            content="data",
+        )
+        return session
+
+    warm = snapshot_run(
+        final="done",
+        reason="completed",
+        completed=True,
+        session=make(),
+        token_accounting={"reused_tokens": 100, "prefilled_tokens": 5},
+    )
+    cold = snapshot_run(
+        final="done",
+        reason="completed",
+        completed=True,
+        session=make(),
+        token_accounting={"reused_tokens": 0, "prefilled_tokens": 105},
+    )
+
+    report = compare_runs(cold, warm)
+
+    assert report.ok
+    assert (
+        warm.token_accounting["reused_tokens"] > cold.token_accounting["reused_tokens"]
+    )
+
+
+def test_task_7_different_final_actions_fail_semantic_equivalence(tmp_path):
+    from .tiny_llm_base import compare_runs, memory_session, snapshot_run
+
+    session_a = memory_session(tmp_path, "test-model")
+    session_a.append("user_message", content="task")
+    session_b = memory_session(tmp_path, "test-model")
+    session_b.append("user_message", content="task")
+
+    baseline = snapshot_run(
+        final="keep", reason="completed", completed=True, session=session_a
+    )
+    optimized = snapshot_run(
+        final="replace", reason="completed", completed=True, session=session_b
+    )
+
+    report = compare_runs(baseline, optimized)
+
+    assert not report.ok
+    assert not report.planes[0].ok  # semantic
+    assert report.planes[1].ok  # evidence still matches
+
+
+def test_task_7_lost_receipt_fails_evidence_equivalence(tmp_path):
+    from .tiny_llm_base import EffectReceipt, compare_runs, snapshot_run
+
+    receipt = EffectReceipt(
+        tool_call_id="a" * 32,
+        tool="read_file",
+        arguments={"path": "a"},
+        exit_state="ok",
+        result="data",
+        changed_artifacts=(),
+    )
+    baseline = snapshot_run(
+        final="done",
+        reason="completed",
+        completed=True,
+        receipts=(receipt,),
+    )
+    optimized = snapshot_run(
+        final="done", reason="completed", completed=True, receipts=()
+    )
+
+    report = compare_runs(baseline, optimized)
+
+    assert not report.ok
+    assert report.planes[1].plane == "evidence"
+    assert not report.planes[1].ok
+
+
+def test_task_7_policy_state_change_fails_policy_equivalence(tmp_path):
+    from .tiny_llm_base import compare_runs, snapshot_run
+
+    baseline = snapshot_run(
+        final="done", reason="completed", completed=True, approval_state="epoch 1"
+    )
+    optimized = snapshot_run(
+        final="done", reason="completed", completed=True, approval_state="epoch 2"
+    )
+
+    report = compare_runs(baseline, optimized)
+
+    assert not report.ok
+    assert report.planes[2].plane == "policy"
+    assert not report.planes[2].ok
+
+
+def test_task_7_compacted_and_full_runs_keep_equivalent_evidence(tmp_path):
+    from .tiny_llm_base import compare_runs, memory_session, snapshot_run
+
+    def make(compact):
+        session = memory_session(tmp_path, "test-model")
+        session.append("user_message", content="task")
+        call = session.append("tool_call", tool="read_file", arguments={"path": "a"})
+        session.append(
+            "tool_result",
+            tool_call_id=call.id,
+            tool="read_file",
+            is_error=False,
+            content="head [...] tail" if compact else "head middle tail",
+        )
+        return session
+
+    full = snapshot_run(
+        final="done", reason="completed", completed=True, session=make(False)
+    )
+    compacted = snapshot_run(
+        final="done", reason="completed", completed=True, session=make(True)
+    )
+
+    report = compare_runs(full, compacted)
+
+    # Different visible observation text is a real evidence difference; the
+    # harness must not pass it silently.
+    assert not report.planes[1].ok
