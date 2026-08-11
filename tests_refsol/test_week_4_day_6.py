@@ -3366,3 +3366,125 @@ def test_task_4_registry_is_scoped_to_model_and_tokenizer_identity():
     assert second.publish((1, 2, 3, 4)) == (0,)
     assert first.stats().live_pages == 1
     assert second.stats().live_pages == 1
+
+
+def test_task_4_state_card_derives_only_public_ledger_state(tmp_path):
+    from .tiny_llm_base import build_state_card, memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    session.append("tool_call", tool="read_file", arguments={"path": "a.py"})
+
+    card = build_state_card(session, goal="fix the parser")
+
+    assert card.goal == "fix the parser"
+    assert "read_file" in card.current_action
+    assert card.last_evidence == ""
+    assert card.phase == "running"
+
+
+def test_task_4_state_card_tracks_tool_evidence(tmp_path):
+    from .tiny_llm_base import build_state_card, memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    call = session.append("tool_call", tool="read_file", arguments={"path": "a.py"})
+    session.append(
+        "tool_result",
+        tool_call_id=call.id,
+        tool="read_file",
+        is_error=False,
+        content="line 1: def parse()",
+    )
+
+    card = build_state_card(session, goal="fix the parser")
+
+    assert "line 1: def parse()" in card.last_evidence
+    assert card.next_safe_step == "continue the loop"
+
+
+def test_task_4_state_card_finished_phase_is_terminal(tmp_path):
+    from .tiny_llm_base import build_state_card, memory_session
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    session.append("run_finished", completed=True, reason="completed", final="done")
+
+    card = build_state_card(session, goal="fix the parser")
+
+    assert card.phase == "finished"
+    assert card.current_action == "none"
+    assert card.next_safe_step == "none"
+
+
+def test_task_4_status_fork_is_read_only_and_discardable():
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        PrefixRegistry,
+        WorldStamp,
+        open_status_fork,
+    )
+
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    registry.publish((1, 2, 3, 4, 5, 6, 7, 8))
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    status = open_status_fork(
+        registry, (1, 2, 3, 4, 5, 6, 7, 8), world=world, approval=approval
+    )
+
+    assert status.token_ids == (1, 2, 3, 4, 5, 6, 7, 8)
+    assert registry.stats().live_refs == 2  # two shared prefix pages
+    status.close()
+    assert registry.stats().live_refs == 0
+
+
+def test_task_4_status_query_leaves_main_trace_and_cache_unchanged(tmp_path):
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        PrefixRegistry,
+        WorldStamp,
+        build_state_card,
+        memory_session,
+        open_status_fork,
+    )
+
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="fix the parser")
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    registry.publish((1, 2, 3, 4))
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    status = open_status_fork(registry, (1, 2, 3, 4), world=world, approval=approval)
+    answered = []
+
+    card = build_state_card(session, goal="fix the parser")
+    response = status.query(card, lambda messages: answered.append(messages) or "ok")
+
+    assert response == "ok"
+    assert answered[0][-1]["content"].startswith("Current public state:")
+    status.close()
+
+    # The main trace has no status event and the registry released everything.
+    assert all(event.type != "status_query" for event in session.events)
+    assert registry.stats().live_refs == 0
+    assert registry.stats().shared_pages == 0
+
+
+def test_task_4_status_fork_rejects_tools_by_construction():
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        PrefixRegistry,
+        WorldStamp,
+        open_status_fork,
+    )
+
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    registry.publish((1, 2, 3, 4))
+    world = WorldStamp(epoch=0, root="/tmp", tool_catalog_hash="t" * 64)
+    approval = ApprovalEpoch(epoch=0)
+    status = open_status_fork(registry, (1, 2, 3, 4), world=world, approval=approval)
+
+    assert status.fork is not None
+    status.close()
+    assert registry.stats().live_refs == 0
