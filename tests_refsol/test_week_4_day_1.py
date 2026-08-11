@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from .tiny_llm_base import (
     AgentLimits,
     ToolAction,
@@ -146,22 +148,55 @@ def test_task_7_agent_stops_repeated_actions():
     assert result.reason == "repeated_action_limit"
 
 
-def test_task_8_observation_propagation(tmp_path):
-    """Every tool observation is fed back to the model as a Tool result."""
-
+def _assert_exact_observation_payload(run_agent_impl):
     workspace = FakeWorkspace("/tmp")
     seen = []
 
     def generate(messages):
-        seen.append(messages)
+        seen.append([dict(message) for message in messages])
         if len(seen) == 1:
             return '{"tool":"read_file","path":"README.md"}'
         return '{"final":"done"}'
 
-    result = run_agent("inspect", generate, workspace)
+    result = run_agent_impl("inspect", generate, workspace)
 
     assert result.completed
-    assert "Tool result:" in seen[1][-1]["content"]
+    assert seen[1][-1] == {
+        "role": "user",
+        "content": "Tool result:\nREADME contents",
+    }, "the exact tool-result payload must reach the next model input"
+
+
+def test_task_8_observation_propagation(tmp_path):
+    """The exact tool result—not only a marker—reaches the next model input."""
+
+    _assert_exact_observation_payload(run_agent)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "content"),
+    (
+        ("wrong", "Tool result:\nwrong payload"),
+        ("dropped", "Tool result:"),
+    ),
+)
+def test_task_8_observation_payload_mutations_are_killed(
+    monkeypatch, mutation, content
+):
+    """Wrong and dropped payloads fail the normal observation guard."""
+
+    from tiny_llm_ref.agent import loop as loop_module
+
+    def broken_append(messages, response, result):
+        return [
+            *messages,
+            {"role": "assistant", "content": response},
+            {"role": "user", "content": content},
+        ]
+
+    monkeypatch.setattr(loop_module, "_append_tool_result", broken_append)
+    with pytest.raises(AssertionError, match="exact tool-result payload"):
+        _assert_exact_observation_payload(loop_module.run_agent)
 
 
 def test_task_8_known_but_disabled_tool_is_rejected(tmp_path):

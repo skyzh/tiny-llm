@@ -47,7 +47,7 @@ def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
     pass
 
 
-TOOL_CATALOG_HASH = ""
+TOOL_CATALOG_HASH = "23d57058bc0b7dc18c6352fcd0d9bf4c8b3b39306f987ade5cff93eae6bacaab"
 
 
 def parse_action(
