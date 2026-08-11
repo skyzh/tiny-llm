@@ -14,6 +14,7 @@ from .compaction import (
     expand_receipt_range,
     reexpand_receipt_message,
 )
+from .control import AgentInterrupted, CancellationToken, SteeringHandle
 from .generation import (
     GenerationSession,
     GenerationStats,
@@ -32,6 +33,7 @@ from .protocol import (
     tool_catalog_hash,
 )
 from .receipts import EffectReceipt, ReceiptStore
+from .status import AgentStateCard, StatusQuery, StatusQueryResult, build_state_card
 from .workspace import ToolPolicy, Workspace
 
 
@@ -40,6 +42,9 @@ __all__ = [
     "AgentEvent",
     "AgentLimits",
     "AgentRun",
+    "AgentStateCard",
+    "AgentInterrupted",
+    "CancellationToken",
     "BranchStats",
     "EffectReceipt",
     "CacheManifest",
@@ -52,6 +57,10 @@ __all__ = [
     "ReceiptStore",
     "RewindError",
     "SequentialBranch",
+    "StatusQuery",
+    "StatusQueryResult",
+    "SteeringHandle",
+    "StatusQueryResult",
     "SessionEvent",
     "SessionLog",
     "SessionStore",
@@ -59,6 +68,7 @@ __all__ = [
     "ToolAction",
     "ToolPolicy",
     "Workspace",
+    "build_state_card",
     "build_system_prompt",
     "generate_response",
     "export_cache_manifest",
