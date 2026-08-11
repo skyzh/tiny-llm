@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from .workspace import Workspace
+from typing import Any
 
 
 class AgentError(ValueError):
@@ -43,8 +40,8 @@ TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
 def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
     """Stable content hash of the enabled tool schema catalog.
 
-    The checkpoint validity rule binds a KV checkpoint to the exact schema
-    set the model saw; changing the tool set invalidates continuations.
+    Changing the enabled tool set changes the hash, so the exact set the
+    model saw stays identifiable.
     """
 
     pass
@@ -62,7 +59,7 @@ def parse_action(
     pass
 
 
-def build_system_prompt(workspace: Workspace) -> str:
+def build_system_prompt(workspace: Any) -> str:
     """Week 4, Day 1: describe only the tools authorized for this run."""
 
     pass

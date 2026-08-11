@@ -86,3 +86,10 @@
         white-space: normal;
     }
 }
+
+/* Code blocks must contain their own overflow at every viewport width so
+   long lines never extend past the page edge. */
+pre {
+    overflow-x: auto;
+    max-width: 100%;
+}
