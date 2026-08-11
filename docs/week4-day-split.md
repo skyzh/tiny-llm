@@ -12,7 +12,7 @@ what belongs to each day. Curriculum prose (book) is not part of this stack.
 | 2 | Authorize effects + durable receipts | feat2 | `workspace.py` (simplified), `receipts.py` |
 | 3 | Session tree (event-level id/parentId) | feat3 | `session.py` |
 | 4 | KV checkpoint/resume + sequential rewind | feat4+5 | `checkpoint.py`, `branch.py`, `generation.py` (session) |
-| 5 | Receipt-backed compaction | feat6 | `compaction.py`, `context.py` |
+| 5 | Receipt-backed compaction | feat6 | `compaction.py` |
 | 6 | Steering + public status + exactly-once reconcile | feat7+8 | `control.py`, `status.py`, `reconcile.py` |
 | 7 | Equivalence harness | feat9 | `harness.py`, `evaluation.py` |
 
@@ -26,6 +26,12 @@ workspace keeps the authorization core (bounds, protected paths, observed
 digests, approvals, atomic writes) plus effect receipts; crash/effect
 recovery is taught by Day 6's exactly-once reconcile instead. This keeps each
 day's surface small and matches the "start simple, extend" arc.
+
+The old summarizer-based `ContextManager` (whole-history compaction with a
+model summary) is not part of the new course: Day 5's receipt-backed
+compaction replaces it, keeping the durable trace untouched and re-expanding
+verified ranges on demand. This removes a large control-coupled module and
+keeps Day 5 self-contained.
 
 ## Stack shape
 
