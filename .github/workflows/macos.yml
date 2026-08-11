@@ -42,4 +42,8 @@ jobs:
 
       - run: pdm run build-ext-ref
 
+      - run: cargo install mdbook-toc
+      - run: cargo install mdbook-katex --version 0.10.0-alpha
+      - uses: taiki-e/install-action@mdbook
+
       - run: pdm run test-refsol

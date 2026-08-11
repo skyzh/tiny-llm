@@ -4,9 +4,8 @@
 
 The loop turns model text into one bounded, schema-checked action or final
 response.  It stops by budget, returns invalid actions to the model, and
-guards against repeated identical actions.  When a ``session``-like object is
-provided, every interaction is recorded as an immutable event in the durable
-event tree (Day 3).
+guards against repeated identical actions.  This file keeps only the
+validated Day 1 core.
 
 Implement the bodies yourself; the reference solution lives in
 ``tiny_llm_ref``.
@@ -57,7 +56,6 @@ class AgentRun:
     final: str | None
     events: tuple[AgentEvent, ...]
     modified_files: tuple[str, ...] = ()
-    session_id: str | None = None
 
 
 def _append_tool_result(
@@ -75,16 +73,12 @@ def run_agent(
     workspace: Any,
     limits: AgentLimits | None = None,
     on_event: Callable[[AgentEvent], None] | None = None,
-    *,
-    session: Any | None = None,
 ) -> AgentRun:
     """Run a bounded validated loop over one task.
 
     ``workspace`` must expose ``available_tools`` (a frozenset of tool names),
     ``execute(action)`` (returning a result string), and ``modified_files``
-    (an iterable of paths).  When ``session`` is provided (a SessionLog, or
-    any object exposing ``append`` and ``session_id``), every interaction is
-    recorded as an immutable event in the durable event tree.
+    (an iterable of paths).
     """
 
     # TODO: reject an empty task; build the system prompt and initial
@@ -92,6 +86,5 @@ def run_agent(
     # parse_action(response, workspace.available_tools); feed invalid
     # actions back as "error: ..." observations; stop on FinalAction,
     # invalid-action limit, identical-action limit, context limit, and step
-    # limit; record user_message/run_started/tool_call/tool_result/
-    # run_finished events and session_id when a session is provided.
+    # limit.
     pass

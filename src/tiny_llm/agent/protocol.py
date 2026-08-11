@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from .workspace import Workspace
+from typing import Any
 
 
 class AgentError(ValueError):
@@ -15,14 +12,14 @@ class AgentError(ValueError):
 
 @dataclass(frozen=True)
 class FinalAction:
-    """Week 4, Day 2: a model response that finishes the task."""
+    """Week 4, Day 1: a model response that finishes the task."""
 
     final: str
 
 
 @dataclass(frozen=True)
 class ToolAction:
-    """Week 4, Day 2: one validated tool request from the model."""
+    """Week 4, Day 1: one validated tool request from the model."""
 
     tool: str
     arguments: dict[str, Any]
@@ -43,8 +40,8 @@ TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
 def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
     """Stable content hash of the enabled tool schema catalog.
 
-    The checkpoint validity rule binds a KV checkpoint to the exact schema
-    set the model saw; changing the tool set invalidates continuations.
+    Changing the enabled tool set changes the hash, so the exact set the
+    model saw stays identifiable.
     """
 
     pass
@@ -57,12 +54,12 @@ def parse_action(
     response: str,
     available_tools: frozenset[str] | None = None,
 ) -> AgentAction:
-    """Week 4, Day 2: strictly parse and validate exactly one JSON action."""
+    """Week 4, Day 1: strictly parse and validate exactly one JSON action."""
 
     pass
 
 
-def build_system_prompt(workspace: Workspace) -> str:
-    """Week 4, Day 2: describe only the tools authorized for this run."""
+def build_system_prompt(workspace: Any) -> str:
+    """Week 4, Day 1: describe only the tools authorized for this run."""
 
     pass
