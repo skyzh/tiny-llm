@@ -1,146 +1,149 @@
-# Day 1: From Generation to an Agent Loop
+# Day 1: A Validated Agent Loop
 
-> 🚧 **Early-review WIP:** This chapter is public for early review and may
-> change. Use a disposable workspace when running the agent or enabling writes
-> or commands.
+> **Day 1 scope:** This chapter teaches a bounded loop and a JSON action
+> protocol. The supplied test uses a fake read-only workspace. File mutation,
+> command execution, durable receipts, sessions, and evaluation are not Day 1
+> capabilities.
 
-The decoder from Week 1 produces text once and exits. An agent repeatedly turns
-text into an action, executes that action, and gives the result back to the
-model. Today you will make that control flow explicit.
+A text generator returns one response and stops. A coding agent needs a small
+control loop: it asks for one response, decides whether that response is a
+final answer or an action, records what happened, and repeats when an action
+produces an observation.
 
-> **Implementation status:** The current Day 1 learner check covers
-> `initial_messages()`: it preserves the system instructions and task and rejects
-> an empty task. The complete `run_agent()` loop described later in this chapter
-> exists in the reference baseline, but its focused checks currently live under
-> Day 6. Treat the rest of this chapter as the intended Day 1 expansion, not as
-> behavior proved by the Day 1 test.
+The model never edits a file directly. It emits text. Ordinary Python code
+validates that text before handing a parsed action to the workspace object.
+That separation is what makes the loop testable without a model.
 
-## Current Repository Checkpoint
+## Checkpoint and Commands
 
-Implement `initial_messages(task, system_prompt)` in
-`src/tiny_llm/agent/generation.py`, then run:
+Implement these Day 1 starter functions:
+
+| File | Function or type | Your responsibility |
+| --- | --- | --- |
+| `src/tiny_llm/agent/generation.py` | `GenerationStats`, `initial_messages()`, `generate_response()` | Reject a blank task, create the first messages, and decode one response with a fresh cache. |
+| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `TOOL_FIELDS`, `tool_catalog_hash()`, `parse_action()`, `build_system_prompt()` | Define the exact action vocabulary, validate one JSON object, and describe only enabled actions. |
+| `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `_append_tool_result()`, `run_agent()` | Bound the loop, append observations, and return an auditable result. |
+
+Run the focused learner check:
 
 ```bash
 pdm run test --week 4 --day 1
 ```
 
-The expected result is that both Day 1 tests pass without loading a model. To
-check the supplied implementation instead, run
-`pdm run test-refsol --week 4 --day 1`.
+It should pass without loading a model. For the supplied reference check:
 
-## Learning Goals
+```bash
+pdm run test-refsol --week 4 --day 1
+```
 
-By the end of the day, you will be able to:
+`generate_response()` is still a Day 1 public boundary even though the focused
+test deliberately avoids model weights. Render the messages with the tokenizer,
+decode at most `max_tokens` using a fresh cache, stop at EOS, and release every
+cache in a `finally` block. The scripted loop tests are the fast way to verify
+the control flow; a real model is not required for this checkpoint.
 
-- explain the difference between a model, an agent loop, and a tool;
-- represent tool calls and final answers as structured actions;
-- preserve assistant actions and tool observations in the conversation; and
-- stop reliably on completion, malformed output, or a step budget.
+## One Response, One Structured Decision
 
-## Actions, Not Free-Form Commands
+Use JSON because it makes the protocol visible in a trace. A response is
+either a final answer:
 
-Begin with a JSON protocol because it is visible in every trace and works with a
-model that does not expose native tool calls. An assistant turn produces exactly
-one of two shapes:
+```json
+{"final":"I inspected README.md."}
+```
+
+or a tool request:
 
 ```json
 {"tool":"read_file","path":"README.md"}
 ```
 
-```json
-{"final":"The project implements a small Qwen3 inference stack."}
-```
+`parse_action()` must accept exactly one JSON object. It rejects malformed
+JSON, non-object values, an empty final answer, an unknown tool, disabled
+tools, missing required fields, unexpected fields, and fields with the wrong
+shape. Do not quietly ignore trailing or extra data.
 
-Parsing JSON is only the first check. The decoded value must be an object, must
-contain exactly one of `tool` or `final`, and must contain arguments allowed by
-that action's schema. Reject trailing text rather than silently ignoring it.
+`TOOL_FIELDS` names the complete future vocabulary:
+`list_files`, `read_file`, `write_file`, `edit_file`, and `run_command`.
+Day 1 does not implement those effects. Its fake workspace enables only
+`read_file`, which is enough to prove that the loop validates availability
+before dispatching an action.
 
-Return validation failures to the model as observations. This lets the model
-repair a malformed action without hiding the failure:
+## Start a Conversation Deliberately
 
-```text
-error: missing fields for read_file: path
-```
-
-## The Loop
-
-Keep orchestration separate from inference and tool execution:
+`initial_messages(task, system_prompt)` creates the first two messages:
 
 ```python
-def run_agent(task, generate, workspace, limits):
-    messages = initial_messages(task, build_system_prompt(workspace))
-    events = []
-    for step in range(1, limits.max_steps + 1):
-        response = generate(messages)
-
-        try:
-            action = parse_action(response, workspace.available_tools)
-        except AgentError as error:
-            result = f"error: {error}"
-            events.append(AgentEvent(step, response, None, result))
-            messages = append_tool_result(messages, response, result)
-            continue
-        if isinstance(action, FinalAction):
-            events.append(AgentEvent(step, response, action, None))
-            break
-
-        result = workspace.execute(action)
-        events.append(AgentEvent(step, response, action, result))
-        messages = append_tool_result(messages, response, result)
-
-    # Construct AgentRun with either "completed" or "step_limit".
+[
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": task},
+]
 ```
 
-The loop owns policy such as budgets and stop conditions. The model adapter owns
-tokenization and decoding. The tool registry owns schemas and execution. These
-boundaries will matter when sessions and cancellation arrive later in the week.
+Reject an empty or whitespace-only task. A clear first message lets later turns
+grow from a known history instead of assembling prompt fragments ad hoc.
 
-## Preserve the Trace
+`build_system_prompt(workspace)` describes the enabled action set for this
+run. The prompt is guidance, not enforcement: `parse_action()` and the
+workspace boundary must independently reject anything the policy does not
+allow.
 
-For now, an in-memory list is sufficient. The current `AgentEvent` records the
-step, raw response, parsed action when valid, and result. The target trace should
-eventually also make these run-level facts discoverable:
+## The Bounded Loop
 
-- the user's task;
-- the assistant's raw response;
-- the parsed action, when valid;
-- the tool result or validation error; and
-- token counts and elapsed time if they are available.
+`run_agent()` receives a task, a `generate` callable, and a workspace. The
+tests substitute a callable that returns predetermined strings, so the loop's
+behavior stays deterministic.
 
-Do not store only the latest prompt string. Named events are easier to inspect
-and can later be serialized without reverse-engineering the chat template.
+```python
+messages = initial_messages(task, build_system_prompt(workspace))
+for step in range(1, limits.max_steps + 1):
+    response = generate(messages)
+    action = parse_action(response, workspace.available_tools)
 
-## Planned Loop Exercise
+    if action is a final answer:
+        record it and stop
 
-Keep `generate_response()` responsible for one model response and make
-`run_agent()` own the loop.
-
-Implement and test these cases without loading a model:
-
-1. A valid tool action is executed and its result is appended.
-2. A final action stops the loop without executing a tool.
-3. Invalid JSON becomes a useful observation and the loop continues.
-4. An unknown tool is rejected before execution.
-5. The loop stops after `max_steps` even if the model never finishes.
-
-Use a fake model that returns predetermined strings and a fake tool registry that
-records calls. Most agent-loop behavior is ordinary deterministic code and does
-not require expensive model tests.
-
-## Checkpoint
-
-After the planned loop slice is implemented, the following trace should be
-possible:
-
-```text
-user      inspect the repository
-assistant {"tool":"read_file","path":"README.md"}
-tool      # Tiny LLM ...
-assistant {"final":"This repository teaches LLM inference and serving."}
+    result = workspace.execute(action)
+    record the action and result
+    messages = append the assistant response and tool observation
 ```
 
-The tool can still be a stub in this planned slice. The current source tree's
-bounded workspace API is introduced by the Day 2 and Day 3 checkpoints, and the
-current loop behavior is verified by Day 6.
+The real implementation also turns a parse failure into an observation such
+as `error: response is not valid JSON: ...`, then lets the model try again.
+This is more useful than crashing the agent for one malformed answer.
+
+Every interaction becomes an `AgentEvent` containing the step number, raw
+response, parsed action when one exists, and result or validation error. The
+returned `AgentRun` records whether a valid final answer completed the
+protocol. It does **not** prove that a task was solved; task grading is a later
+course concern.
+
+## Stop Conditions Are Part of Correctness
+
+`AgentLimits` requires positive values. Implement all of these terminal cases:
+
+- a valid final answer returns `completed`;
+- reaching `max_steps` returns `step_limit`;
+- too many invalid actions returns `invalid_action_limit`;
+- an overlong conversation returns `context_limit`; and
+- too many identical tool requests returns `repeated_action_limit`.
+
+The repeated-action check matters even when a tool succeeds. Repeating the
+same request can burn the whole budget while adding no new information.
+
+## Exercise Checklist
+
+Before considering Day 1 complete, make the focused test demonstrate all of
+these behaviors:
+
+1. A task starts with a system message and a user message.
+2. A `read_file` request reaches the fake workspace, its result becomes an
+   observation, and a later final answer stops the run.
+3. Invalid JSON and an unavailable tool become recoverable error observations.
+4. The loop stops at the step budget.
+5. Repeated identical actions stop before the general step budget is spent.
+
+Keep the solution inside the Day 1 starter files. Do not create session,
+workspace, receipt, checkpoint, or evaluation modules yet; those files arrive
+with their own checkpoints.
 
 {{#include copyright.md}}

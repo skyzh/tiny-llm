@@ -35,9 +35,9 @@ The course follows a four-week learning path:
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
   the scheduler does not rebuild dense history on every step.
-- **Week 4: Build a Coding Agent.** Start with a bounded coding-agent baseline.
-  Multi-turn sessions then motivate cache reuse, context compaction, rewind,
-  cooperative cancellation, and evaluation.
+- **Week 4: Build a Coding Agent.** Start with a bounded, validated agent loop.
+  The course is publishing one reviewed checkpoint at a time; Day 1 introduces
+  the JSON action protocol and loop, while later capabilities remain staged.
 
 ## Why MLX and Qwen3?
 
@@ -70,7 +70,7 @@ implementation, test, and publication readiness is tracked below.
 
 ## Roadmap
 
-The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4's daily chapters are public for early review and may still change. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
+The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; only Day 1 is currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
 
 Persistent Week 4 runs can store sensitive transcripts under
 `.tiny-llm/sessions`, and model-directed file or command tools are not sandboxed.
@@ -100,13 +100,8 @@ Use a disposable workspace and read the
 | 3.5 | Paged FlashAttention | ✅ | ✅ | ✅ | 🚧 |
 | 3.6 (optional) | Speculative Decoding | ✅ | ✅ | ✅ | 🚧 |
 | 3.x (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ | 🚧 |
-| 4.1 | Agent Loop | ✅ | ✅ | ✅ | 🚧 |
-| 4.2 | Tools | ✅ | ✅ | ✅ | 🚧 |
-| 4.3 | Safety and Validation | ✅ | ✅ | ✅ | 🚧 |
-| 4.4 | Interactive Sessions | ✅ | ✅ | ✅ | 🚧 |
-| 4.5 | Context Compaction | ✅ | ✅ | ✅ | 🚧 |
-| 4.6 | Control and Recovery | ✅ | ✅ | ✅ | 🚧 |
-| 4.7 | Evaluation | ✅ | ✅ | ✅ | 🚧 |
+| 4.1 | Validated Agent Loop | ✅ | ✅ | ✅ | 🚧 |
+| 4.2–4.7 | Later agent checkpoints | — | — | — | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.
