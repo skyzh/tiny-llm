@@ -93,3 +93,8 @@ class ReceiptStore:
         """Verify and re-expand a bounded byte range of one receipt's result."""
 
         pass
+
+    def close(self) -> None:
+        """Drop the in-memory index; the durable file is already fsynced."""
+
+        pass

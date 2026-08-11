@@ -4,8 +4,6 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from .control import CancellationToken
-
 
 Message = dict[str, str]
 Generate = Callable[[list[Message]], str]
@@ -42,7 +40,7 @@ class GenerationSession:
         cache_factory: Callable[[], Iterable[Any]],
         max_tokens: int,
         enable_thinking: bool = False,
-        cancellation: CancellationToken | None = None,
+        cancellation: Any | None = None,
     ):
         pass
 
