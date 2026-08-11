@@ -1,9 +1,8 @@
 # Day 1: A Validated Agent Loop
 
 > **Day 1 scope:** This chapter teaches a bounded loop and a JSON action
-> protocol. The supplied test uses a fake read-only workspace. File mutation,
-> command execution, durable receipts, sessions, and evaluation are not Day 1
-> capabilities.
+> protocol. The supplied test uses a fake read-only workspace. File mutation
+> and command execution are not Day 1 capabilities.
 
 A text generator returns one response and stops. A coding agent needs a small
 control loop: it asks for one response, decides whether that response is a
@@ -14,15 +13,15 @@ The model never edits a file directly. It emits text. Ordinary Python code
 validates that text before handing a parsed action to the workspace object.
 That separation is what makes the loop testable without a model.
 
-## Checkpoint and Commands
+## Files and Commands
 
 Implement these Day 1 starter functions:
 
 | File | Function or type | Your responsibility |
 | --- | --- | --- |
-| `src/tiny_llm/agent/generation.py` | `GenerationStats`, `initial_messages()`, `generate_response()` | Reject a blank task, create the first messages, and decode one response with a fresh cache. |
-| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `TOOL_FIELDS`, `tool_catalog_hash()`, `parse_action()`, `build_system_prompt()` | Define the exact action vocabulary, validate one JSON object, and describe only enabled actions. |
-| `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `_append_tool_result()`, `run_agent()` | Bound the loop, append observations, and return an auditable result. |
+| `src/tiny_llm/agent/generation.py` | `initial_messages()`, `generate_response()` | Reject a blank task, create the first messages, and decode one response with a fresh cache. |
+| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `TOOL_CATALOG_HASH`, `tool_catalog_hash()`, `parse_action()`, `build_system_prompt()` | Define the exact action vocabulary, validate one JSON object, and describe only enabled actions. |
+| `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent()` | Bound the loop, append observations, and return an auditable result. |
 
 Run the focused learner check:
 
@@ -38,9 +37,9 @@ pdm run test-refsol --week 4 --day 1
 
 `generate_response()` is still a Day 1 public boundary even though the focused
 test deliberately avoids model weights. Render the messages with the tokenizer,
-decode at most `max_tokens` using a fresh cache, stop at EOS, and release every
-cache in a `finally` block. The scripted loop tests are the fast way to verify
-the control flow; a real model is not required for this checkpoint.
+decode at most the requested token count using a fresh cache, stop at EOS, and
+release every cache in a finally block. The scripted loop tests are the fast
+way to verify the control flow; a real model is not required for this checkpoint.
 
 ## One Response, One Structured Decision
 
@@ -142,8 +141,7 @@ these behaviors:
 4. The loop stops at the step budget.
 5. Repeated identical actions stop before the general step budget is spent.
 
-Keep the solution inside the Day 1 starter files. Do not create session,
-workspace, receipt, checkpoint, or evaluation modules yet; those files arrive
-with their own checkpoints.
+Keep the solution inside the Day 1 starter files. Later days add session,
+checkpoint, and rewind behavior.
 
 {{#include copyright.md}}

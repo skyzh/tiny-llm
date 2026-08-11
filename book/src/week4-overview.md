@@ -45,7 +45,7 @@ The Day 1 starter exposes exactly these public names:
 
 | File | Public names | Why they are here |
 | --- | --- | --- |
-| `src/tiny_llm/agent/generation.py` | `GenerationStats`, `initial_messages`, `generate_response` | Begin a conversation and keep the one-response model boundary explicit. |
+| `src/tiny_llm/agent/generation.py` | `initial_messages`, `generate_response` | Begin a conversation and keep the one-response model boundary explicit. |
 | `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `TOOL_CATALOG_HASH`, `tool_catalog_hash`, `parse_action`, `build_system_prompt` | Represent and validate one final answer or one tool request. |
 | `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent` | Bound the run and retain an inspectable trace. |
 
@@ -63,23 +63,10 @@ the learner test, run:
 pdm run test-refsol --week 4 --day 1
 ```
 
-## Seven-Day Shape
+## Publication Boundary
 
-The course will keep this seven-day structure. Only the first row is available
-today; the rest is a map, not an invitation to implement ahead.
-
-| Day | Theme | Availability |
-| --- | --- | --- |
-| 1 | Validated agent loop and tool protocol | Available now |
-| 2 | Effect receipts | Published after its own reviewed merge |
-| 3 | Session tree | Published after its own reviewed merge |
-| 4 | KV checkpoint and rewind | Published after its own reviewed merge |
-| 5 | Receipt-backed compaction | Published after its own reviewed merge |
-| 6 | Steering, status, and reconciliation | Published after its own reviewed merge |
-| 7 | Equivalence harness | Published after its own reviewed merge |
-
-Do not add modules for a later day to your Day 1 solution. The starter's small
-surface is intentional: it lets the tests catch accidental solution leakage
-and makes each new capability easy to review.
+Only Day 1 is available today. Do not add modules for later days to your
+solution; each later capability will be published with its own reviewed
+checkpoint.
 
 {{#include copyright.md}}
