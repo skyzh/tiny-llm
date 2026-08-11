@@ -88,6 +88,11 @@ class SessionLog:
     def recover_incomplete_turns(self) -> tuple[SessionEvent, ...]:
         pass
 
+    def active_path_events(self) -> tuple[SessionEvent, ...]:
+        """Deterministically reconstruct the model-visible active path."""
+
+        pass
+
 
 class SessionStore:
     """Create and resume workspace-bound local session transcripts."""
@@ -121,6 +126,16 @@ class SessionStore:
         new_session_id: str | None = None,
     ) -> SessionLog:
         """Create a lineage whose model context ends at one ancestor event."""
+
+        pass
+
+    def parent_of(self, session_id: str) -> tuple[str, str] | None:
+        """Return ``(parent_session_id, at_event_id)`` for one branch session."""
+
+        pass
+
+    def active_path(self, session_id: str) -> tuple[str, ...]:
+        """Reconstruct the deterministic root-to-leaf session path."""
 
         pass
 
