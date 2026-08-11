@@ -12,6 +12,7 @@ from .protocol import (
     tool_catalog_hash,
 )
 from .receipts import EffectReceipt, ReceiptStore
+from .session import SessionEvent, SessionLog, SessionStore, memory_session
 from .workspace import ToolPolicy, Workspace
 
 
@@ -24,6 +25,9 @@ __all__ = [
     "FinalAction",
     "GenerationStats",
     "ReceiptStore",
+    "SessionEvent",
+    "SessionLog",
+    "SessionStore",
     "TOOL_CATALOG_HASH",
     "ToolAction",
     "ToolPolicy",
@@ -31,6 +35,7 @@ __all__ = [
     "build_system_prompt",
     "generate_response",
     "initial_messages",
+    "memory_session",
     "parse_action",
     "run_agent",
     "tool_catalog_hash",
