@@ -3252,3 +3252,117 @@ def test_task_6_temp_cleanup_base_exception_cannot_skip_backup_restoration(
 
     assert resumed.conflicts == ("value.txt",)
     assert resumed.retained_recovery_files == (retained_path,)
+
+
+def test_task_4_prefix_publish_is_idempotent_and_content_addressed():
+    from .tiny_llm_base import PrefixRegistry
+
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    first = registry.publish((1, 2, 3, 4, 5, 6, 7, 8))
+    second = registry.publish((1, 2, 3, 4, 5, 6, 7, 8))
+
+    assert first == second
+    assert len(first) == 2
+    assert registry.stats().live_pages == 2
+    assert registry.stats().shared_pages == 0
+
+
+def test_task_4_acquire_reuses_the_longest_published_prefix():
+    from .tiny_llm_base import PrefixRegistry
+
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    registry.publish((1, 2, 3, 4, 5, 6, 7, 8))
+
+    fork = registry.acquire((1, 2, 3, 4, 9, 10))
+
+    assert fork.token_ids == (1, 2, 3, 4)
+    assert len(fork.shared_page_ids) == 1
+    assert registry.stats().live_refs == 1
+    assert registry.stats().shared_pages == 1
+    fork.close()
+    assert registry.stats().live_refs == 0
+
+
+def test_task_4_append_allocates_a_private_tail():
+    from .tiny_llm_base import PrefixRegistry
+
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    registry.publish((1, 2, 3, 4, 5, 6, 7, 8))
+    fork = registry.acquire((1, 2, 3, 4))
+    divergent = fork.append((9, 10, 11, 12))
+
+    assert divergent.token_ids == (1, 2, 3, 4, 9, 10, 11, 12)
+    assert len(divergent.private_page_ids) == 1
+    assert registry.stats().shared_pages == 1
+    divergent.close()
+    fork.close()
+    assert registry.stats().live_refs == 0
+    assert registry.stats().shared_pages == 0
+
+
+def test_task_4_fork_shares_pages_and_isolates_children():
+    from .tiny_llm_base import PrefixRegistry
+
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    registry.publish((1, 2, 3, 4, 5, 6, 7, 8))
+    parent = registry.acquire((1, 2, 3, 4, 5, 6, 7, 8))
+    fork_a = parent.fork(4)
+    child_a = fork_a.append((9, 10, 11, 12))
+    fork_b = parent.fork(4)
+    child_b = fork_b.append((13, 14, 15, 16))
+
+    # Each handle owns its own shared references: parent(2) + fork_a + child_a
+    # + fork_b + child_b = 6 refs on the shared prefix pages.
+    assert registry.stats().live_refs == 6
+    assert registry.shared_page_stats([child_a, child_b])["shared_refs"] == 2
+    assert child_a.token_ids == (1, 2, 3, 4, 9, 10, 11, 12)
+    assert child_b.token_ids == (1, 2, 3, 4, 13, 14, 15, 16)
+
+    child_a.close()
+    child_b.close()
+    fork_a.close()
+    fork_b.close()
+    parent.close()
+    assert registry.stats().live_refs == 0
+
+
+def test_task_4_release_cannot_double_free_or_leak():
+    from .tiny_llm_base import PrefixError, PrefixRegistry
+
+    registry = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    registry.publish((1, 2, 3, 4))
+    fork = registry.acquire((1, 2, 3, 4))
+    fork.close()
+
+    # close() is idempotent, but releasing the same reference again leaks.
+    with pytest.raises(PrefixError):
+        registry.release(fork.shared_page_ids)
+    assert registry.stats().live_refs == 0
+
+
+def test_task_4_budget_evicts_unreferenced_pages_and_fails_closed():
+    from .tiny_llm_base import PrefixError, PrefixRegistry
+
+    registry = PrefixRegistry(
+        model_hash="a" * 64, tokenizer_hash="b" * 64, page_budget=1
+    )
+    registry.publish((1, 2, 3, 4))
+    fork = registry.acquire((1, 2, 3, 4))
+
+    with pytest.raises(PrefixError, match="budget"):
+        registry.publish((9, 10, 11, 12))
+    fork.close()
+    registry.publish((9, 10, 11, 12))
+    assert registry.stats().live_pages == 1
+
+
+def test_task_4_registry_is_scoped_to_model_and_tokenizer_identity():
+    from .tiny_llm_base import PrefixRegistry
+
+    first = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="b" * 64)
+    second = PrefixRegistry(model_hash="a" * 64, tokenizer_hash="c" * 64)
+
+    assert first.publish((1, 2, 3, 4)) == (0,)
+    assert second.publish((1, 2, 3, 4)) == (0,)
+    assert first.stats().live_pages == 1
+    assert second.stats().live_pages == 1

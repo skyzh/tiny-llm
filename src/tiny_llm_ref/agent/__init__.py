@@ -39,6 +39,7 @@ from .generation import (
     initial_messages,
 )
 from .loop import AgentEvent, AgentLimits, AgentRun, run_agent
+from .prefix import ForkedPrefix, PrefixError, PrefixRegistry, PrefixStats
 from .protocol import (
     AgentError,
     FinalAction,
@@ -85,6 +86,7 @@ __all__ = [
     "EvaluationMetrics",
     "FileSnapshot",
     "FinalAction",
+    "ForkedPrefix",
     "GenerationSession",
     "GenerationStats",
     "GradeReport",
@@ -92,6 +94,9 @@ __all__ = [
     "MutationIntent",
     "MutationJournal",
     "PlannedRestore",
+    "PrefixError",
+    "PrefixRegistry",
+    "PrefixStats",
     "ReceiptStore",
     "RecoveryResult",
     "SessionEvent",
