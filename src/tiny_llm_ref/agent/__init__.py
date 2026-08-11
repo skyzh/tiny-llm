@@ -7,6 +7,13 @@ from .checkpoint import (
     export_cache_manifest,
     validate_resume,
 )
+from .compaction import (
+    CompactionError,
+    CompactionResult,
+    compact_tool_results,
+    expand_receipt_range,
+    reexpand_receipt_message,
+)
 from .generation import (
     GenerationSession,
     GenerationStats,
@@ -36,6 +43,8 @@ __all__ = [
     "BranchStats",
     "EffectReceipt",
     "CacheManifest",
+    "CompactionError",
+    "CompactionResult",
     "FinalAction",
     "GenerationSession",
     "GenerationStats",
@@ -53,9 +62,12 @@ __all__ = [
     "build_system_prompt",
     "generate_response",
     "export_cache_manifest",
+    "compact_tool_results",
+    "expand_receipt_range",
     "initial_messages",
     "memory_session",
     "parse_action",
+    "reexpand_receipt_message",
     "run_agent",
     "validate_resume",
     "tool_catalog_hash",
