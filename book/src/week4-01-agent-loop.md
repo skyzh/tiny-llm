@@ -141,7 +141,6 @@ these behaviors:
 4. The loop stops at the step budget.
 5. Repeated identical actions stop before the general step budget is spent.
 
-Keep the solution inside the Day 1 starter files. Later days add session,
-checkpoint, and rewind behavior.
+Keep the solution inside the Day 1 starter files.
 
 {{#include copyright.md}}
