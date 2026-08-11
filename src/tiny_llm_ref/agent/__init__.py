@@ -7,6 +7,7 @@ from .checkpoint import (
     export_cache_manifest,
     validate_resume,
 )
+from .control import AgentInterrupted, CancellationToken, SteeringHandle
 from .compaction import (
     CompactionError,
     CompactionResult,
@@ -31,6 +32,14 @@ from .protocol import (
     tool_catalog_hash,
 )
 from .receipts import EffectReceipt, ReceiptStore
+from .reconcile import (
+    ReconciliationResult,
+    SafeCheckpoint,
+    largest_safe_checkpoint,
+    reconcile_effect,
+    reconcile_interrupted_effects,
+)
+from .status import AgentStateCard, StatusQuery, StatusQueryResult, build_state_card
 from .session import SessionEvent, SessionLog, SessionStore, memory_session
 from .workspace import ToolPolicy, Workspace
 
@@ -40,6 +49,9 @@ __all__ = [
     "AgentEvent",
     "AgentLimits",
     "AgentRun",
+    "CancellationToken",
+    "AgentStateCard",
+    "AgentInterrupted",
     "BranchStats",
     "CacheManifest",
     "CompactionError",
@@ -50,8 +62,13 @@ __all__ = [
     "GenerationStats",
     "ManifestError",
     "ReceiptStore",
+    "ReconciliationResult",
     "RewindError",
+    "SafeCheckpoint",
     "SequentialBranch",
+    "StatusQuery",
+    "SteeringHandle",
+    "StatusQueryResult",
     "SessionEvent",
     "SessionLog",
     "SessionStore",
@@ -59,14 +76,18 @@ __all__ = [
     "ToolAction",
     "ToolPolicy",
     "Workspace",
+    "build_state_card",
     "build_system_prompt",
     "generate_response",
     "compact_tool_results",
     "expand_receipt_range",
     "export_cache_manifest",
     "initial_messages",
+    "largest_safe_checkpoint",
     "memory_session",
     "parse_action",
+    "reconcile_effect",
+    "reconcile_interrupted_effects",
     "reexpand_receipt_message",
     "run_agent",
     "validate_resume",
