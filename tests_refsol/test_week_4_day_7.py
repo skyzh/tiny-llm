@@ -1184,3 +1184,188 @@ def test_task_5_reexpansion_rejects_an_invalid_handle(tmp_path):
         reexpand_receipt_message(store, "no handle here")
     with pytest.raises(CompactionError, match="invalid receipt ID"):
         reexpand_receipt_message(store, "expand via receipt not-a-hash")
+
+
+def test_task_6_reconcile_appends_exactly_one_observation(tmp_path):
+    from .tiny_llm_base import (
+        EffectReceipt,
+        ReceiptStore,
+        memory_session,
+        reconcile_effect,
+    )
+
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="edit the file")
+    call = session.append(
+        "tool_call", tool="write_file", arguments={"path": "a.txt", "content": "x"}
+    )
+    store.put(
+        EffectReceipt(
+            tool_call_id=call.id,
+            tool="write_file",
+            arguments={"path": "a.txt", "content": "x"},
+            exit_state="ok",
+            result="wrote a.txt",
+            changed_artifacts=("a.txt",),
+        )
+    )
+
+    first = reconcile_effect(session, store, call.id)
+    second = reconcile_effect(session, store, call.id)
+
+    assert first.status == "observation_appended"
+    assert second.status == "already_closed"
+    observations = [
+        event
+        for event in session.events
+        if event.type == "tool_result" and event.data.get("tool_call_id") == call.id
+    ]
+    assert len(observations) == 1
+    assert observations[0].data.get("content") == "wrote a.txt"
+
+
+def test_task_6_reconcile_never_guesses_an_orphaned_effect(tmp_path):
+    from .tiny_llm_base import ReceiptStore, memory_session, reconcile_effect
+
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="edit the file")
+    call = session.append(
+        "tool_call", tool="write_file", arguments={"path": "a.txt", "content": "x"}
+    )
+
+    result = reconcile_effect(session, store, call.id)
+
+    assert result.status == "no_receipt"
+    assert not any(event.type == "tool_result" for event in session.events)
+
+
+def test_task_6_reconcile_pass_closes_every_interrupted_call(tmp_path):
+    from .tiny_llm_base import (
+        EffectReceipt,
+        ReceiptStore,
+        memory_session,
+        reconcile_interrupted_effects,
+    )
+
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    session = memory_session(tmp_path, "test-model")
+    session.append("user_message", content="do work")
+    first = session.append("tool_call", tool="read_file", arguments={"path": "a.py"})
+    second = session.append(
+        "tool_call", tool="write_file", arguments={"path": "b.py", "content": "y"}
+    )
+    store.put(
+        EffectReceipt(
+            tool_call_id=first.id,
+            tool="read_file",
+            arguments={"path": "a.py"},
+            exit_state="ok",
+            result="def f(): pass",
+            changed_artifacts=(),
+        )
+    )
+    store.put(
+        EffectReceipt(
+            tool_call_id=second.id,
+            tool="write_file",
+            arguments={"path": "b.py", "content": "y"},
+            exit_state="ok",
+            result="wrote b.py",
+            changed_artifacts=("b.py",),
+        )
+    )
+
+    results = reconcile_interrupted_effects(session, store)
+
+    assert [result.status for result in results] == [
+        "observation_appended",
+        "observation_appended",
+    ]
+    observations = [
+        event
+        for event in session.events
+        if event.type == "tool_result" and event.data.get("reconciled")
+    ]
+    assert len(observations) == 2
+
+
+def test_task_6_largest_safe_checkpoint_picks_the_most_advanced():
+    from .tiny_llm_base import CacheManifest, largest_safe_checkpoint
+
+    smaller = CacheManifest(
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        position=10,
+        prefix_hash="c" * 64,
+    )
+    larger = CacheManifest(
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        position=40,
+        prefix_hash="c" * 64,
+    )
+
+    result = largest_safe_checkpoint(
+        (smaller, larger),
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        tool_catalog_hash="",
+        workspace_fingerprint="",
+    )
+
+    assert result.can_resume
+    assert result.manifest is larger
+
+
+def test_task_6_stale_checkpoint_falls_back_cold():
+    from .tiny_llm_base import CacheManifest, largest_safe_checkpoint
+
+    stale = CacheManifest(
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        position=40,
+        prefix_hash="c" * 64,
+        workspace_fingerprint="w" * 64,
+    )
+
+    result = largest_safe_checkpoint(
+        (stale,),
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        tool_catalog_hash="",
+        workspace_fingerprint="x" * 64,
+    )
+
+    assert not result.can_resume
+    assert result.reason.startswith("cold_")
+
+
+def test_task_6_model_mismatch_rejects_every_checkpoint():
+    from .tiny_llm_base import CacheManifest, largest_safe_checkpoint
+
+    other_model = CacheManifest(
+        model_hash="d" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        position=40,
+        prefix_hash="c" * 64,
+    )
+
+    result = largest_safe_checkpoint(
+        (other_model,),
+        model_hash="a" * 64,
+        tokenizer_hash="b" * 64,
+        layers=2,
+        tool_catalog_hash="",
+        workspace_fingerprint="",
+    )
+
+    assert not result.can_resume
+    assert "model" in result.reason

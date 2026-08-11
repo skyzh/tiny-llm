@@ -47,6 +47,13 @@ from .generation import (
 )
 from .loop import AgentEvent, AgentLimits, AgentRun, run_agent
 from .receipts import EffectReceipt, ReceiptStore
+from .reconcile import (
+    ReconciliationResult,
+    SafeCheckpoint,
+    largest_safe_checkpoint,
+    reconcile_effect,
+    reconcile_interrupted_effects,
+)
 from .protocol import (
     AgentError,
     FinalAction,
@@ -104,9 +111,11 @@ __all__ = [
     "EffectReceipt",
     "PlannedRestore",
     "ReceiptStore",
+    "ReconciliationResult",
     "RewindError",
     "RecoveryResult",
     "SequentialBranch",
+    "SafeCheckpoint",
     "SessionEvent",
     "SessionLog",
     "SessionStore",
@@ -136,8 +145,11 @@ __all__ = [
     "tool_catalog_hash",
     "validate_resume",
     "initial_messages",
+    "largest_safe_checkpoint",
     "memory_session",
     "parse_action",
+    "reconcile_effect",
+    "reconcile_interrupted_effects",
     "reexpand_receipt_message",
     "run_agent",
 ]
