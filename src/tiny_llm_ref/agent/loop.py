@@ -4,10 +4,8 @@
 
 The loop turns model text into one bounded, schema-checked action or final
 response.  It stops by budget, returns invalid actions to the model, and
-guards against repeated identical actions.  Later days add durable event
-recording (Day 3 sessions), token-aware context management (Day 5), and
-cancellation/steering (Day 6); this file keeps only the validated core so
-each day's feature is reviewable on its own.
+guards against repeated identical actions.  Durable event recording arrives
+with Day 3 sessions; this file keeps only the validated Day 1 core.
 """
 
 import json
@@ -66,7 +64,6 @@ class AgentRun:
     final: str | None
     events: tuple[AgentEvent, ...]
     modified_files: tuple[str, ...] = ()
-    session_id: str | None = None
 
 
 def _append_tool_result(
@@ -87,16 +84,12 @@ def run_agent(
     workspace: Any,
     limits: AgentLimits | None = None,
     on_event: Callable[[AgentEvent], None] | None = None,
-    *,
-    session: Any | None = None,
 ) -> AgentRun:
     """Run a bounded validated loop over one task.
 
     ``workspace`` must expose ``available_tools`` (a frozenset of tool names),
     ``execute(action)`` (returning a result string), and ``modified_files``
-    (an iterable of paths).  When ``session`` is provided (a SessionLog, or
-    any object exposing ``append`` and ``session_id``), every interaction is
-    recorded as an immutable event in the durable event tree.
+    (an iterable of paths).
     """
 
     limits = limits or AgentLimits()
@@ -108,30 +101,13 @@ def run_agent(
     invalid_actions = 0
     previous_signature: str | None = None
     identical_actions = 0
-    if session is not None:
-        session.append("user_message", content=task)
-        session.append("run_started")
-
-    def finish(completed: bool, reason: str, final: str | None = None) -> AgentRun:
-        if session is not None:
-            session.append(
-                "run_finished", completed=completed, reason=reason, final=final
-            )
-        return AgentRun(
-            completed,
-            reason,
-            final,
-            tuple(events),
-            tuple(sorted(workspace.modified_files)),
-            session_id=session.session_id if session is not None else None,
-        )
 
     for step in range(1, limits.max_steps + 1):
         if (
             sum(len(message["content"]) for message in messages)
             > limits.max_context_chars
         ):
-            return finish(False, "context_limit")
+            return AgentRun(False, "context_limit", None, tuple(events))
 
         response = generate(messages)
         try:
@@ -145,16 +121,8 @@ def run_agent(
             events.append(event)
             if on_event is not None:
                 on_event(event)
-            if session is not None:
-                session.append(
-                    "tool_result",
-                    tool_call_id=None,
-                    tool=None,
-                    is_error=True,
-                    content=result,
-                )
             if invalid_actions >= limits.max_invalid_actions:
-                return finish(False, "invalid_action_limit")
+                return AgentRun(False, "invalid_action_limit", None, tuple(events))
             messages = _append_tool_result(messages, response, result)
             continue
 
@@ -163,7 +131,7 @@ def run_agent(
             events.append(event)
             if on_event is not None:
                 on_event(event)
-            return finish(True, "completed", action.final)
+            return AgentRun(True, "completed", action.final, tuple(events))
 
         signature = json.dumps(
             {"tool": action.tool, **action.arguments}, sort_keys=True
@@ -179,37 +147,13 @@ def run_agent(
             events.append(event)
             if on_event is not None:
                 on_event(event)
-            if session is not None:
-                session.append(
-                    "tool_result",
-                    tool_call_id=None,
-                    tool=action.tool,
-                    is_error=True,
-                    content=result,
-                )
-            return finish(False, "repeated_action_limit")
+            return AgentRun(False, "repeated_action_limit", None, tuple(events))
 
-        tool_call = None
-        if session is not None:
-            tool_call = session.append(
-                "tool_call", tool=action.tool, arguments=action.arguments
-            )
-        result = workspace.execute(
-            action, tool_call_id=tool_call.id if tool_call is not None else None
-        )
-        if session is not None:
-            session.append(
-                "tool_result",
-                tool_call_id=tool_call.id,
-                tool=action.tool,
-                arguments=action.arguments,
-                is_error=result.startswith("error:"),
-                content=result,
-            )
+        result = workspace.execute(action)
         event = AgentEvent(step, response, action, result)
         events.append(event)
         if on_event is not None:
             on_event(event)
         messages = _append_tool_result(messages, response, result)
 
-    return finish(False, "step_limit")
+    return AgentRun(False, "step_limit", None, tuple(events))

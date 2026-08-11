@@ -69,3 +69,23 @@
         height: 32px;
     }
 }
+
+/* Tables: fixed layout with wrapping cells at every viewport width so
+   checkpoint/API tables never overflow the page edge; wide cells wrap
+   instead of forcing horizontal scroll. */
+.table-wrapper table {
+    table-layout: fixed;
+    width: 100%;
+}
+.table-wrapper th,
+.table-wrapper td {
+    word-break: break-word;
+    white-space: normal;
+}
+
+/* Code blocks must contain their own overflow at every viewport width so
+   long lines never extend past the page edge. */
+pre {
+    overflow-x: auto;
+    max-width: 100%;
+}

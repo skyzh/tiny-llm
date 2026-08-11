@@ -2,35 +2,19 @@
 
 """Week 4, Day 1: the minimal generation surface (starter).
 
-Day 1 needs only the message types, generation statistics, the initial
-conversation messages, and a single-shot ``generate_response`` helper.
-``GenerationSession`` (identity, layer accounting, rewind) arrives with the
-Day 4 KV-checkpoint feature.
+Day 1 needs only the message types, the initial conversation messages, and
+a single-shot ``generate_response`` helper.
 
 Implement the bodies yourself; the reference solution lives in
 ``tiny_llm_ref``.
 """
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 
 Message = dict[str, str]
 Generate = Callable[[list[Message]], str]
-
-
-@dataclass(frozen=True)
-class GenerationStats:
-    """Token work performed by the most recent generation turn."""
-
-    input_tokens: int = 0
-    reused_tokens: int = 0
-    rewound_tokens: int = 0
-    prefilled_tokens: int = 0
-    output_tokens: int = 0
-    cold_start: bool = True
-    latency_seconds: float | None = None
 
 
 def initial_messages(task: str, system_prompt: str) -> list[Message]:
