@@ -166,6 +166,34 @@ class EffectReceipt:
         self.world_stamp.require_current(world)
         self.approval_epoch.require_current(approval)
 
+    def compact_rendering(self, max_chars: int = 240) -> str:
+        """Build the bounded model-visible rendering of this receipt.
+
+        Compaction never deletes canonical evidence: the receipt keeps the
+        full result and changed artifacts, while the model sees a compact
+        handle with the receipt ID, tool, exit state, and bounded head/tail.
+        Re-expansion is an explicit verified observation.
+        """
+
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int):
+            raise ValueError("max_chars must be an integer")
+        if max_chars < 80:
+            raise ValueError("max_chars must leave room for the receipt handle")
+        head = self.head or self.result[:80]
+        tail = self.tail or (self.result[-80:] if len(self.result) > 160 else "")
+        rendered = (
+            f"[tool result {self.tool_call_id[:8]} "
+            f"{self.exit_state} sha256:{self.receipt_id[:16]} "
+            f"bytes:{len(self.result.encode('utf-8'))}]\n"
+            f"head: {head[:40]!r}\n"
+            f"tail: {tail[:40]!r}\n"
+            f"expand via receipt {self.receipt_id}"
+        )
+        encoded = rendered.encode("utf-8")
+        if len(encoded) <= max_chars:
+            return rendered
+        return encoded[: max_chars - 3].decode("utf-8", errors="ignore") + "..."
+
 
 class ReceiptStore:
     """Append-only durable store of immutable effect receipts.
@@ -231,6 +259,27 @@ class ReceiptStore:
         if receipt is None:
             raise KeyError(f"receipt not found: {receipt_id}")
         return receipt
+
+    def expand(self, receipt_id: str, *, start: int = 0, end: int | None = None) -> str:
+        """Verify and re-expand a bounded byte range of one receipt's result.
+
+        Re-expansion is an explicit, verified observation: the stored receipt
+        is reconstructed from its canonical payload, its content address must
+        match, and the requested range must be within the result.  Any digest
+        or range mismatch fails closed instead of returning partial bytes.
+        """
+
+        receipt = self.require(receipt_id)
+        result = receipt.result
+        if isinstance(start, bool) or not isinstance(start, int) or start < 0:
+            raise ValueError("start must be a non-negative integer")
+        if end is None:
+            end = len(result)
+        if isinstance(end, bool) or not isinstance(end, int):
+            raise ValueError("end must be an integer")
+        if end < start or end > len(result):
+            raise ValueError("receipt byte range is outside the stored result")
+        return result[start:end]
 
     def __iter__(self):
         for receipt_id in self._order:

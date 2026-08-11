@@ -15,6 +15,8 @@ from .tiny_llm_base import (
     SessionStore,
     StaticHeldOutGrader,
     TaskPackage,
+    ToolPolicy,
+    Workspace,
     aggregate_metrics,
     evaluate_task,
 )
@@ -1054,3 +1056,159 @@ def test_evaluation_events_precede_hidden_grading_and_preserve_unknown_metrics(
     assert result.metrics.wall_time_seconds == 2.5
     assert result.metrics.terminal_reason == "completed"
     assert aggregate_metrics(reloaded, result.agent_run, 2.5) == result.metrics
+
+
+def test_task_4_receipt_rendering_is_bounded_and_identifies_evidence(tmp_path):
+    from .tiny_llm_base import EffectReceipt
+
+    workspace = Workspace(ToolPolicy(tmp_path))
+    receipt = EffectReceipt(
+        tool_call_id="a" * 32,
+        tool="run_command",
+        arguments={"argv": ["pdm", "run", "test"]},
+        exit_state="ok",
+        result="PASS 12 tests" * 200,
+        changed_artifacts=(),
+        world_stamp=workspace.snapshot_world(),
+        approval_epoch=workspace.approval_epoch,
+    )
+
+    rendering = receipt.compact_rendering()
+
+    assert len(rendering) <= 240
+    assert receipt.receipt_id[:16] in rendering
+    assert "sha256" in rendering
+    assert "ok" in rendering
+
+
+def test_task_4_receipt_store_expands_a_verified_range(tmp_path):
+    from .tiny_llm_base import EffectReceipt, ReceiptStore
+
+    workspace = Workspace(ToolPolicy(tmp_path))
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    body = "line one\nline two\nline three\n"
+    receipt = EffectReceipt(
+        tool_call_id="b" * 32,
+        tool="read_file",
+        arguments={"path": "notes.txt"},
+        exit_state="ok",
+        result=body,
+        changed_artifacts=(),
+        world_stamp=workspace.snapshot_world(),
+        approval_epoch=workspace.approval_epoch,
+    )
+    receipt_id = store.put(receipt)
+
+    assert store.expand(receipt_id) == body
+    assert store.expand(receipt_id, start=5, end=13) == body[5:13]
+    assert store.expand(receipt_id, start=len(body)) == ""
+
+
+def test_task_4_expansion_rejects_out_of_range_bytes(tmp_path):
+    from .tiny_llm_base import EffectReceipt, ReceiptStore
+
+    workspace = Workspace(ToolPolicy(tmp_path))
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    receipt = EffectReceipt(
+        tool_call_id="c" * 32,
+        tool="read_file",
+        arguments={"path": "notes.txt"},
+        exit_state="ok",
+        result="abc",
+        changed_artifacts=(),
+        world_stamp=workspace.snapshot_world(),
+        approval_epoch=workspace.approval_epoch,
+    )
+    receipt_id = store.put(receipt)
+
+    with pytest.raises(ValueError):
+        store.expand(receipt_id, start=-1)
+    with pytest.raises(ValueError):
+        store.expand(receipt_id, start=2, end=1)
+    with pytest.raises(ValueError):
+        store.expand(receipt_id, end=4)
+
+
+def test_task_4_compact_then_expand_recovers_the_omitted_middle(tmp_path):
+    from .tiny_llm_base import EffectReceipt, ReceiptStore
+
+    workspace = Workspace(ToolPolicy(tmp_path))
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    lines = [f"fact {number}: value {number}" for number in range(1, 501)]
+    body = "\n".join(lines) + "\n"
+    receipt = EffectReceipt(
+        tool_call_id="d" * 32,
+        tool="read_file",
+        arguments={"path": "log.txt"},
+        exit_state="ok",
+        result=body,
+        changed_artifacts=(),
+        world_stamp=workspace.snapshot_world(),
+        approval_epoch=workspace.approval_epoch,
+    )
+    receipt_id = store.put(receipt)
+    compact = receipt.compact_rendering()
+    assert len(compact) < len(body)
+
+    # Re-expand the exact range that compaction omitted and verify the
+    # canonical evidence survives byte-for-byte.
+    assert store.expand(receipt_id, start=0, end=100) == body[:100]
+    assert store.expand(receipt_id, start=len(body) - 100) == body[-100:]
+    assert store.expand(receipt_id) == body
+
+
+def test_task_4_tampered_receipt_store_fails_closed(tmp_path):
+    from .tiny_llm_base import EffectReceipt, ReceiptStore
+
+    workspace = Workspace(ToolPolicy(tmp_path))
+    store = ReceiptStore(tmp_path / "receipts.jsonl")
+    receipt = EffectReceipt(
+        tool_call_id="e" * 32,
+        tool="write_file",
+        arguments={"path": "x.txt", "content": "data"},
+        exit_state="ok",
+        result="wrote x.txt",
+        changed_artifacts=("x.txt",),
+        world_stamp=workspace.snapshot_world(),
+        approval_epoch=workspace.approval_epoch,
+    )
+    store.put(receipt)
+
+    path = tmp_path / "receipts.jsonl"
+    mutated = path.read_text(encoding="utf-8").replace(
+        '"result":"wrote x.txt"', '"result":"wrote x.txt hacked"'
+    )
+    path.write_text(mutated, encoding="utf-8")
+
+    # The store fails closed at load time: a tampered receipt cannot even
+    # enter the in-memory index.
+    with pytest.raises(ValueError, match="digest"):
+        ReceiptStore(path)
+
+
+def test_task_4_receipt_epoch_verification_fails_closed(tmp_path):
+    from .tiny_llm_base import (
+        ApprovalEpoch,
+        EffectReceipt,
+        EpochMismatch,
+        WorldStamp,
+    )
+
+    workspace = Workspace(ToolPolicy(tmp_path))
+    receipt = EffectReceipt(
+        tool_call_id="f" * 32,
+        tool="write_file",
+        arguments={"path": "x.txt", "content": "data"},
+        exit_state="ok",
+        result="wrote x.txt",
+        changed_artifacts=("x.txt",),
+        world_stamp=workspace.snapshot_world(),
+        approval_epoch=workspace.approval_epoch,
+    )
+    stale_world = WorldStamp(epoch=0, root=str(tmp_path.resolve()))
+    current_world = WorldStamp(epoch=1, root=str(tmp_path.resolve()))
+
+    with pytest.raises(EpochMismatch):
+        receipt.verify_epoch(current_world, receipt.approval_epoch)
+    with pytest.raises(EpochMismatch):
+        receipt.verify_epoch(stale_world, ApprovalEpoch(epoch=0, allow_writes=True))
