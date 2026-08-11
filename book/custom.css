@@ -70,21 +70,17 @@
     }
 }
 
-/* Narrow viewports: let table cells wrap instead of forcing horizontal
-   scroll, so checkpoint/API tables stay readable at ~390px. */
-@media (max-width: 480px) {
-    .table-wrapper {
-        overflow-x: visible;
-    }
-    .table-wrapper table {
-        table-layout: fixed;
-        width: 100%;
-    }
-    .table-wrapper th,
-    .table-wrapper td {
-        word-break: break-word;
-        white-space: normal;
-    }
+/* Tables: fixed layout with wrapping cells at every viewport width so
+   checkpoint/API tables never overflow the page edge; wide cells wrap
+   instead of forcing horizontal scroll. */
+.table-wrapper table {
+    table-layout: fixed;
+    width: 100%;
+}
+.table-wrapper th,
+.table-wrapper td {
+    word-break: break-word;
+    white-space: normal;
 }
 
 /* Code blocks must contain their own overflow at every viewport width so

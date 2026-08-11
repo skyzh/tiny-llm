@@ -164,8 +164,16 @@ def test_no_non_day1_modules_in_starter():
     )
 
 
-def _ann_text(arg) -> str:
-    return ast.unparse(arg.annotation) if arg.annotation else ""
+def _ann_text(node) -> str:
+    """Unparse an annotation for an arg (has .annotation) or a return node."""
+
+    if node is None:
+        return ""
+    ann = getattr(node, "annotation", None)
+    if ann is not None:
+        return ast.unparse(ann)
+    # node is already the annotation AST (e.g. node.returns)
+    return ast.unparse(node)
 
 
 def _default_text(node, index) -> str:
@@ -210,7 +218,8 @@ def _full_signature(node) -> tuple:
         for i, a in enumerate(args.kwonlyargs)
     )
     kwarg = (args.kwarg.arg, _ann_text(args.kwarg)) if args.kwarg else None
-    return (posonly, positional, vararg, kwonly, kwarg)
+    returns = _ann_text(node.returns) if node.returns else ""
+    return (posonly, positional, vararg, kwonly, kwarg, returns)
 
 
 def _callables(path: Path):
@@ -518,15 +527,24 @@ def _dataclasses(path: Path):
 
 
 def _public_constants(path: Path):
-    """Return top-level UPPER_CASE constant -> value text."""
+    """Return top-level UPPER_CASE constant -> (annotation, value) text.
+
+    Covers both plain assignments (``X = ...``) and annotated constants
+    (``X: type = ...``) such as ``TOOL_FIELDS``.
+    """
 
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    consts: dict[str, str] = {}
+    consts: dict[str, tuple[str, str]] = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id.isupper():
-                    consts[target.id] = ast.unparse(node.value)
+                    consts[target.id] = ("", ast.unparse(node.value))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id.isupper():
+                ann = ast.unparse(node.annotation) if node.annotation else ""
+                value = ast.unparse(node.value) if node.value is not None else "<none>"
+                consts[node.target.id] = (ann, value)
     return consts
 
 
@@ -552,8 +570,9 @@ def test_starter_public_constants_match_reference(module):
     refsol = _public_constants(REFSOL / f"{module}.py")
     for name, value in refsol.items():
         assert name in starter, f"starter missing constant {module}.{name}"
-        # TOOL_CATALOG_HASH is derived from the catalog: compare the stable
-        # starter placeholder rule instead of an exact hash value.
+        # TOOL_CATALOG_HASH is derived from the catalog; the starter declares
+        # the schema via TOOL_FIELDS and the reference derives the hash, so
+        # compare the TOOL_FIELDS schema (above) rather than the derived hash.
         if name == "TOOL_CATALOG_HASH":
             continue
         assert starter[name] == value, (
@@ -562,48 +581,73 @@ def test_starter_public_constants_match_reference(module):
         )
 
 
-# --- Mutation controls: prove each parity dimension fails when broken. ---
+# --- End-to-end mutation controls: mutate a real file, then prove the
+# actual guard path rejects it. ---
 
 MUTATION_DIMENSIONS = (
     ("parameter order", "def f(a, b):\n    pass\n", "def f(b, a):\n    pass\n"),
     ("parameter kind", "def f(*, a):\n    pass\n", "def f(a):\n    pass\n"),
     ("annotation", "def f(a: int):\n    pass\n", "def f(a: str):\n    pass\n"),
     ("default value", "def f(a=1):\n    pass\n", "def f(a=2):\n    pass\n"),
+    ("return annotation", "def f() -> int:\n    pass\n", "def f() -> str:\n    pass\n"),
     ("dataclass field", "class C:\n    a: int = 1\n", "class C:\n    a: int = 2\n"),
     ("public constant", "X = 1\n", "X = 2\n"),
+    ("annotated constant", "X: int = 1\n", "X: int = 2\n"),
 )
+
+
+def _write_and_bind(tempdir, text, kind):
+    """Write one mutation file and bind it with the real guard helper."""
+
+    path = Path(tempdir) / "module.py"
+    path.write_text(text, encoding="utf-8")
+    if kind == "callable":
+        return _callables(path)
+    if kind == "dataclass":
+        return _dataclasses(path)
+    if kind == "constant":
+        return _public_constants(path)
+    raise AssertionError(f"unknown mutation kind {kind}")
 
 
 @pytest.mark.parametrize(
     ("dimension", "good", "bad"),
-    MUTATION_DIMENSIONS,
+    [d for d in MUTATION_DIMENSIONS],
 )
 def test_parity_mutation_controls_are_catchable(dimension, good, bad):
-    """Each signature/field/constant mutation must change the binding."""
+    """Each mutation must change the real guard binding."""
+
+    import tempfile
+
+    if dimension in {
+        "parameter order",
+        "parameter kind",
+        "annotation",
+        "default value",
+        "return annotation",
+    }:
+        kind = "callable"
+    elif dimension == "dataclass field":
+        kind = "dataclass"
+    else:
+        kind = "constant"
+    with tempfile.TemporaryDirectory() as d:
+        good_binding = _write_and_bind(d, good, kind)
+        bad_binding = _write_and_bind(d, bad, kind)
+        assert good_binding != bad_binding, (
+            f"mutation control failed (not caught): {dimension}"
+        )
+
+
+def test_mutation_synthetic_and_end_to_end_agree():
+    """The end-to-end binding must match what the real tests compare."""
 
     import tempfile
 
     with tempfile.TemporaryDirectory() as d:
-        p = Path(d)
-        (p / "good.py").write_text(good, encoding="utf-8")
-        (p / "bad.py").write_text(bad, encoding="utf-8")
-        if dimension in {
-            "parameter order",
-            "parameter kind",
-            "annotation",
-            "default value",
-        }:
-            assert _callables(p / "good.py") != _callables(p / "bad.py"), (
-                f"mutation control failed: {dimension}"
-            )
-        elif dimension == "dataclass field":
-            assert _dataclasses(p / "good.py") != _dataclasses(p / "bad.py"), (
-                f"mutation control failed: {dimension}"
-            )
-        elif dimension == "public constant":
-            assert _public_constants(p / "good.py") != _public_constants(
-                p / "bad.py"
-            ), f"mutation control failed: {dimension}"
+        a = _write_and_bind(d, "def f(a: int) -> str:\n    pass\n", "callable")
+        b = _write_and_bind(d, "def f(a: int) -> str:\n    pass\n", "callable")
+        assert a == b
 
 
 # --- Killing controls for Sage's fail-open classes: each mutation must fail. ---
@@ -678,3 +722,42 @@ def test_mutation_restored_checkpoint_prose_is_caught():
     )
     lower = src.lower()
     assert "checkpoint" in lower  # the prose promise is present again
+
+
+def _book_required_api_names():
+    """Parse the Day-1 book checkpoint table for required starter names.
+
+    Returns the set of backticked identifiers in the ``File | Function or
+    type`` checkpoint table of week4-01-agent-loop.md.
+    """
+
+    import re
+
+    book = ROOT / "book" / "src" / "week4-01-agent-loop.md"
+    text = book.read_text(encoding="utf-8")
+    # Only the checkpoint table region (between the first table header and
+    # the next heading).
+    start = text.find("| File |")
+    end = text.find("\n##", start)
+    table = text[start:end] if start != -1 else ""
+    names = set()
+    for match in re.finditer(r"`([A-Za-z_][A-Za-z_0-9]*)(?:\(\))?`", table):
+        names.add(match.group(1))
+    return names
+
+
+def test_book_day1_required_api_is_exported_by_starter():
+    """Every Day-1-required name in the book must exist in the starter.
+
+    This is an expected-dependency signal: the book currently requires
+    ``GenerationStats`` (a Day-4 concept), which the starter no longer
+    exports, so this test FAILS until Sentinel's minimal material successor
+    removes the stale requirement.  Once the book is fixed, this must pass.
+    """
+
+    import tiny_llm.agent as starter
+
+    required = _book_required_api_names()
+    assert required, "no Day-1 required API names found in the book"
+    missing = sorted(name for name in required if name not in starter.__all__)
+    assert not missing, f"book requires starter names that are not exported: {missing}"
