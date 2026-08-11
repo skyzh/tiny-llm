@@ -175,6 +175,24 @@ class SessionLog:
             return ()
         return tuple(item for item in snapshot if isinstance(item, dict))
 
+    def active_path_events(self) -> tuple[SessionEvent, ...]:
+        """Deterministically reconstruct the model-visible active path.
+
+        The append-only ``id``/``parentId`` tree keeps every branch's full
+        history, so the active path is exactly this session's own event
+        sequence: events after ``branch_completed`` are the leaf's private
+        tail, and the copied prefix before it is the inherited path.  This is
+        the Pi-inspired deterministic reconstruction used by Day 4: the same
+        session always yields the same path, and a branch never rewrites its
+        ancestors.
+        """
+
+        events = self.events
+        completed = [event for event in events if event.type == "branch_completed"]
+        if len(completed) > 1:
+            raise ValueError("session contains multiple branch completion markers")
+        return events
+
     def append(
         self, event_type: str, *, parent_id: str | None = None, **data: Any
     ) -> SessionEvent:
@@ -1085,6 +1103,79 @@ class SessionStore:
             copied_event_count=len(copied_ids),
         )
         return branch
+
+    def list_session_ids(self) -> tuple[str, ...]:
+        """Return every published session ID in the tree, sorted deterministically."""
+
+        directory = self._open_directory(create=False)
+        try:
+            names: list[str] = []
+            for name in os.listdir(directory):
+                path = Path(name)
+                if path.suffix != ".jsonl" or not _SESSION_ID.fullmatch(path.stem):
+                    continue
+                status = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                if stat.S_ISREG(status.st_mode):
+                    names.append(path.stem)
+        finally:
+            os.close(directory)
+        return tuple(sorted(names))
+
+    def parent_of(self, session_id: str) -> tuple[str, str] | None:
+        """Return ``(parent_session_id, at_event_id)`` for one branch session.
+
+        The root session of the tree returns ``None``.  The answer is derived
+        only from the durable ``session_started`` metadata, so reconstruction
+        never depends on in-memory state.
+        """
+
+        log = self.load(session_id, recover=False)
+        first = log.events[0]
+        parent_session = first.data.get("branch_parent_session_id")
+        parent_event = first.data.get("branch_parent_event_id")
+        if parent_session is None or parent_event is None:
+            return None
+        if (
+            not isinstance(parent_session, str)
+            or not _SESSION_ID.fullmatch(parent_session)
+            or not isinstance(parent_event, str)
+            or not _SESSION_ID.fullmatch(parent_event)
+        ):
+            raise ValueError("session branch metadata is invalid")
+        return (parent_session, parent_event)
+
+    def active_path(self, session_id: str) -> tuple[str, ...]:
+        """Reconstruct the deterministic root-to-leaf session path.
+
+        Walk ``parent_of`` from the given leaf back to the root, then return
+        the path root-first.  Any cycle or dangling parent fails closed; this
+        is the Pi-inspired ``id``/``parentId`` tree navigation used by
+        Day 4's deterministic active-path reconstruction.
+        """
+
+        path: list[str] = []
+        seen: set[str] = set()
+        current: str | None = session_id
+        while current is not None:
+            if not _SESSION_ID.fullmatch(current):
+                raise ValueError("invalid session ID in active path")
+            if current in seen:
+                raise ValueError("session tree contains a cycle")
+            seen.add(current)
+            path.append(current)
+            parent = self.parent_of(current)
+            current = parent[0] if parent is not None else None
+        return tuple(reversed(path))
+
+    def children_of(self, session_id: str) -> tuple[str, ...]:
+        """Return direct children of one session, sorted by session ID."""
+
+        children = []
+        for candidate in self.list_session_ids():
+            parent = self.parent_of(candidate)
+            if parent is not None and parent[0] == session_id:
+                children.append(candidate)
+        return tuple(sorted(children))
 
     @staticmethod
     def _validate_branch_side_effect_state(
