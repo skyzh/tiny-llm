@@ -8,15 +8,24 @@ what belongs to each day. Curriculum prose (book) is not part of this stack.
 
 | Day | Theme | Features (PRs) | Modules |
 |---|---|---|---|
-| 1 | Validated agent loop + tool protocol | feat1 | `protocol.py`, `loop.py` |
-| 2 | Effect receipts (durable evidence) | feat2 | `receipts.py`, `workspace.py` wiring |
+| 1 | Validated agent loop + tool protocol | feat1 | `protocol.py`, `loop.py`, `generation.py` (minimal) |
+| 2 | Authorize effects + durable receipts | feat2 | `workspace.py` (simplified), `receipts.py` |
 | 3 | Session tree (event-level id/parentId) | feat3 | `session.py` |
-| 4 | KV checkpoint/resume + sequential rewind | feat4+5 | `checkpoint.py`, `branch.py`, `generation.py` |
+| 4 | KV checkpoint/resume + sequential rewind | feat4+5 | `checkpoint.py`, `branch.py`, `generation.py` (session) |
 | 5 | Receipt-backed compaction | feat6 | `compaction.py`, `context.py` |
 | 6 | Steering + public status + exactly-once reconcile | feat7+8 | `control.py`, `status.py`, `reconcile.py` |
 | 7 | Equivalence harness | feat9 | `harness.py`, `evaluation.py` |
 
 Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.md`.
+
+## Design note: simplified workspace (Day 2)
+
+The old 7-day workspace carried a write-ahead mutation journal and undo
+machinery (old Day 6 content). The new design drops that machinery: the
+workspace keeps the authorization core (bounds, protected paths, observed
+digests, approvals, atomic writes) plus effect receipts; crash/effect
+recovery is taught by Day 6's exactly-once reconcile instead. This keeps each
+day's surface small and matches the "start simple, extend" arc.
 
 ## Stack shape
 
