@@ -43,13 +43,15 @@ def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
 
     if available_tools is None:
         return hashlib.sha256(b"all-tools").hexdigest()
+    unknown = sorted(tool for tool in available_tools if tool not in TOOL_FIELDS)
+    if unknown:
+        raise AgentError(f"unknown enabled tool: {unknown[0]}")
     catalog = {
         tool: {
             "required": sorted(TOOL_FIELDS[tool][0]),
             "optional": sorted(TOOL_FIELDS[tool][1]),
         }
         for tool in sorted(available_tools)
-        if tool in TOOL_FIELDS
     }
     payload = json.dumps(catalog, ensure_ascii=True, sort_keys=True).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
@@ -120,32 +122,32 @@ def parse_action(
 
 
 def build_system_prompt(workspace: Workspace) -> str:
-    """Week 4, Day 2: describe only the tools authorized for this run."""
+    """Week 4, Day 1: describe only the tools authorized for this run."""
 
     lines = [
         "You are a coding agent. Inspect the workspace before editing it.",
         "Reply with exactly one JSON object and no markdown.",
         'Finish with: {"final":"brief summary"}',
         "Available actions:",
-        '{"tool":"list_files","path":"."}',
-        '{"tool":"read_file","path":"README.md"}',
     ]
-    if workspace.policy.allow_writes:
-        lines += [
-            '{"tool":"write_file","path":"hello.py","content":"..."}',
-            '{"tool":"edit_file","path":"hello.py","old":"...","new":"..."}',
-            "Read an existing file before changing it.",
-        ]
-    else:
-        lines.append("This run is read-only. Do not request file changes.")
+    tools = workspace.available_tools
+    if "list_files" in tools:
+        lines.append('{"tool":"list_files","path":"."}')
+    if "read_file" in tools:
+        lines.append('{"tool":"read_file","path":"README.md"}')
+    if "write_file" in tools:
+        lines.append('{"tool":"write_file","path":"hello.py","content":"..."}')
+    if "edit_file" in tools:
+        lines.append('{"tool":"edit_file","path":"hello.py","old":"...","new":"..."}')
+    if "run_command" in tools:
+        lines.append('Use: {"tool":"run_command","argv":["exact","arguments"]}')
+    if "write_file" in tools or "edit_file" in tools:
+        lines.append("Read an existing file before changing it.")
     if workspace.policy.allowed_commands:
         lines.append("The operator allowed only these exact command arrays:")
         lines += [
             json.dumps(list(command)) for command in workspace.policy.allowed_commands
         ]
-        lines.append('Use: {"tool":"run_command","argv":["exact","arguments"]}')
-    else:
-        lines.append("Command execution is disabled.")
     lines += [
         "Paths must be relative to the workspace.",
         "Keep changes small and never invent file contents.",

@@ -150,3 +150,95 @@ def test_task_7_agent_stops_repeated_actions():
 
     assert not result.completed
     assert result.reason == "repeated_action_limit"
+
+
+def test_task_8_observation_propagation(tmp_path):
+    """Every tool observation is fed back to the model as a Tool result."""
+
+    workspace = FakeWorkspace("/tmp")
+    seen = []
+
+    def generate(messages):
+        seen.append(messages)
+        if len(seen) == 1:
+            return '{"tool":"read_file","path":"README.md"}'
+        return '{"final":"done"}'
+
+    result = run_agent("inspect", generate, workspace)
+
+    assert result.completed
+    assert "Tool result:" in seen[1][-1]["content"]
+
+
+def test_task_8_known_but_disabled_tool_is_rejected(tmp_path):
+    """A known tool that is disabled for this run must be rejected."""
+
+    workspace = FakeWorkspace("/tmp")
+    responses_queue = iter(
+        [
+            '{"tool":"write_file","path":"x","content":"y"}',
+            '{"final":"recovered"}',
+        ]
+    )
+
+    result = run_agent("inspect", lambda messages: next(responses_queue), workspace)
+
+    assert result.completed
+    assert workspace.executed == []
+    assert result.events[0].result.startswith("error:")
+    assert "not enabled" in result.events[0].result
+
+
+def test_task_9_positive_limit_fails_closed(tmp_path):
+    """AgentLimits rejects non-positive budgets that disable stopping."""
+
+    from .tiny_llm_base import AgentLimits
+
+    for kwargs in (
+        {"max_steps": 0},
+        {"max_context_chars": 0},
+        {"max_invalid_actions": 0},
+        {"max_identical_actions": 0},
+    ):
+        try:
+            AgentLimits(**kwargs)
+        except ValueError as error:
+            assert "positive" in str(error)
+        else:
+            assert False, f"expected AgentLimits({kwargs}) to be rejected"
+
+
+def test_task_9_context_limit_stops_the_loop(tmp_path):
+    """An oversized context stops the loop with a context_limit reason."""
+
+    from .tiny_llm_base import AgentLimits
+
+    workspace = FakeWorkspace("/tmp")
+
+    result = run_agent(
+        "inspect",
+        lambda _messages: '{"tool":"read_file","path":"README.md"}',
+        workspace,
+        AgentLimits(max_steps=3, max_context_chars=10),
+    )
+
+    assert not result.completed
+    assert result.reason == "context_limit"
+
+
+def test_task_9_invalid_action_limit_stops_the_loop(tmp_path):
+    """Repeated invalid JSON stops the loop with invalid_action_limit."""
+
+    from .tiny_llm_base import AgentLimits
+
+    workspace = FakeWorkspace("/tmp")
+
+    result = run_agent(
+        "inspect",
+        lambda _messages: "not json",
+        workspace,
+        AgentLimits(max_steps=5, max_invalid_actions=2),
+    )
+
+    assert not result.completed
+    assert result.reason == "invalid_action_limit"

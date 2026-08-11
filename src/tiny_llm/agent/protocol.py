@@ -15,14 +15,14 @@ class AgentError(ValueError):
 
 @dataclass(frozen=True)
 class FinalAction:
-    """Week 4, Day 2: a model response that finishes the task."""
+    """Week 4, Day 1: a model response that finishes the task."""
 
     final: str
 
 
 @dataclass(frozen=True)
 class ToolAction:
-    """Week 4, Day 2: one validated tool request from the model."""
+    """Week 4, Day 1: one validated tool request from the model."""
 
     tool: str
     arguments: dict[str, Any]
@@ -57,12 +57,12 @@ def parse_action(
     response: str,
     available_tools: frozenset[str] | None = None,
 ) -> AgentAction:
-    """Week 4, Day 2: strictly parse and validate exactly one JSON action."""
+    """Week 4, Day 1: strictly parse and validate exactly one JSON action."""
 
     pass
 
 
 def build_system_prompt(workspace: Workspace) -> str:
-    """Week 4, Day 2: describe only the tools authorized for this run."""
+    """Week 4, Day 1: describe only the tools authorized for this run."""
 
     pass

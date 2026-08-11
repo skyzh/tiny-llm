@@ -162,3 +162,120 @@ def test_no_non_day1_modules_in_starter():
     assert present <= allowed, (
         f"starter contains non-Day-1 modules: {sorted(present - allowed)}"
     )
+
+
+def _signatures(path: Path):
+    """Return public callable -> (arg names, defaults present)."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    sigs: dict[str, tuple[tuple[str, ...], int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) and not node.name.startswith("_"):
+            args = node.args
+            names = [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs]
+            defaults = len(args.defaults) + len(args.kw_defaults or [])
+            sigs[node.name] = (tuple(names), defaults)
+    return sigs
+
+
+@pytest.mark.parametrize("module", MODULES)
+def test_starter_public_signatures_match_reference(module):
+    """Public callables must have identical argument names and default counts."""
+
+    starter = _signatures(STARTER / f"{module}.py")
+    refsol = _signatures(REFSOL / f"{module}.py")
+    for name in sorted(refsol):
+        assert name in starter, f"starter missing callable {module}.{name}"
+        assert starter[name] == refsol[name], (
+            f"signature drift {module}.{name}: "
+            f"starter {starter[name]} vs reference {refsol[name]}"
+        )
+
+
+@pytest.mark.parametrize("module", MODULES)
+def test_starter_does_not_import_reference(module):
+    """The starter must never import the reference solution."""
+
+    tree = ast.parse((STARTER / f"{module}.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert "tiny_llm_ref" not in (node.module or ""), (
+                f"starter {module} imports the reference solution"
+            )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith("tiny_llm_ref"), (
+                    f"starter {module} imports the reference solution"
+                )
+
+
+def test_starter_package_does_not_import_reference():
+    """The starter package must never import tiny_llm_ref."""
+
+    for path in STARTER.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert "tiny_llm_ref" not in (node.module or ""), (
+                    f"starter {path.name} imports the reference solution"
+                )
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.startswith("tiny_llm_ref"), (
+                        f"starter {path.name} imports the reference solution"
+                    )
+
+
+def test_day1_loop_has_no_session_contract():
+    """Day 1 must not expose or record durable sessions (Day 3 feature)."""
+
+    for path in (STARTER / "loop.py", REFSOL / "loop.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "run_agent":
+                args = [a.arg for a in node.args.args + node.args.kwonlyargs]
+                assert "session" not in args, (
+                    f"{path.name} run_agent exposes a session parameter on Day 1"
+                )
+        source = path.read_text(encoding="utf-8")
+        assert "session.append" not in source, (
+            f"{path.name} records durable events on Day 1"
+        )
+
+
+def _docstrings(path: Path) -> dict[str, str]:
+    """Return public callable/class name -> its first docstring."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docs: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.FunctionDef, ast.ClassDef)
+        ) and not node.name.startswith("_"):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                docs[node.name] = body[0].value.value
+    return docs
+
+
+def test_day1_starter_labels_match_staging():
+    """Day-1-visible labels must not advertise later-day availability."""
+
+    protocol_docs = _docstrings(STARTER / "protocol.py")
+    for name in ("FinalAction", "ToolAction", "parse_action", "build_system_prompt"):
+        doc = protocol_docs.get(name, "")
+        assert "Day 1" in doc, f"{name} is not labeled Day 1 in the starter"
+    loop_docs = _docstrings(STARTER / "loop.py")
+    assert "Day 3" not in loop_docs.get("run_agent", ""), (
+        "Day-1 starter loop advertises Day 3 behavior"
+    )
+    assert "Day 3" not in (STARTER / "loop.py").read_text(encoding="utf-8"), (
+        "Day-1 starter loop module advertises Day 3 behavior"
+    )
