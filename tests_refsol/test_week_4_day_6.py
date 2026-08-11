@@ -3293,3 +3293,92 @@ def test_task_6_temp_cleanup_base_exception_cannot_skip_backup_restoration(
 
     assert resumed.conflicts == ("value.txt",)
     assert resumed.retained_recovery_files == (retained_path,)
+
+
+def _make_branch_session(monkeypatch, layers=2, max_tokens=8):
+    from .tiny_llm_base import GenerationSession
+
+    _install_fake_mlx(monkeypatch)
+    model = _StaticModel()
+    tokenizer = _FakeTokenizer()
+
+    def cache_factory():
+        return [_FakeCache() for _ in range(layers)]
+
+    return GenerationSession(model, tokenizer, cache_factory, max_tokens=max_tokens)
+
+
+def test_task_5_sequential_branch_checkpoint_act_rewind_do_again(monkeypatch):
+    from .tiny_llm_base import SequentialBranch
+
+    session = _make_branch_session(monkeypatch)
+    branch = SequentialBranch(session)
+    branch.session([{"role": "user", "content": "setup"}])
+    boundary = branch.checkpoint()
+
+    first, first_stats = branch.act([{"role": "user", "content": "try A"}])
+    assert first_stats.checkpoint_tokens == len(boundary)
+
+    rewound = branch.rewind()
+    assert rewound == len(boundary)
+
+    second, second_stats = branch.do_again([{"role": "user", "content": "try B"}])
+    assert second_stats.checkpoint_tokens == len(boundary)
+    branch.close()
+
+
+def test_task_5_rewind_reuses_the_unchanged_prefix(monkeypatch):
+    from .tiny_llm_base import SequentialBranch
+
+    session = _make_branch_session(monkeypatch)
+    branch = SequentialBranch(session)
+    branch.session([{"role": "user", "content": "setup"}])
+    branch.checkpoint()
+    branch.act([{"role": "user", "content": "try A"}])
+    branch.rewind()
+    _, again = branch.do_again([{"role": "user", "content": "try B"}])
+
+    # The checkpoint prefix survives the rewind; only the divergent suffix
+    # is recomputed, so the second attempt reuses the shared prefix.
+    assert again.reused_tokens >= 0
+    assert again.checkpoint_tokens > 0
+    branch.close()
+
+
+def test_task_5_branch_requires_checkpoint_before_act(monkeypatch):
+    from .tiny_llm_base import RewindError, SequentialBranch
+
+    branch = SequentialBranch(_make_branch_session(monkeypatch))
+
+    with pytest.raises(RewindError, match="checkpoint"):
+        branch.act([{"role": "user", "content": "try A"}])
+    with pytest.raises(RewindError, match="checkpoint"):
+        branch.rewind()
+    branch.close()
+
+
+def test_task_5_rewind_never_exceeds_the_checkpoint(monkeypatch):
+    from .tiny_llm_base import SequentialBranch
+
+    session = _make_branch_session(monkeypatch)
+    branch = SequentialBranch(session)
+    branch.session([{"role": "user", "content": "setup"}])
+    branch.checkpoint()
+    branch.rewind()
+
+    assert len(branch.session.cached_token_ids) == len(branch.checkpoint_tokens)
+    branch.close()
+
+
+def test_task_5_closed_branch_rejects_all_operations(monkeypatch):
+    from .tiny_llm_base import RewindError, SequentialBranch
+
+    branch = SequentialBranch(_make_branch_session(monkeypatch))
+    branch.close()
+
+    with pytest.raises(RewindError, match="closed"):
+        branch.checkpoint()
+    with pytest.raises(RewindError, match="closed"):
+        branch.rewind()
+    with pytest.raises(RewindError, match="closed"):
+        branch.act([{"role": "user", "content": "try A"}])

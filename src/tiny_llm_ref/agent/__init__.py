@@ -25,6 +25,7 @@ from .evaluation import (
     aggregate_metrics,
     evaluate_task,
 )
+from .branch import BranchStats, RewindError, SequentialBranch
 from .checkpoint import (
     CacheManifest,
     ManifestError,
@@ -68,6 +69,7 @@ __all__ = [
     "AgentRun",
     "AgentInterrupted",
     "CancellationToken",
+    "BranchStats",
     "CacheManifest",
     "CandidateSnapshot",
     "CheckResult",
@@ -90,7 +92,9 @@ __all__ = [
     "EffectReceipt",
     "PlannedRestore",
     "ReceiptStore",
+    "RewindError",
     "RecoveryResult",
+    "SequentialBranch",
     "SessionEvent",
     "SessionLog",
     "SessionStore",

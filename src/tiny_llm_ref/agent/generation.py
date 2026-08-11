@@ -295,6 +295,31 @@ class GenerationSession:
         )
         return self._tokenizer.decode(output)
 
+    def rewind_to(self, token_count: int) -> int:
+        """Discard the cache tail so exactly ``token_count`` tokens remain.
+
+        The unchanged prefix stays cached and is reused by the next call;
+        only the divergent suffix is dropped.  Rewinding the cache never
+        rewinds the world: external effects must be reconciled separately.
+        """
+
+        if self._closed:
+            raise RuntimeError("generation session is closed")
+        if isinstance(token_count, bool) or not isinstance(token_count, int):
+            raise ValueError("token_count must be an integer")
+        if token_count < 0:
+            raise ValueError("token_count must be non-negative")
+        if not self._caches:
+            raise ValueError("cannot rewind a cold cache")
+        current = self._validated_offset(len(self._cached_token_ids))
+        if token_count > current:
+            raise ValueError("cannot rewind past the cached prefix")
+        if token_count == current:
+            return current
+        self._rewind(current - token_count, current)
+        self._cached_token_ids = list(self._cached_token_ids[:token_count])
+        return token_count
+
     def close(self) -> None:
         """Release every layer cache. Closing more than once is safe."""
 
