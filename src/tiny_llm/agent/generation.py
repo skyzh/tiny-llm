@@ -4,8 +4,6 @@
 
 Day 1 needs only the message types, generation statistics, the initial
 conversation messages, and a single-shot ``generate_response`` helper.
-``GenerationSession`` (identity, layer accounting, rewind) arrives with the
-Day 4 KV-checkpoint feature.
 
 Implement the bodies yourself; the reference solution lives in
 ``tiny_llm_ref``.

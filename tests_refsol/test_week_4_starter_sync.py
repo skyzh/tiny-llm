@@ -226,6 +226,13 @@ def test_starter_package_does_not_import_reference():
                     assert not alias.name.startswith("tiny_llm_ref"), (
                         f"starter {path.name} imports the reference solution"
                     )
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in {"__import__", "import_module", "importlib"}:
+                    for arg in node.args:
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                            assert "tiny_llm_ref" not in arg.value, (
+                                f"starter {path.name} dynamically imports the reference"
+                            )
 
 
 def test_day1_loop_has_no_session_contract():
@@ -279,3 +286,48 @@ def test_day1_starter_labels_match_staging():
     assert "Day 3" not in (STARTER / "loop.py").read_text(encoding="utf-8"), (
         "Day-1 starter loop module advertises Day 3 behavior"
     )
+
+
+@pytest.mark.parametrize("module", MODULES)
+def test_starter_private_helpers_are_solution_free(module):
+    """Private helper bodies must also be pass/TODO-only (no solution logic)."""
+
+    tree = ast.parse((STARTER / f"{module}.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) and node.name.startswith("_"):
+            assert _is_solution_free(node.body), (
+                f"starter {module}.{node.name} contains solution logic"
+            )
+
+
+def test_day1_build_system_prompt_advertises_only_enabled_tools():
+    """The Day-1 prompt must list exactly the enabled tools (no hardcoding)."""
+
+    from types import SimpleNamespace
+
+    from .tiny_llm_base import build_system_prompt
+
+    ws = SimpleNamespace(
+        policy=SimpleNamespace(allow_writes=False, allowed_commands=()),
+        available_tools=frozenset({"read_file"}),
+    )
+    prompt = build_system_prompt(ws)
+    assert '"tool":"read_file"' in prompt
+    assert '"tool":"list_files"' not in prompt
+    assert '"tool":"write_file"' not in prompt
+    assert '"tool":"run_command"' not in prompt
+
+
+def test_day1_tool_catalog_hash_binds_enabled_sets_and_rejects_unknowns():
+    """Catalog hashing must distinguish sets, canonicalize None, reject unknowns."""
+
+    from .tiny_llm_base import AgentError, TOOL_CATALOG_HASH, tool_catalog_hash
+
+    assert tool_catalog_hash(None) == TOOL_CATALOG_HASH
+    read_only = tool_catalog_hash(frozenset({"read_file"}))
+    with_tools = tool_catalog_hash(frozenset({"read_file", "list_files"}))
+    assert read_only != with_tools
+    with pytest.raises(AgentError):
+        tool_catalog_hash(frozenset({"read_file", "not_a_tool"}))

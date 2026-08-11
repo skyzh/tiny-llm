@@ -18,16 +18,10 @@ class FakeWorkspace:
             root=root, allow_writes=False, allowed_commands=()
         )
         self.available_tools = frozenset({"read_file"})
-        self.cancellation = None
-        self.session_log = None
         self.modified_files = set()
-        self.uncertain_modified_files = set()
-        self.retained_recovery_files = set()
-        self.command_side_effects_untracked = False
-        self.command_cleanup_incomplete = False
         self.executed = []
 
-    def execute(self, action, *, tool_call_id=None):
+    def execute(self, action):
         self.executed.append(action)
         return "README contents"
 

@@ -17,14 +17,14 @@ class AgentError(ValueError):
 
 @dataclass(frozen=True)
 class FinalAction:
-    """Week 4, Day 2: a model response that finishes the task."""
+    """Week 4, Day 1: a model response that finishes the task."""
 
     final: str
 
 
 @dataclass(frozen=True)
 class ToolAction:
-    """Week 4, Day 2: one validated tool request from the model."""
+    """Week 4, Day 1: one validated tool request from the model."""
 
     tool: str
     arguments: dict[str, Any]
@@ -42,7 +42,9 @@ def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
     """
 
     if available_tools is None:
-        return hashlib.sha256(b"all-tools").hexdigest()
+        # None means "all tools at parse time": canonicalize to the explicit
+        # full-schema catalog so the hash is stable and comparable.
+        available_tools = frozenset(TOOL_FIELDS)
     unknown = sorted(tool for tool in available_tools if tool not in TOOL_FIELDS)
     if unknown:
         raise AgentError(f"unknown enabled tool: {unknown[0]}")
@@ -73,7 +75,7 @@ def parse_action(
     response: str,
     available_tools: frozenset[str] | None = None,
 ) -> AgentAction:
-    """Week 4, Day 2: strictly parse and validate exactly one JSON action."""
+    """Week 4, Day 1: strictly parse and validate exactly one JSON action."""
 
     try:
         raw = json.loads(response)
