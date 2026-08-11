@@ -11,6 +11,8 @@ from .protocol import (
     parse_action,
     tool_catalog_hash,
 )
+from .receipts import EffectReceipt, ReceiptStore
+from .workspace import ToolPolicy, Workspace
 
 
 __all__ = [
@@ -18,10 +20,14 @@ __all__ = [
     "AgentEvent",
     "AgentLimits",
     "AgentRun",
+    "EffectReceipt",
     "FinalAction",
     "GenerationStats",
+    "ReceiptStore",
     "TOOL_CATALOG_HASH",
     "ToolAction",
+    "ToolPolicy",
+    "Workspace",
     "build_system_prompt",
     "generate_response",
     "initial_messages",
