@@ -236,6 +236,37 @@ def test_task_3_advertised_unicode_range_is_aligned_and_runnable(tmp_path):
     assert payload["data"] == "€" * 170
 
 
+@pytest.mark.parametrize("max_range_bytes", [1, 2, 3])
+def test_task_3_range_cap_must_hold_one_max_width_utf8_character(
+    tmp_path, max_range_bytes
+):
+    with pytest.raises(ValueError, match="max_range_bytes must be at least 4"):
+        _workspace(tmp_path, "🙂" * 130, max_range_bytes=max_range_bytes)
+
+
+def test_task_3_four_byte_range_cap_is_advertised_and_runnable(tmp_path):
+    bounded, _ = _workspace(tmp_path, "🙂" * 130, max_range_bytes=4)
+    first = bounded.execute(ToolAction("read_file", {"path": "build.log"}))
+    identity = _payload(first, "Tool result externalized:\n")
+
+    advertised = identity["range_request"]["path"]
+    assert advertised.endswith("/bytes/0-4")
+    result = bounded.execute(ToolAction("read_file", {"path": advertised}))
+    payload = _payload(result, "Artifact range:\n")
+    assert payload["start"] == 0 and payload["end"] == 4
+    assert payload["byte_count"] == 4 and payload["data"] == "🙂"
+
+
+def test_task_3_four_byte_cap_still_rejects_a_supplied_misaligned_range(tmp_path):
+    bounded, artifacts = _workspace(tmp_path, "🙂" * 130, max_range_bytes=4)
+    record = artifacts.put("🙂" * 130)
+    misaligned = artifacts.range_path(record.artifact_id, 0, 3)
+
+    result = bounded.execute(ToolAction("read_file", {"path": misaligned}))
+
+    assert result == "error: artifact range does not align to UTF-8 text"
+
+
 @pytest.mark.parametrize(
     ("path", "message"),
     [

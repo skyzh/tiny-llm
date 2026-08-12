@@ -139,6 +139,8 @@ class BoundedEvidenceWorkspace:
             raise ValueError("evidence limits must be positive integers")
         if self.max_inline_bytes < 512:
             raise ValueError("max_inline_bytes must be at least 512")
+        if self.max_range_bytes < 4:
+            raise ValueError("max_range_bytes must be at least 4")
         if self.preview_bytes > self.max_inline_bytes:
             raise ValueError("preview_bytes must not exceed max_inline_bytes")
 

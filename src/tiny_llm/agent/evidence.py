@@ -60,7 +60,8 @@ class BoundedEvidenceWorkspace:
     max_range_bytes: int = 512
 
     def __post_init__(self) -> None:
-        pass
+        if type(self.max_range_bytes) is not int or self.max_range_bytes < 4:
+            raise ValueError("max_range_bytes must be at least 4")
 
     @property
     def policy(self) -> ToolPolicy:
