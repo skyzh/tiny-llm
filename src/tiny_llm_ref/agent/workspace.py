@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import json
+import math
 import os
 import signal
 import stat
@@ -16,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Thread
-from time import monotonic
+from time import monotonic, sleep
 
 from .protocol import AgentError, ToolAction
 from .receipts import EffectReceipt, ReceiptStore
@@ -68,6 +69,14 @@ class _PreparedWrite:
     parent_identity: tuple[int, int]
 
 
+class _PostRenameUncertain(AgentError):
+    """The target changed, but its containing directory was not made durable."""
+
+    def __init__(self, path: Path):
+        super().__init__("write completed but durability could not be confirmed")
+        self.path = path
+
+
 @dataclass(frozen=True)
 class ToolPolicy:
     """Filesystem and command boundaries for one workspace."""
@@ -101,10 +110,16 @@ class ToolPolicy:
             raise ValueError("tool policy integer limits must be positive")
         if self.max_tool_output_chars < 64:
             raise ValueError("max tool output must leave room for command status")
+        if not isinstance(self.allow_writes, bool):
+            raise ValueError("allow_writes must be a boolean")
         timeout = self.command_timeout_seconds
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
             raise ValueError("command timeout must be a positive number")
-        if timeout <= 0:
+        try:
+            finite_timeout = math.isfinite(timeout)
+        except OverflowError:
+            finite_timeout = False
+        if not finite_timeout or timeout <= 0:
             raise ValueError("command timeout must be a positive number")
         if not root.exists() or not root.is_dir():
             raise ValueError("workspace root must be an existing directory")
@@ -179,20 +194,25 @@ class Workspace:
             raise AgentError("path traversal is not accessible")
         if reason := _protected_path_reason(candidate.parts):
             raise AgentError(reason)
-        literal = self.policy.root / candidate
-        try:
-            relative = literal.resolve(strict=False).relative_to(self.policy.root)
-        except ValueError as error:
-            raise AgentError("path escapes the workspace") from error
+        relative = Path(*candidate.parts) if candidate.parts else Path(".")
         if relative == Path(".") and raw != ".":
             raise AgentError("path must identify a workspace entry")
         path = self.policy.root / relative
-        for index in range(1, len(candidate.parts) + 1):
-            probe = self.policy.root.joinpath(*candidate.parts[:index])
-            if probe.is_symlink():
-                raise AgentError("symlinks are not accessible")
-        if must_exist and not path.exists():
-            raise AgentError("path does not exist")
+        if must_exist:
+            if relative == Path("."):
+                descriptor = self._open_root_directory()
+                os.close(descriptor)
+            else:
+                parent, name = self._open_parent_directory(relative)
+                try:
+                    try:
+                        status = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                    except FileNotFoundError as error:
+                        raise AgentError("path does not exist") from error
+                    if stat.S_ISLNK(status.st_mode):
+                        raise AgentError("symlinks are not accessible")
+                finally:
+                    os.close(parent)
         return path
 
     def list_files(self, raw: str = ".") -> str:
@@ -229,9 +249,11 @@ class Workspace:
         """Read one bounded UTF-8 regular file and remember its digest."""
 
         path = self.resolve_path(raw)
-        data = self._read_bounded_file(path, tool="read_file")
+        data, status = self._read_bounded_regular(path, tool="read_file")
         content = data.decode("utf-8")
         self.observed_files[path] = self._digest(data)
+        observed_modes = self.__dict__.setdefault("_observed_modes", {})
+        observed_modes[path] = stat.S_IMODE(status.st_mode) & 0o777
         return content
 
     def write_file(self, raw: str, content: str) -> str:
@@ -264,18 +286,26 @@ class Workspace:
         ):
             raise AgentError("tool call ID must be a non-empty string")
         call_id = tool_call_id or uuid.uuid4().hex
-        if call_id in self._receipt_ids or (
-            self.receipt_store is not None
-            and self.receipt_store.by_tool_call(call_id) is not None
-        ):
-            raise AgentError("tool call ID already has a receipt")
-        self._receipt_ids.add(call_id)
         try:
             arguments = json.loads(
                 json.dumps(action.arguments, allow_nan=False, ensure_ascii=True)
             )
         except (TypeError, ValueError) as error:
             raise AgentError("tool arguments must be JSON serializable") from error
+
+        if self.receipt_store is not None:
+            with self.receipt_store._claim_tool_call(call_id) as claim:
+                if call_id in self._receipt_ids or claim.existing is not None:
+                    raise AgentError("tool call ID already has a receipt")
+                self._receipt_ids.add(call_id)
+                return self._execute_claimed(action, call_id, arguments, claim)
+        if call_id in self._receipt_ids:
+            raise AgentError("tool call ID already has a receipt")
+        self._receipt_ids.add(call_id)
+        return self._execute_claimed(action, call_id, arguments, None)
+
+    def _execute_claimed(self, action, call_id, arguments, receipt_claim) -> str:
+        """Dispatch one action while its durable tool-call claim is held."""
 
         changed: tuple[str, ...] = ()
         exit_state = "ok"
@@ -306,6 +336,10 @@ class Workspace:
                 result, changed, exit_state = self._run_command(command)
             else:
                 raise AgentError(f"unknown tool: {action.tool}")
+        except _PostRenameUncertain as error:
+            result = f"error: {error}"
+            exit_state = "uncertain"
+            changed = (str(error.path.relative_to(self.policy.root)),)
         except Exception as error:
             result = f"error: {error}"
             exit_state = "error"
@@ -319,17 +353,13 @@ class Workspace:
             changed_artifacts=changed,
         )
         self.last_receipt = receipt
-        if self.receipt_store is not None:
-            self.receipt_store.put(receipt)
+        if receipt_claim is not None:
+            receipt_claim.put(receipt)
         return result
 
     def _validate_root(self) -> None:
-        try:
-            status = os.stat(self.policy.root, follow_symlinks=False)
-        except OSError as error:
-            raise AgentError("workspace root is unavailable") from error
-        if (status.st_dev, status.st_ino) != self.policy._root_identity:
-            raise AgentError("workspace root changed after authorization")
+        descriptor = self._open_root_directory()
+        os.close(descriptor)
 
     def _prepare_write(self, raw: str, content: str) -> _PreparedWrite:
         if not self.policy.allow_writes:
@@ -361,7 +391,11 @@ class Workspace:
             current_content, current_status = current
             if self._digest(current_content) != expected_digest:
                 raise AgentError("file changed since it was read; read it again")
-            expected_mode = stat.S_IMODE(current_status.st_mode) & 0o777
+            current_mode = stat.S_IMODE(current_status.st_mode) & 0o777
+            observed_mode = self.__dict__.get("_observed_modes", {}).get(path)
+            if observed_mode is None or current_mode != observed_mode:
+                raise AgentError("file mode changed since it was read; read it again")
+            expected_mode = observed_mode
             after_mode = expected_mode
         return _PreparedWrite(
             path=path,
@@ -380,9 +414,12 @@ class Workspace:
         path = self.resolve_path(raw)
         if path not in self.observed_files:
             raise AgentError("files must be read before they are edited")
-        data = self._read_bounded_file(path, tool="edit_file")
+        data, current_status = self._read_bounded_regular(path, tool="edit_file")
         if self._digest(data) != self.observed_files[path]:
             raise AgentError("file changed since it was read; read it again")
+        current_mode = stat.S_IMODE(current_status.st_mode) & 0o777
+        if current_mode != self.__dict__.get("_observed_modes", {}).get(path):
+            raise AgentError("file mode changed since it was read; read it again")
         content = data.decode("utf-8")
         matches = content.count(old)
         if matches != 1:
@@ -402,10 +439,24 @@ class Workspace:
                 after_mode=prepared.after_mode,
                 parent_identity=prepared.parent_identity,
             )
+        except _PostRenameUncertain:
+            try:
+                current, current_status = self._read_bounded_regular(
+                    path, tool="write_file"
+                )
+            except (OSError, ValueError):
+                pass
+            else:
+                self.observed_files[path] = self._digest(current)
+                observed_modes = self.__dict__.setdefault("_observed_modes", {})
+                observed_modes[path] = stat.S_IMODE(current_status.st_mode) & 0o777
+            raise
         except BaseException:
             self.uncertain_modified_files.discard(path)
             raise
         self.observed_files[path] = self._digest(prepared.content)
+        observed_modes = self.__dict__.setdefault("_observed_modes", {})
+        observed_modes[path] = prepared.after_mode
         self.modified_files.add(path)
         self.uncertain_modified_files.discard(path)
         return f"wrote {path.relative_to(self.policy.root)}"
@@ -425,38 +476,56 @@ class Workspace:
         return command
 
     def _run_command(self, argv: tuple[str, ...]) -> tuple[str, tuple[str, ...], str]:
-        self._validate_root()
-        process = subprocess.Popen(
-            list(argv),
-            cwd=self.policy.root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+        root = self._open_root_directory()
+        try:
+            process = subprocess.Popen(
+                list(argv),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                pass_fds=(root,),
+                preexec_fn=lambda: os.fchdir(root),
+            )
+        finally:
+            os.close(root)
         assert process.stdout is not None
         output = bytearray()
 
         def _reader() -> None:
-            while True:
-                chunk = process.stdout.read(1 << 16)
-                if not chunk:
-                    return
-                remaining = self.policy.max_tool_output_chars - len(output)
-                if remaining > 0:
-                    output.extend(chunk[:remaining])
+            try:
+                while True:
+                    chunk = process.stdout.read(1 << 16)
+                    if not chunk:
+                        return
+                    remaining = self.policy.max_tool_output_chars - len(output)
+                    if remaining > 0:
+                        output.extend(chunk[:remaining])
+            except (OSError, ValueError):
+                return
 
         thread = Thread(target=_reader, daemon=True)
         thread.start()
         deadline = monotonic() + self.policy.command_timeout_seconds
         timed_out = False
-        while thread.is_alive() and monotonic() < deadline:
-            thread.join(timeout=0.05)
+        while True:
+            process.poll()
+            group_alive = self._process_group_exists(process.pid)
+            if process.returncode is not None and not group_alive:
+                break
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                timed_out = True
+                self._terminate_kill_and_reap(process)
+                break
+            sleep(min(0.01, remaining))
+        if process.returncode is None:
+            process.wait()
+        thread.join(timeout=0.25)
         if thread.is_alive():
-            timed_out = True
-            self._kill_and_reap(process)
-        else:
-            process.wait(timeout=2.0)
-        thread.join(timeout=2.0)
+            process.stdout.close()
+            thread.join(timeout=0.25)
+        if thread.is_alive():
+            raise AgentError("command output could not be drained")
         changed_paths = self._recent_modified()
         changed = tuple(
             sorted(str(path.relative_to(self.policy.root)) for path in changed_paths)
@@ -498,14 +567,40 @@ class Workspace:
         return changed
 
     @staticmethod
-    def _kill_and_reap(process: subprocess.Popen) -> None:
+    def _process_group_exists(process_group: int) -> bool:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    @classmethod
+    def _terminate_kill_and_reap(cls, process: subprocess.Popen) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             try:
-                process.kill()
+                process.terminate()
             except ProcessLookupError:
                 pass
+        grace_deadline = monotonic() + 0.1
+        while monotonic() < grace_deadline:
+            process.poll()
+            if process.returncode is not None and not cls._process_group_exists(
+                process.pid
+            ):
+                break
+            sleep(0.01)
+        if process.returncode is None or cls._process_group_exists(process.pid):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
         try:
             process.wait(timeout=2.0)
         except subprocess.TimeoutExpired as error:
@@ -525,18 +620,42 @@ class Workspace:
             result = result[: max(0, budget - len(marker))] + marker
         return result + suffix
 
+    def _open_root_directory(self) -> int:
+        flags = (
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(self.policy.root, flags)
+        except OSError as error:
+            raise AgentError("workspace root is unavailable") from error
+        status = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(status.st_mode)
+            or (
+                status.st_dev,
+                status.st_ino,
+            )
+            != self.policy._root_identity
+        ):
+            os.close(descriptor)
+            raise AgentError("workspace root changed after authorization")
+        return descriptor
+
     def _open_parent_directory(self, relative: Path) -> tuple[int, str]:
         if not relative.parts or relative.name in {"", ".", ".."}:
             raise AgentError("path is unsafe")
         flags = (
             os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         )
-        directory = os.open(self.policy.root, flags)
+        directory = self._open_root_directory()
         try:
             for part in relative.parts[:-1]:
                 if part in {"", ".", ".."} or _protected_path_reason((part,)):
                     raise AgentError("path is unsafe")
-                child = os.open(part, flags, dir_fd=directory)
+                try:
+                    child = os.open(part, flags, dir_fd=directory)
+                except OSError as error:
+                    raise AgentError("path is unsafe") from error
                 os.close(directory)
                 directory = child
             return directory, relative.name
@@ -549,7 +668,7 @@ class Workspace:
             os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         )
         if relative == Path("."):
-            return os.open(self.policy.root, flags)
+            return self._open_root_directory()
         parent, name = self._open_parent_directory(relative)
         try:
             return os.open(name, flags, dir_fd=parent)
@@ -593,7 +712,9 @@ class Workspace:
         finally:
             os.close(descriptor)
 
-    def _read_bounded_file(self, path: Path, *, tool: str) -> bytes:
+    def _read_bounded_regular(
+        self, path: Path, *, tool: str
+    ) -> tuple[bytes, os.stat_result]:
         relative = path.relative_to(self.policy.root)
         parent, name = self._open_parent_directory(relative)
         try:
@@ -602,7 +723,10 @@ class Workspace:
             os.close(parent)
         if current is None:
             raise AgentError(f"{tool} path is unsafe or missing")
-        return current[0]
+        return current
+
+    def _read_bounded_file(self, path: Path, *, tool: str) -> bytes:
+        return self._read_bounded_regular(path, tool=tool)[0]
 
     def _revalidate_prepared_write(self, prepared: _PreparedWrite) -> None:
         relative = prepared.path.relative_to(self.policy.root)
@@ -677,7 +801,10 @@ class Workspace:
             finally:
                 os.close(descriptor)
             os.rename(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
-            os.fsync(parent)
+            try:
+                os.fsync(parent)
+            except OSError as error:
+                raise _PostRenameUncertain(path) from error
         finally:
             if temporary is not None:
                 try:

@@ -9,8 +9,10 @@ import hashlib
 import json
 import os
 import stat
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 
@@ -163,6 +165,22 @@ class EffectReceipt:
         return receipt
 
 
+@dataclass
+class _ReceiptClaim:
+    store: "ReceiptStore"
+    tool_call_id: str
+    descriptor: int | None
+    created: bool
+    existing: EffectReceipt | None
+
+    def put(self, receipt: EffectReceipt) -> str:
+        """Append while the refreshed durable tool-call claim remains held."""
+
+        if receipt.tool_call_id != self.tool_call_id:
+            raise ValueError("receipt does not match the claimed tool call ID")
+        return self.store._put_locked(receipt, self.descriptor, self.created)
+
+
 class ReceiptStore:
     """Append-only receipt store with verification on write and reload."""
 
@@ -171,6 +189,7 @@ class ReceiptStore:
         self._receipts: dict[str, EffectReceipt] = {}
         self._by_tool_call: dict[str, str] = {}
         self._order: list[str] = []
+        self._lock = RLock()
         if self._path is not None:
             self._load()
 
@@ -178,19 +197,13 @@ class ReceiptStore:
         assert self._path is not None
         if not self._path.exists() and not self._path.is_symlink():
             return
-        descriptor = self._open_file(os.O_RDONLY)
-        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
-            for line_number, line in enumerate(handle, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    receipt = EffectReceipt.from_dict(json.loads(line))
-                except (json.JSONDecodeError, ValueError) as error:
-                    raise ValueError(
-                        f"invalid receipt at line {line_number}"
-                    ) from error
-                self._index(receipt)
+        with self._lock:
+            descriptor = self._open_file(os.O_RDONLY)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_SH)
+                self._refresh_locked(descriptor)
+            finally:
+                os.close(descriptor)
 
     def _open_file(self, flags: int) -> int:
         assert self._path is not None
@@ -220,11 +233,76 @@ class ReceiptStore:
         self._order.append(receipt_id)
         return True
 
-    def put(self, receipt: EffectReceipt) -> str:
-        """Durably append one receipt, idempotently by content address."""
+    def _refresh_locked(self, descriptor: int) -> None:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        data = bytearray()
+        while True:
+            chunk = os.read(descriptor, 1 << 16)
+            if not chunk:
+                break
+            data.extend(chunk)
+        try:
+            text = bytes(data).decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError("receipt store is not valid UTF-8") from error
 
-        if not isinstance(receipt, EffectReceipt):
-            raise TypeError("receipt must be an EffectReceipt")
+        receipts: dict[str, EffectReceipt] = {}
+        by_tool_call: dict[str, str] = {}
+        order: list[str] = []
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                receipt = EffectReceipt.from_dict(json.loads(line))
+            except (json.JSONDecodeError, ValueError) as error:
+                raise ValueError(f"invalid receipt at line {line_number}") from error
+            receipt_id = receipt.receipt_id
+            current_id = by_tool_call.get(receipt.tool_call_id)
+            if current_id is not None and current_id != receipt_id:
+                raise ValueError("tool call ID already belongs to another receipt")
+            if receipt_id in receipts:
+                continue
+            receipts[receipt_id] = receipt
+            by_tool_call[receipt.tool_call_id] = receipt_id
+            order.append(receipt_id)
+        self._receipts = receipts
+        self._by_tool_call = by_tool_call
+        self._order = order
+
+    @contextmanager
+    def _claim_tool_call(self, tool_call_id: str):
+        """Serialize one call ID from before its effect through durable evidence."""
+
+        if not isinstance(tool_call_id, str) or not tool_call_id:
+            raise ValueError("tool call ID must be a non-empty string")
+        with self._lock:
+            if self._path is None:
+                receipt_id = self._by_tool_call.get(tool_call_id)
+                existing = self.get(receipt_id) if receipt_id is not None else None
+                yield _ReceiptClaim(self, tool_call_id, None, False, existing)
+                return
+
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            created = not self._path.exists()
+            descriptor = self._open_file(os.O_RDWR | os.O_APPEND | os.O_CREAT)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                self._refresh_locked(descriptor)
+                receipt_id = self._by_tool_call.get(tool_call_id)
+                existing = self.get(receipt_id) if receipt_id is not None else None
+                yield _ReceiptClaim(
+                    self,
+                    tool_call_id,
+                    descriptor,
+                    created,
+                    existing,
+                )
+            finally:
+                os.close(descriptor)
+
+    def _put_locked(
+        self, receipt: EffectReceipt, descriptor: int | None, created: bool
+    ) -> str:
         receipt_id = receipt.receipt_id
         current_id = self._by_tool_call.get(receipt.tool_call_id)
         if current_id is not None:
@@ -233,9 +311,7 @@ class ReceiptStore:
             return receipt_id
         if receipt_id in self._receipts:
             return receipt_id
-        if self._path is not None:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            existed = self._path.exists()
+        if descriptor is not None:
             line = (
                 json.dumps(
                     receipt.to_dict(),
@@ -246,17 +322,13 @@ class ReceiptStore:
                 )
                 + "\n"
             ).encode("utf-8")
-            descriptor = self._open_file(os.O_WRONLY | os.O_APPEND | os.O_CREAT)
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-                view = memoryview(line)
-                while view:
-                    written = os.write(descriptor, view)
-                    view = view[written:]
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-            if not existed:
+            view = memoryview(line)
+            while view:
+                written = os.write(descriptor, view)
+                view = view[written:]
+            os.fsync(descriptor)
+            if created:
+                assert self._path is not None
                 parent = os.open(
                     self._path.parent,
                     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
@@ -267,6 +339,14 @@ class ReceiptStore:
                     os.close(parent)
         self._index(receipt)
         return receipt_id
+
+    def put(self, receipt: EffectReceipt) -> str:
+        """Durably append one receipt, idempotently by content address."""
+
+        if not isinstance(receipt, EffectReceipt):
+            raise TypeError("receipt must be an EffectReceipt")
+        with self._claim_tool_call(receipt.tool_call_id) as claim:
+            return claim.put(receipt)
 
     def get(self, receipt_id: str) -> EffectReceipt | None:
         """Return a verified receipt, or None when the ID is absent."""
