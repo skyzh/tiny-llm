@@ -220,6 +220,16 @@ def test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix():
     ]
     checkpoint = generator.save_checkpoint(messages)
     branch = generator.fork()
+    foreign_generator = KvPrefixGenerator(DenseEosModel(), CharacterTokenizer(), 2)
+    foreign_checkpoint = foreign_generator.save_checkpoint(
+        [
+            {"role": "system", "content": "foreign system"},
+            {"role": "user", "content": "foreign task"},
+        ]
+    )
+
+    with pytest.raises(AgentError, match="does not match the saved KV prefix"):
+        branch.restore_checkpoint(foreign_checkpoint)
     branch.restore_checkpoint(checkpoint)
     changed = [
         {"role": "system", "content": "changed"},
@@ -337,6 +347,22 @@ def test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence(
         case,
     )
 
+    validate_steering = "validate without another edit"
+    denied_steering = "try changing the answer again"
+    assert passing.steering == validate_steering
+    assert failing.steering == denied_steering
+    assert validate_model.calls[0][-1] == {
+        "role": "user",
+        "content": f"Operator steering:\n{validate_steering}",
+    }
+    assert denied_model.calls[0][-1] == {
+        "role": "user",
+        "content": f"Operator steering:\n{denied_steering}",
+    }
+    assert passing.reuse == validate_model.reuse
+    assert failing.reuse == denied_model.reuse
+    assert passing.reuse.reused_tokens > 0
+    assert failing.reuse.reused_tokens > 0
     assert passing.report.passed
     assert not failing.report.passed
     assert select_branch((passing, failing), "validate-only") is passing
