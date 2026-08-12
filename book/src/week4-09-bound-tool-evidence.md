@@ -32,8 +32,8 @@ pdm run copy-test --week 4 --day 9
 pdm run test --week 4 --day 9
 ```
 
-Before you implement the TODOs, all eleven Day 9 cases across six tasks are
-expected to fail.
+Before you implement the TODOs, the implementation-dependent cases across six
+tasks are expected to fail; the shared constructor-validation cases already pass.
 
 ## Task 1: Give Exact Bytes an Identity
 
@@ -87,7 +87,9 @@ and return a compact JSON observation containing:
 
 The entire compact observation, including metadata and previews, must fit
 `max_inline_bytes`. Reduce previews at UTF-8 boundaries when the metadata needs
-more space. Never split a code point or silently replace one.
+more space. Require `max_range_bytes >= 4` so the default range can always hold
+one maximum-width UTF-8 code point. Never split a code point or silently replace
+one.
 
 ## Task 3: Reuse the Existing Tool Protocol
 
