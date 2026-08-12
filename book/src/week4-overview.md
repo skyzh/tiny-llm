@@ -1,14 +1,15 @@
 # 🚧 Week 4: Build a Coding Agent
 
 > **Course status:** Week 4 is being published one checkpoint at a time. Days 1
-> and 2 are ready to learn and review. Additional capabilities will appear only
-> after their implementation, starter, and reviews are ready.
+> through 3 are ready to learn and review. Additional capabilities will appear
+> only after their implementation, starter, and reviews are ready.
 
 Weeks 1 through 3 turn tokens into text and make serving that text efficient.
 Week 4 starts a different kind of program: an agent repeatedly asks the model
 for one structured action, records the result, and gives that result back to
 the model. Day 1 builds the bounded deterministic loop. Day 2 gives that loop a
-small read-only workspace for listing and reading project files.
+small read-only workspace for listing and reading project files. Day 3 adds an
+approval boundary for edits, one exact validation command, and simple receipts.
 
 ## What Day 1 Builds
 
@@ -71,7 +72,14 @@ Workspace](week4-02-tools.md). The cumulative Day 2 command is:
 pdm run test --week 4 --day 2
 ```
 
-Only the Day 1 and Day 2 starter modules are published. Do not add other agent
-modules or public APIs to your solution.
+After Day 2 passes, continue with [Day 3: Edit, Validate, and
+Record](week4-03-safe-editing.md). Its cumulative command is:
+
+```bash
+pdm run test --week 4 --day 3
+```
+
+Only the Day 1 through Day 3 starter modules are published. Do not add session,
+checkpoint, rewind, compaction, or other later public APIs to your solution.
 
 {{#include copyright.md}}

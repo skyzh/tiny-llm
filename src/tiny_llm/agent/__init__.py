@@ -9,6 +9,7 @@ from .protocol import (
     build_system_prompt,
     parse_action,
 )
+from .receipts import EffectReceipt, ReceiptStore
 from .workspace import ToolPolicy, Workspace
 
 
@@ -17,7 +18,9 @@ __all__ = [
     "AgentEvent",
     "AgentLimits",
     "AgentRun",
+    "EffectReceipt",
     "FinalAction",
+    "ReceiptStore",
     "ToolAction",
     "ToolPolicy",
     "Workspace",
