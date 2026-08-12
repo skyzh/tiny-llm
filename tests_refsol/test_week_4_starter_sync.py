@@ -339,6 +339,31 @@ def test_day_9_bounded_evidence_surface_is_complete_and_has_no_future_api():
         assert future_name not in source
 
 
+def test_day_9_starter_range_cap_can_hold_one_max_width_utf8_character(tmp_path):
+    from tiny_llm.agent import (
+        ArtifactStore,
+        BoundedEvidenceWorkspace,
+        ToolPolicy,
+        Workspace,
+    )
+
+    workspace_root = tmp_path / "workspace"
+    artifact_root = tmp_path / "artifacts"
+    workspace_root.mkdir()
+    artifact_root.mkdir()
+    workspace = Workspace(ToolPolicy(workspace_root))
+    artifacts = ArtifactStore(artifact_root)
+
+    for max_range_bytes in (1, 2, 3):
+        with pytest.raises(ValueError, match="max_range_bytes must be at least 4"):
+            BoundedEvidenceWorkspace(
+                workspace, artifacts, max_range_bytes=max_range_bytes
+            )
+
+    bounded = BoundedEvidenceWorkspace(workspace, artifacts, max_range_bytes=4)
+    assert bounded.max_range_bytes == 4
+
+
 def test_removed_catalog_hash_is_not_exported_or_declared():
     for root in (STARTER, REFSOL):
         source = (root / "protocol.py").read_text(encoding="utf-8")
