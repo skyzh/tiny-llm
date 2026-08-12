@@ -32,6 +32,7 @@
     - [🚧 Optional: Mixture of Experts](./week3-optional-moe.md)
 - [🚧 Week 4: Build a Coding Agent](./week4-overview.md)
     - [🚧 Day 1: Validated Agent Loop](./week4-01-agent-loop.md)
+    - [🚧 Day 2: Inspect a Workspace](./week4-02-tools.md)
 - [🚧 Appendix: Performance Evidence Ledger](./appendix-performance.md)
 - [Sponsored by Raft.build](./sponsor.md)
 

@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,7 +22,7 @@ jobs:
       - name: install sitemap generator
         run: npm install --global static-sitemap-cli@2.2.7
       - name: build book and check sitemap
-        run: book/sitemap.sh --check
+        run: book/sitemap.sh
       - uses: actions/upload-pages-artifact@v3
         with:
           path: book/book

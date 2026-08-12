@@ -20,7 +20,7 @@ Implement these Day 1 starter functions:
 | File | Function or type | Your responsibility |
 | --- | --- | --- |
 | `src/tiny_llm/agent/generation.py` | `initial_messages()`, `generate_response()` | Reject a blank task, create the first messages, and decode one response with a fresh cache. |
-| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `TOOL_CATALOG_HASH`, `tool_catalog_hash()`, `parse_action()`, `build_system_prompt()` | Define the exact action vocabulary, validate one JSON object, and describe only enabled actions. |
+| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `parse_action()`, `build_system_prompt()` | Define the exact action vocabulary, validate one JSON object, and describe only enabled actions. |
 | `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent()` | Bound the loop, append observations, and return an auditable result. |
 
 Run the focused learner check:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -30,31 +29,6 @@ class ToolAction:
 AgentAction = FinalAction | ToolAction
 
 
-def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
-    """Stable content hash of the enabled tool schema catalog.
-
-    Changing the enabled tool set changes the hash, so the exact set the
-    model saw stays identifiable.
-    """
-
-    if available_tools is None:
-        # None means "all tools at parse time": canonicalize to the explicit
-        # full-schema catalog so the hash is stable and comparable.
-        available_tools = frozenset(TOOL_FIELDS)
-    unknown = sorted(tool for tool in available_tools if tool not in TOOL_FIELDS)
-    if unknown:
-        raise AgentError(f"unknown enabled tool: {unknown[0]}")
-    catalog = {
-        tool: {
-            "required": sorted(TOOL_FIELDS[tool][0]),
-            "optional": sorted(TOOL_FIELDS[tool][1]),
-        }
-        for tool in sorted(available_tools)
-    }
-    payload = json.dumps(catalog, ensure_ascii=True, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
 TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "list_files": (frozenset(), frozenset({"path"})),
     "read_file": (frozenset({"path"}), frozenset()),
@@ -62,9 +36,6 @@ TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "edit_file": (frozenset({"path", "old", "new"}), frozenset()),
     "run_command": (frozenset({"argv"}), frozenset()),
 }
-
-
-TOOL_CATALOG_HASH = tool_catalog_hash(frozenset(TOOL_FIELDS))
 
 
 def parse_action(
@@ -141,7 +112,7 @@ def build_system_prompt(workspace: Any) -> str:
         lines.append('Use: {"tool":"run_command","argv":["exact","arguments"]}')
     if "write_file" in tools or "edit_file" in tools:
         lines.append("Read an existing file before changing it.")
-    if workspace.policy.allowed_commands:
+    if "run_command" in tools and workspace.policy.allowed_commands:
         lines.append("The operator allowed only these exact command arrays:")
         lines += [
             json.dumps(list(command)) for command in workspace.policy.allowed_commands

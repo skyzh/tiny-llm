@@ -37,19 +37,6 @@ TOOL_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
 }
 
 
-def tool_catalog_hash(available_tools: frozenset[str] | None) -> str:
-    """Stable content hash of the enabled tool schema catalog.
-
-    Changing the enabled tool set changes the hash, so the exact set the
-    model saw stays identifiable.
-    """
-
-    pass
-
-
-TOOL_CATALOG_HASH = "23d57058bc0b7dc18c6352fcd0d9bf4c8b3b39306f987ade5cff93eae6bacaab"
-
-
 def parse_action(
     response: str,
     available_tools: frozenset[str] | None = None,

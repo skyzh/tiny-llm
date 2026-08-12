@@ -35,9 +35,10 @@ The course follows a four-week learning path:
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
   the scheduler does not rebuild dense history on every step.
-- **Week 4: Build a Coding Agent.** Start with a bounded, validated agent loop.
-  The course is publishing one reviewed checkpoint at a time; Day 1 introduces
-  the JSON action protocol and loop, while later capabilities remain staged.
+- **Week 4: Build a Coding Agent.** Start with a bounded, validated agent loop,
+  then connect it to a small read-only workspace. The course is publishing one
+  reviewed checkpoint at a time; Days 1 and 2 are available while additional
+  capabilities remain staged.
 
 ## Why MLX and Qwen3?
 
@@ -70,12 +71,11 @@ implementation, test, and publication readiness is tracked below.
 
 ## Roadmap
 
-The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; only Day 1 is currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
+The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; Days 1 and 2 are currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
 
-Persistent Week 4 runs can store sensitive transcripts under
-`.tiny-llm/sessions`, and model-directed file or command tools are not sandboxed.
-Use a disposable workspace and read the
-[Week 4 overview](book/src/week4-overview.md) before enabling writes or commands.
+Day 2 can send the contents of files under its workspace root to the model.
+Use a disposable workspace without secrets and read the
+[Week 4 overview](book/src/week4-overview.md) before running the agent loop.
 
 | Week + Chapter | Topic | Code | Test | Doc | Audit |
 |---|---|---|---|---|---|
@@ -101,7 +101,8 @@ Use a disposable workspace and read the
 | 3.6 (optional) | Speculative Decoding | ✅ | ✅ | ✅ | 🚧 |
 | 3.x (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ | 🚧 |
 | 4.1 | Validated Agent Loop | ✅ | ✅ | ✅ | 🚧 |
-| 4.2–4.7 | Later agent checkpoints | — | — | — | 🚧 |
+| 4.2 | Inspect a Workspace | ✅ | ✅ | ✅ | 🚧 |
+| 4.3–4.7 | Later agent checkpoints | — | — | — | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

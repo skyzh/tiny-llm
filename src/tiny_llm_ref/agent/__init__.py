@@ -5,12 +5,11 @@ from .loop import AgentEvent, AgentLimits, AgentRun, run_agent
 from .protocol import (
     AgentError,
     FinalAction,
-    TOOL_CATALOG_HASH,
     ToolAction,
     build_system_prompt,
     parse_action,
-    tool_catalog_hash,
 )
+from .workspace import ToolPolicy, Workspace
 
 
 __all__ = [
@@ -19,12 +18,12 @@ __all__ = [
     "AgentLimits",
     "AgentRun",
     "FinalAction",
-    "TOOL_CATALOG_HASH",
     "ToolAction",
+    "ToolPolicy",
+    "Workspace",
     "build_system_prompt",
     "generate_response",
     "initial_messages",
     "parse_action",
     "run_agent",
-    "tool_catalog_hash",
 ]
