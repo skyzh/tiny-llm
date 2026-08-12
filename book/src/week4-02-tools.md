@@ -35,9 +35,9 @@ but they are not a sandbox or a defense against a hostile filesystem. The tool
 result also becomes model input, so do not point the workspace at files you
 would not send to the model.
 
-Day 3 will add operator-approved edits, one allowlisted validation command, and
-a simple receipt log. Keeping those effects out of Day 2 lets you first see the
-read-only agent loop clearly.
+[Day 3](week4-03-safe-editing.md) adds operator-approved edits, one allowlisted
+validation command, and a simple receipt log. Keeping those effects out of Day
+2 lets you first see the read-only agent loop clearly.
 
 ## Files and Public Surface
 
@@ -177,5 +177,8 @@ pdm run test-refsol --week 4 --day 2
 
 The cumulative course-code guard compares the starter and reference public
 signatures, dataclass fields, package exports, and solution-free method bodies.
+
+When this checkpoint is green, continue to [Day 3: Edit, Validate, and
+Record](week4-03-safe-editing.md).
 
 {{#include copyright.md}}

@@ -1,194 +1,211 @@
-# Day 3: Safe Editing and Validation
+# 🚧 Day 3: Edit, Validate, and Record
 
-> 🚧 **Early-review WIP:** This chapter is public for early review and may
-> change. Use a disposable workspace when running the agent or enabling writes
-> or commands.
+Day 2 gave the model two read-only tools. It could inspect a disposable project
+and explain what it found, but it could not fix anything. Day 3 completes one
+small coding cycle:
 
-Tools connect probabilistic model output to real side effects. Today you will
-make that boundary explicit. File tools should remain inside one workspace,
-mutations should require review, and successful work should be validated.
+```text
+read file -> propose exact edit -> operator approves -> recheck bytes
+    -> replace file -> record receipt -> run focused check -> record receipt
+    -> final answer
+```
 
-> **Implementation status:** The current Day 3 checkpoint covers bounded reads,
-> protected roots and paths, rejection of detected symlinks, and writes disabled
-> by default.
-> Atomic writes, exact edits, and exact command allowlisting are checked on Day
-> 5. Durable mutation intents, recovery, and default-No checkpoint undo belong
-> to the cumulative Day 6 implementation, not this focused checkpoint.
-> Automatic diff capture, validation-aware completion, and process isolation
-> remain deferred.
+The important idea is not broad autonomy. It is an explicit boundary between a
+model proposal and a local side effect.
 
-## Current Checkpoint
+## The Teaching Boundary
 
-Implement the read-side `ToolPolicy` and `Workspace` behavior in
-`src/tiny_llm/agent/workspace.py`, then run:
+Use this checkpoint with one trusted operator, one Python process, and a
+disposable repository that contains no secrets. Its path checks prevent ordinary
+mistakes, but they are not a sandbox or a defense against a hostile filesystem.
+The command tool is not a process jail: an allowed program can access anything
+the host process can access, spawn children, or use the network.
+
+The receipt file is a simple append-only JSONL teaching record. It detects
+edited receipt bytes when reopened and handles a repeated call ID in the same
+process. It is not a transaction log, an `fsync` protocol, a multi-writer store,
+or proof that an interrupted effect did or did not happen. Sessions,
+checkpoints, rewind, and compaction arrive in later checkpoints.
+
+## Files and Public Surface
+
+Implement the TODO bodies in these cumulative starter files:
+
+| File | Public names | Responsibility |
+| --- | --- | --- |
+| `src/tiny_llm/agent/workspace.py` | `ToolPolicy`, `Workspace` | Authorize reads, approved edits, and one exact validation command. |
+| `src/tiny_llm/agent/receipts.py` | `EffectReceipt`, `ReceiptStore` | Represent effects and optionally append verified JSONL records. |
+| `src/tiny_llm/agent/__init__.py` | cumulative Day 1--3 API | Export the two receipt types. |
+
+`ToolPolicy` keeps its first three Day 2 fields and adds:
+
+```python
+allow_writes: bool = False
+allowed_commands: tuple[tuple[str, ...], ...] = ()
+max_write_bytes: int = 64 * 1024
+command_timeout_seconds: float = 30.0
+```
+
+Writes stay disabled unless `allow_writes=True`. Commands stay disabled unless
+their complete argument tuple appears in `allowed_commands`. There is no shell
+string or prefix match.
+
+`Workspace(policy, confirm_tool=None)` creates an in-memory receipt store. Pass
+a `ReceiptStore(path)` as the third argument when you want JSONL output. The
+workspace extends the Day 2 methods with `write_file`, `edit_file`,
+`run_command`, and `modified_files`. `execute(action, tool_call_id=None)` is the
+model-facing gate. Direct tool methods are useful for focused unit tests;
+`execute` performs the approval and receipt steps.
+
+## Task 1: Authorize Tools Explicitly
+
+Build `available_tools` from the policy. Listing and reading are always present.
+Add both file mutation tools only when writes are enabled, and add
+`run_command` only when at least one exact command is configured. Validate all
+size limits, the timeout, the boolean flag, and every command part.
+
+This configuration permits one focused check:
+
+```python
+validation = ("python", "-m", "pytest", "tests/test_math.py", "-q")
+policy = ToolPolicy(
+    Path("demo-project"),
+    allow_writes=True,
+    allowed_commands=(validation,),
+)
+```
+
+## Task 2: Read Before Changing Existing Bytes
+
+Keep Day 2's path and read rules. When `read_file` succeeds, remember the
+SHA-256 digest of the bytes that were returned. Replacing or editing an existing
+file requires that observation. A new file does not have old bytes to inspect,
+but its parent directory must already exist.
+
+For `edit_file`, require a non-empty `old` string that occurs exactly once.
+Compute the proposed bytes in memory and enforce `max_write_bytes` before asking
+for approval. Whole-file `write_file` replacements also require a prior read.
+
+## Task 3: Ask Once, Default No, Then Recheck
+
+`execute` preflights the complete action before calling `confirm_tool`. Missing
+callbacks, `False`, and every value other than the boolean `True` deny the
+effect. A terminal program can provide a small default-No callback:
+
+```python
+def confirm(action):
+    answer = input(f"Approve {action.tool} {action.arguments}? [y/N] ")
+    return answer.strip().lower() in {"y", "yes"}
+```
+
+After approval, `write_file` or `edit_file` reads the destination again and
+compares its digest with the earlier observation. If another actor changed the
+bytes while the operator was deciding, return `error: file changed since it was
+read` and do not overwrite them.
+
+## Task 4: Replace Through the Same Directory
+
+Write the proposed bytes to a temporary file in the destination's parent, close
+it, and call `os.replace(temporary, destination)`. Clean up a leftover temporary
+file after an error. This avoids presenting a partially written destination to
+ordinary readers.
+
+This small pattern is atomic at the replacement step, but it is not a durable
+journal and does not close the check-to-replace race against a hostile actor.
+
+## Task 5: Run One Exact Validation Command
+
+`run_command(argv)` accepts a non-empty list of strings only when its tuple is
+exactly allowlisted. Call `subprocess.run` without a shell, with the workspace
+root as `cwd`, captured text output, and the configured timeout. Bound combined
+stdout and stderr so one observation cannot consume the whole context window.
+
+Return one observation with the status and captured output:
+
+```text
+status: 0
+output:
+1 passed
+```
+
+A nonzero status and a timeout are ordinary validation results the model can
+inspect. They are not Python exceptions and do not prove the final answer is
+correct.
+
+## Task 6: Record Simple Effect Receipts
+
+An `EffectReceipt` has these fields, in order:
+
+```python
+tool_call_id: str
+tool: str
+arguments: dict[str, Any]
+exit_state: str
+result: str
+changed_artifacts: tuple[str, ...] = ()
+```
+
+Its `receipt_id` is the SHA-256 digest of the canonical JSON payload. A
+successful write or edit records exactly one normalized workspace-relative
+artifact. A validation receipt records the exact `argv`, status and captured
+output, with no changed artifacts. `ReceiptStore(path)` loads and verifies an
+existing JSONL file; `ReceiptStore()` remains in memory.
+
+The store maps one `tool_call_id` to one receipt. Repeating the same call ID and
+action returns the existing result without running the effect again. Reusing the
+ID for another action is an error. This is proportional duplicate handling for
+one process, not distributed exactly-once execution.
+
+## Task 7: Run the Complete Scripted Cycle
+
+The test uses scripted model responses, so it needs no model weights:
+
+```python
+responses = iter([
+    '{"tool":"read_file","path":"app.py"}',
+    '{"tool":"edit_file","path":"app.py","old":"1","new":"2"}',
+    '{"tool":"run_command","argv":["python","-m","pytest","tests/test_math.py","-q"]}',
+    '{"final":"changed and validated app.py"}',
+])
+
+store = ReceiptStore(Path("demo-project/.agent-receipts.jsonl"))
+workspace = Workspace(policy, confirm, store)
+result = run_agent("fix app.py", lambda _messages: next(responses), workspace)
+```
+
+Inspect `result.events`, `workspace.modified_files`, and the two receipts. The
+edit receipt names `app.py`; the validation receipt has an empty artifact tuple.
+The final answer is still a model statement, so the validation status in the
+trace is the evidence that matters.
+
+## Run the Cumulative Checkpoint
+
+From the repository root, copy and run the learner checkpoint:
 
 ```bash
 pdm run test --week 4 --day 3
 ```
 
-The expected checks list and read a normal file, hide a common secret, reject
-unsafe paths and symlinks, and prove that writes are disabled by default. Use
-`pdm run test-refsol --week 4 --day 3` for the supplied implementation.
+Before you implement the TODOs, the copied test is expected to fail because the
+new starter methods return `None`. Keep those failures until you solve each
+task; do not import `tiny_llm_ref` from the starter.
 
-## Workspace Boundaries
+Course maintainers can check the supplied implementation without copying the
+learner test:
 
-Resolve requested paths against a fixed workspace root. Reject filesystem root,
-the user's home or one of its ancestors, and a root inside protected metadata or
-secret paths. For tool paths, reject absolute paths, `..` components, and any
-symbolic link detected during validation rather than following it. Deny access
-to `.git` and common secret or key paths so the agent cannot recover hidden
-benchmark solutions, rewrite repository metadata, or read obvious credentials.
-
-Test at least these cases:
-
-- a normal relative path;
-- `../outside.txt`;
-- an absolute path outside the workspace;
-- a symlink inside the workspace pointing outside it; and
-- a path whose parent does not exist yet.
-
-Path checks protect `list_files`, `read_file`, `write_file`, and `edit_file`.
-They do not confine `run_command`; keep the entire exercise workspace
-disposable. They also do not form a hostile-filesystem sandbox: another process
-can race pathname checks, and a hard link can expose bytes under a different
-name.
-
-## Approval Policy
-
-Enabling writes or naming an exact command is a prerequisite, not blanket
-permission. First complete the action schema checks and every tool-specific
-preflight: path and content checks, observed-digest and unique-match checks for
-file mutations, or exact argument-vector allowlisting for commands. Then pause
-once before any side effect:
-
-1. display the proposed `write_file`, `edit_file`, or `run_command` action;
-2. ask a default-No `y/N` question;
-3. continue only for an explicit `y` or `yes`;
-4. for a file mutation, revalidate the path and observed digest before the
-   atomic replacement; and
-5. return a denial observation for empty input, EOF, non-interactive input, No,
-   or any unrecognized response.
-
-`list_files` and `read_file` do not prompt because their path and content limits
-are enforced before access. This gate applies to model-dispatched actions through
-`Workspace.execute()`; direct method calls form the trusted, model-free unit-test
-layer. Session-wide approval is deliberately not inferred from one accepted
-call. A denial is returned as the action's result so it remains visible to both
-the model and the trace.
-
-Confirmation does not make a command safe. `run_command` starts an exact
-argument vector without a shell and with the workspace as `cwd`, but that program
-can still read or modify any host path allowed to the process, spawn children,
-or use the network. Strong confinement requires a container, virtual machine, or
-equivalent sandbox.
-
-## From a Stale-Write Guard to the Day 6 Mutation Journal
-
-The recovery target performs these steps around an approved write or edit:
-
-1. resolve and validate the destination;
-2. read the current contents if the file exists;
-3. record a content hash and before-image for later undo;
-4. compute the proposed result in memory;
-5. produce a diff for the trace or confirmation policy; and
-6. replace the file atomically.
-
-The Day 3 checkpoint records an in-memory content digest when it reads a file,
-rejects byte changes detected during mutation preflight, rechecks the digest
-after human approval, performs an atomic replace, and tracks paths changed by
-file tools. It also retains an outcome-uncertain path if interruption or an
-exception occurs between starting the commit and recording its completion, so
-the CLI tells the operator to inspect that file. This catches ordinary changes
-during the approval pause, but there is still a check-to-replace race against a
-hostile concurrent filesystem actor. The digest is a stale-write guard, not a
-durable journal, and checkpoint undo is not a Day 3 capability.
-
-The cumulative reference implementation adds bounded before-images,
-write-ahead mutation intents, restart classification, conflict checks, and
-default-No checkpoint undo in Day 6. That later journal does not add automatic
-diff capture or process isolation; follow the Day 6 chapter before claiming its
-recovery and undo guarantees.
-
-Do not automatically use `git reset`, `git checkout`, or a temporary commit as
-the mutation journal. A learner may run the agent in a repository that already
-contains unrelated work.
-
-## Inspect Before Editing
-
-A simple system instruction improves both reliability and reviewability:
-
-```text
-Inspect a file before editing it. Prefer exact edits over whole-file writes.
-After changing code, run the smallest relevant validation command.
+```bash
+pdm run test-refsol --week 4 --day 3
 ```
 
-Policy code should still enforce what it can. For example, `edit_file` naturally
-requires observed old text, an existing file must be read before `write_file`
-can replace it, an observation digest must match at the post-approval recheck,
-and both model-dispatched mutation tools require `y/N` approval.
-
-## Validate After Editing
-
-The final answer is not proof that the task is complete. Validation can include:
-
-- a focused unit test;
-- a type checker or linter;
-- a formatter followed by a diff inspection; or
-- a build command for the modified package.
-
-Return command failures to the model with their exit status. The agent should
-decide whether to inspect more code, make another edit, or report that it could
-not finish within its budget.
-
-The current loop does not know that a command was the task's required validation
-and does not reject a final answer merely because the last command failed.
-Validation-aware completion is a planned contract. Until it exists, inspect the
-trace and exit codes rather than treating `completed=True` as proof of
-correctness.
-
-## Budgets and Repeated Failures
-
-Add limits for:
-
-- model turns;
-- generated tokens;
-- tool result bytes;
-- command runtime; and
-- consecutive invalid or identical actions.
-
-If the same action repeats, whether it succeeds or fails, stop with a diagnostic
-instead of spending the remaining budget on an obvious loop. Keep the raw
-actions in the trace so repetition can become an evaluation metric.
-
-## Cumulative Safety Exercise
-
-Create a temporary fixture repository with:
-
-- a small implementation file;
-- a focused test exposing one bug;
-- an unrelated file that must not change; and
-- a symlink that points outside the workspace.
-
-Ask the agent to fix the bug. The task passes only if:
-
-1. the focused test succeeds;
-2. the unrelated file is unchanged;
-3. no **file tool** accesses or modifies a path outside the workspace; and
-4. the trace contains an inspection before the first mutation.
-
-If the trajectory uses `run_command`, allow only the exact fixture validation
-command, approve it separately, and run the whole exercise in a disposable
-environment. The baseline cannot prove that a subprocess avoided outside paths.
-
-Run the same task with a deliberately malformed model action and a failing test
-command. The agent should receive useful errors and remain within its budgets.
+The cumulative course-code guard checks exact public signatures, dataclass
+fields, package exports, TODO-only starter bodies, and absence of Day 4 APIs.
 
 ## Checkpoint
 
-At the end of Day 3, you have the smallest genuinely useful coding agent: it can
-inspect code, make a precise edit, and validate the result in a disposable
-workspace after the cumulative Day 5 and Day 6 behavior is complete. The planned
-remaining milestones make that agent persistent, efficient, controllable, and
-measurable.
+You now have a small end-to-end coding loop: inspect real bytes, propose one
+precise change, pause for a trusted operator, reject stale observations, replace
+the file, validate with one exact command, and retain simple evidence of both
+effects. Day 4 can build persistence concepts on this visible base without
+turning Day 3 into production infrastructure.
 
 {{#include copyright.md}}

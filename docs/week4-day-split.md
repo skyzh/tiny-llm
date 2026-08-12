@@ -1,8 +1,8 @@
 # Week 4 Day Split (reference for reviewers)
 
-Status: Days 2--3 follow Chi's approved simplified agent-loop cycle. Each day
-ships as one cumulative learner PR so reviewers can see exactly what belongs to
-that checkpoint.
+Status: Days 1--3 are published checkpoints. Days 2--3 follow Chi's approved
+simplified agent-loop cycle, with each day shipping as one cumulative learner
+PR so reviewers can see exactly what belongs to that checkpoint.
 
 ## 7-day structure
 
