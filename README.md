@@ -37,10 +37,11 @@ The course follows a four-week learning path:
   the scheduler does not rebuild dense history on every step.
 - **Week 4: Build a Coding Agent.** Start with a bounded, validated agent loop,
   then connect it to a small workspace. The course is publishing one reviewed
-  checkpoint at a time; Days 1 through 6 now cover inspection, approved edits,
+  checkpoint at a time; Days 1 through 7 now cover inspection, approved edits,
   one validation command, simple effect receipts, and one visible
   checkpoint-and-resume boundary, receipt-backed context compaction, and one
-  visible inspect-and-steer pause.
+  visible inspect-and-steer pause, and deterministic evaluation of observable
+  outcomes.
 
 ## Why MLX and Qwen3?
 
@@ -73,7 +74,7 @@ implementation, test, and publication readiness is tracked below.
 
 ## Roadmap
 
-The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; Days 1 through 6 are currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
+The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; Days 1 through 7 are currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
 
 Day 3 can send file contents to the model, modify files after approval, and run
 one exact configured command. Use a disposable workspace without secrets and
@@ -85,6 +86,8 @@ Day 5 compacts older completed effects in the model-visible transcript while
 their exact receipts retain the full action, result, and changed artifacts.
 Day 6 inspects one complete-observation checkpoint, appends one visible operator
 instruction, and resumes a fresh model without replaying the completed effect.
+Day 7 evaluates one completed run from declared final, file, result, and receipt
+facts without grading hidden reasoning or exact transcript shape.
 
 | Week + Chapter | Topic | Code | Test | Doc | Audit |
 |---|---|---|---|---|---|
@@ -115,7 +118,7 @@ instruction, and resumes a fresh model without replaying the completed effect.
 | 4.4 | Checkpoint and Resume | ✅ | ✅ | ✅ | 🚧 |
 | 4.5 | Compact Completed Work | ✅ | ✅ | ✅ | 🚧 |
 | 4.6 | Inspect and Steer a Paused Agent | ✅ | ✅ | ✅ | 🚧 |
-| 4.7 | Later agent checkpoint | — | — | — | 🚧 |
+| 4.7 | Evaluate Observable Outcomes | ✅ | ✅ | ✅ | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

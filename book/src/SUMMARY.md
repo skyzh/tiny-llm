@@ -37,6 +37,7 @@
     - [🚧 Day 4: Checkpoint and Resume](./week4-04-sessions.md)
     - [🚧 Day 5: Compact Completed Work](./week4-05-compaction.md)
     - [🚧 Day 6: Inspect and Steer a Paused Agent](./week4-06-steering.md)
+    - [🚧 Day 7: Evaluate Observable Outcomes](./week4-07-evaluation.md)
 - [🚧 Appendix: Performance Evidence Ledger](./appendix-performance.md)
 - [Sponsored by Raft.build](./sponsor.md)
 
