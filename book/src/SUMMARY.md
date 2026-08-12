@@ -35,6 +35,7 @@
     - [🚧 Day 2: Inspect a Workspace](./week4-02-tools.md)
     - [🚧 Day 3: Edit, Validate, and Record](./week4-03-safe-editing.md)
     - [🚧 Day 4: Checkpoint and Resume](./week4-04-sessions.md)
+    - [🚧 Day 5: Compact Completed Work](./week4-05-compaction.md)
 - [🚧 Appendix: Performance Evidence Ledger](./appendix-performance.md)
 - [Sponsored by Raft.build](./sponsor.md)
 

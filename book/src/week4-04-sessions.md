@@ -184,7 +184,7 @@ scripted model from the same conversation and fake-cache position. Inspect the
 checkpoint's messages and model fields, then confirm that the pre-checkpoint
 edit and command remain single completed effects.
 
-Later course capabilities remain unpublished until their own complete learner
-checkpoints are ready.
+Continue with [Day 5: Compact Completed Work](week4-05-compaction.md) to derive
+a smaller model-visible transcript while keeping the exact effect receipts.
 
 {{#include copyright.md}}
