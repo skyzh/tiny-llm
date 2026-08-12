@@ -146,7 +146,7 @@ class EvaluationReport:
 def _file_check(workspace: Workspace, expected: FileExpectation) -> EvaluationCheck:
     name = f"file:{expected.path}"
     try:
-        observed = workspace.resolve_path(expected.path).read_text(encoding="utf-8")
+        observed = workspace.resolve_path(expected.path).read_bytes().decode("utf-8")
     except (AgentError, OSError, UnicodeError) as error:
         return EvaluationCheck(name, False, f"evidence unavailable: {error}")
     if observed == expected.content:
