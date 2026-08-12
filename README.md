@@ -37,12 +37,13 @@ The course follows a four-week learning path:
   the scheduler does not rebuild dense history on every step.
 - **Week 4: Build a Coding Agent.** Start with a bounded, validated agent loop,
   then connect it to a small workspace. The course is publishing one reviewed
-  checkpoint at a time; Days 1 through 8 now cover inspection, approved edits,
+  checkpoint at a time; Days 1 through 9 now cover inspection, approved edits,
   one validation command, simple effect receipts, and one visible
   checkpoint-and-resume boundary, receipt-backed context compaction, and one
   visible inspect-and-steer pause, and deterministic evaluation of observable
   outcomes, then tokenizer/KV-prefix reuse for two isolated steered branches
-  and one explicit evidence-backed selection.
+  and one explicit evidence-backed selection, followed by bounded,
+  range-retrievable evidence for oversized tool results.
 
 ## Why MLX and Qwen3?
 
@@ -75,7 +76,7 @@ implementation, test, and publication readiness is tracked below.
 
 ## Roadmap
 
-The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; Days 1 through 8 are currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
+The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; Days 1 through 9 are currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
 
 Day 3 can send file contents to the model, modify files after approval, and run
 one exact configured command. Use a disposable workspace without secrets and
@@ -93,6 +94,9 @@ Day 8 reuses one real tokenizer/KV checkpoint for two differently steered,
 effect-isolated continuations, evaluates both with Day 7's harness, and makes
 one explicit passing selection without pretending completed effects were
 rewound.
+Day 9 stores exact oversized tool-result bytes outside the model prompt, shows
+a bounded identity/digest/head-tail observation, and lets the model retrieve
+one explicit byte range through the existing loop.
 
 | Week + Chapter | Topic | Code | Test | Doc | Audit |
 |---|---|---|---|---|---|
@@ -125,6 +129,7 @@ rewound.
 | 4.6 | Inspect and Steer a Paused Agent | ✅ | ✅ | ✅ | 🚧 |
 | 4.7 | Evaluate Observable Outcomes | ✅ | ✅ | ✅ | 🚧 |
 | 4.8 | Fork, Steer, and Select | ✅ | ✅ | ✅ | 🚧 |
+| 4.9 | Bound Tool Evidence | ✅ | ✅ | ✅ | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

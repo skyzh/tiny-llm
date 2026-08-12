@@ -18,6 +18,7 @@ from .evaluation import (
     ResultExpectation,
     evaluate_run,
 )
+from .evidence import ArtifactRef, ArtifactStore, BoundedEvidenceWorkspace
 from .generation import generate_response, initial_messages
 from .loop import (
     AgentEvent,
@@ -47,6 +48,9 @@ __all__ = [
     "AgentRun",
     "AgentStatus",
     "ApprovalDecision",
+    "ArtifactRef",
+    "ArtifactStore",
+    "BoundedEvidenceWorkspace",
     "BranchOutcome",
     "CompactionResult",
     "EvaluationCase",

@@ -199,4 +199,8 @@ concurrently, share a mutable workspace, merge receipts, or provide a session
 server/tree. Day 8 teaches the boundary visibly before adding any serving-scale
 machinery.
 
+Continue with [Day 9: Bound Tool Evidence](week4-09-bound-tool-evidence.md) to
+keep oversized results verifiable without placing their complete bytes in each
+later model prompt.
+
 {{#include copyright.md}}

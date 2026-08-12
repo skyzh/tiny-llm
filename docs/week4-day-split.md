@@ -1,9 +1,9 @@
 # Week 4 Day Split (reference for reviewers)
 
-Status: Days 1--8 are published checkpoints. Each day ships as one cumulative
+Status: Days 1--9 are published checkpoints. Each day ships as one cumulative
 learner PR so reviewers can see exactly what belongs to that checkpoint.
 
-## 8-day structure
+## 9-day structure
 
 | Day | Theme | Features (PRs) | Modules |
 |---|---|---|---|
@@ -15,6 +15,7 @@ learner PR so reviewers can see exactly what belongs to that checkpoint.
 | 6 | Inspect and steer | safe-boundary status and one visible steering message | `steering.py` |
 | 7 | Evaluate outcomes | declared final/file/result/receipt facts | `evaluation.py` |
 | 8 | Fork, steer, and select | dense tokenizer/KV prefix reuse, isolated branches, explicit selection | `branching.py`, `workspace.py` |
+| 9 | Bound tool evidence | exact external bytes, bounded observation, explicit range retrieval | `evidence.py` |
 
 Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.md`.
 
@@ -26,10 +27,11 @@ Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.
 - Days are implemented sequentially. A later day does not leak API or prose
   into the current starter.
 
-## Why 8 days
+## Why 9 days
 
 The first seven days establish the agent loop and its observable evidence. Day
 8 reconnects that control path to the tokenizer and KV cache built in Weeks
-1--3. Each day adds one visible concept; scaling and production-hardening
-machinery stay outside the core course unless a later checkpoint explicitly
-teaches it.
+1--3. Day 9 keeps large observable evidence available without filling every
+later model prompt. Each day adds one visible concept; scaling and
+production-hardening machinery stay outside the core course unless a later
+checkpoint explicitly teaches it.
