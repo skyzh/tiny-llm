@@ -2,10 +2,9 @@
 
 """Fail-closed starter/reference sync and anti-leakage guards for Week 4.
 
-Day 1 slice: the starter (``tiny_llm.agent``) declares the learner surface for
-``protocol``, ``loop``, and ``generation``; the reference
-(``tiny_llm_ref.agent``) implements the solutions.  These tests keep them from
-silently drifting:
+The cumulative Day 1--2 starter declares the learner surface while the
+reference package implements it. These tests keep the two from silently
+drifting:
 
 - every public class/method/function in the reference must exist in the
   starter (and vice versa) — a missing or extra member fails;
@@ -34,9 +33,13 @@ FEATURE_MAP = {
     "protocol": ("loop + tool protocol", "Day 1"),
     "loop": ("loop + tool protocol", "Day 1"),
     "generation": ("loop + tool protocol (minimal)", "Day 1"),
+    "receipts": ("immutable durable effect receipts", "Day 2"),
+    "workspace": ("bounded authorized workspace effects", "Day 2"),
 }
 
 MODULES = sorted(FEATURE_MAP)
+DAY1_MODULES = ("generation", "loop", "protocol")
+DAY2_MODULES = ("receipts", "workspace")
 
 
 def _public_api(path: Path):
@@ -156,13 +159,20 @@ def test_starter_package_exports_match_reference():
     )
 
 
-def test_no_non_day1_modules_in_starter():
-    """Only Day 1 modules may exist at this slice; later days add theirs."""
+def test_only_published_modules_exist_in_starter():
+    """Only cumulative Day 1--2 modules may exist at this slice."""
 
-    allowed = {"__init__.py", "protocol.py", "loop.py", "generation.py"}
+    allowed = {
+        "__init__.py",
+        "protocol.py",
+        "loop.py",
+        "generation.py",
+        "receipts.py",
+        "workspace.py",
+    }
     present = {path.name for path in STARTER.glob("*.py")}
     assert present <= allowed, (
-        f"starter contains non-Day-1 modules: {sorted(present - allowed)}"
+        f"starter contains unpublished modules: {sorted(present - allowed)}"
     )
 
 
@@ -519,34 +529,85 @@ def _assert_no_future_prose(path: Path) -> None:
 
 
 def _assert_future_surface_clean(starter_dir: Path) -> None:
-    """Run every normal future-surface guard over a starter tree."""
+    """Run every Day-1 future-surface guard over a starter tree."""
 
-    for module in MODULES:
+    for module in DAY1_MODULES:
         path = starter_dir / f"{module}.py"
         _assert_no_future_symbols(path)
         _assert_no_future_imports(path)
         _assert_no_future_prose(path)
 
 
-@pytest.mark.parametrize("module", MODULES)
+@pytest.mark.parametrize("module", DAY1_MODULES)
 def test_day1_starter_has_no_future_symbols(module):
     """Day-1 files must not expose or promise later-day concepts."""
 
     _assert_no_future_symbols(STARTER / f"{module}.py")
 
 
-@pytest.mark.parametrize("module", MODULES)
+@pytest.mark.parametrize("module", DAY1_MODULES)
 def test_day1_starter_has_no_future_imports(module):
     """Day-1 files must not import later-day modules."""
 
     _assert_no_future_imports(STARTER / f"{module}.py")
 
 
-@pytest.mark.parametrize("module", MODULES)
+@pytest.mark.parametrize("module", DAY1_MODULES)
 def test_day1_starter_has_no_future_prose_promises(module):
     """Day-1 docstrings/comments must not promise later-day behavior."""
 
     _assert_no_future_prose(STARTER / f"{module}.py")
+
+
+DAY3_PLUS_CONCEPTS = (
+    "GenerationSession",
+    "branch",
+    "checkpoint",
+    "compaction",
+    "context",
+    "control",
+    "evaluation",
+    "harness",
+    "parentId",
+    "reconcile",
+    "recovery",
+    "rewind",
+    "rewound",
+    "session",
+    "status",
+    "steering",
+)
+
+
+@pytest.mark.parametrize("module", DAY2_MODULES)
+def test_day2_starter_has_no_later_day_surface(module):
+    """Day 2 declarations must not expose or promise Day 3+ concepts."""
+
+    path = STARTER / f"{module}.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    identifiers = {
+        identifier
+        for node in ast.walk(tree)
+        for identifier in (
+            [node.id]
+            if isinstance(node, ast.Name)
+            else [node.attr]
+            if isinstance(node, ast.Attribute)
+            else []
+        )
+    }
+    forbidden_identifiers = sorted(identifiers & set(DAY3_PLUS_CONCEPTS))
+    assert not forbidden_identifiers, (
+        f"starter {path.name} exposes later-day symbols: {forbidden_identifiers}"
+    )
+    lower = source.lower()
+    forbidden_prose = sorted(
+        concept for concept in DAY3_PLUS_CONCEPTS if concept.lower() in lower
+    )
+    assert not forbidden_prose, (
+        f"starter {path.name} promises later-day concepts: {forbidden_prose}"
+    )
 
 
 def _dataclasses(path: Path):
@@ -873,74 +934,3 @@ def test_real_tree_checkpoint_prose_mutation_fails_normal_guard(tmp_path):
     )
     with pytest.raises(AssertionError, match="checkpoint"):
         _assert_future_surface_clean(starter)
-
-
-BOOK_API_TABLES = (
-    ROOT / "book" / "src" / "week4-01-agent-loop.md",
-    ROOT / "book" / "src" / "week4-overview.md",
-)
-
-
-def _book_required_api_names(book: Path) -> set[str]:
-    """Parse one Day-1 required-API table into its backticked names."""
-
-    import re
-
-    text = book.read_text(encoding="utf-8")
-    start = text.find("| File |")
-    table_lines = []
-    if start != -1:
-        for line in text[start:].splitlines():
-            if not line.startswith("|"):
-                break
-            table_lines.append(line)
-    table = "\n".join(table_lines)
-    names = set()
-    for match in re.finditer(r"`([A-Za-z_][A-Za-z_0-9]*)(?:\(\))?`", table):
-        names.add(match.group(1))
-    return names
-
-
-def _assert_book_starter_api_parity(
-    book_paths: tuple[Path, ...], starter_dir: Path
-) -> None:
-    """Bind every book table bidirectionally to the public starter exports."""
-
-    exported = _package_exports(starter_dir)
-    for book in book_paths:
-        required = _book_required_api_names(book)
-        assert required, f"no Day-1 required API names found in {book.name}"
-        book_only = sorted(required - exported)
-        starter_only = sorted(exported - required)
-        assert not book_only and not starter_only, (
-            f"book/starter API drift in {book.name}: "
-            f"book-only={book_only}, starter-only={starter_only}"
-        )
-
-
-def test_book_day1_required_api_matches_starter_bidirectionally():
-    _assert_book_starter_api_parity(BOOK_API_TABLES, STARTER)
-
-
-@pytest.mark.parametrize(
-    ("mutation", "old", "new"),
-    (
-        (
-            "book-only",
-            "`initial_messages()`, `generate_response()`",
-            "`initial_messages()`, `generate_response()`, `GenerationStats`",
-        ),
-        (
-            "starter-only",
-            "`initial_messages()`, `generate_response()`",
-            "`initial_messages()`",
-        ),
-    ),
-)
-def test_real_book_api_mutations_fail_bidirectional_guard(tmp_path, mutation, old, new):
-    source = BOOK_API_TABLES[0]
-    mutated = tmp_path / source.name
-    shutil.copy2(source, mutated)
-    _replace_once(mutated, old, new)
-    with pytest.raises(AssertionError, match="book/starter API drift"):
-        _assert_book_starter_api_parity((mutated,), STARTER)

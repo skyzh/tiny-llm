@@ -1,179 +1,213 @@
-# Day 2: Tools and Structured Actions
+# 🚧 Day 2: Authorize Effects and Keep Receipts
 
-> 🚧 **Early-review WIP:** This chapter is public for early review and may
-> change. Use a disposable workspace when running the agent or enabling writes
-> or commands.
+Day 1 stopped untrusted model text at a strict JSON boundary and bounded the
+number of loop steps. Day 2 adds the next boundary: a model request is not
+permission to change the machine.
 
-The agent loop becomes useful when actions can inspect and change a repository.
-The course protocol uses five actions: `list_files`, `read_file`, `edit_file`,
-`write_file`, and `run_command`.
+You will build a workspace that confines file tools to one directory, asks the
+operator before a write or command, and records each dispatched action as a
+content-addressed receipt. The learner tests use temporary directories and
+small local commands; they do not load a model.
 
-> **Implementation status:** The current Day 2 checkpoint covers strict action
-> parsing and a system prompt that lists only enabled tools. Read-side workspace
-> behavior is checked on Day 3; mutation and command behavior is checked on Day
-> 5. The sections below describe that cumulative baseline using its exact JSON
-> names and fields.
+> A path boundary is not a process sandbox. An allowed executable can read
+> outside the workspace, use the network, or start other processes. Use a
+> disposable repository and allow only exact commands you understand.
 
-## Why Five Tools Are Enough
+## The Day 1 to Day 2 Boundary
 
-A larger tool catalog is not automatically more capable. Every schema consumes
-context and gives the model another choice to make. Five tools cover the basic
-software-development cycle:
+The Day 1 loop already calls `workspace.execute(action)`. Its fake workspace
+proved the control flow without granting real effects. Day 2 replaces that fake
+at runtime with two explicit layers:
 
-- `list_files` performs bounded directory discovery;
-- `read_file` gathers one bounded UTF-8 file;
-- `edit_file` makes a targeted, reviewable replacement;
-- `write_file` creates a file or deliberately replaces its contents; and
-- `run_command` runs one exact operator-allowed argument vector.
-
-The model can use `rg`, `find`, or another program only when the operator has
-allowed that exact argument vector for `run_command`. Later you can add
-specialized tools when evaluation shows that a repeated workflow is unreliable,
-not merely because another command exists.
-
-## List Files
-
-The path is optional and defaults to the workspace root:
-
-```json
-{"tool":"list_files","path":"src"}
+```text
+validated ToolAction
+        |
+        v
+preflight against ToolPolicy
+        |
+        v
+operator approval for writes or commands
+        |
+        v
+revalidate, then perform the effect
+        |
+        v
+append an EffectReceipt
 ```
 
-The result identifies entries as files or directories, omits protected paths and
-symlinks, and stops after the policy's entry limit.
+Preflight must happen before approval. A malformed, disabled, stale, or
+non-allowlisted action should never ask the operator a misleading question.
+After approval, a write must recheck the file and parent directory before its
+atomic replacement.
 
-## Read File
+## Files and Public Surface
 
-The current interface reads one complete bounded file:
+Implement the TODO bodies in these Day 2 starter files:
 
-```json
-{"tool":"read_file","path":"src/parser.py"}
-```
+| File | Public names |
+| --- | --- |
+| `src/tiny_llm/agent/workspace.py` | `ToolPolicy`, `Workspace` |
+| `src/tiny_llm/agent/receipts.py` | `EffectReceipt`, `ReceiptStore` |
+| `src/tiny_llm/agent/__init__.py` | Re-exports the four Day 2 names alongside the Day 1 API. |
 
-Apply a byte limit so a minified or binary-looking file cannot flood the context.
-Reject directories, oversized files, and non-UTF-8 files with explicit errors.
-Line windows are a possible extension, but `offset` and `limit` are not fields in
-the current action schema.
+The starter declarations are the contract. Do not add extra public classes,
+functions, constants, or methods.
 
-## Edit File
-
-Use exact text replacement rather than asking the model to rewrite an entire
-file:
-
-```json
-{
-  "tool":"edit_file",
-  "path":"src/parser.py",
-  "old":"if not value:\n    return None",
-  "new":"if value is None:\n    return None"
-}
-```
-
-The old text must match exactly once. Zero matches usually mean the model needs
-to reread the file. Multiple matches mean it must select a more specific region.
-The current baseline returns the changed path; adding a bounded unified diff to
-the trace is a planned reviewability improvement.
-
-An exact edit has useful failure semantics: it refuses to apply when the file no
-longer matches what the model observed.
-
-`edit_file` is available only when writes were enabled by the operator. Even
-then, each model-dispatched action through `Workspace.execute()` must pass its
-preflight before it pauses and asks `y/N`. Only an explicit yes advances to the
-post-approval recheck and atomic edit. Direct method calls are the trusted,
-model-free layer used by focused tool tests and do not prompt.
-
-## Write File
-
-`write_file` is useful for creating a new file, but overwriting an existing file
-is a larger mutation than an exact edit. An existing file must first be read.
-Enforce a content limit and use an atomic replace so interruption does not leave
-a partially written file. Like `edit_file`, every eligible model-dispatched
-action that passes preflight requires an explicit `y`/`yes`; the displayed
-default is No.
-
-## Run Command
-
-The input is a non-empty JSON array. It must exactly equal an argument vector the
-operator supplied with `--allow-command`:
-
-```json
-{"tool":"run_command","argv":["pdm","run","test","--week","1","--day","3"]}
-```
-
-Capture stdout and stderr together in execution order, include the exit code,
-and cap what is returned to the model. The current baseline retains the bounded
-prefix and appends a truncation marker; it does not preserve a complete temporary
-log.
-
-The timeout belongs to `ToolPolicy`, not the model action. It attempts to
-terminate the command's same-process-group descendants and reaps the foreground
-child. A descendant that creates another session can escape this cleanup, so a
-disposable workspace and stronger OS process isolation are still required for
-hostile commands. At the Day 2 checkpoint, the runner handles
-`KeyboardInterrupt` while a command is active. The cumulative reference
-implementation adds one cooperative cancellation signal across the loop,
-course-model decoder, command polling, and steering in Day 6; that behavior is
-not part of the Day 2 focused check.
-
-Exact allowlisting is necessary but not sufficient. Every eligible
-model-dispatched `run_command` action that passes preflight also asks `y/N` and
-defaults to No. The runner does not invoke a shell, but an allowed executable can
-itself delete files, read outside the workspace, spawn children, or use the
-network.
-
-> A command running with `cwd` set to the repository can still read files outside
-> that directory. Run this course agent only in a disposable workspace. Path
-> validation is useful, but it is not a replacement for process isolation.
-
-## Executable Schema
-
-The current parser represents required and optional fields as data:
+`ToolPolicy` has these fields, in order:
 
 ```python
-TOOL_FIELDS = {
-    "list_files": (frozenset(), frozenset({"path"})),
-    "read_file": (frozenset({"path"}), frozenset()),
-    "write_file": (frozenset({"path", "content"}), frozenset()),
-    "edit_file": (frozenset({"path", "old", "new"}), frozenset()),
-    "run_command": (frozenset({"argv"}), frozenset()),
-}
+root: Path
+allow_writes: bool = False
+allowed_commands: tuple[tuple[str, ...], ...] = ()
+max_file_bytes: int = 64 * 1024
+max_write_bytes: int = 64 * 1024
+max_list_entries: int = 200
+max_tool_output_chars: int = 16_000
+command_timeout_seconds: float = 30.0
 ```
 
-Keep the prompt, parser, availability policy, approval policy, and dispatch names
-in agreement. Unknown, disabled, malformed, or human-denied actions become
-recoverable observations rather than operating-system calls.
+`Workspace` exposes:
 
-## Current Checkpoint
+- `bind_receipt_store(store)` before the first dispatched action;
+- `available_tools`, derived only from the policy;
+- `resolve_path`, `list_files`, and `read_file` for bounded inspection;
+- `write_file` and `edit_file` for the trusted, direct method layer;
+- `run_command` for one exact allowed argument vector; and
+- `execute(action, tool_call_id=...)` for the model-dispatch boundary.
 
-Implement `parse_action()` and `build_system_prompt()` in
-`src/tiny_llm/agent/protocol.py`, then run:
+Direct method calls make focused implementation tests possible. Model-requested
+writes, edits, and commands go through `execute`, where they require an explicit
+truthy `confirm_tool` response. Missing confirmation means No.
+
+## Task 4: Bound Paths and Reads
+
+Normalize the policy root once and remember its filesystem identity. Reject a
+root that is missing, is a symlink, is the filesystem root or home directory, or
+passes through protected metadata.
+
+Tool paths are non-empty relative paths. Reject:
+
+- `..` traversal and absolute paths;
+- every symlinked path component;
+- `.git` and common secret locations such as `.env`, `.ssh`, and `.aws`; and
+- common private-key names and `.pem` or `.key` suffixes.
+
+`list_files` returns at most `max_list_entries` sorted lines in `file path` or
+`dir path` form. It omits symlinks and protected entries. `read_file` accepts
+only a single-link regular UTF-8 file no larger than `max_file_bytes`, returns
+its text, and remembers the digest of the bytes it inspected.
+
+Expected failures include `AgentError` messages containing `path traversal`,
+`symlinks`, `not accessible`, `not a regular file`, or `exceeds ... bytes`.
+
+## Task 5: Inspect Before Overwrite
+
+Creating a new file and replacing an existing file have different preconditions.
+A new file may be prepared when writes are enabled. An existing file may be
+overwritten only after `read_file` recorded its current digest.
+
+Fail when the target bytes or mode change after that read. For `edit_file`, also
+require non-empty old text that occurs exactly once. Write through a temporary
+regular file in the same directory, flush it, atomically rename it, and flush
+the parent directory. Preserve an existing file's permission bits; create new
+files with mode `0600`.
+
+Expected failures include `existing files must be read before overwrite`,
+`file changed since it was read`, `file mode changed`, and `old text must match
+exactly once`.
+
+## Task 6: Put Approval Between Two Checks
+
+`execute` first completes the write, edit, or command preflight without making a
+change. Only then may it call `confirm_tool(action)`. If approval succeeds, the
+workspace revalidates the prepared file and parent identity before committing.
+
+This order handles two important cases:
+
+1. an invalid action never reaches the approval callback; and
+2. a file changed while the operator considered the request is not overwritten.
+
+Recoverable dispatch failures return a string beginning with `error:` and are
+still receipted. A missing or false callback returns `error: operator denied
+<tool>` and performs no effect.
+
+## Task 7: Allow Exact Commands and Enforce Timeouts
+
+`allowed_commands` contains complete argument tuples. The requested list must
+equal one tuple exactly; a prefix, suffix, different flag, or shell string is a
+different command. Invoke the argument vector directly with the workspace as
+its current directory—never with a shell.
+
+Capture stdout and stderr together, cap the returned text, and preserve the
+status line even when output is truncated. A successful result ends with
+`[exit code: 0]`. A nonzero result begins or ends with an `error:` status. On a
+timeout, kill the command's process group, reap the child, and return an error
+that contains `command timed out after`.
+
+Command approval does not make the executable safe. Keep the allowlist small and
+run the course in a disposable workspace.
+
+## Task 8: Make Receipts Immutable and Verifiable
+
+`EffectReceipt` is a frozen dataclass with exactly these fields:
+
+```python
+tool_call_id: str
+tool: str
+arguments: dict[str, Any]
+exit_state: str
+result: str
+changed_artifacts: tuple[str, ...]
+```
+
+Accept only the exit states `ok`, `error`, and `uncertain`. Detach and freeze the
+JSON-compatible arguments so later caller mutation cannot change evidence.
+Sort and deduplicate changed paths. `receipt_id` is the lowercase SHA-256 of the
+canonical JSON payload; it does not include itself.
+
+`to_dict()` adds `receipt_id` to a detached JSON representation.
+`from_dict()` accepts exactly those durable fields, reconstructs the receipt,
+and rejects a digest mismatch. Changing any stored argument, result, status, or
+artifact must therefore fail closed.
+
+`ReceiptStore(path)` loads an optional JSON-lines file and verifies every line.
+`put` appends one canonical line, flushes it, and calls `fsync` before updating
+the in-memory index. Repeating the same receipt is idempotent. Reusing a
+`tool_call_id` for different evidence is an error. `get`, `require`, and
+`by_tool_call` return only digest-verified receipts.
+
+## Task 9: Receipt Every Dispatch
+
+`Workspace.execute` assigns a non-empty call ID when none was supplied and
+records the normalized inputs, bounded result, exit state, and exact file
+changed by a successful write or edit. Bind a durable store before the first
+dispatch when receipts must survive the process.
+
+Validate a caller-supplied `tool_call_id` before any effect. Reject an ID already
+present in the bound store instead of repeating its action. This checkpoint does
+not guess what an interrupted process may have done: a timed-out command is
+marked `uncertain`.
+
+## Run the Cumulative Checkpoint
+
+Run the learner workflow from the repository root:
 
 ```bash
 pdm run test --week 4 --day 2
 ```
 
-The checks cover valid final and tool actions, malformed JSON and fields,
-enabled-tool prompt rendering, and rejection of a known but disabled tool. Use
-`pdm run test-refsol --week 4 --day 2` for the supplied implementation.
+This copies the cumulative Day 2 learner test into `tests/` and runs it against
+`tiny_llm`. The first tasks retain the Day 1 protocol checks; Tasks 4–9 exercise
+the new workspace and receipt surface. During course development, the supplied
+implementation can be checked without copying learner tests:
 
-## Cumulative Tool Exercise
+```bash
+pdm run test-refsol --week 4 --day 2
+```
 
-Implement the five tools and test them without a model across the later
-checkpoints:
-
-1. List a bounded directory and read a bounded UTF-8 file.
-2. Reject an edit with zero or multiple matches.
-3. Apply a unique approved edit while preserving the file's line endings.
-4. Create an approved file and reject content over the configured limit.
-5. Deny mutations and commands when approval is empty, unavailable, or No.
-6. Run an exact approved command that succeeds, one that fails, and one that
-   times out.
-7. Truncate a large command result while preserving its exit status.
-
-Then give the agent a fixture repository containing a one-line bug. A successful
-trajectory should inspect the implementation and test, make one exact edit, run
-the focused test, and return a final answer. This model-backed trajectory is a
-course target; the current Day 2 tests are deterministic and do not load a model.
+The cumulative guards also compare public APIs, full signatures, dataclass
+fields and defaults, package exports, and constants. Starter bodies must remain
+TODO-only and cannot import the reference package or declare unpublished
+capabilities.
 
 {{#include copyright.md}}

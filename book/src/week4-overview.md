@@ -1,15 +1,14 @@
 # 🚧 Week 4: Build a Coding Agent
 
-> **Course status:** Week 4 is being published one checkpoint at a time. Day 1
-> is ready to learn and review. Later days are deliberately not in this book
-> yet; each will appear only after its implementation, starter, and reviews are
-> ready.
+> **Course status:** Week 4 is being published one checkpoint at a time. Days 1
+> and 2 are ready to learn and review. Additional capabilities will appear only
+> after their implementation, starter, and reviews are ready.
 
 Weeks 1 through 3 turn tokens into text and make serving that text efficient.
 Week 4 starts a different kind of program: an agent repeatedly asks the model
 for one structured action, records the result, and gives that result back to
-the model. Today, that program is a bounded, deterministic loop. It does not
-yet run a command, edit a file, save a session, or evaluate a task.
+the model. Day 1 builds the bounded deterministic loop. Day 2 gives that loop a
+policy-bound workspace, explicit effect approval, and durable receipts.
 
 ## What Day 1 Builds
 
@@ -36,8 +35,8 @@ task + system instruction
 
 The workspace in the Day 1 tests is a small fake object with one enabled
 read-only action. This keeps the learning target focused: validate the model's
-text, bound the loop, and preserve the conversation. The real effect boundary
-will arrive in a later, separately reviewed checkpoint.
+text, bound the loop, and preserve the conversation. Day 2 then implements the
+real effect boundary without changing the Day 1 loop contract.
 
 ## Day 1 Checkpoint
 
@@ -65,8 +64,14 @@ pdm run test-refsol --week 4 --day 1
 
 ## Publication Boundary
 
-Only Day 1 is available today. Do not add modules for later days to your
-solution; each later capability will be published with its own reviewed
-checkpoint.
+After Day 1 passes, continue with [Day 2: Authorize Effects and Keep
+Receipts](week4-02-tools.md). The cumulative Day 2 command is:
+
+```bash
+pdm run test --week 4 --day 2
+```
+
+Only the Day 1 and Day 2 starter modules are published. Do not add other agent
+modules or public APIs to your solution.
 
 {{#include copyright.md}}
