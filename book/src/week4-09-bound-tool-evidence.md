@@ -49,10 +49,10 @@ ArtifactRef(
 ```
 
 The content-addressed ID and full digest deliberately repeat the same hash in
-different roles: one is the handle used by the range request; the other is an
-independent model-visible verification field. The store registers the ID in
-memory. A different store cannot retrieve it merely because the caller guessed
-the filename.
+different roles: one is the handle used by the range request; the other is a
+separately labeled model-visible verification field. The store registers the
+ID in memory. A different store cannot retrieve it merely because the caller
+guessed the filename.
 
 Before every range read, verify the stored byte count and digest again. The
 course store is local and single-process. It does not promise retention,
@@ -159,6 +159,10 @@ artifact directories, put a large UTF-8 `build.log` in the workspace, and use
 the same local-model adapter as the exploratory Week 4 exercise:
 
 ```python
+import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from mlx_lm import generate as mlx_generate, load
 from tiny_llm.agent import (
     ArtifactStore,
@@ -168,10 +172,23 @@ from tiny_llm.agent import (
     run_agent,
 )
 
+workspace_directory = TemporaryDirectory(prefix="tiny-llm-day9-workspace-")
+artifact_directory = TemporaryDirectory(prefix="tiny-llm-day9-artifacts-")
+workspace_root = Path(workspace_directory.name)
+artifact_root = Path(artifact_directory.name)
+(workspace_root / "build.log").write_text(
+    "build started α\n"
+    + "x" * 256
+    + "\nERROR code=E42 dependency mismatch\n"
+    + "y" * 3_000,
+    encoding="utf-8",
+)
+
 mlx_model, tokenizer = load("Qwen/Qwen3-0.6B-MLX-4bit")
+artifacts = ArtifactStore(artifact_root)
 workspace = BoundedEvidenceWorkspace(
     Workspace(ToolPolicy(workspace_root, max_file_bytes=64_000)),
-    ArtifactStore(artifact_root),
+    artifacts,
 )
 
 def generate(messages):
@@ -190,11 +207,19 @@ run = run_agent(
     generate,
     workspace,
 )
+
+for event in run.events:
+    print(event.result)
+print(run.final)
+for artifact_path in artifact_root.iterdir():
+    data = artifact_path.read_bytes()
+    print(artifact_path.name, len(data), hashlib.sha256(data).hexdigest())
 ```
 
 Model choices vary. Inspect the actual first observation, requested artifact
 ID and range, returned bytes, final answer, and on-disk artifact digest. Do not
-use a workspace or artifact root containing secrets.
+use a workspace or artifact root containing secrets. After inspection, call
+`workspace_directory.cleanup()` and `artifact_directory.cleanup()`.
 
 ## Checkpoint
 
