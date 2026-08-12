@@ -24,8 +24,8 @@ the host process can access, spawn children, or use the network.
 The receipt file is a simple append-only JSONL teaching record. It detects
 edited receipt bytes when reopened and handles a repeated call ID in the same
 process. It is not a transaction log, an `fsync` protocol, a multi-writer store,
-or proof that an interrupted effect did or did not happen. Sessions,
-checkpoints, rewind, and compaction arrive in later checkpoints.
+or proof that an interrupted effect did or did not happen. Day 3 deliberately
+stops at this receipt boundary.
 
 ## Files and Public Surface
 
@@ -205,7 +205,7 @@ fields, package exports, TODO-only starter bodies, and absence of Day 4 APIs.
 You now have a small end-to-end coding loop: inspect real bytes, propose one
 precise change, pause for a trusted operator, reject stale observations, replace
 the file, validate with one exact command, and retain simple evidence of both
-effects. Day 4 can build persistence concepts on this visible base without
-turning Day 3 into production infrastructure.
+effects. Later checkpoints can build on this visible base without turning Day 3
+into production infrastructure.
 
 {{#include copyright.md}}
