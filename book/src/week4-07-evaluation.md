@@ -162,9 +162,9 @@ observable outcomes. This harness samples the facts a particular case names. It
 does not prove general task correctness, model quality, security, or production
 safety, and it is not a hidden grader, benchmark suite, or LLM-as-judge system.
 
-That closes the seven-day Week 4 path: build a bounded loop, inspect and change
-a workspace with approvals and receipts, pause and resume, compact completed
-evidence, steer at a safe boundary, and finally evaluate one run by what it
-actually left behind.
+You now have the evidence needed to compare continuations. Continue with [Day
+8: Fork, Steer, and Select](week4-08-fork-steer-select.md) to reuse one real
+token/KV prefix, steer two isolated branches, and explicitly choose a passing
+outcome without rewinding completed effects.
 
 {{#include copyright.md}}

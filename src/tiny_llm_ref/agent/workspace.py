@@ -36,6 +36,22 @@ def _is_protected(path: Path) -> bool:
 
 
 @dataclass(frozen=True)
+class ApprovalDecision:
+    """One operator approval or a model-visible denial reason."""
+
+    approved: bool
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.approved) is not bool:
+            raise ValueError("approved must be a boolean")
+        if not isinstance(self.reason, str):
+            raise ValueError("approval reason must be a string")
+        if not self.approved and not self.reason.strip():
+            raise ValueError("a denial requires a nonblank operator reason")
+
+
+@dataclass(frozen=True)
 class ToolPolicy:
     """Tools and limits authorized for one explicit workspace root."""
 
@@ -96,7 +112,7 @@ class Workspace:
     """Run the Day 3 tools under one policy and approval callback."""
 
     policy: ToolPolicy
-    confirm_tool: Callable[[ToolAction], bool] | None = None
+    confirm_tool: Callable[[ToolAction], bool | ApprovalDecision] | None = None
     receipt_store: ReceiptStore = field(default_factory=ReceiptStore)
     _observed: dict[str, str] = field(default_factory=dict, init=False)
     _modified: set[str] = field(default_factory=set, init=False)
@@ -260,7 +276,13 @@ class Workspace:
                 )
             else:
                 self._allowed_command(action.arguments["argv"])
-            if self.confirm_tool is None or self.confirm_tool(action) is not True:
+            decision = self.confirm_tool(action) if self.confirm_tool else False
+            if isinstance(decision, ApprovalDecision):
+                if not decision.approved:
+                    raise AgentError(
+                        f"operator denied the tool action: {decision.reason}"
+                    )
+            elif decision is not True:
                 raise AgentError("operator denied the tool action")
             if action.tool == "write_file":
                 result = self.write_file(
@@ -365,6 +387,8 @@ class Workspace:
         return command
 
     def _new_call_id(self) -> str:
-        call_id = f"call-{self._next_call_number}"
-        self._next_call_number += 1
-        return call_id
+        while True:
+            call_id = f"call-{self._next_call_number}"
+            self._next_call_number += 1
+            if self.receipt_store.get(call_id) is None:
+                return call_id
