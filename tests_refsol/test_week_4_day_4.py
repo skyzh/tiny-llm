@@ -81,6 +81,25 @@ def test_task_2_agent_checkpoint_binds_task_messages_and_model_state():
         create_checkpoint("inspect", messages, replace(model, conversation_position=3))
     with pytest.raises(AgentError, match="identity"):
         replace(checkpoint, task="different").validate()
+    changed_messages = (checkpoint.messages[0], ("user", "respect"))
+    assert len(changed_messages[-1][1]) == len(checkpoint.messages[-1][1])
+    with pytest.raises(AgentError, match="identity"):
+        replace(checkpoint, messages=changed_messages).validate()
+    with pytest.raises(AgentError, match="identity"):
+        replace(
+            checkpoint,
+            model=replace(checkpoint.model, response_index=1),
+        ).validate()
+    with pytest.raises(AgentError, match="identity"):
+        replace(
+            checkpoint,
+            model=replace(checkpoint.model, cached_token_ids=(6, 8)),
+        ).validate()
+    with pytest.raises(AgentError, match="identity"):
+        replace(
+            checkpoint,
+            model=replace(checkpoint.model, layer_offsets=(2, 2)),
+        ).validate()
     with pytest.raises(AgentError, match="messages"):
         replace(checkpoint, messages=(("user",),)).validate()
 
