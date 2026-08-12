@@ -1,150 +1,190 @@
-# Day 4: Interactive Sessions and Resume
+# Day 4: Checkpoint and Resume
 
-> 🚧 **Early-review WIP:** This chapter is public for early review and may
-> change. Use a disposable workspace when running the agent or enabling writes
-> or commands.
+Days 1 through 3 build one uninterrupted coding-agent run. The model proposes
+an action, the harness executes it, and the result becomes the next model
+observation. But if the process stops, a new model object does not know which
+conversation prefix it had already processed.
 
-The stateless loop from the first three days loses its conversation whenever the
-process exits. This chapter makes the event stream durable and adds a reusable
-generation cache without making either representation depend on the other.
+Day 4 makes one boundary visible: save the conversation and the small model
+snapshot immediately after a complete tool observation, then restore both into
+a fresh scripted model and continue at the next response. The completed tools
+stay completed; resume starts after their observations instead of replaying
+them.
 
-> **Implementation status:** The reference implementation, learner API surface,
-> and focused tests in this chapter are executable. The chapter remains WIP even
-> though the checkpoint is executable.
+This is a teaching checkpoint for one process and the course's fake model. It
+is not a session tree, rewind feature, persistent KV store, transaction log, or
+exactly-once effect system.
 
 ## Check the Chapter
 
-Implement the session and generation APIs under `src/tiny_llm/agent/`, then run:
+Implement the TODO-only surfaces in:
+
+| File | Public names | Responsibility |
+| --- | --- | --- |
+| `src/tiny_llm/agent/checkpoint.py` | `ModelCheckpoint`, `AgentCheckpoint`, `create_checkpoint` | Represent and validate one in-memory conversation/model snapshot. |
+| `src/tiny_llm/agent/loop.py` | `run_to_checkpoint`, `resume_agent` | Stop after a complete observation, then continue with a fresh model. |
+| `src/tiny_llm/agent/__init__.py` | the names above | Export the cumulative Day 4 API. |
+
+Run the learner checkpoint from the repository root:
 
 ```bash
 pdm run test --week 4 --day 4
 ```
 
-Use `pdm run test-refsol --week 4 --day 4` to check the supplied implementation.
-The tests use temporary directories and fake caches; they do not execute model
-commands or destructive subprocesses.
+Before you implement the TODOs, all seven Day 4 tasks are expected to fail.
+The test uses a scripted model, fake cache metadata, a temporary workspace, and
+one exact Python validation command. It does not load model weights.
 
-## Three Separate States
+Course maintainers can check the supplied implementation without copying the
+learner test:
 
-The implementation deliberately separates:
-
-1. **Durable session state:** append-only user, assistant, tool, and lifecycle
-   events.
-2. **Model-visible context:** semantic chat messages rebuilt from those events.
-3. **KV state:** an in-process optimization for one rendered token prefix.
-
-The JSONL log is canonical. Losing or closing a KV cache only makes the next
-turn perform a cold prefill; it does not make the conversation impossible to
-resume.
-
-## Append-Only Session Log
-
-`SessionEvent` stores an ID, UTC timestamp, event type, optional parent ID, and
-type-specific data. `SessionLog.append()` serializes ID assignment and append,
-flushes the line, and calls `fsync` before returning. A persisted session begins
-with metadata containing its resolved workspace, model/backend/template
-identifier, and loaded project instructions.
-
-The agent records events in this order:
-
-```text
-user_message
-assistant_message        # durable before parsing or executing
-tool_call
-tool_result
-run_finished
+```bash
+pdm run test-refsol --week 4 --day 4
 ```
 
-If a process exits after `tool_call`, resume appends a concise interrupted
-`tool_result`. It never repeats the side effect or invents a successful result.
-Malformed, oversized, duplicate-ID, symlinked, or metadata-inconsistent logs
-fail closed.
+## One Safe Loop Boundary
 
-Session transcripts can contain source text and command output. They live under
-`.tiny-llm/sessions`, are ignored by Git, and are hidden from the model's
-workspace tools. Treat that directory as sensitive local data.
-
-## Resume Boundaries
-
-`SessionStore` creates, loads, and selects the newest session. Loading validates
-the resolved workspace and model/backend/template identifier. A session cannot
-silently be replayed against a different repository or inference template.
-
-At creation and resume, the store reads the workspace-root `AGENTS.md` when it
-is a bounded, regular UTF-8 file. The snapshot and SHA-256 digest are recorded.
-If the file changes, an `instructions_changed` event explains which policy is
-now visible. Recursive instruction discovery and arbitrary configuration files
-are intentionally deferred.
-
-The CLI supports:
+A checkpoint is saved only after the harness has appended both halves of a
+tool interaction:
 
 ```text
-agent TASK                 start and persist a new session
-agent --interactive TASK   accept follow-up messages in the same process
-agent --continue           resume the newest session for this workspace/model
-agent --session ID         resume one selected session
-agent --no-session TASK    run without creating a session file
+assistant: {"tool":"edit_file", ...}
+user:      Tool result:\nedited app.py
+                                      ^ checkpoint here
 ```
 
-`--continue` and `--session` are mutually exclusive. `--no-session` cannot be
-combined with resume flags. Existing Day 3 safety rules still apply to every
-tool call after resume. A completed session needs a new interactive follow-up;
-resume never creates an unsolicited model turn.
+Saving before the observation would leave the restored model unable to tell
+whether the tool ran. Day 4 therefore counts completed tool calls and saves at
+the boundary after `_append_tool_result(...)` has produced the next complete
+conversation.
 
-## Rebuilding Context
+The checkpoint stores the semantic messages, not the `AgentEvent` history.
+Day 3 receipts remain separate evidence about the edit or command. They are not
+copied into the checkpoint and they do not become a replay controller.
 
-The context builder maps user and assistant events back to their chat roles and
-wraps completed tool results as user observations. Lifecycle, timing, and
-metadata events remain audit-only. A recovered unmatched call becomes a normal
-error observation, so the next model turn can choose a safe next action.
+## Task 1: Represent the Fake Model Snapshot
 
-Day 4 still uses the character-bounded retention helper once the conversation
-is rebuilt. Token-aware reduction and structured summaries belong to Day 5;
-the durable log is never trimmed.
-
-## Reusing KV State
-
-`GenerationSession` preserves the existing one-argument `Generate` boundary:
+`ModelCheckpoint` contains four fields, in order:
 
 ```python
-response = generation_session(messages)
+conversation_position: int
+response_index: int
+cached_token_ids: tuple[int, ...]
+layer_offsets: tuple[int, ...]
 ```
 
-It renders and tokenizes the requested messages, compares token IDs with the
-prefix represented by every live cache layer, and computes their longest common
-prefix. Before rewinding, it verifies that all layer offsets agree with its own
-bookkeeping. A valid divergent suffix is rewound on every layer and only the new
-suffix is prefetched. Any disagreement, unsupported rewind, or cache error
-releases the whole cache set and starts cold.
+`conversation_position` is the number of semantic messages at the saved
+boundary. `response_index` tells the scripted model which response comes next.
+`cached_token_ids` represents the prompt prefix in the fake cache, and every
+`layer_offsets` entry must equal its length.
 
-`GenerationStats` reports input, reused, rewound, prefetched, and output token
-counts plus whether the turn started cold. The represented-token invariant is:
+Reject negative positions, invalid token IDs, a missing layer snapshot, or
+offsets that disagree with the cached prefix. These checks make the fake model
+state internally coherent without introducing a production cache format.
+
+## Task 2: Bind Conversation and Model State
+
+`AgentCheckpoint` contains:
+
+```python
+checkpoint_id: str
+task: str
+messages: tuple[tuple[str, str], ...]
+model: ModelCheckpoint
+```
+
+`create_checkpoint(task, messages, model)` copies each mutable message into an
+immutable `(role, content)` pair. It computes `checkpoint_id` as the SHA-256 of
+canonical JSON containing the task, messages, and model fields.
+
+`AgentCheckpoint.validate()` checks the ordinary resume contract:
+
+- the task and messages are structurally valid;
+- the model's conversation position equals the saved message count;
+- the checkpoint ID still matches the content.
+
+This identity check catches an accidental mismatch. It is not a hostile-tamper
+or authentication scheme.
+
+## Task 3: Stop After a Complete Observation
+
+`run_to_checkpoint(task, generate, workspace, after_tool_calls=1, limits=None)`
+starts with the same prompt and validation rules as `run_agent`. It counts a
+tool call only after execution and observation append. At the requested count,
+it calls:
+
+```python
+model_state = generate.save_checkpoint(messages)
+```
+
+and returns an `AgentCheckpoint`.
+
+The generator must return a `ModelCheckpoint`. A missing checkpoint method, a
+non-positive tool-call count, or a run that finishes before the boundary is a
+clear error instead of a partial checkpoint.
+
+## Task 4: Restore a Fresh Model
+
+`resume_agent(checkpoint, fresh_generate, workspace, limits=None)` validates the
+checkpoint, calls:
+
+```python
+fresh_generate.restore_checkpoint(checkpoint.model)
+```
+
+rebuilds the semantic message list, and enters the normal loop. The fresh model
+therefore sees the exact conversation prefix and produces the response at the
+saved `response_index`.
+
+No old tool action is submitted again. The first model call after restore sees
+the already-recorded tool result and chooses the next action or final answer.
+
+## Task 5: Make the Fake Cache Visible
+
+The test's `FakeCheckpointModel` turns each message content length into one fake
+token ID. `save_checkpoint(messages)` records those token IDs, two matching
+layer offsets, and the next scripted-response index. A new model object restores
+that state and asserts that its first resumed input has the same token prefix
+and conversation position.
+
+This deliberately small representation exposes the inference/harness
+integration: the harness owns semantic conversation state, while the model owns
+the cache snapshot that accelerates exactly that state.
+
+## Task 6: Resume Without Replaying Effects
+
+The end-to-end test scripts:
 
 ```text
-every cache offset == len(the token IDs represented by the live cache)
+read app.py
+edit app.py
+run the exact validation command
+checkpoint after the validation observation
+construct a fresh scripted model
+resume to the final answer
 ```
 
-The final sampled token is included only after it has actually been fed through
-the model. `close()` is idempotent and releases every cache. Warm and cold paths
-must produce the same greedy response.
+Before resume, the Day 3 store already contains the edit receipt and validation
+receipt. After resume, the approval log and receipt count are unchanged: neither
+completed effect ran twice. The checkpoint contains no receipt IDs and makes no
+exactly-once claim; it simply resumes after the conversation already says those
+effects completed.
 
-The reusable cache is implemented for the course Week 2/3 model adapter. The
-`--solution mlx` compatibility backend keeps its stateless generator; durable
-session replay still works there.
+## Task 7: Keep the Boundary Small
 
-## Exercise
+The Day 4 starter adds only `checkpoint.py` and two loop entry points. Do not add
+session IDs, parent pointers, branches, rewind methods, compaction summaries,
+steering queues, disk cache files, or later-day modules. If the in-memory
+checkpoint is lost, start a new run.
 
-1. Round-trip every session event through JSONL.
-2. Verify that an assistant response is durable before a tool runs.
-3. Resume an unmatched tool call without re-executing it.
-4. Reject a workspace or model mismatch.
-5. Change `AGENTS.md` and inspect the recorded transition.
-6. Confirm that `--no-session` writes nothing.
-7. Compare cache reuse, rewind, and cold-fallback counters with fake layers.
-8. Close a live generation session twice without leaking a cache.
+## Checkpoint
 
-Day 5 adds rendered-token budgeting and structured compaction. Day 6 adds
-mutation recovery, checkpoints, cancellation, steering, and branches. Disk KV
-snapshots and multi-process session writers are not part of this checkpoint.
+You can now stop after a complete tool observation and continue with a fresh
+scripted model from the same conversation and fake-cache position. Inspect the
+checkpoint's messages and model fields, then confirm that the pre-checkpoint
+edit and command remain single completed effects.
+
+Later course capabilities remain unpublished until their own complete learner
+checkpoints are ready.
 
 {{#include copyright.md}}

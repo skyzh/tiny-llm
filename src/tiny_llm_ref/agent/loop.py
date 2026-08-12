@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from .checkpoint import AgentCheckpoint, ModelCheckpoint, create_checkpoint
 from .generation import Generate, Message, initial_messages
 from .protocol import (
     AgentError,
@@ -78,29 +79,21 @@ def _append_tool_result(
     ]
 
 
-def run_agent(
-    task: str | None,
+def _continue_agent(
+    messages: list[Message],
     generate: Generate,
     workspace: Any,
-    limits: AgentLimits | None = None,
-    on_event: Callable[[AgentEvent], None] | None = None,
-) -> AgentRun:
-    """Run a bounded validated loop over one task.
-
-    ``workspace`` must expose ``available_tools`` (a frozenset of tool names),
-    ``execute(action)`` (returning a result string), and ``modified_files``
-    (an iterable of paths).
-    """
-
-    limits = limits or AgentLimits()
-    if task is None or not task.strip():
-        raise ValueError("task must not be empty")
-    system_prompt = build_system_prompt(workspace)
-    messages = initial_messages(task, system_prompt)
+    limits: AgentLimits,
+    on_event: Callable[[AgentEvent], None] | None,
+    *,
+    task: str | None = None,
+    checkpoint_after_tool_calls: int | None = None,
+) -> AgentRun | AgentCheckpoint:
     events: list[AgentEvent] = []
     invalid_actions = 0
     previous_signature: str | None = None
     identical_actions = 0
+    tool_calls = 0
 
     for step in range(1, limits.max_steps + 1):
         if (
@@ -155,5 +148,90 @@ def run_agent(
         if on_event is not None:
             on_event(event)
         messages = _append_tool_result(messages, response, result)
+        tool_calls += 1
+        if checkpoint_after_tool_calls == tool_calls:
+            save = getattr(generate, "save_checkpoint", None)
+            if save is None:
+                raise AgentError("generator does not support checkpoints")
+            model = save(messages)
+            if not isinstance(model, ModelCheckpoint):
+                raise AgentError("generator returned an invalid model checkpoint")
+            assert task is not None
+            return create_checkpoint(task, messages, model)
 
     return AgentRun(False, "step_limit", None, tuple(events))
+
+
+def run_agent(
+    task: str | None,
+    generate: Generate,
+    workspace: Any,
+    limits: AgentLimits | None = None,
+    on_event: Callable[[AgentEvent], None] | None = None,
+) -> AgentRun:
+    """Run a bounded validated loop over one task.
+
+    ``workspace`` must expose ``available_tools`` (a frozenset of tool names),
+    ``execute(action)`` (returning a result string), and ``modified_files``
+    (an iterable of paths).
+    """
+
+    if task is None or not task.strip():
+        raise ValueError("task must not be empty")
+    messages = initial_messages(task, build_system_prompt(workspace))
+    result = _continue_agent(
+        messages, generate, workspace, limits or AgentLimits(), on_event
+    )
+    assert isinstance(result, AgentRun)
+    return result
+
+
+def run_to_checkpoint(
+    task: str,
+    generate: Generate,
+    workspace: Any,
+    after_tool_calls: int = 1,
+    limits: AgentLimits | None = None,
+) -> AgentCheckpoint:
+    """Run until a tool observation is complete, then save model and messages."""
+
+    if type(after_tool_calls) is not int or after_tool_calls <= 0:
+        raise ValueError("after_tool_calls must be a positive integer")
+    if not task.strip():
+        raise ValueError("task must not be empty")
+    messages = initial_messages(task, build_system_prompt(workspace))
+    result = _continue_agent(
+        messages,
+        generate,
+        workspace,
+        limits or AgentLimits(),
+        None,
+        task=task,
+        checkpoint_after_tool_calls=after_tool_calls,
+    )
+    if isinstance(result, AgentCheckpoint):
+        return result
+    raise AgentError(f"run ended before checkpoint: {result.reason}")
+
+
+def resume_agent(
+    checkpoint: AgentCheckpoint,
+    generate: Generate,
+    workspace: Any,
+    limits: AgentLimits | None = None,
+) -> AgentRun:
+    """Restore a fresh model and continue after the saved tool observation."""
+
+    checkpoint.validate()
+    restore = getattr(generate, "restore_checkpoint", None)
+    if restore is None:
+        raise AgentError("generator does not support checkpoint restore")
+    restore(checkpoint.model)
+    messages = [
+        {"role": role, "content": content} for role, content in checkpoint.messages
+    ]
+    result = _continue_agent(
+        messages, generate, workspace, limits or AgentLimits(), None
+    )
+    assert isinstance(result, AgentRun)
+    return result

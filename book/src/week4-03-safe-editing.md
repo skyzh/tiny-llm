@@ -198,14 +198,15 @@ pdm run test-refsol --week 4 --day 3
 ```
 
 The cumulative course-code guard checks exact public signatures, dataclass
-fields, package exports, TODO-only starter bodies, and absence of Day 4 APIs.
+fields, package exports, TODO-only starter bodies, and absence of future APIs.
 
 ## Checkpoint
 
 You now have a small end-to-end coding loop: inspect real bytes, propose one
 precise change, pause for a trusted operator, reject stale observations, replace
 the file, validate with one exact command, and retain simple evidence of both
-effects. Later checkpoints can build on this visible base without turning Day 3
-into production infrastructure.
+effects. Continue with [Day 4: Checkpoint and Resume](week4-04-sessions.md) to
+save one complete observation boundary and restore it through a fresh scripted
+model without turning Day 3 into production infrastructure.
 
 {{#include copyright.md}}

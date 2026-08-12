@@ -34,6 +34,7 @@
     - [🚧 Day 1: Validated Agent Loop](./week4-01-agent-loop.md)
     - [🚧 Day 2: Inspect a Workspace](./week4-02-tools.md)
     - [🚧 Day 3: Edit, Validate, and Record](./week4-03-safe-editing.md)
+    - [🚧 Day 4: Checkpoint and Resume](./week4-04-sessions.md)
 - [🚧 Appendix: Performance Evidence Ledger](./appendix-performance.md)
 - [Sponsored by Raft.build](./sponsor.md)
 

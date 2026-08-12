@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from .checkpoint import AgentCheckpoint
 from .generation import Generate, Message
 from .protocol import (
     AgentAction,
@@ -87,4 +88,27 @@ def run_agent(
     # actions back as "error: ..." observations; stop on FinalAction,
     # invalid-action limit, identical-action limit, context limit, and step
     # limit.
+    pass
+
+
+def run_to_checkpoint(
+    task: str,
+    generate: Generate,
+    workspace: Any,
+    after_tool_calls: int = 1,
+    limits: AgentLimits | None = None,
+) -> AgentCheckpoint:
+    """Run until a tool observation is complete, then save model and messages."""
+
+    pass
+
+
+def resume_agent(
+    checkpoint: AgentCheckpoint,
+    generate: Generate,
+    workspace: Any,
+    limits: AgentLimits | None = None,
+) -> AgentRun:
+    """Restore a fresh model and continue after the saved tool observation."""
+
     pass
