@@ -1,7 +1,7 @@
 # 🚧 Week 4: Build a Coding Agent
 
 > **Course status:** Week 4 is being published one checkpoint at a time. Days 1
-> through 4 are ready to learn and review. Additional capabilities will appear
+> through 5 are ready to learn and review. Additional capabilities will appear
 > only after their implementation, starter, and reviews are ready.
 
 Weeks 1 through 3 turn tokens into text and make serving that text efficient.
@@ -12,6 +12,8 @@ small read-only workspace for listing and reading project files. Day 3 adds an
 approval boundary for edits, one exact validation command, and simple receipts.
 Day 4 saves a complete conversation boundary and the fake model's cache
 metadata, then restores both into a fresh model without replaying effects.
+Day 5 derives a smaller model-visible transcript from older completed effects
+while their exact receipts remain unchanged.
 
 ## What Day 1 Builds
 
@@ -88,7 +90,14 @@ Resume](week4-04-sessions.md). Its cumulative command is:
 pdm run test --week 4 --day 4
 ```
 
-Only the Day 1 through Day 4 starter modules are published. Do not add session,
-rewind, compaction, steering, or other later public APIs to your solution.
+After Day 4 passes, continue with [Day 5: Compact Completed
+Work](week4-05-compaction.md). Its cumulative command is:
+
+```bash
+pdm run test --week 4 --day 5
+```
+
+Only the Day 1 through Day 5 starter modules are published. Do not add session
+trees, rewind, steering, or other later public APIs to your solution.
 
 {{#include copyright.md}}
