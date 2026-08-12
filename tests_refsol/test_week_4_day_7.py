@@ -174,6 +174,34 @@ def test_task_2_file_content_does_not_normalize_newlines(tmp_path):
     ]
 
 
+def test_task_2_invalid_utf8_is_not_ignored(tmp_path):
+    run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
+    (tmp_path / "app.py").write_bytes(b"answer = \xff2\n")
+
+    report = evaluate_run(run, workspace, receipts, case)
+
+    assert not report.passed
+    assert [check.name for check in report.checks if not check.passed] == [
+        "file:app.py"
+    ]
+
+
+def test_task_2_invalid_utf8_is_not_replaced(tmp_path):
+    run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
+    (tmp_path / "app.py").write_bytes(b"answer = \xff2\n")
+    replacement_case = replace(
+        case,
+        files=(FileExpectation("app.py", "answer = \N{REPLACEMENT CHARACTER}2\n"),),
+    )
+
+    report = evaluate_run(run, workspace, receipts, replacement_case)
+
+    assert not report.passed
+    assert [check.name for check in report.checks if not check.passed] == [
+        "file:app.py"
+    ]
+
+
 def test_task_2_tool_and_result_must_match_the_same_event(tmp_path):
     run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
     split_evidence = replace(
