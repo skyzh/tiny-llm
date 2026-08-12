@@ -8,7 +8,7 @@ Weeks 1 through 3 turn tokens into text and make serving that text efficient.
 Week 4 starts a different kind of program: an agent repeatedly asks the model
 for one structured action, records the result, and gives that result back to
 the model. Day 1 builds the bounded deterministic loop. Day 2 gives that loop a
-policy-bound workspace, explicit effect approval, and durable receipts.
+small read-only workspace for listing and reading project files.
 
 ## What Day 1 Builds
 
@@ -35,8 +35,8 @@ task + system instruction
 
 The workspace in the Day 1 tests is a small fake object with one enabled
 read-only action. This keeps the learning target focused: validate the model's
-text, bound the loop, and preserve the conversation. Day 2 then implements the
-real effect boundary without changing the Day 1 loop contract.
+text, bound the loop, and preserve the conversation. Day 2 replaces the fake
+with real read-only tools without changing the Day 1 loop contract.
 
 ## Day 1 Checkpoint
 
@@ -45,7 +45,7 @@ The Day 1 starter exposes exactly these public names:
 | File | Public names | Why they are here |
 | --- | --- | --- |
 | `src/tiny_llm/agent/generation.py` | `initial_messages`, `generate_response` | Begin a conversation and keep the one-response model boundary explicit. |
-| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `TOOL_CATALOG_HASH`, `tool_catalog_hash`, `parse_action`, `build_system_prompt` | Represent and validate one final answer or one tool request. |
+| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `parse_action`, `build_system_prompt` | Represent and validate one final answer or one tool request. |
 | `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent` | Bound the run and retain an inspectable trace. |
 
 Implement the Day 1 exercise, then run:
@@ -64,8 +64,8 @@ pdm run test-refsol --week 4 --day 1
 
 ## Publication Boundary
 
-After Day 1 passes, continue with [Day 2: Authorize Effects and Keep
-Receipts](week4-02-tools.md). The cumulative Day 2 command is:
+After Day 1 passes, continue with [Day 2: Inspect a
+Workspace](week4-02-tools.md). The cumulative Day 2 command is:
 
 ```bash
 pdm run test --week 4 --day 2
