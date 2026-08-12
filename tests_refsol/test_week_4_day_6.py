@@ -95,7 +95,35 @@ def test_task_2_status_preview_is_bounded_and_inspection_is_pure():
         inspect_checkpoint(checkpoint, evidence_chars=0)
 
 
-def test_task_3_status_rejects_an_incomplete_or_invalid_tool_boundary():
+@pytest.mark.parametrize(
+    ("action", "error"),
+    [
+        ("not json", "not valid JSON"),
+        ('{"final":"done"}', "expected a tool action"),
+        ('{"tool":"unknown"}', "unknown tool"),
+        ('{"tool":"read_file"}', "missing fields for read_file: path"),
+        ('{"tool":"read_file","path":7}', "path must be a string"),
+        (
+            '{"tool":"read_file","path":"README.md","extra":true}',
+            "unexpected fields for read_file: extra",
+        ),
+    ],
+)
+def test_task_3_status_rejects_protocol_invalid_tool_actions(action, error):
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "inspect"},
+        {"role": "assistant", "content": action},
+        {"role": "user", "content": "Tool result:\nresult"},
+    ]
+    checkpoint = create_checkpoint(
+        "inspect", messages, ModelCheckpoint(4, 1, (6, 7, 8, 19), (4,))
+    )
+    with pytest.raises(AgentError, match=error):
+        inspect_checkpoint(checkpoint)
+
+
+def test_task_3_status_rejects_an_incomplete_tool_boundary():
     messages = [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "inspect"},
@@ -105,17 +133,6 @@ def test_task_3_status_rejects_an_incomplete_or_invalid_tool_boundary():
     )
     with pytest.raises(AgentError, match="complete tool observation"):
         inspect_checkpoint(checkpoint)
-
-    invalid_action = [
-        *messages,
-        {"role": "assistant", "content": "not json"},
-        {"role": "user", "content": "Tool result:\nresult"},
-    ]
-    invalid = create_checkpoint(
-        "inspect", invalid_action, ModelCheckpoint(4, 1, (6, 7, 8, 19), (4,))
-    )
-    with pytest.raises(AgentError, match="tool action"):
-        inspect_checkpoint(invalid)
 
 
 def test_task_4_steering_is_one_visible_message_in_stable_order(tmp_path):
@@ -228,3 +245,17 @@ def test_task_6_steering_and_checkpoint_validation_fail_closed(tmp_path):
         resume_with_steering(
             checkpoint, "continue", lambda _messages: '{"final":"done"}', workspace
         )
+
+    incomplete = create_checkpoint(
+        "inspect",
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "inspect"},
+        ],
+        ModelCheckpoint(2, 0, (6, 7), (2,)),
+    )
+    untouched = FakeSteeringModel(())
+    with pytest.raises(AgentError, match="complete tool observation"):
+        resume_with_steering(incomplete, "continue", untouched, workspace)
+    assert untouched.restored is None
+    assert untouched.calls == []

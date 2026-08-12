@@ -11,7 +11,7 @@ from typing import Any
 from .checkpoint import AgentCheckpoint
 from .generation import Generate, Message
 from .loop import AgentLimits, AgentRun, _continue_agent
-from .protocol import AgentError
+from .protocol import AgentError, ToolAction, parse_action
 
 _TOOL_RESULT_PREFIX = "Tool result:\n"
 _STEERING_PREFIX = "Operator steering:\n"
@@ -35,13 +35,9 @@ def _bounded_preview(content: str, limit: int) -> str:
     return content[: limit - 1] + "…"
 
 
-def inspect_checkpoint(
-    checkpoint: AgentCheckpoint, *, evidence_chars: int = 160
-) -> AgentStatus:
-    """Derive a bounded public status from a complete tool observation."""
-
-    if type(evidence_chars) is not int or evidence_chars <= 0:
-        raise ValueError("evidence_chars must be a positive integer")
+def _completed_tool_boundary(
+    checkpoint: AgentCheckpoint,
+) -> tuple[ToolAction, str]:
     checkpoint.validate()
     if len(checkpoint.messages) < 2:
         raise AgentError("checkpoint does not end at a complete tool observation")
@@ -54,23 +50,32 @@ def inspect_checkpoint(
     ):
         raise AgentError("checkpoint does not end at a complete tool observation")
     try:
-        action = json.loads(action_content)
-    except json.JSONDecodeError as error:
-        raise AgentError("checkpoint tool action is invalid") from error
-    if (
-        not isinstance(action, dict)
-        or not isinstance(action.get("tool"), str)
-        or not action["tool"].strip()
-    ):
-        raise AgentError("checkpoint tool action is invalid")
-    last_action = json.dumps(action, sort_keys=True, separators=(",", ":"))
-    evidence = result_content[len(_TOOL_RESULT_PREFIX) :]
-    tool = action["tool"]
+        action = parse_action(action_content)
+    except AgentError as error:
+        raise AgentError(f"checkpoint tool action is invalid: {error}") from error
+    if not isinstance(action, ToolAction):
+        raise AgentError("checkpoint tool action is invalid: expected a tool action")
+    return action, result_content[len(_TOOL_RESULT_PREFIX) :]
+
+
+def inspect_checkpoint(
+    checkpoint: AgentCheckpoint, *, evidence_chars: int = 160
+) -> AgentStatus:
+    """Derive a bounded public status from a complete tool observation."""
+
+    if type(evidence_chars) is not int or evidence_chars <= 0:
+        raise ValueError("evidence_chars must be a positive integer")
+    action, evidence = _completed_tool_boundary(checkpoint)
+    last_action = json.dumps(
+        {"tool": action.tool, **action.arguments},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return AgentStatus(
         task=checkpoint.task,
         last_action=last_action,
         last_evidence=_bounded_preview(evidence, evidence_chars),
-        next_step=f"resume the model after the completed {tool} observation",
+        next_step=f"resume the model after the completed {action.tool} observation",
     )
 
 
@@ -85,7 +90,7 @@ def resume_with_steering(
 
     if not isinstance(steering, str) or not steering.strip():
         raise ValueError("steering must not be empty")
-    checkpoint.validate()
+    _completed_tool_boundary(checkpoint)
     restore = getattr(generate, "restore_checkpoint", None)
     if restore is None:
         raise AgentError("generator does not support checkpoint restore")
