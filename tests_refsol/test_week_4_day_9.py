@@ -114,6 +114,71 @@ def test_task_2_oversized_result_becomes_bounded_verifiable_observation(tmp_path
     assert len(rendered.encode()) <= unicode.max_inline_bytes
 
 
+def test_task_2_externalization_uses_utf8_bytes_at_the_exact_inline_boundary(
+    tmp_path,
+):
+    inline, _ = _workspace(tmp_path, "a" * 512)
+    assert inline.execute(ToolAction("read_file", {"path": "build.log"})) == "a" * 512
+
+    multibyte_root = tmp_path / "multibyte"
+    multibyte_root.mkdir()
+    multibyte_artifacts = tmp_path / "multibyte-artifacts"
+    multibyte_artifacts.mkdir()
+    content = "é" * 512
+    (multibyte_root / "build.log").write_text(content, encoding="utf-8")
+    multibyte = BoundedEvidenceWorkspace(
+        Workspace(ToolPolicy(multibyte_root, max_file_bytes=32_000)),
+        ArtifactStore(multibyte_artifacts),
+    )
+
+    result = multibyte.execute(ToolAction("read_file", {"path": "build.log"}))
+    payload = _payload(result, "Tool result externalized:\n")
+    assert payload["byte_count"] == len(content.encode("utf-8")) == 1_024
+
+
+def test_task_2_inline_cap_plus_one_byte_is_externalized(tmp_path):
+    bounded, _ = _workspace(tmp_path, "a" * 513)
+
+    result = bounded.execute(ToolAction("read_file", {"path": "build.log"}))
+
+    assert result.startswith("Tool result externalized:\n")
+
+
+def test_task_2_four_byte_unicode_bounds_the_whole_encoded_observation(tmp_path):
+    bounded, _ = _workspace(
+        tmp_path,
+        "🙂" * 300,
+        max_inline_bytes=512,
+        preview_bytes=80,
+        max_range_bytes=512,
+    )
+
+    result = bounded.execute(ToolAction("read_file", {"path": "build.log"}))
+
+    assert len(result.encode("utf-8")) <= 512
+
+
+def test_task_2_four_byte_unicode_preview_ranges_are_byte_accurate(tmp_path):
+    content = "🙂" * 300
+    bounded, _ = _workspace(
+        tmp_path,
+        content,
+        max_inline_bytes=512,
+        preview_bytes=80,
+        max_range_bytes=512,
+    )
+
+    result = bounded.execute(ToolAction("read_file", {"path": "build.log"}))
+    payload = _payload(result, "Tool result externalized:\n")
+
+    data = content.encode("utf-8")
+    head_end = payload["head_range"][1]
+    tail_start = payload["tail_range"][0]
+    assert head_end == len(payload["head_preview"].encode("utf-8"))
+    assert tail_start == len(data) - len(payload["tail_preview"].encode("utf-8"))
+    assert payload["omitted_range"] == [head_end, tail_start]
+
+
 def test_task_3_explicit_virtual_read_returns_only_the_bound_range(tmp_path):
     content = "0123456789" * 100
     bounded, artifacts = _workspace(
@@ -141,6 +206,34 @@ def test_task_3_explicit_virtual_read_returns_only_the_bound_range(tmp_path):
     }
     assert content[:117] not in result
     assert content[139:] not in result
+
+
+def test_task_3_selected_unicode_byte_count_is_not_a_character_count(tmp_path):
+    content = "€" * 300
+    bounded, artifacts = _workspace(tmp_path, content)
+    first = bounded.execute(ToolAction("read_file", {"path": "build.log"}))
+    identity = _payload(first, "Tool result externalized:\n")
+    path = artifacts.range_path(identity["artifact_id"], 0, 510)
+
+    result = bounded.execute(ToolAction("read_file", {"path": path}))
+    payload = _payload(result, "Artifact range:\n")
+
+    assert payload["byte_count"] == 510
+    assert len(payload["data"]) == 170
+
+
+def test_task_3_advertised_unicode_range_is_aligned_and_runnable(tmp_path):
+    content = "€" * 300
+    bounded, _ = _workspace(tmp_path, content)
+    first = bounded.execute(ToolAction("read_file", {"path": "build.log"}))
+    identity = _payload(first, "Tool result externalized:\n")
+
+    advertised = identity["range_request"]["path"]
+    assert advertised.endswith("/bytes/0-510")
+    result = bounded.execute(ToolAction("read_file", {"path": advertised}))
+    payload = _payload(result, "Artifact range:\n")
+    assert payload["start"] == 0 and payload["end"] == 510
+    assert payload["data"] == "€" * 170
 
 
 @pytest.mark.parametrize(
@@ -211,6 +304,22 @@ def test_task_4_unknown_store_and_tampering_do_not_leak_artifacts(tmp_path):
     tampered = bounded.execute(ToolAction("read_file", {"path": path}))
     assert tampered == "error: artifact digest does not match its recorded identity"
     assert "classified" not in tampered
+
+
+def test_task_4_range_cap_plus_one_is_rejected(tmp_path):
+    bounded, artifacts = _workspace(
+        tmp_path,
+        "a" * 100,
+        max_inline_bytes=512,
+        preview_bytes=4,
+        max_range_bytes=16,
+    )
+    record = artifacts.put("a" * 100)
+    path = artifacts.range_path(record.artifact_id, 0, 17)
+
+    result = bounded.execute(ToolAction("read_file", {"path": path}))
+
+    assert result == "error: artifact range exceeds 16 bytes"
 
 
 def test_task_5_existing_agent_loop_retrieves_evidence_then_continues(tmp_path):

@@ -175,7 +175,7 @@ class BoundedEvidenceWorkspace:
         return self._bounded_observation(record, data)
 
     def _bounded_observation(self, record: ArtifactRef, data: bytes) -> str:
-        suggested_end = min(record.byte_count, self.max_range_bytes)
+        _, suggested_end = self._head_preview(data, self.max_range_bytes)
         for preview_limit in range(self.preview_bytes, -1, -1):
             head, head_end = self._head_preview(data, preview_limit)
             tail, tail_start = self._tail_preview(data, preview_limit, head_end)
