@@ -185,14 +185,17 @@ separate manual run is exploratory: a real model chooses the tools, so its
 wording and exact tool order may vary. Use only a disposable directory that
 contains no secrets or private source.
 
-The CLI defaults to `qwen3-4b` (`Qwen/Qwen3-4B-MLX-4bit`). The command below
-selects the stronger `mlx-community/Qwen3-30B-A3B-4bit` model for more reliable
-tool use. Both use the local MLX model path already used by this repository.
-You need macOS on Apple Silicon and the installed MLX dependencies. The first
-run downloads the selected weights from Hugging Face when they are not cached,
-so it also needs network access and several gigabytes of free disk. If MLX is
-unavailable or the weights cannot be loaded, the command exits before the
-agent calls a workspace tool; it does not substitute scripted output.
+The CLI defaults to `qwen3-4b` (`Qwen/Qwen3-4B-MLX-4bit`), whose cached weights
+use about 2 GiB; use that lower-resource option when needed. The recorded
+exploratory run below used `mlx-community/Qwen3-30B-A3B-4bit`, whose cached
+weights use about 16 GiB and require sufficient Apple unified memory. Model
+behavior and tool order vary with either choice. Both use the local MLX model
+path already used by this repository. You need macOS on Apple Silicon and the
+installed MLX dependencies. The first run downloads the selected weights from
+Hugging Face when they are not cached, so it also needs network access and the
+corresponding free disk space. If MLX is unavailable or the weights cannot be
+loaded, the command exits before the agent calls a workspace tool; it does not
+substitute scripted output.
 
 Create a tiny read-only workspace, then give the model one goal:
 

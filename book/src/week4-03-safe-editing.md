@@ -207,13 +207,16 @@ lets a real model plan the same Day 3 cycle from one natural-language goal.
 Its wording and tool order can vary, and completion is not an automated test.
 Use a fresh disposable directory with no secrets.
 
-The CLI default is `qwen3-4b` (`Qwen/Qwen3-4B-MLX-4bit`); this example selects
-`mlx-community/Qwen3-30B-A3B-4bit` for more reliable multi-step tool use. It
-requires macOS on Apple Silicon and the installed MLX dependencies. An
-uncached first run downloads the selected weights from Hugging Face and needs
-network access plus several gigabytes of free disk. If MLX, network access,
-disk space, or the weights are unavailable, model loading fails before any
-tool call; do not treat a scripted checkpoint as evidence that this live run
+The CLI default is `qwen3-4b` (`Qwen/Qwen3-4B-MLX-4bit`), whose cached weights
+use about 2 GiB; use that lower-resource option when needed. The recorded
+exploratory run below used `mlx-community/Qwen3-30B-A3B-4bit`, whose cached
+weights use about 16 GiB and require sufficient Apple unified memory. Model
+behavior and tool order vary with either choice. Both require macOS on Apple
+Silicon and the installed MLX dependencies. An uncached first run downloads
+the selected weights from Hugging Face and needs network access plus the
+corresponding free disk space. If MLX, network access, disk space, unified
+memory, or the weights are unavailable, model loading fails before any tool
+call; do not treat a scripted checkpoint as evidence that this live run
 occurred.
 
 Pre-create the workspace, an existing file, and one focused validation fixture:
