@@ -9,6 +9,7 @@ transaction log, process jail, or defense against a hostile filesystem.
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import subprocess
 import tempfile
@@ -68,18 +69,24 @@ class ToolPolicy:
         if (
             type(self.command_timeout_seconds) not in {int, float}
             or self.command_timeout_seconds <= 0
+            or not math.isfinite(self.command_timeout_seconds)
         ):
-            raise ValueError("command timeout must be positive")
+            raise ValueError("command timeout must be finite and positive")
         if not isinstance(self.allowed_commands, tuple):
             raise ValueError("allowed commands must be a tuple of tuples")
         commands = self.allowed_commands
         if any(
             not isinstance(command, tuple)
             or not command
-            or any(not isinstance(part, str) or not part for part in command)
+            or any(
+                not isinstance(part, str) or not part or "\0" in part
+                for part in command
+            )
             for command in commands
         ):
-            raise ValueError("allowed commands must contain non-empty strings")
+            raise ValueError(
+                "allowed commands must contain non-empty strings without NUL"
+            )
         object.__setattr__(self, "root", root)
         object.__setattr__(self, "allowed_commands", commands)
 
@@ -304,6 +311,8 @@ class Workspace:
         return path, relative, data
 
     def _prepare_edit(self, raw: str, old: str, new: str) -> tuple[Path, str, bytes]:
+        if not self.policy.allow_writes:
+            raise AgentError("writes are not enabled")
         path = self.resolve_path(raw)
         relative = path.relative_to(self.policy.root).as_posix()
         current = self._current_observed(path, relative)
@@ -347,9 +356,9 @@ class Workspace:
 
     def _allowed_command(self, argv: list[str]) -> tuple[str, ...]:
         if not isinstance(argv, list) or any(
-            not isinstance(part, str) or not part for part in argv
+            not isinstance(part, str) or not part or "\0" in part for part in argv
         ):
-            raise AgentError("argv must contain non-empty strings")
+            raise AgentError("argv must contain non-empty strings without NUL")
         command = tuple(argv)
         if command not in self.policy.allowed_commands:
             raise AgentError("command is not allowed")

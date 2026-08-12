@@ -32,13 +32,24 @@ def test_task_1_policy_enables_only_explicit_effects(tmp_path):
     )
     with pytest.raises(ValueError, match="positive"):
         ToolPolicy(tmp_path, max_write_bytes=0)
+    for invalid_timeout in (0, -1, float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="finite and positive"):
+            ToolPolicy(tmp_path, command_timeout_seconds=invalid_timeout)
     with pytest.raises(ValueError, match="commands"):
         ToolPolicy(tmp_path, allowed_commands=(("",),))
+    with pytest.raises(ValueError, match="without NUL"):
+        ToolPolicy(tmp_path, allowed_commands=(("validator\0",),))
 
 
 def test_task_2_mutations_require_read_preflight_and_approval(tmp_path):
     source = tmp_path / "app.py"
     source.write_text("answer = 1\n", encoding="utf-8")
+    read_only = Workspace(ToolPolicy(tmp_path))
+    read_only.read_file("app.py")
+    with pytest.raises(AgentError, match="writes are not enabled"):
+        read_only.edit_file("app.py", "1", "2")
+    assert source.read_text(encoding="utf-8") == "answer = 1\n"
+
     approvals = []
     workspace = Workspace(
         ToolPolicy(tmp_path, allow_writes=True),
@@ -137,12 +148,16 @@ def test_task_6_validation_uses_exact_argv_and_records_output(tmp_path):
     )
 
     denied = workspace.execute(ToolAction("run_command", {"argv": ["echo", "no"]}))
+    nul_denied = workspace.execute(
+        ToolAction("run_command", {"argv": [sys.executable, "bad\0argument"]})
+    )
     result = workspace.execute(
         ToolAction("run_command", {"argv": list(allowed)}), "validate-1"
     )
     receipt = store.get("validate-1")
 
     assert denied == "error: command is not allowed"
+    assert nul_denied == "error: argv must contain non-empty strings without NUL"
     assert len(approvals) == 1
     assert result == "status: 3\noutput:\nfocused fail\n"
     assert receipt.arguments == {"argv": list(allowed)}
