@@ -140,6 +140,73 @@ def test_task_2_each_wrong_fact_fails_only_its_named_check(tmp_path, fact, faile
     assert [check.name for check in report.checks if not check.passed] == [failed_name]
 
 
+def test_task_2_incomplete_run_cannot_pass_from_matching_final_text(tmp_path):
+    run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
+    incomplete = replace(run, completed=False, reason="step_limit")
+
+    report = evaluate_run(incomplete, workspace, receipts, case)
+
+    assert not report.passed
+    assert [check.name for check in report.checks if not check.passed] == ["final"]
+
+
+def test_task_2_file_content_requires_exact_bytes(tmp_path):
+    run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
+    (tmp_path / "app.py").write_text("answer = 2\nextra\n", encoding="utf-8")
+
+    report = evaluate_run(run, workspace, receipts, case)
+
+    assert not report.passed
+    assert [check.name for check in report.checks if not check.passed] == [
+        "file:app.py"
+    ]
+
+
+def test_task_2_tool_and_result_must_match_the_same_event(tmp_path):
+    run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
+    split_evidence = replace(
+        run,
+        events=(
+            replace(run.events[0], result="edited app.py"),
+            replace(run.events[1], result="edit completed"),
+            *run.events[2:],
+        ),
+    )
+
+    report = evaluate_run(split_evidence, workspace, receipts, case)
+
+    assert not report.passed
+    assert [check.name for check in report.checks if not check.passed] == [
+        "result:edit_file"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field_name", "mismatch"),
+    [
+        ("exit_state", "error"),
+        ("result_contains", "not in the receipt"),
+        ("changed_artifacts", ("other.py",)),
+    ],
+)
+def test_task_2_each_receipt_fact_is_independently_required(
+    tmp_path, field_name, mismatch
+):
+    run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
+    wrong_receipt = replace(case.receipts[0], **{field_name: mismatch})
+    changed_case = replace(
+        case,
+        receipts=(wrong_receipt, case.receipts[1]),
+    )
+
+    report = evaluate_run(run, workspace, receipts, changed_case)
+
+    assert not report.passed
+    assert [check.name for check in report.checks if not check.passed] == [
+        "receipt:call-1"
+    ]
+
+
 def test_task_3_nonessential_final_phrasing_and_event_order_are_not_graded(tmp_path):
     run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
     alternate = replace(
@@ -222,7 +289,31 @@ def test_task_6_evaluation_is_pure(tmp_path):
     assert after == before
 
 
+def test_task_6_file_evidence_does_not_dispatch_the_stateful_read_tool(
+    tmp_path, monkeypatch
+):
+    run, workspace, receipts, case, _approvals = _completed_case(tmp_path)
+    (tmp_path / "evidence.txt").write_text("declared evidence\n", encoding="utf-8")
+    changed_case = replace(
+        case,
+        files=(FileExpectation("evidence.txt", "declared evidence\n"),),
+    )
+    monkeypatch.setattr(
+        workspace,
+        "read_file",
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("evaluation must not dispatch workspace.read_file")
+        ),
+    )
+
+    report = evaluate_run(run, workspace, receipts, changed_case)
+
+    assert report.passed
+
+
 def test_task_7_invalid_evaluation_specifications_fail_closed(tmp_path):
+    with pytest.raises(ValueError, match="final substring"):
+        EvaluationCase("  ")
     with pytest.raises(ValueError, match="file path"):
         FileExpectation("../escape", "data")
     with pytest.raises(ValueError, match="result substring"):
