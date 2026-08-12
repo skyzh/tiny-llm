@@ -1,7 +1,7 @@
 # 🚧 Week 4: Build a Coding Agent
 
 > **Course status:** Week 4 is being published one checkpoint at a time. Days 1
-> through 6 are ready to learn and review. Additional capabilities will appear
+> through 7 are ready to learn and review. Additional capabilities will appear
 > only after their implementation, starter, and reviews are ready.
 
 Weeks 1 through 3 turn tokens into text and make serving that text efficient.
@@ -15,7 +15,9 @@ metadata, then restores both into a fresh model without replaying effects.
 Day 5 derives a smaller model-visible transcript from older completed effects
 while their exact receipts remain unchanged. Day 6 inspects one safe checkpoint,
 adds one visible operator steering message, and resumes a fresh model without
-replaying the completed effect.
+replaying the completed effect. Day 7 evaluates one completed run from declared
+final, file, result, and receipt facts without grading hidden reasoning or exact
+transcript shape.
 
 ## What Day 1 Builds
 
@@ -106,8 +108,15 @@ Agent](week4-06-steering.md). Its cumulative command is:
 pdm run test --week 4 --day 6
 ```
 
-Only the Day 1 through Day 6 starter modules are published. Do not add session
-trees, rewind, reconciliation, evaluation, or other later public APIs to your
+After Day 6 passes, continue with [Day 7: Evaluate Observable
+Outcomes](week4-07-evaluation.md). Its cumulative command is:
+
+```bash
+pdm run test --week 4 --day 7
+```
+
+Only the Day 1 through Day 7 starter modules are published. Do not add session
+trees, rewind, reconciliation, an LLM judge, or other later public APIs to your
 solution.
 
 {{#include copyright.md}}

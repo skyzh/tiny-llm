@@ -2,6 +2,15 @@
 
 from .checkpoint import AgentCheckpoint, ModelCheckpoint, create_checkpoint
 from .compaction import CompactionResult, compact_completed_interactions
+from .evaluation import (
+    EvaluationCase,
+    EvaluationCheck,
+    EvaluationReport,
+    FileExpectation,
+    ReceiptExpectation,
+    ResultExpectation,
+    evaluate_run,
+)
 from .generation import generate_response, initial_messages
 from .loop import (
     AgentEvent,
@@ -31,16 +40,23 @@ __all__ = [
     "AgentRun",
     "AgentStatus",
     "CompactionResult",
+    "EvaluationCase",
+    "EvaluationCheck",
+    "EvaluationReport",
     "EffectReceipt",
     "FinalAction",
+    "FileExpectation",
     "ModelCheckpoint",
     "ReceiptStore",
+    "ReceiptExpectation",
+    "ResultExpectation",
     "ToolAction",
     "ToolPolicy",
     "Workspace",
     "build_system_prompt",
     "compact_completed_interactions",
     "create_checkpoint",
+    "evaluate_run",
     "generate_response",
     "initial_messages",
     "inspect_checkpoint",

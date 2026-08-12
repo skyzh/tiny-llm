@@ -190,7 +190,8 @@ fresh model without replaying the completed effect. Inspect the model inputs in
 the focused test to verify the original task, saved evidence, and steering stay
 in order through a later tool turn and final answer.
 
-Additional capabilities remain unpublished until their own complete learner
-checkpoints are ready.
+Continue with [Day 7: Evaluate Observable Outcomes](week4-07-evaluation.md) to
+turn the final workspace, tool results, and durable receipts into a structured
+pass/fail report without grading hidden reasoning or exact transcript shape.
 
 {{#include copyright.md}}
