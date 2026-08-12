@@ -13,6 +13,18 @@ from .receipts import ReceiptStore
 
 
 @dataclass(frozen=True)
+class ApprovalDecision:
+    """One operator approval or a model-visible denial reason."""
+
+    approved: bool
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        # TODO: validate the decision and require a reason for denials.
+        pass
+
+
+@dataclass(frozen=True)
 class ToolPolicy:
     """Tools and limits authorized for one explicit workspace root."""
 
@@ -34,7 +46,7 @@ class Workspace:
     """Run the Day 3 tools under one policy and approval callback."""
 
     policy: ToolPolicy
-    confirm_tool: Callable[[ToolAction], bool] | None = None
+    confirm_tool: Callable[[ToolAction], bool | ApprovalDecision] | None = None
     receipt_store: ReceiptStore = field(default_factory=ReceiptStore)
     _observed: dict[str, str] = field(default_factory=dict, init=False)
     _modified: set[str] = field(default_factory=set, init=False)

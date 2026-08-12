@@ -1,10 +1,9 @@
 # Week 4 Day Split (reference for reviewers)
 
-Status: Days 1--4 are published checkpoints. Days 2--4 follow Chi's approved
-simplified agent-loop cycle, with each day shipping as one cumulative learner
-PR so reviewers can see exactly what belongs to that checkpoint.
+Status: Days 1--8 are published checkpoints. Each day ships as one cumulative
+learner PR so reviewers can see exactly what belongs to that checkpoint.
 
-## 7-day structure
+## 8-day structure
 
 | Day | Theme | Features (PRs) | Modules |
 |---|---|---|---|
@@ -12,9 +11,10 @@ PR so reviewers can see exactly what belongs to that checkpoint.
 | 2 | Inspect a workspace | read-only list/read tools | `workspace.py` |
 | 3 | Edit, validate, and record | approved edits, one command, simple receipts | `workspace.py`, `receipts.py` |
 | 4 | Checkpoint and resume | one conversation + fake-model cache snapshot | `checkpoint.py`, `loop.py` |
-| 5 | Reserved learner checkpoint | unpublished | — |
-| 6 | Reserved learner checkpoint | unpublished | — |
-| 7 | Reserved learner checkpoint | unpublished | — |
+| 5 | Compact completed work | bounded receipt-backed transcript view | `compaction.py` |
+| 6 | Inspect and steer | safe-boundary status and one visible steering message | `steering.py` |
+| 7 | Evaluate outcomes | declared final/file/result/receipt facts | `evaluation.py` |
+| 8 | Fork, steer, and select | dense tokenizer/KV prefix reuse, isolated branches, explicit selection | `branching.py`, `workspace.py` |
 
 Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.md`.
 
@@ -26,8 +26,10 @@ Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.
 - Days are implemented sequentially. A later day does not leak API or prose
   into the current starter.
 
-## Why 7 days
+## Why 8 days
 
-The existing `week4-01..07` chapter numbering stays stable. Each remaining day
-adds one visible agent-loop concept; scaling and production-hardening machinery
-stay outside the core course unless a later checkpoint explicitly teaches it.
+The first seven days establish the agent loop and its observable evidence. Day
+8 reconnects that control path to the tokenizer and KV cache built in Weeks
+1--3. Each day adds one visible concept; scaling and production-hardening
+machinery stay outside the core course unless a later checkpoint explicitly
+teaches it.

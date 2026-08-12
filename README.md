@@ -37,11 +37,12 @@ The course follows a four-week learning path:
   the scheduler does not rebuild dense history on every step.
 - **Week 4: Build a Coding Agent.** Start with a bounded, validated agent loop,
   then connect it to a small workspace. The course is publishing one reviewed
-  checkpoint at a time; Days 1 through 7 now cover inspection, approved edits,
+  checkpoint at a time; Days 1 through 8 now cover inspection, approved edits,
   one validation command, simple effect receipts, and one visible
   checkpoint-and-resume boundary, receipt-backed context compaction, and one
   visible inspect-and-steer pause, and deterministic evaluation of observable
-  outcomes.
+  outcomes, then tokenizer/KV-prefix reuse for two isolated steered branches
+  and one explicit evidence-backed selection.
 
 ## Why MLX and Qwen3?
 
@@ -74,7 +75,7 @@ implementation, test, and publication readiness is tracked below.
 
 ## Roadmap
 
-The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; Days 1 through 7 are currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
+The table tracks implementation (`Code`), tests (`Test`), rendered chapters (`Doc`), and Chi's review of learner-facing material (`Audit`). Week 4 is publishing one reviewed day at a time; Days 1 through 8 are currently available to learners. The Audit column reflects Chi's personal editorial pass on the published course content and is independent of code/test/doc readiness.
 
 Day 3 can send file contents to the model, modify files after approval, and run
 one exact configured command. Use a disposable workspace without secrets and
@@ -88,6 +89,10 @@ Day 6 inspects one complete-observation checkpoint, appends one visible operator
 instruction, and resumes a fresh model without replaying the completed effect.
 Day 7 evaluates one completed run from declared final, file, result, and receipt
 facts without grading hidden reasoning or exact transcript shape.
+Day 8 reuses one real tokenizer/KV checkpoint for two differently steered,
+effect-isolated continuations, evaluates both with Day 7's harness, and makes
+one explicit passing selection without pretending completed effects were
+rewound.
 
 | Week + Chapter | Topic | Code | Test | Doc | Audit |
 |---|---|---|---|---|---|
@@ -119,6 +124,7 @@ facts without grading hidden reasoning or exact transcript shape.
 | 4.5 | Compact Completed Work | ✅ | ✅ | ✅ | 🚧 |
 | 4.6 | Inspect and Steer a Paused Agent | ✅ | ✅ | ✅ | 🚧 |
 | 4.7 | Evaluate Observable Outcomes | ✅ | ✅ | ✅ | 🚧 |
+| 4.8 | Fork, Steer, and Select | ✅ | ✅ | ✅ | 🚧 |
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.
