@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import shlex
 import sys
 from pathlib import Path
 
 from model_names import shortcut_name_to_full_name
+from tiny_llm import agent
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,12 +24,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="pre-created disposable workspace containing no secrets",
     )
     parser.add_argument("--model", default="qwen3-4b")
-    parser.add_argument(
-        "--solution",
-        choices=["tiny_llm", "tiny_llm_ref", "ref"],
-        default="tiny_llm",
-        help="course workspace implementation (the model uses local MLX-LM)",
-    )
     parser.add_argument("--device", choices=["cpu", "gpu"], default="gpu")
     parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--max-steps", type=int, default=8)
@@ -115,10 +109,6 @@ def main() -> int:
         parser.error("--root must be a pre-created directory")
     try:
         commands = parse_allowed_commands(args.allow_command)
-        package = (
-            "tiny_llm_ref" if args.solution in {"tiny_llm_ref", "ref"} else "tiny_llm"
-        )
-        agent = importlib.import_module(f"{package}.agent")
         policy = agent.ToolPolicy(
             args.root,
             allow_writes=args.allow_writes,
@@ -126,7 +116,7 @@ def main() -> int:
         )
         log_path = receipt_path(policy.root, args.receipt_log)
         store = agent.ReceiptStore(log_path)
-    except (ImportError, ValueError) as error:
+    except ValueError as error:
         parser.error(str(error))
 
     workspace = agent.Workspace(policy, confirm_tool, store)
