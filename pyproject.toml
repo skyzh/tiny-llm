@@ -48,7 +48,7 @@ bench-chunked-prefill.cmd = "python -m benches.bench_chunked_prefill"
 bench-week3-attention.cmd = "python -m benches.bench_week3_attention"
 bench-long-context-attention.cmd = "python -m benches.bench_long_context_attention"
 batch-main.cmd = "python batch-main.py"
-agent.cmd = "python agent.py"
+agent = { cmd = "python agent.py", env = { PYTHONPATH = "src" } }
 evaluate-agent.cmd = "python evaluate-agent.py"
 test.cmd = "python scripts/dev-tools.py test"
 check-installation.cmd = "python scripts/check-installation.py"

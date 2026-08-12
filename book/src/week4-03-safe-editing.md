@@ -200,6 +200,65 @@ pdm run test-refsol --week 4 --day 3
 The cumulative course-code guard checks exact public signatures, dataclass
 fields, package exports, TODO-only starter bodies, and absence of future APIs.
 
+## Explore the Full Cycle with a Real Model
+
+Keep the scripted checkpoint as the deterministic proof. This manual exercise
+lets a real model plan the same Day 3 cycle from one natural-language goal.
+Its wording and tool order can vary, and completion is not an automated test.
+Use a fresh disposable directory with no secrets.
+
+The CLI default is `qwen3-4b` (`Qwen/Qwen3-4B-MLX-4bit`); this example selects
+`mlx-community/Qwen3-30B-A3B-4bit` for more reliable multi-step tool use. It
+requires macOS on Apple Silicon and the installed MLX dependencies. An
+uncached first run downloads the selected weights from Hugging Face and needs
+network access plus several gigabytes of free disk. If MLX, network access,
+disk space, or the weights are unavailable, model loading fails before any
+tool call; do not treat a scripted checkpoint as evidence that this live run
+occurred.
+
+Pre-create the workspace, an existing file, and one focused validation fixture:
+
+```bash
+EDIT_ROOT="$(mktemp -d)"
+printf '%s\n' \
+  'def greeting(name):' \
+  '    return f"Hello, {name}!"' > "$EDIT_ROOT/app.py"
+cat > "$EDIT_ROOT/validate.py" <<'PY'
+from pathlib import Path
+from app import greeting
+
+assert greeting("Ada") == "Welcome, Ada!"
+assert Path("NOTES.md").read_text() == "Greeting now says Welcome.\n"
+print("validation passed")
+PY
+```
+
+Now give the real model one goal. `--allow-command` names the only command it
+may run, including its exact arguments. Each proposed write, edit, or command
+still pauses at a default-No learner approval prompt:
+
+```bash
+pdm run agent -- --model mlx-community/Qwen3-30B-A3B-4bit --root "$EDIT_ROOT" \
+  --allow-writes \
+  --allow-command "python validate.py" \
+  --receipt-log .agent-receipts.jsonl \
+  "Inspect the workspace. Create NOTES.md containing exactly 'Greeting now says Welcome.' followed by a newline, precisely change app.py so greeting says Welcome instead of Hello, run the allowed validation, react to its evidence, and finish with a brief summary. Use workspace tools to gather evidence before any effect. Your first response must be one tool request, every response must contain exactly one JSON object, and do not finish until the requested files and validation evidence have been inspected."
+```
+
+Read every approval payload before answering `y`. The live trace shows the
+model response, parsed action, tool observation, validation status/output, and
+final answer. Afterward, inspect the changed bytes and the durable effect
+receipts rather than trusting the final prose alone:
+
+```bash
+cat "$EDIT_ROOT/app.py" "$EDIT_ROOT/NOTES.md"
+cat "$EDIT_ROOT/.agent-receipts.jsonl"
+```
+
+The receipt records preserve the approved `write_file`, `edit_file`, and
+`run_command` arguments and outcomes. The status and captured output in the
+validation receipt are the evidence to compare with the changed bytes.
+
 ## Checkpoint
 
 You now have a small end-to-end coding loop: inspect real bytes, propose one
