@@ -3,7 +3,11 @@
 """Course-code guards for the cumulative Week 4 Day 1--4 starter."""
 
 import ast
+import importlib.util
+import io
+import re
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -13,6 +17,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 STARTER = ROOT / "src" / "tiny_llm" / "agent"
 REFSOL = ROOT / "src" / "tiny_llm_ref" / "agent"
+REAL_MODEL_CLI = ROOT / "agent.py"
 MODULES = (
     "checkpoint",
     "generation",
@@ -206,3 +211,66 @@ def test_starter_does_not_import_the_reference_solution():
     for path in STARTER.glob("*.py"):
         source = path.read_text(encoding="utf-8")
         assert "tiny_llm_ref" not in source
+
+
+def test_real_model_cli_exposes_only_the_learner_package():
+    source = REAL_MODEL_CLI.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assert "tiny_llm_ref" not in source
+    assert "importlib" not in source
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "tiny_llm"
+        and any(alias.name == "agent" for alias in node.names)
+        for node in tree.body
+    )
+
+    spec = importlib.util.spec_from_file_location(
+        "week4_real_model_cli", REAL_MODEL_CLI
+    )
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    parser = cli.build_parser()
+    help_text = parser.format_help()
+    assert "--solution" not in help_text
+    assert "tiny_llm_ref" not in help_text
+    assert re.search(r"\bref\b", help_text) is None
+    assert all(action.dest != "solution" for action in parser._actions)
+    args = parser.parse_args(["--root", str(ROOT), "inspect", "this", "workspace"])
+    assert not hasattr(args, "solution")
+
+
+def test_real_model_cli_discloses_command_side_effect_scope(tmp_path, monkeypatch):
+    import tiny_llm_ref.agent as ref_agent
+
+    spec = importlib.util.spec_from_file_location(
+        "week4_real_model_cli", REAL_MODEL_CLI
+    )
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    command = (sys.executable, "-c", "from pathlib import Path; Path('extra').touch()")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("y\n"))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    output = io.StringIO()
+    with redirect_stdout(output):
+        workspace = ref_agent.Workspace(
+            ref_agent.ToolPolicy(tmp_path, allowed_commands=(command,)),
+            cli.confirm_tool,
+        )
+        result = workspace.execute(
+            ref_agent.ToolAction("run_command", {"argv": list(command)})
+        )
+        cli.show_file_tool_changes(workspace.modified_files)
+
+    assert (tmp_path / "extra").is_file()
+    assert result.startswith("status: 0")
+    text = output.getvalue()
+    assert "file-tool changes> []" in text
+    assert "approved commands may create or change additional filesystem paths" in text
+    assert (
+        "command receipts record the command and result, not a complete filesystem diff"
+        in text
+    )
