@@ -75,6 +75,11 @@ def confirm_tool(action) -> bool:
     print("\napproval requested> " + json.dumps(payload, sort_keys=True))
     if action.tool == "run_command":
         print("warning> an allowed command is not confined by the workspace boundary")
+        print(
+            "warning> approved commands may create or change additional filesystem "
+            "paths; command receipts record the command and result, not a complete "
+            "filesystem diff"
+        )
     if not sys.stdin.isatty():
         print("approval denied> interactive confirmation requires a TTY")
         return False
@@ -95,6 +100,10 @@ def show_event(agent, event) -> None:
         print("action> " + json.dumps(payload, sort_keys=True))
     if event.result is not None:
         print(f"observation> {event.result}")
+
+
+def show_file_tool_changes(paths) -> None:
+    print("file-tool changes> " + json.dumps(list(paths)))
 
 
 def main() -> int:
@@ -168,7 +177,7 @@ def main() -> int:
         print("\nfinished> " + (result.final or ""))
     else:
         print("\nstopped> " + result.reason)
-    print("modified files> " + json.dumps(list(workspace.modified_files)))
+    show_file_tool_changes(workspace.modified_files)
     return 0 if result.completed else 1
 
 

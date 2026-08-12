@@ -4,8 +4,10 @@
 
 import ast
 import importlib.util
+import io
 import re
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -237,3 +239,38 @@ def test_real_model_cli_exposes_only_the_learner_package():
     assert all(action.dest != "solution" for action in parser._actions)
     args = parser.parse_args(["--root", str(ROOT), "inspect", "this", "workspace"])
     assert not hasattr(args, "solution")
+
+
+def test_real_model_cli_discloses_command_side_effect_scope(tmp_path, monkeypatch):
+    import tiny_llm_ref.agent as ref_agent
+
+    spec = importlib.util.spec_from_file_location(
+        "week4_real_model_cli", REAL_MODEL_CLI
+    )
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    command = (sys.executable, "-c", "from pathlib import Path; Path('extra').touch()")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("y\n"))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    output = io.StringIO()
+    with redirect_stdout(output):
+        workspace = ref_agent.Workspace(
+            ref_agent.ToolPolicy(tmp_path, allowed_commands=(command,)),
+            cli.confirm_tool,
+        )
+        result = workspace.execute(
+            ref_agent.ToolAction("run_command", {"argv": list(command)})
+        )
+        cli.show_file_tool_changes(workspace.modified_files)
+
+    assert (tmp_path / "extra").is_file()
+    assert result.startswith("status: 0")
+    text = output.getvalue()
+    assert "file-tool changes> []" in text
+    assert "approved commands may create or change additional filesystem paths" in text
+    assert (
+        "command receipts record the command and result, not a complete filesystem diff"
+        in text
+    )
