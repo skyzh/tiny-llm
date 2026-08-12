@@ -19,6 +19,7 @@ from .protocol import (
     parse_action,
 )
 from .receipts import EffectReceipt, ReceiptStore
+from .steering import AgentStatus, inspect_checkpoint, resume_with_steering
 from .workspace import ToolPolicy, Workspace
 
 
@@ -28,6 +29,7 @@ __all__ = [
     "AgentEvent",
     "AgentLimits",
     "AgentRun",
+    "AgentStatus",
     "CompactionResult",
     "EffectReceipt",
     "FinalAction",
@@ -41,8 +43,10 @@ __all__ = [
     "create_checkpoint",
     "generate_response",
     "initial_messages",
+    "inspect_checkpoint",
     "parse_action",
     "resume_agent",
+    "resume_with_steering",
     "run_agent",
     "run_to_checkpoint",
 ]

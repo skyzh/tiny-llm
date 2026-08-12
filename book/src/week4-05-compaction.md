@@ -172,7 +172,8 @@ by the receipts the caller supplies.
 
 You can now make an older validation interaction visibly smaller, inspect the
 receipt that retains its complete result, and feed the compact view to the next
-model call. Later capabilities remain unpublished until their own complete
-learner checkpoints are ready.
+model call. Continue with [Day 6: Inspect and Steer a Paused
+Agent](week4-06-steering.md) to inspect one checkpoint, add one visible operator
+message, and resume without replaying completed work.
 
 {{#include copyright.md}}

@@ -25,6 +25,7 @@ MODULES = (
     "loop",
     "protocol",
     "receipts",
+    "steering",
     "workspace",
 )
 
@@ -124,7 +125,7 @@ def test_starter_is_solution_free_and_reference_is_implemented(module):
         )
 
 
-def test_package_exports_match_the_published_day_5_surface():
+def test_package_exports_match_the_published_day_6_surface():
     import tiny_llm.agent as starter
     import tiny_llm_ref.agent as refsol
 
@@ -134,6 +135,7 @@ def test_package_exports_match_the_published_day_5_surface():
         "AgentEvent",
         "AgentLimits",
         "AgentRun",
+        "AgentStatus",
         "CompactionResult",
         "EffectReceipt",
         "FinalAction",
@@ -147,15 +149,17 @@ def test_package_exports_match_the_published_day_5_surface():
         "create_checkpoint",
         "generate_response",
         "initial_messages",
+        "inspect_checkpoint",
         "parse_action",
         "resume_agent",
+        "resume_with_steering",
         "run_agent",
         "run_to_checkpoint",
     }
     assert set(starter.__all__) == set(refsol.__all__) == expected
 
 
-def test_only_day_1_through_day_5_modules_exist_in_the_starter():
+def test_only_day_1_through_day_6_modules_exist_in_the_starter():
     allowed = {
         "__init__.py",
         "checkpoint.py",
@@ -164,6 +168,7 @@ def test_only_day_1_through_day_5_modules_exist_in_the_starter():
         "loop.py",
         "protocol.py",
         "receipts.py",
+        "steering.py",
         "workspace.py",
     }
     assert {path.name for path in STARTER.glob("*.py")} == allowed
@@ -187,7 +192,7 @@ def test_day_3_workspace_surface_remains_complete():
     assert set(receipts) == {"EffectReceipt", "ReceiptStore"}
 
 
-def test_day_4_checkpoint_surface_is_complete_and_has_no_day_6_api():
+def test_day_4_checkpoint_surface_remains_complete():
     checkpoint = _public_surface(STARTER, "checkpoint")
     assert set(checkpoint) == {
         "AgentCheckpoint",
@@ -200,7 +205,7 @@ def test_day_4_checkpoint_surface_is_complete_and_has_no_day_6_api():
     source = "\n".join(
         path.read_text(encoding="utf-8") for path in STARTER.glob("*.py")
     )
-    for future_name in ("Session", "rewind", "steering"):
+    for future_name in ("Session", "rewind"):
         assert future_name not in source
 
 
@@ -211,6 +216,20 @@ def test_day_5_compaction_surface_is_complete():
         "compact_completed_interactions",
     }
     assert {name for name, *_ in compaction["CompactionResult"]} == {"saved_tokens"}
+
+
+def test_day_6_steering_surface_is_complete_and_has_no_day_7_api():
+    steering = _public_surface(STARTER, "steering")
+    assert set(steering) == {
+        "AgentStatus",
+        "inspect_checkpoint",
+        "resume_with_steering",
+    }
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in STARTER.glob("*.py")
+    )
+    for future_name in ("Session", "rewind", "reconcile", "evaluation"):
+        assert future_name not in source
 
 
 def test_removed_catalog_hash_is_not_exported_or_declared():
