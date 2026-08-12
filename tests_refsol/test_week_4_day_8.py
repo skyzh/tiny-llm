@@ -79,9 +79,7 @@ class DenseEosModel:
         for layer, cache in enumerate(caches):
             cache.update_and_fetch(keys + layer, keys + layer)
         after = tuple(id(cache.key_values[0]) for cache in caches)
-        self.calls.append(
-            (offset, size, tuple(id(cache) for cache in caches), before, after)
-        )
+        self.calls.append((offset, size, tuple(caches), before, after))
         return mx.concatenate(
             [mx.ones((1, size, 1)), mx.zeros((1, size, 127))], axis=-1
         )
@@ -192,7 +190,10 @@ def test_task_2_cached_prefix_is_prefilled_once_and_reused_by_both_forks():
     assert prefix_call[0] == 0
     assert prefix_call[1] == len(checkpoint.cached_token_ids)
     assert first_call[0] == second_call[0] == len(checkpoint.cached_token_ids)
-    assert first_call[2] != second_call[2]
+    assert all(
+        first_cache is not second_cache
+        for first_cache, second_cache in zip(first_call[2], second_call[2], strict=True)
+    )
     assert first_call[3] == second_call[3] == prefix_call[4]
     assert first_call[4] != first_call[3]
     assert second_call[4] != second_call[3]
