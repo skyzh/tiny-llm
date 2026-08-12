@@ -1,6 +1,6 @@
 # Week 4 Day Split (reference for reviewers)
 
-Status: Days 1--3 are published checkpoints. Days 2--3 follow Chi's approved
+Status: Days 1--4 are published checkpoints. Days 2--4 follow Chi's approved
 simplified agent-loop cycle, with each day shipping as one cumulative learner
 PR so reviewers can see exactly what belongs to that checkpoint.
 
@@ -11,10 +11,10 @@ PR so reviewers can see exactly what belongs to that checkpoint.
 | 1 | Validated agent loop + tool protocol | feat1 | `protocol.py`, `loop.py` |
 | 2 | Inspect a workspace | read-only list/read tools | `workspace.py` |
 | 3 | Edit, validate, and record | approved edits, one command, simple receipts | `workspace.py`, `receipts.py` |
-| 4 | KV checkpoint/resume + sequential rewind | feat4+5 | `checkpoint.py`, `branch.py`, `generation.py` |
-| 5 | Receipt-backed compaction | feat6 | `compaction.py`, `context.py` |
-| 6 | Steering + public status + exactly-once reconcile | feat7+8 | `control.py`, `status.py`, `reconcile.py` |
-| 7 | Equivalence harness | feat9 | `harness.py`, `evaluation.py` |
+| 4 | Checkpoint and resume | one conversation + fake-model cache snapshot | `checkpoint.py`, `loop.py` |
+| 5 | Reserved learner checkpoint | unpublished | — |
+| 6 | Reserved learner checkpoint | unpublished | — |
+| 7 | Reserved learner checkpoint | unpublished | — |
 
 Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.md`.
 
