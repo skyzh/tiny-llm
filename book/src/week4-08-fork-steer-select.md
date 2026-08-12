@@ -143,8 +143,9 @@ selected = select_branch(outcomes, "validate-only")
 ```
 
 The name must identify exactly one outcome, and that outcome must pass its Day
-7 report. Reject an absent name, duplicate names, or a failing branch. Day 8
-does not invent a hidden score or ask another model to judge the traces.
+7 report. Reject an absent selected name, a selected name that matches multiple
+outcomes, or a failing branch. Day 8 does not invent a hidden score or ask
+another model to judge the traces.
 
 ## Manual Qwen/MLX Walkthrough
 
@@ -154,18 +155,32 @@ the same dense compatibility path:
 ```python
 from mlx_lm import load
 from tiny_llm import Qwen3ModelWeek3
-from tiny_llm.agent import KvPrefixGenerator
+from tiny_llm.agent import KvPrefixGenerator, create_checkpoint
 
 mlx_model, tokenizer = load("Qwen/Qwen3-0.6B-MLX-4bit")
 model = Qwen3ModelWeek3(mlx_model, enable_paged_attention=False)
-generate = KvPrefixGenerator(model, tokenizer, max_tokens=128)
+prefix_generator = KvPrefixGenerator(model, tokenizer, max_tokens=128)
 ```
 
-Create the Day 4 checkpoint after a complete tool observation, call
-`generate.save_checkpoint(messages)` for that exact message list, and fork two
-fresh generators. Give them different visible steering messages and the two
-workspace/receipt copies described above. Print each `outcome.reuse`, render
-both evaluation reports, and select the passing name.
+First create a Day 4 checkpoint named `paused` after a complete tool
+observation. Its messages are the control boundary you want to share, while its
+model field belongs to the generator that created it. Rebind those exact
+messages to the real tokenizer and dense KV cache before resuming:
+
+```python
+messages = [
+    {"role": role, "content": content}
+    for role, content in paused.messages
+]
+model_checkpoint = prefix_generator.save_checkpoint(messages)
+checkpoint = create_checkpoint(paused.task, messages, model_checkpoint)
+```
+
+Now fork two fresh generators with `prefix_generator.fork()`. Give them
+different visible steering messages and the two workspace/receipt copies
+described above, passing the rebound `checkpoint` to each `run_branch` call.
+Print each `outcome.reuse`, render both evaluation reports, and select the
+passing name.
 
 Model responses are nondeterministic, so this walkthrough is manual. Inspect
 the actual proposed actions, approval reason, final file bytes, receipt logs,
