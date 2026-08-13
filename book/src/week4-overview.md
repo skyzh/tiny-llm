@@ -1,7 +1,7 @@
 # 🚧 Week 4: Build a Coding Agent
 
 > **Course status:** Week 4 is being published one checkpoint at a time. Days 1
-> through 8 are ready to learn and review. Additional capabilities will appear
+> through 9 are ready to learn and review. Additional capabilities will appear
 > only after their implementation, starter, and reviews are ready.
 
 Weeks 1 through 3 turn tokens into text and make serving that text efficient.
@@ -21,6 +21,9 @@ transcript shape.
 Day 8 reconnects the agent to the inference system from Weeks 1–3: it saves one
 real tokenizer/KV prefix, forks two isolated steered continuations without
 rewinding completed effects, evaluates both, and makes one explicit selection.
+Day 9 keeps oversized tool-result bytes in a local artifact store while the
+model sees a bounded identity, digest, preview, and explicit range-retrieval
+path through the unchanged agent loop.
 
 ## What Day 1 Builds
 
@@ -125,8 +128,15 @@ Select](week4-08-fork-steer-select.md). Its cumulative command is:
 pdm run test --week 4 --day 8
 ```
 
-Only the Day 1 through Day 8 starter modules are published. Do not add session
-trees, effect rewind, reconciliation, an LLM judge, radix serving, or other
-later public APIs to your solution.
+After Day 8 passes, continue with [Day 9: Bound Tool
+Evidence](week4-09-bound-tool-evidence.md). Its cumulative command is:
+
+```bash
+pdm run test --week 4 --day 9
+```
+
+Only the Day 1 through Day 9 starter modules are published. Do not add session
+trees, effect rewind, reconciliation, an LLM judge, semantic summarization,
+radix serving, or other later public APIs to your solution.
 
 {{#include copyright.md}}

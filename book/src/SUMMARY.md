@@ -39,6 +39,7 @@
     - [🚧 Day 6: Inspect and Steer a Paused Agent](./week4-06-steering.md)
     - [🚧 Day 7: Evaluate Observable Outcomes](./week4-07-evaluation.md)
     - [🚧 Day 8: Fork, Steer, and Select](./week4-08-fork-steer-select.md)
+    - [🚧 Day 9: Bound Tool Evidence](./week4-09-bound-tool-evidence.md)
 - [🚧 Appendix: Performance Evidence Ledger](./appendix-performance.md)
 - [Sponsored by Raft.build](./sponsor.md)
 
