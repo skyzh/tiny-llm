@@ -5,7 +5,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Tiny-LLM">
 <meta property="og:title" content="{{#if chapter_title}}{{ chapter_title }} — Tiny-LLM{{else}}{{ title }}{{/if}}">
-<meta property="og:description" content="A hands-on course for systems engineers. Build and optimize an LLM serving system with MLX, Metal kernels, KV caching, batching, and paged attention.">
+<meta property="og:description" content="A hands-on course for systems engineers. Build and optimize an LLM serving system with MLX, then connect its inference state and context budget to a coding agent.">
 <meta property="og:image" content="https://skyzh.github.io/tiny-llm/tiny-llm-social.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="628">
@@ -15,6 +15,26 @@
 <meta name="twitter:site" content="@iskyzh">
 <meta name="twitter:creator" content="@iskyzh">
 <meta name="twitter:title" content="{{#if chapter_title}}{{ chapter_title }} — Tiny-LLM{{else}}{{ title }}{{/if}}">
-<meta name="twitter:description" content="A hands-on course for systems engineers. Build and optimize an LLM serving system with MLX, Metal kernels, KV caching, batching, and paged attention.">
+<meta name="twitter:description" content="A hands-on course for systems engineers. Build and optimize an LLM serving system with MLX, then connect its inference state and context budget to a coding agent.">
 <meta name="twitter:image" content="https://skyzh.github.io/tiny-llm/tiny-llm-social.png">
 <meta name="twitter:image:alt" content="Tiny-LLM — Build an LLM Serving System with MLX">
+
+<script>
+  (function () {
+    var pageUrl = "https://skyzh.github.io" + window.location.pathname.replace(/\/index\.html$/, "/");
+    var canonical = document.createElement("link");
+    canonical.rel = "canonical";
+    canonical.href = pageUrl;
+    document.head.appendChild(canonical);
+
+    var openGraphUrl = document.createElement("meta");
+    openGraphUrl.setAttribute("property", "og:url");
+    openGraphUrl.content = pageUrl;
+    document.head.appendChild(openGraphUrl);
+
+    var twitterUrl = document.createElement("meta");
+    twitterUrl.name = "twitter:url";
+    twitterUrl.content = pageUrl;
+    document.head.appendChild(twitterUrl);
+  }());
+</script>
