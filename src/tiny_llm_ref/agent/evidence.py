@@ -231,7 +231,10 @@ class BoundedEvidenceWorkspace:
         if match is None:
             return "error: artifact range path is malformed"
         artifact_id, raw_start, raw_end = match.groups()
-        start, end = int(raw_start), int(raw_end)
+        try:
+            start, end = int(raw_start), int(raw_end)
+        except ValueError:
+            return "error: artifact range path is malformed"
         if end - start > self.max_range_bytes:
             return f"error: artifact range exceeds {self.max_range_bytes} bytes"
         try:

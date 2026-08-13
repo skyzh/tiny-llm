@@ -301,6 +301,27 @@ def test_task_4_range_failures_are_ordinary_and_do_not_fall_through(
     assert "learner-secret" not in result
 
 
+@pytest.mark.parametrize("oversized_bound", ["{digits}-1", "0-{digits}"])
+def test_task_4_oversized_decimal_bounds_are_ordinary_and_do_not_fall_through(
+    tmp_path, monkeypatch, oversized_bound
+):
+    bounded, artifacts = _workspace(tmp_path, "short")
+    record = artifacts.put("short")
+    digits = "9" * 5_000
+    path = f".tool-artifacts/{record.artifact_id}/bytes/" + oversized_bound.format(
+        digits=digits
+    )
+
+    def fail_if_delegated(*_args, **_kwargs):
+        raise AssertionError("reserved artifact paths must not reach the workspace")
+
+    monkeypatch.setattr(bounded.workspace, "execute", fail_if_delegated)
+
+    result = bounded.execute(ToolAction("read_file", {"path": path}))
+
+    assert result == "error: artifact range path is malformed"
+
+
 def test_task_4_unknown_store_and_tampering_do_not_leak_artifacts(tmp_path):
     bounded, artifacts = _workspace(
         tmp_path,
