@@ -3,7 +3,7 @@ authors = ["Alex Chi", "Connor Zhang"]
 language = "en"
 src = "src"
 title = "Tiny-LLM — Build an LLM Serving System with MLX"
-description = "A hands-on course for systems engineers. Build and optimize an LLM serving system with MLX, Metal kernels, KV caching, batching, and paged attention."
+description = "A hands-on course for systems engineers. Build and optimize an LLM serving system with MLX, then connect its inference state and context budget to a coding agent."
 
 [preprocessor.toc]
 command = "mdbook-toc"
