@@ -170,6 +170,8 @@ receipt lookup by summary text, K/V cache editing, session trees, rewind,
 steering, or exactly-once execution. It compacts only completed effects backed
 by the receipts the caller supplies.
 
+## Checkpoint
+
 You can now make an older validation interaction visibly smaller, inspect the
 receipt that retains its complete result, and feed the compact view to the next
 model call. Continue with [Day 6: Inspect and Steer a Paused

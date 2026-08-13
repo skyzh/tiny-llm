@@ -4,139 +4,92 @@
 > through 9 are ready to learn and review. Additional capabilities will appear
 > only after their implementation, starter, and reviews are ready.
 
-Weeks 1 through 3 turn tokens into text and make serving that text efficient.
-Week 4 starts a different kind of program: an agent repeatedly asks the model
-for one structured action, records the result, and gives that result back to
-the model. Day 1 builds the bounded deterministic loop. Day 2 gives that loop a
-small read-only workspace for listing and reading project files. Day 3 adds an
-approval boundary for edits, one exact validation command, and simple receipts.
-Day 4 saves a complete conversation boundary and the fake model's cache
-metadata, then restores both into a fresh model without replaying effects.
-Day 5 derives a smaller model-visible transcript from older completed effects
-while their exact receipts remain unchanged. Day 6 inspects one safe checkpoint,
-adds one visible operator steering message, and resumes a fresh model without
-replaying the completed effect. Day 7 evaluates one completed run from declared
-final, file, result, and receipt facts without grading hidden reasoning or exact
-transcript shape.
-Day 8 reconnects the agent to the inference system from Weeks 1–3: it saves one
-real tokenizer/KV prefix, forks two isolated steered continuations without
-rewinding completed effects, evaluates both, and makes one explicit selection.
-Day 9 keeps oversized tool-result bytes in a local artifact store while the
-model sees a bounded identity, digest, preview, and explicit range-retrieval
-path through the unchanged agent loop.
+Weeks 1 through 3 built the inference path: tokenize a conversation, run the
+model, and manage the key/value cache that makes later decoding efficient.
+Week 4 puts that path inside a small coding-agent harness. The model proposes
+one structured action at a time; ordinary Python validates it, executes it
+through an explicit workspace boundary, returns the observation, and decides
+when the run must stop.
 
-## What Day 1 Builds
+The goal is not broad autonomy. Each day adds one visible mechanism that you
+can inspect and test: bounded control flow, read-only tools, approved effects,
+receipts, checkpoints, context selection, steering, evaluation, prefix reuse,
+and bounded evidence retrieval.
 
-Day 1 establishes the protocol and control flow that later checkpoints will
-extend:
+## The Nine-Day Progression
 
-```text
-task + system instruction
-          |
-          v
-     model response
-          |
-          v
-  validate one JSON action
-      |             |
-      | tool        | final answer
-      v             v
- execute through  stop the run
- a supplied workspace
-      |
-      v
- append an observation and continue
-```
-
-The workspace in the Day 1 tests is a small fake object with one enabled
-read-only action. This keeps the learning target focused: validate the model's
-text, bound the loop, and preserve the conversation. Day 2 replaces the fake
-with real read-only tools without changing the Day 1 loop contract.
-
-## Day 1 Checkpoint
-
-The Day 1 starter exposes exactly these public names:
-
-| File | Public names | Why they are here |
+| Day | Question | Visible mechanism |
 | --- | --- | --- |
-| `src/tiny_llm/agent/generation.py` | `initial_messages`, `generate_response` | Begin a conversation and keep the one-response model boundary explicit. |
-| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `parse_action`, `build_system_prompt` | Represent and validate one final answer or one tool request. |
-| `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent` | Bound the run and retain an inspectable trace. |
+| [1](week4-01-agent-loop.md) | How does model text become one safe next step? | A validated JSON action protocol and bounded loop. |
+| [2](week4-02-tools.md) | How can the agent inspect a project? | A contained read-only workspace with listing and file reads. |
+| [3](week4-03-safe-editing.md) | How can it change and validate code deliberately? | Operator approval, exact edits and commands, and effect receipts. |
+| [4](week4-04-sessions.md) | Where can a run pause and resume? | One complete-observation checkpoint with model cache metadata. |
+| [5](week4-05-compaction.md) | How can older completed work use less context? | Receipt-backed deterministic compaction of completed interactions. |
+| [6](week4-06-steering.md) | How can an operator inspect and redirect a paused run? | A public status view and one visible steering message. |
+| [7](week4-07-evaluation.md) | How do we judge a run without grading hidden reasoning? | A deterministic report over declared observable outcomes. |
+| [8](week4-08-fork-steer-select.md) | How can two continuations reuse one inference prefix? | Dense tokenizer/KV-prefix reuse, isolated effects, and explicit selection. |
+| [9](week4-09-bound-tool-evidence.md) | How can a large tool result remain available without filling the prompt? | Content-addressed external bytes, bounded previews, and explicit range retrieval. |
 
-Implement the Day 1 exercise, then run:
+The sequence is cumulative. Later starters keep the earlier public surface, and
+later tests rely on the boundaries established before them. Work through the
+days in order even when one later mechanism is your main interest.
 
-```bash
-pdm run test --week 4 --day 1
-```
+## Prerequisites and Environment
 
-The learner test uses scripted responses and a fake workspace, so it does not
-download or load a model. To check the supplied implementation without copying
-the learner test, run:
+Complete the repository setup and Weeks 1 through 3 first. Day 8 directly uses
+the course tokenizer, model, and dense KV cache; the earlier Week 4 days also
+assume you recognize the model-generation boundary those weeks established.
 
-```bash
-pdm run test-refsol --week 4 --day 1
-```
+The supported environment is macOS on Apple Silicon with the project
+dependencies installed. The deterministic Week 4 learner tests use scripted
+models and temporary workspaces, so they do not need model downloads. The
+chapters that include real-model walkthroughs label them as manual and
+nondeterministic; uncached runs additionally need network access, disk space,
+and enough Apple unified memory for the selected MLX weights.
 
-## Publication Boundary
+Use only disposable workspaces with no secrets. Read observations become model
+input, and later days can enable file changes and an exact allowlisted command.
 
-After Day 1 passes, continue with [Day 2: Inspect a
-Workspace](week4-02-tools.md). The cumulative Day 2 command is:
+## How to Use This Week
 
-```bash
-pdm run test --week 4 --day 2
-```
+For each day:
 
-After Day 2 passes, continue with [Day 3: Edit, Validate, and
-Record](week4-03-safe-editing.md). Its cumulative command is:
+1. Read its teaching boundary and public starter surface.
+2. Run the day-specific learner command to see the expected failures.
+3. Implement only that day's numbered tasks in `src/tiny_llm/agent/`.
+4. Rerun the same cumulative checkpoint until it is green.
+5. Inspect the recorded events, files, receipts, reports, or cache facts named
+   by the chapter instead of trusting a final model sentence alone.
 
-```bash
-pdm run test --week 4 --day 3
-```
+The day chapters contain the exact commands and checkpoints. Course maintainers
+can use the corresponding reference command without copying a learner test.
+Optional real-model walkthroughs come after the deterministic checkpoint; they
+are exploration, not a replacement for reproducible course-code evidence.
 
-After Day 3 passes, continue with [Day 4: Checkpoint and
-Resume](week4-04-sessions.md). Its cumulative command is:
+## The Cumulative Learning Arc
 
-```bash
-pdm run test --week 4 --day 4
-```
+Days 1 through 3 establish the ordinary agent cycle: propose, validate,
+observe, approve effects, and record evidence. Days 4 through 6 show how the
+harness can pause, reduce older context, and add an operator instruction while
+preserving completed work. Day 7 evaluates observable outcomes. Day 8 reconnects
+that control path to the tokenizer and KV cache from Weeks 1 through 3. Day 9
+keeps oversized results verifiable while exposing only a bounded view to the
+model.
 
-After Day 4 passes, continue with [Day 5: Compact Completed
-Work](week4-05-compaction.md). Its cumulative command is:
+By the end, you can explain both sides of the boundary: what the model sees and
+proposes, and what the harness validates, executes, retains, or refuses.
 
-```bash
-pdm run test --week 4 --day 5
-```
+## Week Boundary
 
-After Day 5 passes, continue with [Day 6: Inspect and Steer a Paused
-Agent](week4-06-steering.md). Its cumulative command is:
+This is a teaching agent for a trusted operator and disposable local projects.
+It is not a sandbox, hostile-filesystem defense, process jail, durable
+transaction system, distributed scheduler, session tree, hidden grader,
+semantic-perfect memory, network artifact service, or production serving
+framework. Completed effects are never presented as rewound, and a model's
+final prose is never treated as proof by itself.
 
-```bash
-pdm run test --week 4 --day 6
-```
-
-After Day 6 passes, continue with [Day 7: Evaluate Observable
-Outcomes](week4-07-evaluation.md). Its cumulative command is:
-
-```bash
-pdm run test --week 4 --day 7
-```
-
-After Day 7 passes, continue with [Day 8: Fork, Steer, and
-Select](week4-08-fork-steer-select.md). Its cumulative command is:
-
-```bash
-pdm run test --week 4 --day 8
-```
-
-After Day 8 passes, continue with [Day 9: Bound Tool
-Evidence](week4-09-bound-tool-evidence.md). Its cumulative command is:
-
-```bash
-pdm run test --week 4 --day 9
-```
-
-Only the Day 1 through Day 9 starter modules are published. Do not add session
-trees, effect rewind, reconciliation, an LLM judge, semantic summarization,
-radix serving, or other later public APIs to your solution.
+Each day states its narrower limits where they matter. Keep later or
+production-scale APIs out of the starter unless a chapter explicitly teaches
+them.
 
 {{#include copyright.md}}

@@ -1,73 +1,58 @@
 # Day 1: A Validated Agent Loop
 
-> **Day 1 scope:** This chapter teaches a bounded loop and a JSON action
-> protocol. The supplied test uses a fake read-only workspace. File mutation
-> and command execution are not Day 1 capabilities.
+Weeks 1 through 3 built a function that turns a conversation into model text.
+A coding agent needs a small control loop around that function: ask for one
+response, decide whether it is a final answer or an action, record what
+happened, and continue when an action produces an observation.
 
-A text generator returns one response and stops. A coding agent needs a small
-control loop: it asks for one response, decides whether that response is a
-final answer or an action, records what happened, and repeats when an action
-produces an observation.
+The model never edits a file directly. It emits text. Ordinary Python validates
+that text before handing a parsed action to a workspace object. This separation
+makes the loop deterministic to test even when no model weights are loaded.
 
-The model never edits a file directly. It emits text. Ordinary Python code
-validates that text before handing a parsed action to the workspace object.
-That separation is what makes the loop testable without a model.
+## The Teaching Boundary
 
-## Files and Commands
+Day 1 teaches only a bounded loop and one JSON action protocol. The supplied
+test uses a fake workspace with one enabled read-only action. Real project
+inspection arrives on Day 2; file mutation, command execution, approval, and
+durable receipts arrive later.
 
-Implement these Day 1 starter functions:
+The loop validates and records a model response, but it does not prove that the
+model solved the task. It is also not a sandbox, background worker, persistent
+session, or production scheduler.
 
-| File | Function or type | Your responsibility |
+## Files and Public Surface
+
+Implement the TODO bodies in these Day 1 starter files:
+
+| File | Public names | Responsibility |
 | --- | --- | --- |
-| `src/tiny_llm/agent/generation.py` | `initial_messages()`, `generate_response()` | Reject a blank task, create the first messages, and decode one response with a fresh cache. |
-| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `parse_action()`, `build_system_prompt()` | Define the exact action vocabulary, validate one JSON object, and describe only enabled actions. |
-| `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent()` | Bound the loop, append observations, and return an auditable result. |
+| `src/tiny_llm/agent/generation.py` | `initial_messages`, `generate_response` | Begin a conversation and keep one model-response boundary explicit. |
+| `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `parse_action`, `build_system_prompt` | Represent and validate one final answer or one enabled tool request. |
+| `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent` | Bound a run, propagate observations, and retain an inspectable trace. |
 
-Run the focused learner check:
+`generate_response()` remains part of the public Day 1 surface even though the
+focused test uses scripted strings. It renders the messages with the course
+tokenizer, decodes at most `max_tokens` with a fresh cache, stops at EOS, and
+releases every cache in a `finally` block.
+
+Run the cumulative learner checkpoint from the repository root:
 
 ```bash
 pdm run test --week 4 --day 1
 ```
 
-It should pass without loading a model. For the supplied reference check:
+This command copies the supplied Day 1 test into `tests/` before running it.
+Before you implement the TODOs, the implementation-dependent cases across nine
+task groups are expected to fail. No model download is required.
+
+Course maintainers can check the supplied implementation without copying the
+learner test:
 
 ```bash
 pdm run test-refsol --week 4 --day 1
 ```
 
-`generate_response()` is still a Day 1 public boundary even though the focused
-test deliberately avoids model weights. Render the messages with the tokenizer,
-decode at most the requested token count using a fresh cache, stop at EOS, and
-release every cache in a finally block. The scripted loop tests are the fast
-way to verify the control flow; a real model is not required for this checkpoint.
-
-## One Response, One Structured Decision
-
-Use JSON because it makes the protocol visible in a trace. A response is
-either a final answer:
-
-```json
-{"final":"I inspected README.md."}
-```
-
-or a tool request:
-
-```json
-{"tool":"read_file","path":"README.md"}
-```
-
-`parse_action()` must accept exactly one JSON object. It rejects malformed
-JSON, non-object values, an empty final answer, an unknown tool, disabled
-tools, missing required fields, unexpected fields, and fields with the wrong
-shape. Do not quietly ignore trailing or extra data.
-
-`TOOL_FIELDS` names the complete future vocabulary:
-`list_files`, `read_file`, `write_file`, `edit_file`, and `run_command`.
-Day 1 does not implement those effects. Its fake workspace enables only
-`read_file`, which is enough to prove that the loop validates availability
-before dispatching an action.
-
-## Start a Conversation Deliberately
+## Task 1: Start the Conversation Deliberately
 
 `initial_messages(task, system_prompt)` creates the first two messages:
 
@@ -78,69 +63,121 @@ before dispatching an action.
 ]
 ```
 
-Reject an empty or whitespace-only task. A clear first message lets later turns
-grow from a known history instead of assembling prompt fragments ad hoc.
+Reject an empty or whitespace-only task. `build_system_prompt(workspace)`
+describes only the actions enabled for this run. The prompt is guidance, not
+enforcement: the protocol and workspace boundary must still reject anything
+the policy does not allow.
 
-`build_system_prompt(workspace)` describes the enabled action set for this
-run. The prompt is guidance, not enforcement: `parse_action()` and the
-workspace boundary must independently reject anything the policy does not
-allow.
+## Task 2: Execute One Tool and Finish
 
-## The Bounded Loop
+`run_agent(task, generate, workspace, limits=None)` starts from those messages.
+The test injects a `generate` callable that returns predetermined strings, so
+the control flow stays deterministic.
 
-`run_agent()` receives a task, a `generate` callable, and a workspace. The
-tests substitute a callable that returns predetermined strings, so the loop's
-behavior stays deterministic.
+For a valid tool action, call `workspace.execute(action)`, record the action and
+result, and append both the assistant response and a user observation. When a
+later response is a valid `FinalAction`, return a completed `AgentRun` with the
+final text.
 
-```python
-messages = initial_messages(task, build_system_prompt(workspace))
-for step in range(1, limits.max_steps + 1):
-    response = generate(messages)
-    action = parse_action(response, workspace.available_tools)
+## Task 3: Validate One Structured Decision
 
-    if action is a final answer:
-        record it and stop
+A model response is exactly one JSON object. It is either a final answer:
 
-    result = workspace.execute(action)
-    record the action and result
-    messages = append the assistant response and tool observation
+```json
+{"final":"I inspected README.md."}
 ```
 
-The real implementation also turns a parse failure into an observation such
-as `error: response is not valid JSON: ...`, then lets the model try again.
-This is more useful than crashing the agent for one malformed answer.
+or one tool request:
 
-Every interaction becomes an `AgentEvent` containing the step number, raw
-response, parsed action when one exists, and result or validation error. The
-returned `AgentRun` records whether a valid final answer completed the
-protocol. It does **not** prove that a task was solved; task grading is a later
-course concern.
+```json
+{"tool":"read_file","path":"README.md"}
+```
 
-## Stop Conditions Are Part of Correctness
+`parse_action()` rejects malformed JSON, non-object values, blank final text,
+unknown or disabled tools, missing fields, unexpected fields, and fields with
+the wrong shape. Do not ignore trailing or extra data.
 
-`AgentLimits` requires positive values. Implement all of these terminal cases:
+`TOOL_FIELDS` names the cumulative vocabulary: `list_files`, `read_file`,
+`write_file`, `edit_file`, and `run_command`. Day 1 implements none of those
+effects. Its fake workspace enables only `read_file`, which is enough to prove
+that availability is checked before dispatch.
 
-- a valid final answer returns `completed`;
-- reaching `max_steps` returns `step_limit`;
-- too many invalid actions returns `invalid_action_limit`;
-- an overlong conversation returns `context_limit`; and
-- too many identical tool requests returns `repeated_action_limit`.
+Malformed or unavailable actions become ordinary `error:` observations. The
+model can see the failure and choose another response instead of crashing the
+Python loop.
 
-The repeated-action check matters even when a tool succeeds. Repeating the
-same request can burn the whole budget while adding no new information.
+## Task 4: Stop at the Step Budget
 
-## Exercise Checklist
+`AgentLimits.max_steps` bounds how many model decisions one run may attempt.
+When the loop consumes that budget without a valid final answer, return an
+incomplete run whose reason is `step_limit`. The events show exactly how the
+budget was spent.
 
-Before considering Day 1 complete, make the focused test demonstrate all of
-these behaviors:
+## Task 5: Return an Inspectable Run
 
-1. A task starts with a system message and a user message.
-2. A `read_file` request reaches the fake workspace, its result becomes an
-   observation, and a later final answer stops the run.
-3. Invalid JSON and an unavailable tool become recoverable error observations.
-4. The loop stops at the step budget.
-5. Repeated identical actions stop before the general step budget is spent.
+Every interaction becomes an `AgentEvent` with the step number, raw response,
+parsed action when one exists, and result or validation error. `AgentRun`
+records the completion flag, stop reason, optional final answer, and immutable
+event tuple.
 
-Keep the solution inside the Day 1 starter files.
+A run marked `completed` means only that the model returned a valid final
+action. Later days add receipts and outcome evaluation; Day 1 keeps the trace
+small and in memory.
+
+## Task 6: Recover from Invalid JSON
+
+After an invalid response, append the raw assistant response and its exact
+validation error as the next user observation. Reset the identical-action
+counter, then let the model try again while the invalid-action budget remains.
+
+The focused case sends invalid JSON followed by a valid final response. The
+first event must retain the recoverable error, and the second must complete the
+run.
+
+## Task 7: Stop Repeated Actions
+
+Serialize each parsed tool name and normalized argument object into a stable
+signature. Count consecutive identical requests and stop with
+`repeated_action_limit` when the count exceeds the configured budget.
+
+This guard matters even when a tool succeeds: repeating the same request can
+consume the whole run without adding new information.
+
+## Task 8: Preserve the Exact Observation
+
+The next model call must receive the complete tool result, not only a marker:
+
+```python
+{
+    "role": "user",
+    "content": "Tool result:\nREADME contents",
+}
+```
+
+The normal guard fails if that payload is changed or dropped. It also proves
+that a known-but-disabled tool such as `write_file` becomes an error
+observation and never reaches the fake workspace.
+
+## Task 9: Make Every Limit Fail Closed
+
+Require positive values for `max_steps`, `max_context_chars`,
+`max_invalid_actions`, and `max_identical_actions`. Zero or negative budgets
+would disable the intended stopping guarantee and must be rejected.
+
+Before each model call, bound the total message-content characters and stop
+with `context_limit` when it is too large. Count invalid actions and stop with
+`invalid_action_limit` when that budget is exhausted. Together with the step
+and repeated-action limits, every run has an explicit terminal reason.
+
+## Checkpoint
+
+When Day 1 is green, inspect the focused test rather than only its final pass:
+confirm the initial system/user pair, one dispatched `read_file`, the exact
+observation in the next model input, the completed final event, and each
+budgeted stop reason.
+
+You now have a validated, bounded model → action → observation loop. Continue
+with [Day 2: Inspect a Workspace](week4-02-tools.md) to replace the fake tool
+boundary with real contained directory listing and UTF-8 file reads.
 
 {{#include copyright.md}}
