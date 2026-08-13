@@ -168,8 +168,9 @@ pdm run test --week 4 --day 2
 ```
 
 This copies the cumulative Day 2 learner test into `tests/` and runs it against
-`tiny_llm`. During course development, check the supplied implementation
-without copying the learner test:
+`tiny_llm`. Before you implement the TODOs, the implementation-dependent cases
+across six task groups are expected to fail. During course development, check
+the supplied implementation without copying the learner test:
 
 ```bash
 pdm run test-refsol --week 4 --day 2
@@ -219,6 +220,12 @@ the final answer with the actual disposable files:
 find "$INSPECT_ROOT" -type f -print
 cat "$INSPECT_ROOT/README.md" "$INSPECT_ROOT/src/weather.py"
 ```
+
+## Checkpoint
+
+Confirm that the deterministic run listed a directory, read exact UTF-8 file
+contents, returned recoverable path errors to the model, and completed without
+enabling any effect tool.
 
 When this checkpoint is green, continue to [Day 3: Edit, Validate, and
 Record](week4-03-safe-editing.md).

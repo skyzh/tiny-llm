@@ -15,7 +15,7 @@ This is a teaching checkpoint for one process and the course's fake model. It
 is not a session tree, rewind feature, persistent KV store, transaction log, or
 exactly-once effect system.
 
-## Check the Chapter
+## Files and Public Surface
 
 Implement the TODO-only surfaces in:
 

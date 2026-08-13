@@ -35,6 +35,12 @@ pdm run test --week 4 --day 9
 Before you implement the TODOs, the implementation-dependent cases across six
 tasks are expected to fail; the shared constructor-validation cases already pass.
 
+Use this command for the supplied implementation:
+
+```bash
+pdm run test-refsol --week 4 --day 9
+```
+
 ## Task 1: Give Exact Bytes an Identity
 
 `ArtifactStore.put(result)` encodes the complete result as UTF-8, writes those
