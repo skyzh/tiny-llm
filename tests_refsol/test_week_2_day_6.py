@@ -70,6 +70,40 @@ def test_task_2_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
         assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
+@pytest.mark.parametrize(
+    ("rows", "outputs", "input_dim"),
+    [(9, 33, 128), (31, 65, 256), (33, 97, 512)],
+)
+@pytest.mark.parametrize("use_split_k", [False, True])
+def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
+    rows: int,
+    outputs: int,
+    input_dim: int,
+    use_split_k: bool,
+):
+    mx.random.seed(rows + outputs + input_dim)
+    with mx.stream(mx.gpu):
+        inputs = mx.random.normal((rows, input_dim)).astype(mx.bfloat16)
+        weight = mx.random.normal((outputs, input_dim)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        tiled = quantized_matmul(
+            scales,
+            biases,
+            128,
+            4,
+            inputs,
+            packed,
+            transpose_b=True,
+            use_simdgroup=True,
+            use_split_k=use_split_k,
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, inputs, packed, transpose_b=True
+        )
+        assert tiled.shape == (rows, outputs)
+        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
+
+
 @pytest.mark.skipif(
     not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
