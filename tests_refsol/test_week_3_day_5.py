@@ -20,14 +20,18 @@ def _random_chunk(
     return key, value
 
 
+@pytest.mark.parametrize("page_size", [16, 32], ids=["cross-page", "contiguous"])
 @pytest.mark.parametrize("query_length", [9, 65])
-def test_paged_flash_attention_crosses_noncontiguous_pages(query_length: int):
-    page_size = 32
+def test_paged_flash_attention_crosses_noncontiguous_pages(
+    query_length: int,
+    page_size: int,
+):
     pool = TinyKvPagedPool(page_size=page_size)
     cache = TinyKvPagedCache(pool=pool)
     blocker = TinyKvPagedCache(pool=pool)
 
     cache.update_and_fetch(*_random_chunk(64))
+    initial_pages = len(cache.page_ids)
     blocker.update_and_fetch(*_random_chunk(page_size))
     next_key, next_value = _random_chunk(query_length)
     metadata = cache.update_and_fetch_paged(
@@ -55,7 +59,7 @@ def test_paged_flash_attention_crosses_noncontiguous_pages(query_length: int):
     )
     mx.eval(expected, actual)
 
-    assert cache.page_ids[:2] == [0, 1]
-    assert cache.page_ids[2] == 3
+    assert cache.page_ids[:initial_pages] == list(range(initial_pages))
+    assert cache.page_ids[initial_pages] == initial_pages + 1
     assert actual.dtype == mx.bfloat16
     assert_allclose(actual, expected, mx.bfloat16, rtol=2e-2, atol=2e-2)
