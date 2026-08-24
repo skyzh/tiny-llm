@@ -45,7 +45,35 @@ def trace_hash(payload: dict) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def source_metadata() -> dict:
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    tracked_status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if tracked_status:
+        raise RuntimeError("benchmark source must be tracked-clean")
+    return {"git_commit": commit, "git_tree": tree, "git_tracked_dirty": False}
+
+
 def main() -> None:
+    source = source_metadata()
     manifest = {
         "week2": [],
         "chunked": [],
@@ -137,7 +165,7 @@ def main() -> None:
                     "label": label,
                     "mode": mode,
                     "prefill_step": step,
-                    "source": payload["source"],
+                    "source": payload.get("source", source),
                     "trace_sha256": trace_hash(payload),
                 }
             )
@@ -187,7 +215,7 @@ def main() -> None:
             {
                 "label": label,
                 "mode": mode,
-                "source": payload["source"],
+                "source": payload.get("source", source),
                 "trace_sha256": trace_hash(payload),
             }
         )
@@ -236,7 +264,7 @@ def main() -> None:
             {
                 "label": label,
                 "mode": mode,
-                "source": payload["source"],
+                "source": payload.get("source", source),
                 "trace_sha256": trace_hash(payload),
             }
         )
