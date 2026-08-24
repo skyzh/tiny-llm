@@ -4,6 +4,7 @@ import mlx.core as mx
 import numpy as np
 import pytest
 from mlx_lm import load
+import tiny_llm_ref.models as model_dispatch
 
 from .tiny_llm_base import *
 from .utils import *
@@ -206,6 +207,73 @@ def test_task_3_qwen3_4b():
         "Qwen/Qwen3-4B-MLX-4bit",
         seq_len=3,
     )
+
+
+def test_task_3_week3_batch_factory_selects_mlx_projections(monkeypatch):
+    mlx_model = object()
+    captured = {}
+
+    def fake_dispatch(model_name, model, week, **kwargs):
+        captured.update(
+            model_name=model_name,
+            model=model,
+            week=week,
+            kwargs=kwargs,
+        )
+        return "week3-batch-model"
+
+    monkeypatch.setattr(model_dispatch, "dispatch_model", fake_dispatch)
+
+    result = model_dispatch.dispatch_week3_batch_model("qwen3-0.6b", mlx_model)
+
+    assert result == "week3-batch-model"
+    assert captured == {
+        "model_name": "qwen3-0.6b",
+        "model": mlx_model,
+        "week": 2,
+        "kwargs": {"use_mlx_quantized_linear": True},
+    }
+
+
+def test_task_3_week2_model_keeps_course_projections_by_default():
+    mlx_model = tiny_qwen3_mlx_model()
+    course_model = Qwen3ModelWeek2(mlx_model)
+    week3_batch_model = Qwen3ModelWeek2(
+        mlx_model,
+        use_mlx_quantized_linear=True,
+    )
+
+    assert not course_model.layers_inner[0].self_attn.wq.use_mlx_quantized_linear
+    assert week3_batch_model.layers_inner[0].self_attn.wq.use_mlx_quantized_linear
+
+
+def test_task_3_mlx_projection_selector_is_causal(monkeypatch):
+    calls = []
+
+    def fake_quantized_matmul(x, weight, **kwargs):
+        calls.append((x, weight, kwargs))
+        return mx.full((*x.shape[:-1], weight.shape[0]), 7, dtype=mx.float32)
+
+    monkeypatch.setattr(mx, "quantized_matmul", fake_quantized_matmul)
+    weights = QuantizedWeights(
+        scales=mx.ones((3, 1)),
+        biases=mx.zeros((3, 1)),
+        group_size=4,
+        bits=4,
+        weight=mx.zeros((3, 1), dtype=mx.uint32),
+        use_mlx_quantized_linear=True,
+    )
+    x = mx.ones((2, 4))
+
+    result = quantized_linear(x, weights)
+
+    assert result.tolist() == [[7.0, 7.0, 7.0], [7.0, 7.0, 7.0]]
+    assert len(calls) == 1
+    assert calls[0][2]["scales"] is weights.scales
+    assert calls[0][2]["biases"] is weights.biases
+    assert calls[0][2]["transpose"] is True
+    assert calls[0][2]["group_size"] == 4
+    assert calls[0][2]["bits"] == 4
 
 
 @pytest.mark.skipif(

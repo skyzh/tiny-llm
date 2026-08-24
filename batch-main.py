@@ -68,12 +68,15 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
     print(
         f"Using {args.loader} loader with thinking={args.enable_thinking} for {args.model}"
     )
-    tiny_llm_model = models.dispatch_model(
-        args.model,
-        mlx_model,
-        week=int(args.loader.removeprefix("week")),
-        **dispatch_kwargs,
-    )
+    if args.loader == "week2":
+        tiny_llm_model = models.dispatch_week3_batch_model(args.model, mlx_model)
+    else:
+        tiny_llm_model = models.dispatch_model(
+            args.model,
+            mlx_model,
+            week=3,
+            **dispatch_kwargs,
+        )
     encoded_prompts = []
     for idx, prompt in enumerate(prompts):
         print(f"Prompt {idx}: {prompt}")

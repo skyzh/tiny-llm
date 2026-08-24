@@ -42,7 +42,9 @@ def _quantized_layer(
     )
 
 
-def _fake_qwen3_mlx_model() -> SimpleNamespace:
+def _fake_qwen3_mlx_model(
+    tie_word_embeddings: bool = True,
+) -> SimpleNamespace:
     mx.random.seed(0)
     args = SimpleNamespace(
         num_hidden_layers=2,
@@ -55,7 +57,7 @@ def _fake_qwen3_mlx_model() -> SimpleNamespace:
         rms_norm_eps=1e-5,
         max_position_embeddings=128,
         rope_theta=10000,
-        tie_word_embeddings=True,
+        tie_word_embeddings=tie_word_embeddings,
     )
     embed_tokens = _quantized_layer(args.vocab_size, args.hidden_size)
     kv_hidden_size = args.num_key_value_heads * args.head_dim
@@ -102,6 +104,7 @@ def _fake_qwen3_mlx_model() -> SimpleNamespace:
                 weight=mx.ones((args.hidden_size,), dtype=mx.bfloat16)
             ),
         ),
+        lm_head=_quantized_layer(args.vocab_size, args.hidden_size),
     )
 
 
@@ -383,10 +386,88 @@ def test_task_3_week3_model_reuses_week2_fast_kernels():
         assert isinstance(layer.self_attn.rope, FastRoPE)
 
 
-def test_task_3_incremental_decode_matches_week2():
+def _dense_projection_weights(model: Qwen3ModelWeek3):
+    yield model.embedding.weight
+    for layer in model.layers_inner:
+        yield layer.self_attn.wq
+        yield layer.self_attn.wk
+        yield layer.self_attn.wv
+        yield layer.self_attn.wo
+        yield layer.mlp.w_gate
+        yield layer.mlp.w_up
+        yield layer.mlp.w_down
+    if model.w_lm_head is not None:
+        yield model.w_lm_head
+
+
+@pytest.mark.parametrize("tie_word_embeddings", [True, False])
+def test_task_3_dense_week3_model_selects_mlx_projection_seam(
+    tie_word_embeddings: bool,
+):
+    mlx_model = _fake_qwen3_mlx_model(
+        tie_word_embeddings=tie_word_embeddings,
+    )
+    model = Qwen3ModelWeek3(
+        mlx_model,
+        page_size=4,
+        enable_paged_attention=False,
+    )
+    inherited = Qwen3ModelWeek3(
+        mlx_model,
+        page_size=4,
+        enable_paged_attention=False,
+        use_mlx_quantized_linear=False,
+    )
+
+    assert model.use_mlx_quantized_linear
+    assert all(
+        weight.use_mlx_quantized_linear for weight in _dense_projection_weights(model)
+    )
+    assert not inherited.use_mlx_quantized_linear
+    assert not any(
+        weight.use_mlx_quantized_linear
+        for weight in _dense_projection_weights(inherited)
+    )
+
+
+def test_task_3_mlx_projection_seam_preserves_paged_cache_across_prompt_and_decode(
+    monkeypatch,
+):
+    mlx_model = _fake_qwen3_mlx_model()
+    original_quantized_matmul = mx.quantized_matmul
+    row_counts = []
+
+    def record_quantized_matmul(x, *args, **kwargs):
+        row_counts.append(x.shape[-2])
+        return original_quantized_matmul(x, *args, **kwargs)
+
+    monkeypatch.setattr(mx, "quantized_matmul", record_quantized_matmul)
+    model = Qwen3ModelWeek3(
+        mlx_model,
+        page_size=2,
+        enable_paged_attention=False,
+    )
+    cache = model.create_kv_cache()
+
+    model(mx.array([[1, 5, 7]], dtype=mx.int32), 0, cache, logits_to_keep=1)
+    assert all(layer_cache.page_lens == [2, 1] for layer_cache in cache)
+    model(mx.array([[3]], dtype=mx.int32), 3, cache, logits_to_keep=1)
+
+    assert 3 in row_counts
+    assert 1 in row_counts
+    assert all(layer_cache.offset == 4 for layer_cache in cache)
+    assert all(layer_cache.page_lens == [2, 2] for layer_cache in cache)
+
+
+def test_task_3_incremental_decode_attention_cache_matches_week2():
     mlx_model = _fake_qwen3_mlx_model()
     week2_model = Qwen3ModelWeek2(mlx_model)
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_paged_attention=False)
+    week3_model = Qwen3ModelWeek3(
+        mlx_model,
+        page_size=4,
+        enable_paged_attention=False,
+        use_mlx_quantized_linear=False,
+    )
     inputs = mx.array([[1, 5, 7, 3, 9, 11]], dtype=mx.int32)
     week2_cache = week2_model.create_kv_cache()
     week3_cache = week3_model.create_kv_cache()

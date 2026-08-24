@@ -93,6 +93,7 @@ class Qwen3ModelWeek3:
         mlx_model: Any,
         page_size: int = 128,
         enable_paged_attention: bool = True,
+        use_mlx_quantized_linear: bool = True,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass

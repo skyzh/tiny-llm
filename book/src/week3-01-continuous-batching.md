@@ -95,15 +95,31 @@ You can verify your solution by running:
 pdm run test --week 3 --day 1 -- -k task_2
 ```
 
-## Task 3: Exercise the Batch-Ready Model
+## Task 3: Add the Week 3 Projection Seam
 
 ```
-src/tiny_llm/qwen3_week2.py  (reuse unchanged)
+src/tiny_llm/quantize.py::mlx_quantized_linear
+src/tiny_llm/qwen3_week2.py::Qwen3ModelWeek2.__init__
+src/tiny_llm/models.py::dispatch_week3_batch_model
 ```
 
-Call the Week 2 model with several requests, one offset per batch element, and
-the mask returned by `BatchingKvCache`. Exercise requests joining and leaving
-at different positions. The model remains request-agnostic; slot ownership and
+Week 2 ends with a course-owned quantized matmul so you can inspect its loader,
+SIMD-matrix operations, and Split-K policy. Week 3 teaches serving mechanisms,
+so it should not make every cache and scheduler measurement depend on that
+teaching kernel's remaining projection overhead.
+
+Add a per-weight `use_mlx_quantized_linear` selector whose default remains
+`False`, preserving every Week 2 checkpoint. When selected,
+`quantized_linear` should call `mx.quantized_matmul` with the same packed
+weight, scales, biases, group size, bits, and transposed-weight convention.
+Then implement `dispatch_week3_batch_model` as the explicit construction seam:
+it builds the completed dense-cache Week 2 model with that selector enabled.
+
+Call this batch-ready model with several requests, one offset per batch
+element, and the mask returned by `BatchingKvCache`. Exercise requests joining
+and leaving at different positions. Only quantized projections cross the MLX
+seam; normalization, RoPE, activation, attention, cache state, and scheduling
+remain in your solution. The model remains request-agnostic; slot ownership and
 lifecycle belong to the cache and scheduler.
 
 You should pass all of the tests by running:

@@ -366,6 +366,14 @@ Modify `TinyKvPagedCache.gather_dense` in
 `src/tiny_llm/qwen3_week3.py`. This checkpoint deliberately does not implement
 `paged_attention`; Day 4 owns that function.
 
+Carry forward Day 1's projection boundary when constructing the dense Qwen3
+model: quantized projections use the `mx.quantized_matmul` seam, while the
+embedding lookup, normalization, activation, RoPE, cache, and attention paths
+remain course-owned. Keep `use_mlx_quantized_linear=True` as the dense Week 3
+default and retain the opt-out only as a benchmark/correctness ablation. The
+optional MoE extension keeps its separately taught router/expert projection
+contract; do not silently broaden this dense-model seam into that chapter.
+
 Build a compatibility path that reconstructs dense K/V from pages and compares it against `TinyKvFullCache`.
 
 This gives us a correctness check before we change the attention path itself.

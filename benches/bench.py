@@ -646,12 +646,15 @@ def main() -> None:
                 ] = not args.disable_paged_attention
             elif args.loader == "week2" and args.week2_checkpoint is not None:
                 dispatch_kwargs["checkpoint"] = args.week2_checkpoint
-            model = models.dispatch_model(
-                model_name,
-                mlx_model,
-                week=int(args.loader.removeprefix("week")),
-                **dispatch_kwargs,
-            )
+            if args.loader == "week2" and args.batch_decode:
+                model = models.dispatch_week3_batch_model(model_name, mlx_model)
+            else:
+                model = models.dispatch_model(
+                    model_name,
+                    mlx_model,
+                    week=int(args.loader.removeprefix("week")),
+                    **dispatch_kwargs,
+                )
 
             if args.batch_decode:
                 cache_factory = (
