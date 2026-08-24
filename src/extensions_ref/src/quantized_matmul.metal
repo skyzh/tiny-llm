@@ -127,7 +127,7 @@ inline void quantized_matmul_block_w4a16_g128(
         T, OutT, padded_reduction_size>;
     using activation_loader = tiny_llm::CooperativeTileLoader<
         T, output_block_size, reduction_block_size,
-        padded_reduction_size, 128>;
+        padded_reduction_size, 128, false, true>;
     block_mma mma(simdgroup, lane);
 
     const int weight_output = thread_id / 4;

@@ -16,9 +16,19 @@ template <
     int COLS,
     int DESTINATION_STRIDE,
     int THREADS,
-    bool TRANSPOSE_DESTINATION = false>
+    bool TRANSPOSE_DESTINATION = false,
+    bool COPY_16_BYTES = false>
 struct CooperativeTileLoader {
     static_assert((ROWS * COLS) % THREADS == 0);
+    static_assert(COLS % ((ROWS * COLS) / THREADS) == 0);
+    static_assert(
+        !COPY_16_BYTES ||
+        (!TRANSPOSE_DESTINATION &&
+         sizeof(T) * ((ROWS * COLS) / THREADS) == 16));
+
+    struct alignas(sizeof(T)) Read16Bytes {
+        uint8_t values[16];
+    };
 
     static METAL_FUNC void load(
         device const T* source,
@@ -27,21 +37,72 @@ struct CooperativeTileLoader {
         uint thread_index,
         int valid_rows = ROWS,
         int valid_columns = COLS) {
+        if (valid_rows == ROWS && valid_columns == COLS) {
+            load_full(source, source_stride, destination, thread_index);
+        } else {
+            load_safe(
+                source,
+                source_stride,
+                destination,
+                thread_index,
+                valid_rows,
+                valid_columns);
+        }
+    }
+
+    static METAL_FUNC void load_full(
+        device const T* source,
+        int source_stride,
+        threadgroup T* destination,
+        uint thread_index) {
         constexpr int values_per_thread = (ROWS * COLS) / THREADS;
-        const int chunk_start = int(thread_index) * values_per_thread;
+        constexpr int threads_per_row = COLS / values_per_thread;
+        const int row = int(thread_index) / threads_per_row;
+        const int column =
+            (int(thread_index) % threads_per_row) * values_per_thread;
+
+        if constexpr (COPY_16_BYTES) {
+            *((threadgroup Read16Bytes*)(
+                destination + row * DESTINATION_STRIDE + column)) =
+                *((const device Read16Bytes*)(
+                    source + row * source_stride + column));
+            return;
+        }
 
         #pragma unroll
         for (int offset = 0; offset < values_per_thread; ++offset) {
-            const int linear_index = chunk_start + offset;
-            const int row = linear_index / COLS;
-            const int column = linear_index % COLS;
-            const T value = row < valid_rows && column < valid_columns
-                ? source[row * source_stride + column]
+            const T value = source[row * source_stride + column + offset];
+            if constexpr (TRANSPOSE_DESTINATION) {
+                destination[(column + offset) * DESTINATION_STRIDE + row] = value;
+            } else {
+                destination[row * DESTINATION_STRIDE + column + offset] = value;
+            }
+        }
+    }
+
+    static METAL_FUNC void load_safe(
+        device const T* source,
+        int source_stride,
+        threadgroup T* destination,
+        uint thread_index,
+        int valid_rows,
+        int valid_columns) {
+        constexpr int values_per_thread = (ROWS * COLS) / THREADS;
+        constexpr int threads_per_row = COLS / values_per_thread;
+        const int row = int(thread_index) / threads_per_row;
+        const int column =
+            (int(thread_index) % threads_per_row) * values_per_thread;
+
+        #pragma unroll
+        for (int offset = 0; offset < values_per_thread; ++offset) {
+            const int current_column = column + offset;
+            const T value = row < valid_rows && current_column < valid_columns
+                ? source[row * source_stride + current_column]
                 : T(0);
             if constexpr (TRANSPOSE_DESTINATION) {
-                destination[column * DESTINATION_STRIDE + row] = value;
+                destination[current_column * DESTINATION_STRIDE + row] = value;
             } else {
-                destination[row * DESTINATION_STRIDE + column] = value;
+                destination[row * DESTINATION_STRIDE + current_column] = value;
             }
         }
     }
