@@ -25,6 +25,13 @@ def run(label: str, arguments: list[str]) -> dict:
     command = [sys.executable, "-m", *arguments, "--json-output", str(output)]
     environment = os.environ.copy()
     environment["HF_HUB_OFFLINE"] = "1"
+    source_path = str(ROOT / "src")
+    current_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = (
+        source_path
+        if not current_pythonpath
+        else source_path + os.pathsep + current_pythonpath
+    )
     print(f"[{label}] {' '.join(command)}", flush=True)
     subprocess.run(command, cwd=ROOT, env=environment, check=True)
     return json.loads(output.read_text())
