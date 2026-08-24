@@ -1,0 +1,205 @@
+{
+  "week2": [
+    {
+      "label": "course",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tracked_dirty": false
+      }
+    }
+  ],
+  "chunked": [
+    {
+      "label": "chunked-512-01-seam",
+      "mode": "seam",
+      "prefill_step": 512,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    },
+    {
+      "label": "chunked-512-02-inherited",
+      "mode": "inherited",
+      "prefill_step": 512,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    },
+    {
+      "label": "chunked-512-03-inherited",
+      "mode": "inherited",
+      "prefill_step": 512,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    },
+    {
+      "label": "chunked-512-04-seam",
+      "mode": "seam",
+      "prefill_step": 512,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    },
+    {
+      "label": "chunked-128-01-seam",
+      "mode": "seam",
+      "prefill_step": 128,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    },
+    {
+      "label": "chunked-128-02-inherited",
+      "mode": "inherited",
+      "prefill_step": 128,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    },
+    {
+      "label": "chunked-128-03-inherited",
+      "mode": "inherited",
+      "prefill_step": 128,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    },
+    {
+      "label": "chunked-128-04-seam",
+      "mode": "seam",
+      "prefill_step": 128,
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "5c04d91264d8da063b8f6d7b9a2dbabbca3b4a810faccd82f71fdbb2ff4e2e89"
+    }
+  ],
+  "day3": [
+    {
+      "label": "day3-01-seam",
+      "mode": "seam",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "1f15b78561e50c57619f0af3bb99843e355ab1cf25aa94c61507aabef5171ad2"
+    },
+    {
+      "label": "day3-02-inherited",
+      "mode": "inherited",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "1f15b78561e50c57619f0af3bb99843e355ab1cf25aa94c61507aabef5171ad2"
+    },
+    {
+      "label": "day3-03-mlx",
+      "mode": "mlx",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "1f15b78561e50c57619f0af3bb99843e355ab1cf25aa94c61507aabef5171ad2"
+    },
+    {
+      "label": "day3-04-mlx",
+      "mode": "mlx",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "1f15b78561e50c57619f0af3bb99843e355ab1cf25aa94c61507aabef5171ad2"
+    },
+    {
+      "label": "day3-05-inherited",
+      "mode": "inherited",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "1f15b78561e50c57619f0af3bb99843e355ab1cf25aa94c61507aabef5171ad2"
+    },
+    {
+      "label": "day3-06-seam",
+      "mode": "seam",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "1f15b78561e50c57619f0af3bb99843e355ab1cf25aa94c61507aabef5171ad2"
+    }
+  ],
+  "serving": [
+    {
+      "label": "serving-01-seam",
+      "mode": "seam",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "7ca865219b478e1c20296cd3ce9388338eafae8bbfb207043fd38e5dee7f7482"
+    },
+    {
+      "label": "serving-02-inherited",
+      "mode": "inherited",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "7ca865219b478e1c20296cd3ce9388338eafae8bbfb207043fd38e5dee7f7482"
+    },
+    {
+      "label": "serving-03-inherited",
+      "mode": "inherited",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "7ca865219b478e1c20296cd3ce9388338eafae8bbfb207043fd38e5dee7f7482"
+    },
+    {
+      "label": "serving-04-seam",
+      "mode": "seam",
+      "source": {
+        "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+        "git_tree": "25e588de248692b711e04014ba43e85326d21393",
+        "git_tracked_dirty": false
+      },
+      "trace_sha256": "7ca865219b478e1c20296cd3ce9388338eafae8bbfb207043fd38e5dee7f7482"
+    }
+  ]
+}
