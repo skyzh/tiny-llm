@@ -9,6 +9,13 @@ and the runtime metadata needed to read noncontiguous K/V directly. The final
 model uses one page-aware attention interface with separate schedules for
 one-token decode and multi-token prefill.
 
+Week 2's course-owned quantized projections remain the inspectable endpoint of
+that week's kernel lessons. Week 3 deliberately switches dense-model
+projections to `mx.quantized_matmul` at model construction, while retaining the
+course-owned normalization, activation, cache, attention, paging, and
+scheduler paths. This keeps Week 3 focused on serving-system mechanisms rather
+than carrying the teaching kernel's projection cost through every benchmark.
+
 
 ## What We’ll Cover
 
@@ -19,7 +26,7 @@ one-token decode and multi-token prefill.
 - Optional speculative decoding over rewindable caches
 - Optional Mixture-of-Experts model support
 
-Day 1 batches independent request states. Day 2
+Day 1 introduces that projection seam and batches independent request states. Day 2
 splits long prefills so they cannot monopolize the scheduler. Day 3 replaces a
 growing dense cache with fixed-size pages while retaining a dense-gather
 compatibility path. Day 4 removes that gather by teaching attention to walk the

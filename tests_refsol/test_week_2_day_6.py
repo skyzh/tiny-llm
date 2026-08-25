@@ -1,5 +1,7 @@
 """Week 2 Day 6 SIMD-matrix prefill tests."""
 
+from pathlib import Path
+
 import mlx.core as mx
 import pytest
 
@@ -68,6 +70,84 @@ def test_task_2_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
             scales, biases, 128, 4, inputs, packed, transpose_b=True
         )
         assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
+
+
+@pytest.mark.parametrize(
+    ("rows", "outputs", "input_dim"),
+    [(9, 33, 128), (31, 65, 256), (33, 97, 512)],
+)
+@pytest.mark.parametrize("use_split_k", [False, True])
+def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
+    rows: int,
+    outputs: int,
+    input_dim: int,
+    use_split_k: bool,
+):
+    mx.random.seed(rows + outputs + input_dim)
+    with mx.stream(mx.gpu):
+        inputs = mx.random.normal((rows, input_dim)).astype(mx.bfloat16)
+        weight = mx.random.normal((outputs, input_dim)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        tiled = quantized_matmul(
+            scales,
+            biases,
+            128,
+            4,
+            inputs,
+            packed,
+            transpose_b=True,
+            use_simdgroup=True,
+            use_split_k=use_split_k,
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, inputs, packed, transpose_b=True
+        )
+        assert tiled.shape == (rows, outputs)
+        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
+
+
+def test_task_2_course_owned_loader_zero_fills_partial_rows_gpu():
+    """A full-width tile with partial rows must still use the safe path."""
+    header = (
+        Path(__file__).parents[1] / "src/extensions_ref/src/cooperative_matrix.h"
+    ).read_text()
+    source = """
+        threadgroup T tile[32];
+        using Loader = tiny_llm::CooperativeTileLoader<T, 4, 8, 8, 4>;
+        Loader::load(
+            inp, 8, tile, thread_position_in_threadgroup.x, 2, 8);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint index = thread_position_in_threadgroup.x;
+             index < 32;
+             index += 4) {
+            out[index] = tile[index];
+        }
+    """
+    kernel = mx.fast.metal_kernel(
+        name="probe_course_loader_partial_rows",
+        input_names=["inp"],
+        output_names=["out"],
+        source=source,
+        header=header,
+    )
+
+    valid = (mx.arange(16).reshape(2, 8) + 1).astype(mx.bfloat16)
+    sentinel = mx.full((1, 8), 37, dtype=mx.bfloat16)
+    padding = mx.full((1, 8), -11, dtype=mx.bfloat16)
+    loader_source = mx.concatenate([valid, sentinel, padding], axis=0)
+    output = kernel(
+        inputs=[loader_source],
+        template=[("T", mx.bfloat16)],
+        grid=(4, 1, 1),
+        threadgroup=(4, 1, 1),
+        output_shapes=[(4, 8)],
+        output_dtypes=[mx.bfloat16],
+    )[0]
+    mx.eval(output)
+
+    assert output.shape == (4, 8)
+    assert mx.array_equal(output[:2], valid).item()
+    assert mx.array_equal(output[2:], mx.zeros((2, 8), dtype=mx.bfloat16)).item()
 
 
 @pytest.mark.skipif(

@@ -80,6 +80,11 @@ def parse_args() -> argparse.Namespace:
         help="run the Week 3 Day 4 dense-gather compatibility checkpoint",
     )
     parser.add_argument(
+        "--week3-inherit-course-projections",
+        action="store_true",
+        help="benchmark the pre-seam Week 3 projection stack as an ablation",
+    )
+    parser.add_argument(
         "--week2-checkpoint",
         choices=(
             "kv-cache",
@@ -169,6 +174,13 @@ def validate_args(args: argparse.Namespace) -> None:
         )
     if args.disable_paged_attention and args.loader != "week3":
         raise ValueError("--disable-paged-attention requires --loader week3")
+    if args.week3_inherit_course_projections and not (
+        args.loader == "week3" or (args.loader == "week2" and args.batch_decode)
+    ):
+        raise ValueError(
+            "--week3-inherit-course-projections requires a Week 3 model or "
+            "the Week 3 batch scheduler"
+        )
 
 
 def load_solution_modules(solution: str):
@@ -644,14 +656,24 @@ def main() -> None:
                 dispatch_kwargs[
                     "enable_paged_attention"
                 ] = not args.disable_paged_attention
+                dispatch_kwargs[
+                    "use_mlx_quantized_linear"
+                ] = not args.week3_inherit_course_projections
             elif args.loader == "week2" and args.week2_checkpoint is not None:
                 dispatch_kwargs["checkpoint"] = args.week2_checkpoint
-            model = models.dispatch_model(
-                model_name,
-                mlx_model,
-                week=int(args.loader.removeprefix("week")),
-                **dispatch_kwargs,
-            )
+            if (
+                args.loader == "week2"
+                and args.batch_decode
+                and not args.week3_inherit_course_projections
+            ):
+                model = models.dispatch_week3_batch_model(model_name, mlx_model)
+            else:
+                model = models.dispatch_model(
+                    model_name,
+                    mlx_model,
+                    week=int(args.loader.removeprefix("week")),
+                    **dispatch_kwargs,
+                )
 
             if args.batch_decode:
                 cache_factory = (

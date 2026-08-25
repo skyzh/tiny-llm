@@ -221,6 +221,7 @@ class Qwen3ModelWeek3:
         mlx_model: Any,
         page_size: int = 128,
         enable_paged_attention: bool = True,
+        use_mlx_quantized_linear: bool = True,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
@@ -234,12 +235,20 @@ class Qwen3ModelWeek3:
         ]
         precision = mx.bfloat16
         self.precision = precision
+        # Dense Week 3 keeps the course-owned cache, attention, normalization,
+        # activation, and scheduler paths, but no longer inherits Week 2's
+        # teaching-oriented projection kernels. The optional MoE path retains
+        # its separately taught router/expert projection contract.
+        self.use_mlx_quantized_linear = use_mlx_quantized_linear and not getattr(
+            mlx_model.args, "num_experts", 0
+        )
 
         def week3_weights(layer: Any) -> QuantizedWeights:
             return QuantizedWeights.from_mlx_layer(
                 layer,
                 use_simdgroup_matmul=True,
                 use_split_k_matmul=True,
+                use_mlx_quantized_linear=self.use_mlx_quantized_linear,
             )
 
         self.embedding = QuantizedEmbedding(

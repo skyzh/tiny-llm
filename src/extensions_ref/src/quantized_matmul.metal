@@ -2,8 +2,7 @@
 #include <metal_simdgroup_matrix>
 #include "mlx/backend/metal/kernels/utils.h"
 #include "mlx/backend/metal/kernels/complex.h"
-#include "mlx/backend/metal/kernels/steel/gemm/loader.h"
-#include "mlx/backend/metal/kernels/steel/gemm/mma.h"
+#include "cooperative_matrix.h"
 
 template <typename T>
 [[kernel]] void quantized_matmul_vanilla_w4a16_g128(
@@ -124,20 +123,12 @@ inline void quantized_matmul_block_w4a16_g128(
     const int packed_cols = N / packs_per_item;
     const int groups_per_row = N / group_size;
 
-    using block_mma = mlx::steel::BlockMMA<
-        T, OutT, output_block_size, output_block_size,
-        reduction_block_size, 2, 2, false, true,
-        padded_reduction_size, padded_reduction_size>;
-    using activation_loader = mlx::steel::BlockLoader<
+    using block_mma = tiny_llm::CooperativeBlockMMA<
+        T, OutT, padded_reduction_size>;
+    using activation_loader = tiny_llm::CooperativeTileLoader<
         T, output_block_size, reduction_block_size,
-        padded_reduction_size, 1, 128>;
+        padded_reduction_size, 128, false, true>;
     block_mma mma(simdgroup, lane);
-    activation_loader load_activation(
-        a + row_base * N + reduction_start,
-        N,
-        activation_tile,
-        simdgroup,
-        lane);
 
     const int weight_output = thread_id / 4;
     const int weight_pack = thread_id % 4;
@@ -171,14 +162,18 @@ inline void quantized_matmul_block_w4a16_g128(
          reduction_base < reduction_end;
          reduction_base += reduction_block_size) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
-
-        if (row_base + output_block_size <= M) {
-            load_activation.load_unsafe();
-        } else {
-            load_activation.load_safe(short2(
-                reduction_block_size,
-                max(0, M - row_base)));
-        }
+        const int valid_rows = clamp(M - row_base, 0, output_block_size);
+        const int valid_reduction = clamp(
+            min(N, reduction_end) - reduction_base,
+            0,
+            reduction_block_size);
+        activation_loader::load(
+            a + row_base * N + reduction_base,
+            N,
+            activation_tile,
+            thread_id,
+            valid_rows,
+            valid_reduction);
 
         const uint32_t packed = valid_output ? *weight_source : 0;
         const float scale =
@@ -194,9 +189,8 @@ inline void quantized_matmul_block_w4a16_g128(
         }
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        mma.mma(activation_tile, weight_tile);
+        mma.multiply_accumulate(activation_tile, weight_tile);
 
-        load_activation.next();
         weight_source += reduction_block_size / packs_per_item;
         quantization_group_step += reduction_block_size;
         if (quantization_group_step == group_size) {

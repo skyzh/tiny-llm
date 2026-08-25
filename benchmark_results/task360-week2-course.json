@@ -1,0 +1,115 @@
+{
+  "source": {
+    "git_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+    "git_tracked_dirty": false
+  },
+  "host": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.12.13",
+    "mlx_version": "0.32.0",
+    "hardware": {
+      "machine_name": "Mac mini",
+      "machine_model": "Mac16,11",
+      "chip_type": "Apple M4 Pro",
+      "cpu_cores": "proc 14:10:4:0",
+      "gpu_model": "Apple M4 Pro",
+      "gpu_cores": "20",
+      "physical_memory": "64 GB"
+    }
+  },
+  "configuration": {
+    "model": "qwen3-0.6b",
+    "solution": "ref",
+    "suite": "week2",
+    "device": "gpu",
+    "input_len": 128,
+    "output_len": 33,
+    "warmup": 1,
+    "repeats": 2,
+    "seed": 0,
+    "prefill_logits": "last",
+    "offline": true,
+    "cooldown_seconds": 0.5,
+    "variants": [
+      "week2-simd-matmul",
+      "week2-split-k",
+      "mlx"
+    ]
+  },
+  "execution_order": [
+    [
+      "week2-simd-matmul",
+      "week2-split-k",
+      "mlx"
+    ],
+    [
+      "mlx",
+      "week2-split-k",
+      "week2-simd-matmul"
+    ]
+  ],
+  "results": {
+    "week2-simd-matmul": {
+      "label": "2.6 SIMD matrix prefill",
+      "samples": [
+        {
+          "prefill": 4227.31,
+          "decode": 217.45,
+          "output": 185.47
+        },
+        {
+          "prefill": 4216.54,
+          "decode": 238.78,
+          "output": 200.24
+        }
+      ],
+      "median": {
+        "prefill": 4221.925,
+        "decode": 228.115,
+        "output": 192.85500000000002
+      }
+    },
+    "week2-split-k": {
+      "label": "2.7 Split-K prefill",
+      "samples": [
+        {
+          "prefill": 4194.27,
+          "decode": 236.06,
+          "output": 198.25
+        },
+        {
+          "prefill": 4205.87,
+          "decode": 238.98,
+          "output": 200.43
+        }
+      ],
+      "median": {
+        "prefill": 4200.07,
+        "decode": 237.51999999999998,
+        "output": 199.34
+      }
+    },
+    "mlx": {
+      "label": "MLX",
+      "samples": [
+        {
+          "prefill": 5569.83,
+          "decode": 249.09,
+          "output": 217.23
+        },
+        {
+          "prefill": 5385.57,
+          "decode": 306.74,
+          "output": 256.95
+        }
+      ],
+      "median": {
+        "prefill": 5477.7,
+        "decode": 277.915,
+        "output": 237.08999999999997
+      }
+    }
+  }
+}
