@@ -4,10 +4,13 @@
 > [Week 2 verification matrix](./week2-overview.md#verification-status) for
 > what is continuously tested, locally measured, and still under review.
 
-Day 6's cooperative loads brought long-row prefill near MLX. Its follow-up sweep shows a different
-problem at short prefill: Qwen's narrow K/V projections do not launch enough
-independent result tiles to occupy the GPU. Today we split the reduction
-dimension only until that grid is large enough.
+Day 6's cooperative loads establish a reusable course-owned tile schedule. Its
+follow-up sweep shows a different problem at short prefill: Qwen's narrow K/V
+projections do not launch enough independent result tiles to occupy the GPU.
+Today we split the reduction dimension only until that grid is large enough.
+The matched long-row control still trails MLX; it tells us that extra
+partitions are neutral once the ordinary result grid is occupied, not that the
+base tile has reached library parity.
 
 This chapter is not a general split-K library. It optimizes the model shapes we
 actually run:
@@ -181,8 +184,26 @@ Split-K only below the measured crossover: it must improve the under-filled
 projection, preserve one-token decode, and fall back exactly to Day 6 when the
 ordinary result grid is already occupied. Record the accumulation and reduction
 dispatches beside the calculated partition policy and operator table. The final
-stretch-goal acceptance run must still reach 80%
-of MLX in both phases.
+stretch-goal acceptance run must still reach 80% of full MLX in both phases on
+the fixed Qwen3-4B 128-prompt/129-output workload.
+
+On the checked M4 Pro, the balanced final-main evidence supports this narrower
+result:
+
+- at `M=32`, K/V/O/down improve in both execution positions, Q reverses
+  direction, and gate/up are neutral;
+- complete-model prefill improves from 537.92 to 599.81 tok/s, or 11.5%, while
+  decode is neutral;
+- at `M=128`, complete-model prefill is 706.50 versus 707.41 tok/s and decode
+  is 66.28 versus 65.83 tok/s;
+- at `M=2,048`, complete-model prefill is 551.48 versus 547.73 tok/s and every
+  projection uses the unsplit policy.
+
+The final 128-token checkpoint reaches 88.2% of full-MLX prefill and 87.0% of
+full-MLX decode throughput. These values support the fixed-workload stretch
+goal, not a universal Split-K crossover or 80% claim. See
+`benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
+for every raw sample and the balanced-order drift controls.
 
 The [reference checkpoint](./appendix-performance.md#day-7-split-k-only-below-the-crossover)
 pairs the short-shape operator gains with the end-to-end result and keeps the
@@ -201,8 +222,11 @@ optimize matvec -> benchmark decode -> optimize model kernels -> benchmark decod
 -> measure tile occupancy -> optimize split-K -> benchmark the complete checkpoint
 ```
 
-Week 3 inherits these projection schedules. Paging is evaluated separately on
-cache writes, direct page reads, attention time, and end-to-end throughput; it
-does not receive credit for the Day 7 projection gain.
+Week 3 keeps the same quantized-linear interfaces but deliberately selects MLX
+quantized projections in its dense model and scheduler factory. Its cache,
+attention, paging, batching, and scheduling remain course-owned. Paging is
+evaluated separately on cache writes, direct page reads, attention time, and
+end-to-end throughput; it does not receive credit for either the Day 7
+projection result or task #360's separately measured projection-seam gain.
 
 {{#include copyright.md}}

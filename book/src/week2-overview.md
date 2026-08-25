@@ -41,7 +41,7 @@ needed:
 
 | Required work | Provided infrastructure | Optional work |
 |---|---|---|
-| Days 1–7: cached model integration, matched benchmarking, quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark runners, correctness tests, and Python-reference implementations | The short profiling notice, schedule searches, hardware-specific retuning, and the 80%-of-MLX stretch target |
+| Days 1–7: cached model integration, matched benchmarking, quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark runners, correctness tests, and Python-reference implementations | The short profiling notice, schedule searches, hardware-specific retuning, and the fixed-workload 80%-of-MLX stretch target |
 
 The tests define API and correctness contracts; they do not require a student
 to rediscover the reference schedule. Metal capture, Xcode visualization,
@@ -58,14 +58,20 @@ not acceptance gates.
 - A BF16 SIMD-matrix quantized prefill kernel
 - A shape-aware split-K schedule for small Qwen prefill matrices
 - A last-token output interface for generation
-- An optional stretch target of 80% of MLX prefill and decode throughput on the
-  fixed Week 2 checkpoint
+- An optional stretch target of 80% of MLX prefill and decode throughput on one
+  fixed Qwen3-4B workload: 128 prompt tokens, 129 output tokens, last-row
+  logits, two warmups, and four balanced fresh-process samples. On the checked
+  M4 Pro, the final checkpoint reaches 88.2% of full-MLX prefill and 87.0% of
+  full-MLX decode throughput. This is not a cross-shape or cross-device target.
 
 Week 2 does **not** call MLX-provided implementations of the operators we are
 learning. Your solution implements quantized matmul, decode attention, RMSNorm,
 RoPE, and SwiGLU in its own Python, C++, or Metal code. In particular, the
 completed checkpoint does not use `mx.quantized_matmul`, `mx.dequantize`,
 `mx.fast` operators, or `mx.fast.scaled_dot_product_attention` as shortcuts.
+Its matrix path also avoids `mlx::steel`: the supplied course scaffold owns the
+cooperative tile loader and the direct Metal `simdgroup_matrix` fragment
+bookkeeping.
 The Day 1 baseline still uses Week 1's Python `mx.dequantize` loading helper;
 Day 3 replaces that loading path as part of keeping weights packed.
 
@@ -115,10 +121,16 @@ dispatches separate prefill and decode matrix schedules, and keeps weights
 quantized throughout. Week 1 continues to use its Python `mlx.core` full-prefix
 generation loop.
 
-Week 3 imports these Week 2 interfaces rather than copying or replacing them.
-It adds page-table translation and combines Week 2's online softmax,
-SIMD-matrix tiling, and page walking in one paged FlashAttention operator. That
-boundary lets each week's model remain understandable and runnable on its own.
+Week 3 keeps these Week 2 interfaces, but it deliberately changes projection
+ownership: canonical dense Week 3 and the Week 3 scheduler factory select MLX
+quantized projections. Cache management, attention, paging, batching, and
+scheduling remain course-owned. Full MLX is a separate benchmark baseline,
+not another name for this hybrid Week 3 course path.
+
+The explicit projection seam is a teaching boundary, not a performance credit
+for paging. Task #360 isolates the seam while holding the course-owned serving
+mechanisms fixed; the final-main benchmark corpus reports representative
+absolute performance after that choice. Keep those two questions separate.
 
 Run `pdm run bench-week2-progression` to measure each checkpoint against the
 Week 1 baseline and MLX. Full methodology and cumulative results are in the

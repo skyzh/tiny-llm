@@ -96,10 +96,11 @@ The Qwen path uses 128-token pages and a 32-token K/V tile. An aligned tile is
 therefore physically contiguous even when the logical sequence as a whole is
 not. Assign each thread contiguous elements through a cooperative block loader
 so adjacent lanes issue coalesced reads. Keep a generic loader for a tile that
-crosses a page boundary. Your Metal kernel may use MLX's low-level Steel
-block-loader header for this load primitive, while your solution owns the page
-translation, tile schedule, online softmax, primitive, and dispatch. It does
-not instantiate MLX attention.
+crosses a page boundary. Reuse the course-owned `CooperativeTileLoader` and
+direct `simdgroup_matrix` fragments from Week 2; do not import a Steel loader
+or matrix helper. Your solution owns page translation, the contiguous and
+cross-page load paths, tile schedule, causal mask, online softmax, primitive,
+and dispatch. It does not instantiate MLX attention.
 
 Tail cases are required. A query block, K/V tile, final page, or context may be
 partially full, and physical page ids need not be consecutive.
@@ -178,7 +179,9 @@ extension function.
 
 The Week 3 model should use the tiled paged path automatically for supported
 long prefills. Short queries continue through the vector paged-decode schedule.
-Neither path gathers a dense K/V tensor.
+Neither path gathers a dense K/V tensor. Canonical Week 3 uses MLX quantized
+projections, but its cache, paged attention, batching, and scheduling remain
+course-owned. This hybrid course path is not the full-MLX baseline.
 
 Measure the completed operator in the continuous-serving trace. Report prompt
 range, page size, batch size, hardware, prefill throughput, decode throughput,
@@ -190,18 +193,29 @@ pdm run bench-serving-progression --offline --repeats 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 --prefill-step 128 \
   --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/m4-pro-qwen3-4b-week3-serving-mlx-0.32.0.json
+  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
 ```
 
 FlashAttention is expected to matter more as prefill grows. It should not
 replace the Day 4 decode schedule: a one-token query has no query-tile reuse.
 
-On the checked M4 Pro trace, the complete direct-paged path reaches 679.56
-prefill tok/s, 41.88 output tok/s, 82.11 decode tok/s, and 0.558 requests/s.
-Relative to dense serving on the same trace, output and request throughput are
-28.7% higher, decode throughput is 62.8% higher, and peak KV storage is 47.4%
-lower. These are cumulative Week 3 path results; the serving trace does not
-isolate the Day 5 prefill schedule from paging, direct decode, or scheduling.
+On the checked M4 Pro trace, all three course rows share the same projection
+seam:
+
+| Storage / attention path | Prefill tok/s | Output tok/s | Decode tok/s | Requests/s | Peak KV | Avoidable KV copy |
+|---|---:|---:|---:|---:|---:|---:|
+| Dense growth and reconstruction | 711.18 | 35.23 | 57.59 | 0.469 | 1,096 MiB | 209,532 MiB |
+| Paged storage + dense gather | 725.46 | 41.64 | 78.53 | 0.555 | not a total peak | 103,445 MiB |
+| Direct paged attention | 672.68 | 46.36 | 105.01 | 0.618 | 576 MiB | 504 MiB |
+
+Relative to dense serving, direct paging is 5.4% lower on prefill, 31.6%
+higher on output/request throughput, 82.3% higher on decode, 47.4% lower on
+measured peak KV storage, and 99.76% lower on avoidable logical copy volume.
+The compatibility row's page-pool counter excludes its temporary dense staging
+allocation, so it is not a total peak. These are cumulative Week 3 system
+results; they do not isolate the Day 5 prefill schedule from paging, direct
+decode, allocation, or scheduling, and they do not credit the MLX projection
+seam to paged attention.
 
 Use a separate 8K static sweep as a kernel diagnostic after the serving trace.
 It shows when query tiling begins to offset page-table overhead, but it does not
@@ -215,17 +229,20 @@ pdm run bench-course-progression --offline --suite course \
   --variant week2 --variant week3 --variant mlx --model qwen3-4b \
   --input-len 8192 --output-len 2 --prefill-logits last \
   --warmup 1 --repeats 4 --cooldown-seconds 1 \
-  --json-output benchmark_results/m4-pro-qwen3-4b-week3-8k-mlx-0.32.0.json
+  --json-output benchmark_results/task367-final-main/raw/week3-8k-final-main.json
 ```
 
 | 8K static checkpoint | Prefill tok/s | Decode tok/s |
 |---|---:|---:|
-| Week 2 | 323.26 | 17.62 |
-| Complete Week 3 | 424.14 | 24.96 |
-| MLX | 594.21 | 25.24 |
+| Week 2 course-owned projections | 323.96 | 17.73 |
+| Week 3 seam + course paged path | 463.69 | 27.42 |
+| Full MLX | 639.73 | 28.37 |
 
-The complete Week 3 prefill path is 31.2% faster than Week 2 and reaches 71.4%
-of MLX at this shape. Its decode row is the Day 4 vector schedule, not evidence
-for the tiled prefill kernel.
+The Week 3 prefill path is 43.1% faster than Week 2 and reaches 72.5% of full
+MLX at this shape. This remains a static diagnostic: it does not measure
+request turnover, page reuse, admission capacity, or the projection seam
+causally. Its decode row is the Day 4 vector schedule, not evidence for the
+tiled prefill kernel. Full method and raw samples are in
+`benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`.
 
 {{#include copyright.md}}

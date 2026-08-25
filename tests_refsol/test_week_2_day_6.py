@@ -108,8 +108,13 @@ def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
 
 def test_task_2_course_owned_loader_zero_fills_partial_rows_gpu():
     """A full-width tile with partial rows must still use the safe path."""
+    extension = (
+        "extensions_ref"
+        if Path(__file__).parent.name == "tests_refsol"
+        else "extensions"
+    )
     header = (
-        Path(__file__).parents[1] / "src/extensions_ref/src/cooperative_matrix.h"
+        Path(__file__).parents[1] / f"src/{extension}/src/cooperative_matrix.h"
     ).read_text()
     source = """
         threadgroup T tile[32];

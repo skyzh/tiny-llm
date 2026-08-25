@@ -62,11 +62,17 @@ The 40-element shared-memory stride pads the 32-value rows to avoid an
 unhelpful bank-access pattern. Tail rows and columns are zero-filled or guarded
 at the final store.
 
-Your Metal kernel may use MLX's low-level Steel `BlockLoader` and `BlockMMA`
-headers as building blocks. Those helpers provide cooperative loads and
-matrix-fragment bookkeeping. Your solution still owns the W4A16 unpacking,
-dequantization, tile layout, primitive, dispatch, split policy, and reduction;
-it does not call MLX's quantized-matmul operator.
+Implement the small course-owned boundary in
+`src/extensions/src/cooperative_matrix.h`. `CooperativeTileLoader` assigns one
+contiguous source chunk to each thread, uses a branch-free full-tile path, and
+zero-fills the edge-safe path. `CooperativeBlockMMA` loads and accumulates
+direct Metal `simdgroup_matrix` fragments. The required solution does not use
+Steel `BlockLoader` or `BlockMMA`.
+
+This helper does not hide the exercise. Your solution still owns the W4A16
+unpacking, dequantization, tile layout, direct matrix-fragment bookkeeping,
+primitive, dispatch, split policy, and reduction; it does not call MLX's
+quantized-matmul operator.
 
 ## Task 1: Preserve the Workload Dispatch
 
@@ -90,9 +96,10 @@ column tiles. The result must retain the model-facing 16-bit dtype.
 
 ## Task 2: Make Device Loads Contiguous
 
-Continue modifying `quantized_matmul_simdgroup_w4a16_g128` (and its private
-Metal helper, if you factor one) in
-`src/extensions/src/quantized_matmul.metal`; do not change the public
+Continue modifying `quantized_matmul_simdgroup_w4a16_g128` in
+`src/extensions/src/quantized_matmul.metal` and complete the course-owned
+`CooperativeTileLoader` TODO in
+`src/extensions/src/cooperative_matrix.h`; do not change the public
 `quantized_matmul` binding.
 
 Use a cooperative block loader so adjacent threads and each thread's local
@@ -153,9 +160,11 @@ projections launch too few 32×32 result tiles to fill the GPU. If the same
 kernel remains slow at large `M`, improve its loads or matrix schedule before
 adding reduction partitions.
 
-At long `M`, the two-dimensional tile grid is already large. Do not force the
-next optimization there: additional reduction partitions would only add a
-temporary buffer and another launch.
+At long `M`, the two-dimensional tile grid is already large. The checked
+2,048-row sweep puts the course SIMD path roughly 7–11% above MLX latency for
+the major projections, while the Split-K successor is neutral. That control
+does not establish parity with MLX; it establishes that multiplying an already
+occupied grid would only add a temporary buffer and another launch.
 
 ## Benchmark Analysis: Identify Under-Filled Prefill Shapes
 
@@ -178,17 +187,19 @@ threadgroups.
 
 Attach the complete-model prefill delta and per-projection tables at 32, 128,
 and 2,048 rows. Do not select Split-K merely because projections still occupy
-most of prefill. First require the long or wide controls to approach MLX while
-the short, narrow projection remains disproportionately slow.
+most of prefill. Require the short, narrow projection to improve in both
+balanced execution positions while the 128- and 2,048-row controls stay
+neutral.
 
 Use the dispatch calculation and short-shape operator sweep to establish that
 the unsplit result grid has too few independent threadgroups. Use the matched
-long-shape control to rule out costly work inside each tile; if it exposes such
-a cost, repair Day 6 before multiplying the grid. The
+long-shape control to show that Split-K does not help once that grid is
+occupied; it may still expose a gap inside each tile, which belongs to Day 6
+rather than a larger partition grid. The
 [reference checkpoint](./appendix-performance.md#day-6-use-cooperative-loads-for-quantized-prefill)
-pairs the prefill gain with long and short operator controls and the dispatch
-geometry that motivates Split-K. A remaining arithmetic hot spot would send
-you back to Day 6 instead.
+pairs the prefill result with long and short operator controls and the dispatch
+geometry that motivates Split-K. The exact final-main samples and method live
+in `benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`.
 
 > **Optional profiling evidence.** A 32/128-row attribution can corroborate the
 > shape analysis, but it does not replace the matched complete-model delta,
