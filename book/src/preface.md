@@ -41,7 +41,47 @@ The course supports two different goals: **implementing** the cumulative
 serving stack, or **studying and running** a later checkpoint without completing
 all earlier exercises. These are not the same path.
 
-![Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the seven Week 2 days and Week 3 into Week 4 Day 8. Week 2 Days 3 through 7 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 Days 1 through 7 form a scripted-model lesson path that can start after setup; Day 8 joins the two paths, and Day 9 continues the Week 4 sequence.](./course-roadmap.svg)
+<style>
+  .course-roadmap-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    overscroll-behavior-x: contain;
+  }
+  .course-roadmap-scroll:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
+  }
+  .course-roadmap-scroll img {
+    display: block;
+    width: 1200px;
+    min-width: 1200px;
+    max-width: none;
+    height: auto;
+  }
+</style>
+
+<div id="course-roadmap-scroll" class="course-roadmap-scroll" role="region" aria-label="Scrollable Tiny-LLM course roadmap" aria-describedby="course-roadmap-scroll-help" tabindex="0">
+  <img src="./course-roadmap.svg" alt="Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the seven Week 2 days and Week 3 into Week 4. Week 2 Days 3 through 7 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 keeps the course prerequisite of setup plus Weeks 1 through 3, while its deterministic scripted-model tests for Days 1 through 7 can run after setup. Day 8 joins the scripted sequence to the real-model path, and Day 9 continues the Week 4 sequence.">
+</div>
+
+<p id="course-roadmap-scroll-help">On a narrow screen, scroll the roadmap
+horizontally; when the roadmap is focused, the left and right arrow keys move
+through it without changing chapters. Its labels stay at their readable desktop
+size.</p>
+
+<script>
+  (() => {
+    const roadmap = document.getElementById("course-roadmap-scroll");
+    roadmap.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const distance = Math.max(120, Math.round(roadmap.clientWidth * 0.8));
+      roadmap.scrollLeft += event.key === "ArrowLeft" ? -distance : distance;
+    });
+  })();
+</script>
 
 Solid arrows in the diagram are **interface and state prerequisites**. They do
 not mean that you must hand-write every earlier optimization. A dashed border
@@ -56,7 +96,7 @@ functions in `src/tiny_llm`.
 | Skip a Week 2 kernel optimization | Keep that day's course interface and wire the corresponding MLX operator at the seam | The earlier model, state, and interface work still needs to exist. This is a local code choice, not a CLI flag. |
 | Read or experiment with a later week | Open that chapter and use `tiny_llm_ref` | None in your learner tree. Run the supplied reference tests or reference loader. |
 | Compare with the production-library baseline | Use `--solution mlx` | None, but this runs the full MLX model and bypasses the course implementation. |
-| Start the Week 4 scripted-model lessons | Week 4 Day 1 | Days 1–7 use deterministic scripted models. Follow the Week 4 days in order; Day 8's real-model bridge needs the Week 3 model/tokenizer/KV-cache boundary. |
+| Run the Week 4 Days 1–7 deterministic tests before finishing the serving stack | After setup, run the supplied scripted-model tests | The tests do not need a working serving implementation. The course still assumes setup plus Weeks 1–3 before Week 4; follow the Week 4 days in order, and Day 8's real-model bridge needs the Week 3 model/tokenizer/KV-cache boundary. |
 
 The cumulative dependencies are deliberate:
 
@@ -68,9 +108,11 @@ The cumulative dependencies are deliberate:
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
   Week 2.”
-- **Week 3 → Week 4:** the early agent checkpoints exercise control flow with
-  scripted models. Week 4 Day 8 reconnects that harness to the real tokenizer
-  and KV cache, so that checkpoint needs a working Week 3 path.
+- **Week 3 → Week 4:** Week 4 remains the next cumulative course week. Its
+  Days 1–7 tests can exercise control flow with deterministic scripted models
+  after setup, even before the serving stack works. Day 8 reconnects that
+  harness to the real tokenizer and KV cache, so that checkpoint needs a
+  working Week 3 path.
 
 > **Is Week 2 required for Week 3? The Week 2 interfaces are; every Week 2
 > optimization is not.** The current Week 3 starter reuses the Week 2 model

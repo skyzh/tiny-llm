@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1040" role="img" aria-labelledby="title description">
   <title id="title">Tiny-LLM course roadmap, Week 2 operator off-ramps, and entry paths</title>
-  <desc id="description">The course implementation proceeds from setup and Week 1 through seven Week 2 days into Week 3. Week 2 Days 1 and 2 establish required state and measurement. Days 3 through 7 preserve course interfaces but allow manual substitution of corresponding MLX operators instead of custom kernels. This per-operator path is different from the full-MLX solution, which bypasses the course stack. Week 4 scripted-model lessons can begin after setup; Day 8 reconnects them to the Week 3 tokenizer and KV cache.</desc>
+  <desc id="description">The cumulative course implementation proceeds from setup and Week 1 through seven Week 2 days and Week 3 into Week 4. Week 2 Days 1 and 2 establish required state and measurement. Days 3 through 7 preserve course interfaces but allow manual substitution of corresponding MLX operators instead of custom kernels. This per-operator path is different from the full-MLX solution, which bypasses the course stack. Week 4 keeps setup plus Weeks 1 through 3 as course prerequisites, while the deterministic scripted-model tests for Days 1 through 7 can run after setup without a working serving implementation. Day 8 reconnects the scripted sequence to the Week 3 tokenizer and KV cache.</desc>
   <style>
     :root {
       color-scheme: light dark;
@@ -97,9 +97,10 @@
   <text class="title" x="900" y="478">Week 4 scripted-model lessons</text>
   <rect class="box week4" x="900" y="500" width="260" height="104" rx="10" />
   <text class="label" x="1030" y="530" text-anchor="middle">Days 1–7</text>
-  <text class="detail" x="1030" y="554" text-anchor="middle">scripted-model</text>
-  <text class="detail" x="1030" y="573" text-anchor="middle">coding-agent mechanics</text>
-  <text class="detail" x="1030" y="592" text-anchor="middle">independent entry after setup</text>
+  <text class="detail" x="1030" y="554" text-anchor="middle">course follows Week 3</text>
+  <text class="detail" x="1030" y="573" text-anchor="middle">scripted-model mechanics</text>
+  <text class="detail" x="1030" y="592" text-anchor="middle">tests runnable after setup</text>
+  <path class="arrow" d="M 880 552 L 900 552" />
 
   <rect class="box week4" x="700" y="645" width="220" height="92" rx="10" />
   <text class="label" x="810" y="674" text-anchor="middle">Day 8 · Join</text>
