@@ -35,6 +35,57 @@ small coding agent.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
+## Course Roadmap: What Depends on What
+
+The course supports two different goals: **implementing** the cumulative
+serving stack, or **studying and running** a later checkpoint without completing
+all earlier exercises. These are not the same path.
+
+![Tiny-LLM roadmap. The cumulative implementation path runs from Week 1 through Week 3 into Week 4 Day 8. Week 4 Days 1 through 7 form a scripted-model agent path that can start after setup; Day 8 joins the two paths, and Day 9 continues the agent path. The supplied reference solution can run any completed checkpoint, while full MLX is a comparison baseline rather than a course-code prerequisite.](./course-roadmap.svg)
+
+Solid arrows in the diagram are learner-code prerequisites. The reference and
+MLX lanes let you observe a completed system, but they do not fill in unfinished
+functions in `src/tiny_llm`.
+
+| Your goal | Start here | What earlier implementation is required? |
+| --- | --- | --- |
+| Build the whole serving system | Week 1, then follow the solid arrows | Each week uses interfaces and mechanisms established by the previous week. |
+| Read or experiment with a later week | Open that chapter and use `tiny_llm_ref` | None in your learner tree. Run the supplied reference tests or reference loader. |
+| Compare with the production-library baseline | Use `--solution mlx` | None, but this runs the full MLX model and bypasses the course implementation. |
+| Study the agent harness first | Week 4 Day 1 | Days 1–7 use deterministic scripted models. Follow the Week 4 days in order; Day 8's real-model bridge needs the Week 3 model/tokenizer/KV-cache boundary. |
+
+The cumulative dependencies are deliberate:
+
+- **Week 1 → Week 2:** Week 2 starts from the readable Qwen3 model and replaces
+  costs one mechanism at a time: first the generation algorithm and KV cache,
+  then quantized and fused kernels.
+- **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
+  course-owned normalization, activation, cache, attention, paging, batching,
+  and scheduling. This is an explicit operator seam, not “use the MLX model for
+  Week 2.”
+- **Week 3 → Week 4:** the early agent checkpoints exercise control flow with
+  scripted models. Week 4 Day 8 reconnects that harness to the real tokenizer
+  and KV cache, so that checkpoint needs a working Week 3 path.
+
+To run a completed checkpoint without solving it first:
+
+```bash
+# Run one supplied reference test group.
+pdm run test-refsol --week 3 --day 1
+
+# Run a completed course model.
+pdm run main --solution ref --loader week3
+
+# Run the separate full-MLX baseline.
+pdm run main --solution mlx
+```
+
+`--solution ref` runs the supplied implementation end to end. `--solution mlx`
+runs MLX end to end. Neither command composes “earlier weeks from the reference
+or MLX, this week's TODOs from my learner tree.” If you want to implement a
+later week in `src/tiny_llm`, its earlier learner-code prerequisites must already
+work; the repository does not currently provide a one-command hybrid checkpoint.
+
 ## Choose a Model for Your Mac
 
 The table below is a conservative starting point for common MacBook unified-memory sizes. Each entry is
