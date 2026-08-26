@@ -125,27 +125,24 @@
   <text class="detail" x="500" y="682" text-anchor="middle">paging / batching / scheduler</text>
   <path class="arrow" d="M 450 482 L 450 556 L 500 556 L 500 590" />
 
-  <text class="title" x="720" y="568">Week 4 scripted-model lessons</text>
-  <rect class="box week4" x="720" y="590" width="220" height="104" rx="10" />
-  <text class="label" x="830" y="620" text-anchor="middle">Days 1–7</text>
-  <text class="detail" x="830" y="644" text-anchor="middle">scripted-model</text>
-  <text class="detail" x="830" y="663" text-anchor="middle">coding-agent mechanics</text>
-  <text class="detail" x="830" y="682" text-anchor="middle">can start after setup</text>
+  <text class="title" x="740" y="568">Week 4 scripted-model lessons</text>
+  <rect class="box week4" x="740" y="590" width="270" height="104" rx="10" />
+  <text class="label" x="875" y="620" text-anchor="middle">Days 1–7</text>
+  <text class="detail" x="875" y="644" text-anchor="middle">scripted-model</text>
+  <text class="detail" x="875" y="663" text-anchor="middle">coding-agent mechanics</text>
+  <text class="detail" x="875" y="682" text-anchor="middle">independent entry after setup</text>
 
-  <rect class="box week4" x="980" y="590" width="172" height="104" rx="10" />
-  <text class="label" x="1066" y="620" text-anchor="middle">Day 8</text>
-  <text class="detail" x="1066" y="644" text-anchor="middle">real tokenizer +</text>
-  <text class="detail" x="1066" y="663" text-anchor="middle">KV-prefix bridge</text>
-  <path class="arrow" d="M 940 642 L 980 642" />
-  <path class="arrow" d="M 640 642 L 690 642 L 690 724 L 1020 724 L 1020 694" />
-  <text class="small" x="777" y="719">Week 3 serving bridge</text>
+  <rect class="box week4" x="600" y="735" width="220" height="92" rx="10" />
+  <text class="label" x="710" y="764" text-anchor="middle">Day 8 · Join</text>
+  <text class="detail" x="710" y="788" text-anchor="middle">real tokenizer +</text>
+  <text class="detail" x="710" y="807" text-anchor="middle">KV-prefix bridge</text>
+  <path class="arrow" d="M 500 694 L 500 710 L 660 710 L 660 735" />
+  <path class="arrow" d="M 875 694 L 875 710 L 760 710 L 760 735" />
 
-  <rect class="box week4" x="980" y="750" width="172" height="82" rx="10" />
-  <text class="label" x="1066" y="780" text-anchor="middle">Day 9</text>
-  <text class="detail" x="1066" y="804" text-anchor="middle">bound tool evidence</text>
-  <path class="arrow" d="M 1105 694 L 1105 750" />
-  <path class="arrow" d="M 70 168 L 24 168 L 24 760 L 830 760 L 830 694" />
-  <text class="small" x="48" y="753">scripted path from setup</text>
+  <rect class="box week4" x="900" y="735" width="220" height="92" rx="10" />
+  <text class="label" x="1010" y="764" text-anchor="middle">Day 9</text>
+  <text class="detail" x="1010" y="788" text-anchor="middle">bound tool evidence</text>
+  <path class="arrow" d="M 820 781 L 900 781" />
 
   <text class="title" x="48" y="870">Run or inspect without completing earlier exercises</text>
   <rect class="box reference" x="48" y="894" width="500" height="104" rx="10" />
