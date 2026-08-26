@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 690" role="img" aria-labelledby="title description">
-  <title id="title">Tiny-LLM course roadmap and entry paths</title>
-  <desc id="description">The cumulative learner implementation proceeds from setup to Week 1, Week 2, and Week 3. A separate Week 4 scripted-agent sequence can begin after setup. Week 4 Day 8 joins both paths because it connects the agent to the real tokenizer and KV cache, then Day 9 continues. A supplied reference solution can run any completed checkpoint. Full MLX is a comparison baseline and does not supply learner prerequisites.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1120" role="img" aria-labelledby="title description">
+  <title id="title">Tiny-LLM course roadmap, Week 2 operator off-ramps, and entry paths</title>
+  <desc id="description">The course implementation proceeds from setup and Week 1 through seven Week 2 days into Week 3. Week 2 Days 1 and 2 establish required state and measurement. Days 3 through 7 preserve course interfaces but allow manual substitution of corresponding MLX operators instead of custom kernels. This per-operator path is different from the full-MLX solution, which bypasses the course stack. Week 4 scripted-model lessons can begin after setup; Day 8 reconnects them to the Week 3 tokenizer and KV cache.</desc>
   <style>
     :root {
       color-scheme: light dark;
@@ -35,6 +35,7 @@
     }
     .background { fill: var(--background); }
     .box { stroke: var(--border); stroke-width: 1.5; }
+    .panel { fill: none; stroke: var(--border); stroke-width: 1.5; }
     .setup { fill: var(--setup); }
     .week1 { fill: var(--week1); }
     .week2 { fill: var(--week2); }
@@ -42,13 +43,12 @@
     .week4 { fill: var(--week4); }
     .reference { fill: var(--reference); }
     .baseline { fill: var(--baseline); }
-    .optional { stroke-dasharray: 7 6; }
+    .optional { stroke-dasharray: 7 5; stroke-width: 2; }
     .title { fill: var(--foreground); font: 700 18px system-ui, sans-serif; }
-    .label { fill: var(--foreground); font: 650 16px system-ui, sans-serif; }
+    .label { fill: var(--foreground); font: 650 15px system-ui, sans-serif; }
     .detail { fill: var(--muted); font: 13px system-ui, sans-serif; }
     .small { fill: var(--muted); font: 12px system-ui, sans-serif; }
     .arrow { fill: none; stroke: var(--arrow); stroke-width: 2.5; marker-end: url(#arrowhead); }
-    .dash { fill: none; stroke: var(--arrow); stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrowhead); }
   </style>
   <defs>
     <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -56,71 +56,111 @@
     </marker>
   </defs>
 
-  <rect class="background" width="1200" height="690" />
-  <text class="title" x="48" y="40">Cumulative learner implementation</text>
+  <rect class="background" width="1200" height="1120" />
+  <text class="title" x="48" y="38">Cumulative course interfaces and state</text>
+  <text class="detail" x="48" y="59">Keep the course boundary; choose a custom kernel or an explicit MLX operator at optimization seams.</text>
 
-  <rect class="box setup" x="48" y="64" width="150" height="92" rx="10" />
-  <text class="label" x="123" y="98" text-anchor="middle">Setup</text>
-  <text class="detail" x="123" y="122" text-anchor="middle">MLX + model files</text>
-  <text class="detail" x="123" y="141" text-anchor="middle">reference checks</text>
+  <rect class="box setup" x="48" y="82" width="170" height="86" rx="10" />
+  <text class="label" x="133" y="113" text-anchor="middle">Setup</text>
+  <text class="detail" x="133" y="136" text-anchor="middle">MLX + model files</text>
+  <text class="detail" x="133" y="154" text-anchor="middle">reference checks</text>
 
-  <rect class="box week1" x="258" y="64" width="190" height="92" rx="10" />
-  <text class="label" x="353" y="96" text-anchor="middle">Week 1</text>
-  <text class="detail" x="353" y="120" text-anchor="middle">Readable Qwen3</text>
-  <text class="detail" x="353" y="139" text-anchor="middle">matmul → text</text>
+  <rect class="box week1" x="286" y="82" width="200" height="86" rx="10" />
+  <text class="label" x="386" y="113" text-anchor="middle">Week 1</text>
+  <text class="detail" x="386" y="136" text-anchor="middle">Readable Qwen3</text>
+  <text class="detail" x="386" y="154" text-anchor="middle">model interfaces</text>
+  <path class="arrow" d="M 218 125 L 286 125" />
 
-  <rect class="box week2" x="508" y="64" width="190" height="92" rx="10" />
-  <text class="label" x="603" y="96" text-anchor="middle">Week 2</text>
-  <text class="detail" x="603" y="120" text-anchor="middle">Dense KV cache</text>
-  <text class="detail" x="603" y="139" text-anchor="middle">course-owned kernels</text>
+  <rect class="panel" x="48" y="210" width="1104" height="318" rx="12" />
+  <text class="title" x="72" y="242">Week 2 · keep the model/state boundary; optimize or substitute each operator</text>
 
-  <rect class="box week3" x="758" y="64" width="190" height="92" rx="10" />
-  <text class="label" x="853" y="96" text-anchor="middle">Week 3</text>
-  <text class="detail" x="853" y="120" text-anchor="middle">Batching + paged KV</text>
-  <text class="detail" x="853" y="139" text-anchor="middle">MLX projection seam</text>
+  <rect class="box week2" x="72" y="265" width="230" height="92" rx="10" />
+  <text class="label" x="187" y="294" text-anchor="middle">Day 1 · KV cache</text>
+  <text class="detail" x="187" y="318" text-anchor="middle">required state +</text>
+  <text class="detail" x="187" y="337" text-anchor="middle">Week 2 model shell</text>
 
-  <path class="arrow" d="M 198 110 L 258 110" />
-  <path class="arrow" d="M 448 110 L 508 110" />
-  <path class="arrow" d="M 698 110 L 758 110" />
+  <rect class="box week2" x="335" y="265" width="230" height="92" rx="10" />
+  <text class="label" x="450" y="294" text-anchor="middle">Day 2 · Measure</text>
+  <text class="detail" x="450" y="318" text-anchor="middle">matched benchmark</text>
+  <text class="detail" x="450" y="337" text-anchor="middle">not an operator seam</text>
 
-  <text class="title" x="258" y="222">Agent track</text>
+  <rect class="box week2 optional" x="598" y="265" width="230" height="92" rx="10" />
+  <text class="label" x="713" y="294" text-anchor="middle">Day 3 · Quantize</text>
+  <text class="detail" x="713" y="318" text-anchor="middle">keep packing + model wiring</text>
+  <text class="detail" x="713" y="337" text-anchor="middle">MLX off-ramp: projections</text>
 
-  <rect class="box week4" x="258" y="246" width="250" height="102" rx="10" />
-  <text class="label" x="383" y="278" text-anchor="middle">Week 4 · Days 1–7</text>
-  <text class="detail" x="383" y="303" text-anchor="middle">Scripted-model agent mechanics</text>
-  <text class="detail" x="383" y="323" text-anchor="middle">can start after setup</text>
+  <rect class="box week2 optional" x="861" y="265" width="230" height="92" rx="10" />
+  <text class="label" x="976" y="294" text-anchor="middle">Day 4 · Fused ops</text>
+  <text class="detail" x="976" y="318" text-anchor="middle">keep model call sites</text>
+  <text class="detail" x="976" y="337" text-anchor="middle">MLX: norm / RoPE / SiLU</text>
 
-  <rect class="box week4" x="758" y="246" width="190" height="102" rx="10" />
-  <text class="label" x="853" y="278" text-anchor="middle">Week 4 · Day 8</text>
-  <text class="detail" x="853" y="303" text-anchor="middle">Real tokenizer +</text>
-  <text class="detail" x="853" y="323" text-anchor="middle">KV-prefix bridge</text>
+  <path class="arrow" d="M 302 311 L 335 311" />
+  <path class="arrow" d="M 565 311 L 598 311" />
+  <path class="arrow" d="M 828 311 L 861 311" />
 
-  <rect class="box week4" x="1008" y="246" width="144" height="102" rx="10" />
-  <text class="label" x="1080" y="278" text-anchor="middle">Day 9</text>
-  <text class="detail" x="1080" y="303" text-anchor="middle">Bound tool</text>
-  <text class="detail" x="1080" y="323" text-anchor="middle">evidence</text>
+  <rect class="box week2 optional" x="861" y="390" width="230" height="92" rx="10" />
+  <text class="label" x="976" y="419" text-anchor="middle">Day 5 · Decode attention</text>
+  <text class="detail" x="976" y="443" text-anchor="middle">keep cache + shape adapter</text>
+  <text class="detail" x="976" y="462" text-anchor="middle">MLX off-ramp: SDPA</text>
 
-  <path class="arrow" d="M 123 156 L 123 297 L 258 297" />
-  <path class="arrow" d="M 508 297 L 758 297" />
-  <path class="arrow" d="M 948 297 L 1008 297" />
-  <path class="arrow" d="M 853 156 L 853 246" />
-  <text class="small" x="866" y="203">serving bridge</text>
+  <rect class="box week2 optional" x="598" y="390" width="230" height="92" rx="10" />
+  <text class="label" x="713" y="419" text-anchor="middle">Day 6 · Tiled prefill</text>
+  <text class="detail" x="713" y="443" text-anchor="middle">keep projection API</text>
+  <text class="detail" x="713" y="462" text-anchor="middle">MLX off-ramp: projections</text>
 
-  <text class="title" x="48" y="421">Run or inspect without completing earlier exercises</text>
+  <rect class="box week2 optional" x="335" y="390" width="230" height="92" rx="10" />
+  <text class="label" x="450" y="419" text-anchor="middle">Day 7 · Split-K</text>
+  <text class="detail" x="450" y="443" text-anchor="middle">keep dispatch boundary</text>
+  <text class="detail" x="450" y="462" text-anchor="middle">MLX off-ramp: projections</text>
 
-  <rect class="box reference optional" x="48" y="447" width="700" height="88" rx="10" />
-  <text class="label" x="74" y="478">Supplied reference solution</text>
-  <text class="detail" x="74" y="502">Run any completed checkpoint with test-refsol or --solution ref.</text>
-  <text class="detail" x="74" y="522">This demonstrates the checkpoint; it does not complete TODOs in src/tiny_llm.</text>
+  <path class="arrow" d="M 1091 311 L 1120 311 L 1120 436 L 1091 436" />
+  <path class="arrow" d="M 861 436 L 828 436" />
+  <path class="arrow" d="M 598 436 L 565 436" />
+  <path class="arrow" d="M 386 168 L 386 188 L 187 188 L 187 265" />
 
-  <rect class="box baseline optional" x="798" y="447" width="354" height="88" rx="10" />
-  <text class="label" x="824" y="478">Full MLX baseline</text>
-  <text class="detail" x="824" y="502">--solution mlx bypasses course code.</text>
-  <text class="detail" x="824" y="522">Use it for comparison, not composition.</text>
+  <rect class="box week3" x="360" y="590" width="280" height="104" rx="10" />
+  <text class="label" x="500" y="620" text-anchor="middle">Week 3</text>
+  <text class="detail" x="500" y="644" text-anchor="middle">MLX quantized projections</text>
+  <text class="detail" x="500" y="663" text-anchor="middle">course cache / attention /</text>
+  <text class="detail" x="500" y="682" text-anchor="middle">paging / batching / scheduler</text>
+  <path class="arrow" d="M 450 482 L 450 556 L 500 556 L 500 590" />
 
-  <line x1="48" y1="592" x2="111" y2="592" class="arrow" />
-  <text class="detail" x="128" y="597">learner-code prerequisite</text>
-  <line x1="390" y1="592" x2="453" y2="592" class="dash" />
-  <text class="detail" x="470" y="597">run/compare path; does not fill learner TODOs</text>
-  <text class="small" x="48" y="644">Within each week, later days are cumulative. Optional Week 3 chapters branch after the required Week 3 path.</text>
+  <text class="title" x="720" y="568">Week 4 scripted-model lessons</text>
+  <rect class="box week4" x="720" y="590" width="220" height="104" rx="10" />
+  <text class="label" x="830" y="620" text-anchor="middle">Days 1–7</text>
+  <text class="detail" x="830" y="644" text-anchor="middle">scripted-model</text>
+  <text class="detail" x="830" y="663" text-anchor="middle">coding-agent mechanics</text>
+  <text class="detail" x="830" y="682" text-anchor="middle">can start after setup</text>
+
+  <rect class="box week4" x="980" y="590" width="172" height="104" rx="10" />
+  <text class="label" x="1066" y="620" text-anchor="middle">Day 8</text>
+  <text class="detail" x="1066" y="644" text-anchor="middle">real tokenizer +</text>
+  <text class="detail" x="1066" y="663" text-anchor="middle">KV-prefix bridge</text>
+  <path class="arrow" d="M 940 642 L 980 642" />
+  <path class="arrow" d="M 640 642 L 690 642 L 690 724 L 1020 724 L 1020 694" />
+  <text class="small" x="777" y="719">Week 3 serving bridge</text>
+
+  <rect class="box week4" x="980" y="750" width="172" height="82" rx="10" />
+  <text class="label" x="1066" y="780" text-anchor="middle">Day 9</text>
+  <text class="detail" x="1066" y="804" text-anchor="middle">bound tool evidence</text>
+  <path class="arrow" d="M 1105 694 L 1105 750" />
+  <path class="arrow" d="M 70 168 L 24 168 L 24 760 L 830 760 L 830 694" />
+  <text class="small" x="48" y="753">scripted path from setup</text>
+
+  <text class="title" x="48" y="870">Run or inspect without completing earlier exercises</text>
+  <rect class="box reference" x="48" y="894" width="500" height="104" rx="10" />
+  <text class="label" x="72" y="925">Supplied reference solution</text>
+  <text class="detail" x="72" y="950">Run completed checkpoints with test-refsol or --solution ref.</text>
+  <text class="detail" x="72" y="970">It demonstrates the checkpoint; it does not fill learner TODOs.</text>
+
+  <rect class="box baseline" x="590" y="894" width="562" height="104" rx="10" />
+  <text class="label" x="614" y="925">Full MLX baseline</text>
+  <text class="detail" x="614" y="950">--solution mlx replaces the whole model and bypasses course code.</text>
+  <text class="detail" x="614" y="970">It is not the manual per-operator path shown in Week 2.</text>
+
+  <line x1="48" y1="1047" x2="111" y2="1047" class="arrow" />
+  <text class="detail" x="128" y="1052">interface / state prerequisite</text>
+  <rect class="box week2 optional" x="390" y="1029" width="64" height="35" rx="7" />
+  <text class="detail" x="470" y="1052">custom operator may be replaced manually at the same interface</text>
+  <text class="small" x="48" y="1097">An off-ramp continues the course but does not complete that day's custom-kernel tests or performance claim.</text>
 </svg>
