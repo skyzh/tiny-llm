@@ -35,6 +35,138 @@ small coding agent.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
+## Course Roadmap: What Depends on What
+
+The course supports two different goals: **implementing** the cumulative
+serving stack, or **studying and running** a later checkpoint without completing
+all earlier exercises. These are not the same path.
+
+<style>
+  .course-roadmap-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    overscroll-behavior-x: contain;
+  }
+  .course-roadmap-scroll:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
+  }
+  .course-roadmap-scroll img {
+    display: block;
+    width: 1200px;
+    min-width: 1200px;
+    max-width: none;
+    height: auto;
+  }
+</style>
+
+<div id="course-roadmap-scroll" class="course-roadmap-scroll" role="region" aria-label="Scrollable Tiny-LLM course roadmap" aria-describedby="course-roadmap-scroll-help" tabindex="0">
+  <img src="./course-roadmap.svg" alt="Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the seven Week 2 days and Week 3 into Week 4. Week 2 Days 3 through 7 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 keeps the course prerequisite of setup plus Weeks 1 through 3, while its deterministic scripted-model tests for Days 1 through 7 can run after setup. Day 8 joins the scripted sequence to the real-model path, and Day 9 continues the Week 4 sequence.">
+</div>
+
+<p id="course-roadmap-scroll-help">On a narrow screen, scroll the roadmap
+horizontally; when the roadmap is focused, the left and right arrow keys move
+through it without changing chapters. Its labels stay at their readable desktop
+size.</p>
+
+<script>
+  (() => {
+    const roadmap = document.getElementById("course-roadmap-scroll");
+    roadmap.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const distance = Math.max(120, Math.round(roadmap.clientWidth * 0.8));
+      roadmap.scrollLeft += event.key === "ArrowLeft" ? -distance : distance;
+    });
+  })();
+</script>
+
+Solid arrows in the diagram are **interface and state prerequisites**. They do
+not mean that you must hand-write every earlier optimization. A dashed border
+marks a custom operator that you may replace locally with its MLX equivalent
+while keeping the surrounding course interface. The reference and full-MLX
+lanes let you observe a completed system, but they do not fill in unfinished
+functions in `src/tiny_llm`.
+
+| Your goal | Start here | What earlier implementation is required? |
+| --- | --- | --- |
+| Build the whole serving system | Week 1, then follow the solid arrows | Each week uses interfaces and mechanisms established by the previous week. |
+| Skip a Week 2 kernel optimization | Keep that day's course interface and wire the corresponding MLX operator at the seam | The earlier model, state, and interface work still needs to exist. This is a local code choice, not a CLI flag. |
+| Read or experiment with a later week | Open that chapter and use `tiny_llm_ref` | None in your learner tree. Run the supplied reference tests or reference loader. |
+| Compare with the production-library baseline | Use `--solution mlx` | None, but this runs the full MLX model and bypasses the course implementation. |
+| Run the Week 4 Days 1–7 deterministic tests before finishing the serving stack | After setup, run the supplied scripted-model tests | The tests do not need a working serving implementation. The course still assumes setup plus Weeks 1–3 before Week 4; follow the Week 4 days in order, and Day 8's real-model bridge needs the Week 3 model/tokenizer/KV-cache boundary. |
+
+The cumulative dependencies are deliberate:
+
+- **Week 1 → Week 2:** Week 2 starts from the readable Qwen3 model and replaces
+  costs one mechanism at a time: first the generation algorithm and KV cache,
+  then quantized and fused kernels. Days 1–2 establish state and measurement;
+  Days 3–7 expose optimization seams.
+- **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
+  course-owned normalization, activation, cache, attention, paging, batching,
+  and scheduling. This is an explicit operator seam, not “use the MLX model for
+  Week 2.”
+- **Week 3 → Week 4:** Week 4 remains the next cumulative course week. Its
+  Days 1–7 tests can exercise control flow with deterministic scripted models
+  after setup, even before the serving stack works. Day 8 reconnects that
+  harness to the real tokenizer and KV cache, so that checkpoint needs a
+  working Week 3 path.
+
+> **Is Week 2 required for Week 3? The Week 2 interfaces are; every Week 2
+> optimization is not.** The current Week 3 starter reuses the Week 2 model
+> shell, dense-cache contract, packed-weight plumbing, normalization,
+> activation, attention, and matrix-fragment interfaces. You may preserve
+> those interfaces and substitute MLX operators for custom optimization work,
+> but starting Week 3 is **not as simple as selecting `--solution mlx`**. That
+> flag selects the complete MLX model and bypasses the course-owned paging,
+> batching, attention, and scheduler surfaces that Week 3 teaches. Skipping
+> the entire Week 2 implementation would require a supplied hybrid starting
+> checkpoint; that checkpoint does not exist today.
+
+### Week 2 operator off-ramps
+
+Week 2 separates the mechanism you need later from the kernel you are invited
+to optimize. If your goal is to continue into Week 3 rather than implement
+every Metal kernel, you can make these explicit local substitutions:
+
+| Week 2 day | Keep in the course stack | Optional MLX substitution |
+| --- | --- | --- |
+| Days 1–2 | Dense KV-cache state, the Week 2 model boundary, and the matched measurement method | None; these are state and methodology rather than replaceable operators. |
+| Day 3 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
+| Day 4 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
+| Day 5 | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the custom decode-attention kernel. |
+| Days 6–7 | The same quantized-projection interface and dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing SIMD-matrix and Split-K schedules. |
+
+Only the quantized-projection seam is already selected by canonical Week 3.
+The Day 4 and Day 5 alternatives require you to wire the MLX call at the
+existing course interface; there is no `--use-mlx-for-day` command. These
+off-ramps let you study later mechanisms, but they do not complete the skipped
+day's custom-kernel exercises, implementation-specific tests, or performance
+claims.
+
+To run a completed checkpoint without solving it first:
+
+```bash
+# Run one supplied reference test group.
+pdm run test-refsol --week 3 --day 1
+
+# Run a completed course model.
+pdm run main --solution ref --loader week3
+
+# Run the separate full-MLX baseline.
+pdm run main --solution mlx
+```
+
+`--solution ref` runs the supplied implementation end to end. `--solution mlx`
+runs MLX end to end. Neither command composes “earlier weeks from the reference
+or MLX, this week's TODOs from my learner tree.” Per-operator substitution is a
+manual code edit that preserves the course interface; it is not a third
+solution mode. If you want to implement a later week in `src/tiny_llm`, its
+earlier interface and state prerequisites must already work; the repository
+does not currently provide a one-command hybrid checkpoint.
+
 ## Choose a Model for Your Mac
 
 The table below is a conservative starting point for common MacBook unified-memory sizes. Each entry is
