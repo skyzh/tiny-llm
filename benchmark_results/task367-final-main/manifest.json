@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-08-25T07:18:18Z",
+  "task": 367,
+  "repository": "skyzh/tiny-llm",
+  "source": {
+    "git_commit": "18aec8503929d80c986324578068ecac2463c2ac",
+    "git_tree": "f88ea559a1deea6970160e68acfb1838ef815473",
+    "git_tracked_dirty": false
+  },
+  "host": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine_model": "Mac16,11",
+    "chip": "Apple M4 Pro",
+    "gpu_cores": 20,
+    "physical_memory": "64 GB",
+    "python": "3.12.13",
+    "mlx": "0.32.0",
+    "mlx_lm": "0.31.3",
+    "numpy": "2.2.6",
+    "xcode": "26.6",
+    "metal": "32023.883"
+  },
+  "models": {
+    "qwen3-4b": "Qwen/Qwen3-4B-MLX-4bit",
+    "qwen3-0.6b": "Qwen/Qwen3-0.6B-MLX-4bit"
+  },
+  "focused_correctness": {
+    "passed": 74,
+    "model_availability_skips": 3,
+    "selectors": [
+      "week 2 day 6",
+      "week 2 day 7",
+      "week 3 day 2",
+      "week 3 day 4",
+      "week 3 day 5"
+    ]
+  },
+  "raw_files": {
+    "raw/week2-32-final-main.json": "64d1e3208a5b6294533339e86172ee1de25564a2254193a95a305bac33104619",
+    "raw/week2-128-final-main.json": "905927bef784acd5f2296f0bd6af406b7599dc5296d404918c2a2d600d5c1676",
+    "raw/week2-2048-final-main.json": "ad5142e10a80031d039cfd3c60fcd2c2efdf527734b760726b2011637e4296eb",
+    "raw/week2-prefill-operators-final-main.json": "a225b4103d06c7564c7320b99bb147f8299b46df240d1cc31af08afea0610b28",
+    "raw/week3-chunked-prefill-final-main.json": "b89a469a51b2ff016fd9ddd489d3f64a745fd0d3356829910d41a9bea8ef0627",
+    "raw/week3-attention-final-main.json": "f8120f166e9c7958e945f84bcf4821a5893884478e1f79bd1f3e89d5c47dd218",
+    "raw/week3-serving-final-main.json": "bda87aa8fd893dd69ee5e5dca53af118fb442014700111de6b3300fdccfe448c",
+    "raw/week3-8k-final-main.json": "0f2d993782729f06b19b4f3e81f7deb930c2d3c4377ebbbd947a287b41cb2464"
+  },
+  "task360_causal_evidence": {
+    "measured_source_commit": "170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac",
+    "measured_source_tree": "25e588de248692b711e04014ba43e85326d21393",
+    "tracked_ledger": "benchmark_results/task360-week3-projection-e2e-sha256.txt",
+    "tracked_ledger_sha256": "36b68f3907d50c17f3cacc586bb90f61bc52143f826a7ddeabeb0ed54c26a2fe",
+    "manifest_sha256": "461d44e382fca42801f985d96f060fcaa9ab76e9a12c73dbcffe32f8b806cd18",
+    "report_sha256": "f6d585d3e10887984e5a967f85681dea1d08909ddaff3ebde308ddf5975a50db",
+    "ledger_verified": true
+  }
+}

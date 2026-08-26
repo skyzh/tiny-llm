@@ -437,7 +437,7 @@ gathered tensor:
 pdm run bench-week3-attention --offline --contexts 128 1024 \
   --page-size 128 --warmup 5 --iterations 60 --repeats 4 \
   --cooldown-seconds 1 \
-  --json-output benchmark_results/m4-pro-qwen3-4b-week3-attention-mlx-0.32.0.json
+  --json-output benchmark_results/task367-final-main/raw/week3-attention-final-main.json
 ```
 
 Each value is the median of four balanced fresh-process medians, with 60
@@ -445,12 +445,14 @@ synchronized calls after five warmups per process:
 
 | Context | Dense + gather | Direct paged | MLX fused |
 |---:|---:|---:|---:|
-| 128 | 184.01 us | 187.55 us | 153.59 us |
-| 1,024 | 420.88 us | 249.79 us | 207.18 us |
+| 128 | 201.26 us | 228.58 us | 188.79 us |
+| 1,024 | 468.39 us | 299.14 us | 250.04 us |
 
-Direct traversal is 1.9% slower than dense-plus-gather at 128 tokens, but 40.7%
-faster at 1,024 tokens. MLX remains faster at both shapes. The checked BF16
-outputs match the readable dense equation within the documented 2e-2 tolerance.
+Direct traversal is 13.6% slower than dense-plus-gather at 128 tokens, but
+36.1% faster at 1,024 tokens. MLX remains faster at both shapes. The checked
+BF16 outputs match the readable dense equation within 0.00439453125 at
+`S=128` and 0.001953125 at `S=1,024`. This operator benchmark contains no model
+projection, so it isolates the attention paths directly.
 
 ### Checkpoint 1: Establish a Correct Direct Path
 
@@ -519,17 +521,24 @@ pdm run bench-serving-progression --offline --repeats 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 --prefill-step 128 \
   --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/m4-pro-qwen3-4b-week3-serving-mlx-0.32.0.json
+  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
 ```
 
 It compares Week 2 dense batch reconstruction, Week 3 paged storage with the
-dense-gather compatibility path, and Week 3 direct paged attention. It resets
-page capacity after warmup and reports prefill, output, and decode throughput
-alongside peak KV bytes, copy volume, page reuse, and tail fragmentation. The
-direct path's four-process medians are 679.56 prefill tok/s, 41.88 output tok/s,
-82.11 decode tok/s, and 0.558 requests/s. Its synchronized decode calls take
-38.27/39.83/43.46 ms at median/p95/max; the completion gaps, which include
-intervening scheduler and prefill work, are 39.13/224.70/240.99 ms.
+dense-gather compatibility path, and Week 3 direct paged attention. All three
+course rows use the same MLX quantized-projection seam; they differ in KV
+representation and attention path. The runner resets page capacity after
+warmup and reports prefill, output, and decode throughput alongside peak KV
+bytes, copy volume, page reuse, and tail fragmentation. The direct path's
+four-process medians are 672.68 prefill tok/s, 46.36 output tok/s, 105.01 decode
+tok/s, and 0.618 requests/s. Its synchronized decode calls take
+28.97/36.78/63.04 ms at median/p95/max; the completion gaps, which include
+intervening scheduler and prefill work, are 30.16/222.18/239.49 ms.
+
+These are cumulative system results, not an isolated Day 4 kernel speedup. The
+ledger at
+`benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
+records the fixed trace, balanced process order, and denominator boundary.
 
 ```bash
 pdm run test --week 3 --day 4

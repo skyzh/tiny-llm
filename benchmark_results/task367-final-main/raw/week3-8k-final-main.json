@@ -1,0 +1,155 @@
+{
+  "source": {
+    "git_commit": "18aec8503929d80c986324578068ecac2463c2ac",
+    "git_tracked_dirty": false
+  },
+  "host": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.12.13",
+    "mlx_version": "0.32.0",
+    "hardware": {
+      "machine_name": "Mac mini",
+      "machine_model": "Mac16,11",
+      "chip_type": "Apple M4 Pro",
+      "cpu_cores": "proc 14:10:4:0",
+      "gpu_model": "Apple M4 Pro",
+      "gpu_cores": "20",
+      "physical_memory": "64 GB"
+    }
+  },
+  "configuration": {
+    "model": "qwen3-4b",
+    "solution": "ref",
+    "suite": "course",
+    "device": "gpu",
+    "input_len": 8192,
+    "output_len": 2,
+    "warmup": 1,
+    "repeats": 4,
+    "seed": 0,
+    "prefill_logits": "last",
+    "offline": true,
+    "cooldown_seconds": 1.0,
+    "variants": [
+      "week2",
+      "week3",
+      "mlx"
+    ]
+  },
+  "execution_order": [
+    [
+      "week2",
+      "week3",
+      "mlx"
+    ],
+    [
+      "mlx",
+      "week3",
+      "week2"
+    ],
+    [
+      "week2",
+      "week3",
+      "mlx"
+    ],
+    [
+      "mlx",
+      "week3",
+      "week2"
+    ]
+  ],
+  "results": {
+    "week2": {
+      "label": "Week 2 decode",
+      "samples": [
+        {
+          "prefill": 316.88,
+          "decode": 12.64,
+          "output": 0.08
+        },
+        {
+          "prefill": 323.87,
+          "decode": 18.8,
+          "output": 0.08
+        },
+        {
+          "prefill": 324.05,
+          "decode": 16.66,
+          "output": 0.08
+        },
+        {
+          "prefill": 325.14,
+          "decode": 18.87,
+          "output": 0.08
+        }
+      ],
+      "median": {
+        "prefill": 323.96000000000004,
+        "decode": 17.73,
+        "output": 0.08
+      }
+    },
+    "week3": {
+      "label": "Week 3 paged FlashAttention",
+      "samples": [
+        {
+          "prefill": 452.43,
+          "decode": 27.38,
+          "output": 0.11
+        },
+        {
+          "prefill": 462.92,
+          "decode": 27.47,
+          "output": 0.11
+        },
+        {
+          "prefill": 464.45,
+          "decode": 27.87,
+          "output": 0.11
+        },
+        {
+          "prefill": 466.08,
+          "decode": 25.18,
+          "output": 0.11
+        }
+      ],
+      "median": {
+        "prefill": 463.685,
+        "decode": 27.424999999999997,
+        "output": 0.11
+      }
+    },
+    "mlx": {
+      "label": "MLX",
+      "samples": [
+        {
+          "prefill": 635.35,
+          "decode": 28.87,
+          "output": 0.15
+        },
+        {
+          "prefill": 635.24,
+          "decode": 27.87,
+          "output": 0.15
+        },
+        {
+          "prefill": 644.11,
+          "decode": 26.03,
+          "output": 0.16
+        },
+        {
+          "prefill": 644.39,
+          "decode": 29.69,
+          "output": 0.16
+        }
+      ],
+      "median": {
+        "prefill": 639.73,
+        "decode": 28.37,
+        "output": 0.155
+      }
+    }
+  }
+}

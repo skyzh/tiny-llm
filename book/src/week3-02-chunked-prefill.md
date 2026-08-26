@@ -75,13 +75,15 @@ pdm run bench-chunked-prefill --offline --model qwen3-0.6b \
   --min-input-len 64 --max-input-len 512 \
   --min-output-len 32 --max-output-len 32 \
   --warmup 1 --repeats 4 --cooldown-seconds 1 \
-  --json-output benchmark_results/m4-pro-qwen3-0.6b-week3-chunked-prefill-mlx-0.32.0.json
+  --json-output benchmark_results/task367-final-main/raw/week3-chunked-prefill-final-main.json
 ```
 
 The checked trace uses seed 0 and the same 32-token output budget for every
 request. Each chunk size runs twice in forward order and twice in reverse order
-in fresh processes. The JSON stores every prompt token id, the per-request
-output budget, and their canonical SHA-256 checksum.
+in fresh processes. Every row uses the same canonical Week 3 MLX
+quantized-projection seam and the same course-owned scheduler, dense cache, and
+attention code; only the prefill budget changes. The JSON stores every prompt
+token id, the per-request output budget, and their canonical SHA-256 checksum.
 
 A decode-completion gap is the wall-clock interval between two consecutive
 synchronized decode calls while at least one decode request remains active. It
@@ -89,15 +91,20 @@ therefore includes intervening prefill and scheduler work; idle time with no
 decode request is excluded. On the measured M4 Pro, the four-process medians
 were:
 
-| Prefill budget | Output tok/s | Requests/s | Decode step p95 | Decode gap p95 / max |
-|---:|---:|---:|---:|---:|
-| 32 | 105.47 | 3.296 | 17.52 ms | 30.39 / 32.47 ms |
-| 128 | 144.91 | 4.528 | 18.78 ms | 46.52 / 48.80 ms |
-| 512 | 157.00 | 4.906 | 19.57 ms | 76.04 / 122.16 ms |
+| Prefill budget | Output tok/s | Prefill tok/s | Decode tok/s | Requests/s | Decode step p95 | Decode gap p95 / max |
+|---:|---:|---:|---:|---:|---:|---:|
+| 32 | 105.23 | 2,549.62 | 181.77 | 3.288 | 15.82 ms | 30.01 / 52.62 ms |
+| 128 | 153.82 | 4,215.12 | 242.23 | 4.807 | 17.79 ms | 45.36 / 53.76 ms |
+| 512 | 170.46 | 4,769.14 | 262.01 | 5.327 | 17.11 ms | 73.56 / 119.90 ms |
 
-The 512-token row is the full-prompt Day 1 control for this trace. Reducing the
-budget makes the p95 completion gap monotonically smaller, while the 32-token
-budget gives up substantial throughput. The course uses 128 as a measured
-compromise for this workload, not as a universal optimum.
+The 512-token row is the full-prompt Day 1 control for this trace. Relative to
+that row, the 128-token budget gives up 9.8% output throughput while reducing
+the p95 completion gap by 38.3% and the maximum gap by 55.2%. The 32-token
+budget reduces the p95 gap further but gives up substantially more throughput.
+The course uses 128 as a measured compromise for this workload, not as a
+universal optimum. The ledger at
+`benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
+keeps this final-main absolute result separate from task #360's causal
+projection-seam ablation.
 
 {{#include copyright.md}}
