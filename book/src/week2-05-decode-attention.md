@@ -1,19 +1,26 @@
 # 🚧 Week 2 Day 5: Fused Decode Attention
 
-> **Status: Experimental.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) for
-> what is continuously tested, locally measured, and still under review.
+Day 4 leaves packed projections and three fused model kernels behind stable
+interfaces. Day 5 preserves the readable grouped-attention function in
+`src/tiny_llm/week2_kernels.py`, completes the separate decode-attention stubs
+in `week2_kernels.cpp` and `week2_kernels.metal`, and adds one visible dispatch
+guard in `Qwen3MultiHeadAttention.__call__`.
 
-This chapter starts only after the Day 4 evidence has verified that the fused
-model kernels reduced the repeated pointwise cluster. Linear projections remain
-important, but their operator latency is already close to the external
-denominator, while attention is the next measured removable gap through cached
-context `S <= 256`. Longer-context measurements use the Week 1 Python fallback for
-caches beyond 256; every checked context through 256 uses the optimized path. During
-single-request decode, query length is normally one while the cached key/value
-sequence grows by one token at a time. Week 1 expresses attention as matrix
-multiplication, masking, softmax, and another matrix multiplication. That is
-expressed with `mlx.core`, but it materializes the complete score and probability rows.
+Your first milestone is a Python oracle with the same model-facing shapes.
+Then implement online softmax in Metal, compare the two directly, and integrate
+the custom path only for `L <= 2`, `S <= 256`, and ordinary `None` or causal
+masks. Run the day gate after rebuilding the extension:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 5
+```
+
+During single-request decode, query length is normally one while the cached
+key/value sequence grows by one token at a time. Week 1 expresses attention as
+matrix multiplication, masking, softmax, and another matrix multiplication.
+That `mlx.core` composition materializes the complete score and probability
+rows; Day 5 computes the same result while retaining only online-softmax state.
 
 First write a Python `mlx.core` composition to preserve the equation, then replace its
 matmuls and softmax with an online-softmax Metal kernel in your solution.
@@ -234,19 +241,10 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
 
 ```
 
-Repeat the attention microbenchmark at contexts 32, 128, 160, 192, and 256, and
-attach that context sweep beside the short-context
-`swiglu`/`decode-attention` model rows.
-The intermediate points reveal whether the custom kernel has a useful measured
-crossover rather than assuming that an endpoint applies to every context.
-Reject the custom dispatch if repeated fresh-process short-context runs do not
-improve, even when the isolated kernel looks faster. If the operator wins only
-over a limited context range, encode that measured crossover in the dispatch
-guard.
-
-> **Optional profiling evidence.** Decode and prefill kernel-group results can
-> explain how the workload divides its time, but they are reference evidence,
-> not required output for this checkpoint.
+For your checkpoint, keep the short-context model comparison and one
+representative operator row inside the dispatch range. The checked sweep below
+shows why the reference guard stops at 256; the complete samples and execution
+order live in the performance appendix.
 
 The checked Qwen3-4B sweep on an M4 Pro used six forward/reverse context passes,
 rotated every implementation order, and recorded all 60 samples per
@@ -301,17 +299,15 @@ The checked raw record is
 In the fixed `128/129` workload, prefill has `L=128` and uses the Python path.
 The first timed decode call appends the new token before the guard sees `S=129`;
 the one-token decode calls through `S=256` therefore use the custom path. Keep
-the fixed workload separate from the short-context acceptance run. Continue to
-Day 6 after the correctness tests pass, the direct source trace proves the
-bounded attention dispatch and its fallback, repeated short-context runs retain
-the gain, and the fixed `128/129` control confirms that prefill is unchanged and
-still routes through Day 3's matrix-shaped projection path.
+that fixed workload separate from the short-context acceptance run: it confirms
+that prefill is unchanged and still routes through Day 3's matrix-shaped
+projection path. The
+[performance appendix](./appendix-performance.md#day-5-fused-decode-attention)
+contains the full context sweep and attribution.
 
-> **Optional profiling evidence.** The
-> [reference checkpoint](./appendix-performance.md#day-5-fused-decode-attention)
-> pairs the context sweep, short-context model delta, and fixed-workload
-> control with a separate prefill attribution. The attribution explains why the
-> course targets matrix-shaped projections next; it is not a prerequisite for
-> Day 6.
+If you want to continue without the custom attention kernel, preserve
+`scaled_dot_product_attention` and the model-facing dispatch boundary, then use
+MLX attention only at that operator seam. Do not replace the course cache,
+model, or generation loop with `--solution mlx`.
 
 {{#include copyright.md}}

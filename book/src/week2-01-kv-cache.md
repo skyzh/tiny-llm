@@ -1,12 +1,28 @@
 # 🚧 Week 2 Day 1: KV Cache
 
-> **Status: Experimental.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) for
-> what is continuously tested, locally measured, and still under review.
+You arrive with the Week 1 Qwen model and full-prefix generation loop still
+working. Day 1 leaves them unchanged and completes the separate Week 2 shells:
 
-In this chapter, we will add a **key-value cache** to the Qwen3 model. During
-generation, the cache lets each attention layer reuse the keys and values from
-previous tokens instead of recomputing the entire prefix at every step.
+- `src/tiny_llm/kv_cache.py::TinyKvFullCache` stores one layer's dense K/V;
+- `src/tiny_llm/qwen3_week2.py::Qwen3ModelWeek2` threads cache state and
+  offsets through the model;
+- `Qwen3ModelWeek2.create_kv_cache` creates one cache per layer and request;
+- `src/tiny_llm/generate.py` prefills once, then sends only the new token.
+
+Those four pieces are your work. The starter already supplies the Week 1
+operators and the model-loading boundary. Your first useful feedback is the
+focused learner gate:
+
+```bash
+pdm run test --week 2 --day 1
+```
+
+When it passes, run the `kv-cache` checkpoint shown in Task 4. That live call
+is where the cache becomes part of generation rather than an isolated data
+structure.
+
+The cache lets each attention layer reuse the keys and values from previous
+tokens instead of recomputing the entire prefix at every step.
 
 This is the foundation of Week 2 decode optimization, not a serving-only Week 3
 feature. Without it, every generated token reruns all model layers over an
@@ -209,12 +225,8 @@ Implement `create_kv_cache` so every request gets one cache handle per
 Transformer layer. Pass the matching layer cache through every block and keep
 the caller's offset consistent with the cache's logical length.
 
-To verify correctness, run the following test, which is similar to the Week 1
-model test:
-
-```bash
-pdm run test --week 2 --day 1
-```
+The Day 1 test checks this request-scoped lifecycle together with the cache and
+model work from the earlier tasks.
 
 ## Task 4: Connect the Serving Loop
 
@@ -262,9 +274,8 @@ pdm run bench --solution tiny_llm --loader week2 \
   --min-output-len 65 --max-output-len 65 --warmup 2
 ```
 
-Record this number in your optimization ledger. The next chapter teaches how
-to compare it fairly with Week 1 and MLX; every later command changes exactly
-one cumulative checkpoint.
+Keep one result as the input to Day 2's matched comparison. Every later command
+changes one cumulative checkpoint.
 
 Day 1 is an algorithmic checkpoint, so it does not invent a shader-level
 limiter from a GPU trace. The checkpoint removes full-prefix recomputation;

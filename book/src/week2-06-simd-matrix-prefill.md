@@ -1,24 +1,31 @@
 # 🚧 Week 2 Day 6: SIMD-Matrix Prefill
 
-> **Status: Experimental.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) for
-> what is continuously tested, locally measured, and still under review.
+Day 5 leaves one-token decode on the Day 3 matvec and 128-token prefill on the
+correctness-first vanilla matrix path for `M > 8`. The Day 6 starter already
+contains the cumulative primitive and dispatch, the
+`quantized_matmul_simdgroup_w4a16_g128` Metal shell, the course-owned
+`CooperativeTileLoader`/`CooperativeBlockMMA` boundary, and the
+`logits_to_keep` model switch. You complete those surfaces without changing
+the public quantized-linear API.
 
-Day 5 ends by switching the benchmark from one-token decode to multi-token
-prefill. Its source trace shows that the 128-token prefill still uses Day 3's
-correctness-first vanilla quantized matrix path for `M > 8`. Day 6 replaces that
-inherited multi-row schedule, then measures the complete model and the real
-projection shapes to decide whether the new path stays.
+Implement the matrix path in four cumulative slices: preserve the `M <= 8`
+matvec dispatch, add the 32×32×32 tile, make device loads contiguous, reuse one
+group's scale/bias across its four reduction tiles, then move the final-logit
+slice before the vocabulary projection. The day gate checks aligned and
+partial tiles as well as the loader:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 6
+```
+
+After that gate passes, run one matched 128-token prefill and one real-shape
+projection control. The live model must use the tiled path; an isolated kernel
+result is not enough.
 
 MLX remains an external performance denominator; the SIMD-matrix path in your
 solution continues to call the C++/Metal primitive you implement for every
 projection.
-
-> **Optional profiling evidence.** The checked dependency-aware attribution and
-> the
-> [reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
-> explain why projections are the reference solution's next target. They are not
-> required learner output and do not gate this chapter.
 
 The implementation remains deliberately narrow:
 
@@ -154,11 +161,11 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
   --prefill-logits last
 ```
 
-Inspect the projection sweep as well as complete-model throughput. Continue to
-Day 7 when the long-`M` projections are healthy but short, narrow K/V
-projections launch too few 32×32 result tiles to fill the GPU. If the same
-kernel remains slow at large `M`, improve its loads or matrix schedule before
-adding reduction partitions.
+The comparison should separate two cases. Healthy long-`M` projections show
+that the tile itself works; a short, narrow K/V projection with too few 32×32
+result tiles exposes the occupancy problem Day 7 addresses. If both cases are
+slow, the remaining work is still in this tile rather than in reduction
+partitioning.
 
 At long `M`, the two-dimensional tile grid is already large. The checked
 2,048-row sweep puts the course SIMD path roughly 7–11% above MLX latency for
@@ -185,11 +192,9 @@ done
 The dispatch formula gives the unsplit 32-row K projection 32 independent
 threadgroups.
 
-Attach the complete-model prefill delta and per-projection tables at 32, 128,
-and 2,048 rows. Do not select Split-K merely because projections still occupy
-most of prefill. Require the short, narrow projection to improve in both
-balanced execution positions while the 128- and 2,048-row controls stay
-neutral.
+Use one short K/V row and one long occupied-grid row to establish the shape
+difference. Do not select Split-K merely because projections still occupy most
+of prefill.
 
 Use the dispatch calculation and short-shape operator sweep to establish that
 the unsplit result grid has too few independent threadgroups. Use the matched
@@ -201,8 +206,11 @@ pairs the prefill result with long and short operator controls and the dispatch
 geometry that motivates Split-K. The exact final-main samples and method live
 in `benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`.
 
-> **Optional profiling evidence.** A 32/128-row attribution can corroborate the
-> shape analysis, but it does not replace the matched complete-model delta,
-> projection controls, and dispatch calculation above.
+The complete shape campaign and attribution are in the performance appendix.
+
+If you want to continue without implementing the tiled kernel, preserve the
+same quantized-linear and `logits_to_keep` interfaces and substitute MLX only
+for the matrix-shaped projection. Keep the Day 3 decode matvec and the rest of
+the course model intact; `--solution mlx` is a different full-model path.
 
 {{#include copyright.md}}

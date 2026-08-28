@@ -1,14 +1,28 @@
 # 🚧 Week 2 Day 3: Quantize the Model
 
-> **Status: Experimental.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) for
-> what is continuously tested, locally measured, and still under review.
+Day 2 leaves you with a synchronized dense BF16 baseline. The Day 3 starter
+already supplies the packed-weight container and its
+`QuantizedWeights.from_mlx_layer` loader, the extension declaration and
+binding, fail-closed C++/Metal stubs, and cumulative model switches. Your work
+is to:
 
-Day 2 established a synchronized dense BF16 baseline. Day 3 reduces projection
-weight traffic with packed W4A16 weights, implements the Metal operators that
-consume them directly, wires those operators into the live model, and reruns
-the same benchmark. Packed storage or an isolated fast kernel is not completion:
-the cached model must use the quantized path.
+1. dequantize selected embedding rows without expanding the full table;
+2. define the lazy quantized-matmul primitive and its validation boundary;
+3. implement the readable Metal matrix control and the decode-shaped SIMD
+   matvec; and
+4. wire packed projections and the tied output head into the live cached model.
+
+Start with the Python wrapper gate, then build and test the GPU operator:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 3 -- -k task_1
+pdm run test --week 2 --day 3 -- -k gpu
+```
+
+Finally run the complete Day 3 gate and `quantized-matvec` model checkpoint.
+Packed storage or an isolated fast kernel is not completion: the cached model
+must dispatch through your quantized path.
 
 **📚 Readings**
 
@@ -321,10 +335,11 @@ src/tiny_llm/quantize.py
 src/tiny_llm/embedding.py
 ```
 
-Modify these exact starter functions:
+The starter already implements `QuantizedWeights.from_mlx_layer`; inspect and
+reuse that packed-weight plumbing. Modify these learner-owned functions:
 
-- `QuantizedWeights.from_mlx_layer`, `dequantize_weights`, and
-  `quantized_linear` in `src/tiny_llm/quantize.py`;
+- `dequantize_weights` and `quantized_linear` in
+  `src/tiny_llm/quantize.py`;
 - `QuantizedEmbedding.__call__` and `QuantizedEmbedding.as_linear` in
   `src/tiny_llm/embedding.py`.
 
@@ -339,8 +354,8 @@ matrix and its dequantization parameters:
 | `group_size` | int | Number of consecutive values that share the same scale/bias. For the Qwen3 MLX 4-bit weights used here, this is `128`. |
 | `bits` | int | Quantization bit width (typically 4, meaning values are in range $[0, 15]$) |
 
-Its `from_mlx_layer` method extracts these fields from an MLX quantized layer
-when loading the model.
+Its supplied `from_mlx_layer` method extracts these fields from an MLX
+quantized layer when loading the model. Do not replace it with a second loader.
 
 Next, implement `quantized_linear`, a wrapper around `quantized_matmul` with the
 same input convention as the standard `linear` function. You will implement
@@ -662,17 +677,13 @@ matvec is integrated into decode.
 Before moving on, confirm that the quantized matvec kernel is actually called
 during model inference, not just registered and tested in isolation.
 
-> **🚧 Acceptance criterion.** Your checkpoint is incomplete until the model's
-> projection dispatcher is wired to your custom primitive. Decode-shaped work
-> must route through `quantized_linear` → `quantized_matvec_custom` → the
-> extension primitive → the Metal matvec. Matrix-shaped work must route through
-> `quantized_linear` → `quantized_matmul` → the extension primitive → its Metal
-> matrix schedule. Use a source trace through those branches in your completed
-> dispatcher and model wiring. The supplied tests validate packed model state
-> and the direct operators, while the matched benchmark reports complete-model
-> throughput; neither proves the live Metal pipeline identity by itself. Use a
-> direct source trace of the dispatch branches, then treat the throughput
-> comparison as a separate result.
+Your checkpoint is complete only when the model's projection dispatcher is
+wired to your custom primitive. Decode-shaped work must route through
+`quantized_linear` → `quantized_matvec_custom` → the extension primitive → the
+Metal matvec. Matrix-shaped work must route through `quantized_linear` →
+`quantized_matmul` → the extension primitive → its Metal matrix schedule. The
+supplied tests validate packed model state and the direct operators; the live
+model command verifies that those pieces compose.
 
 Measure the cumulative model and the real projection shapes:
 
@@ -686,23 +697,16 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --section decode-projections --context 128
 ```
 
-Attach the complete-model before/after rows, the per-projection latency table,
-and the direct dispatch trace. First require a clear decode gain over
-`kv-cache`. Then compare each projection with MLX at the identical shape.
-Projections may remain the largest absolute category because the model performs
-them in every layer; once their operator latency is close to MLX, that bar is
-no longer the largest removable gap.
+Keep one cumulative model row and one representative real-shape projection
+comparison. First require a clear decode gain over `kv-cache`; then use the
+projection row to decide whether the matvec still needs work. The complete
+campaign and reference attribution are in the
+[performance appendix](./appendix-performance.md#day-3-keep-weights-packed).
 
-Continue to Day 4 only after the correctness tests pass, the source trace proves
-that the live model selects the intended matrix and matvec branches, the matched
-model run improves decode over `kv-cache`, and the projection table is close to
-MLX at the same shapes. If the projection comparison is still far behind, keep
-tuning the matvec instead. Once that gap shrinks, Day 4 turns to the recurring
-normalization, position, and activation work around those projections.
-
-> **Optional profiling evidence.** A kernel-group replay or operator attribution
-> can corroborate that transition, but neither gates progress. The
-> [reference checkpoint](./appendix-performance.md#day-3-keep-weights-packed)
-> includes both alongside the model and projection measurements above.
+If you want to continue without writing the custom Day 3 kernels, implement
+the same `quantized_linear` interface with `mx.quantized_matmul` and keep the
+rest of the course model unchanged. That is a local operator off-ramp, not
+`--solution mlx`: the latter runs a separate complete model and does not
+exercise your cache or model wiring.
 
 {{#include copyright.md}}
