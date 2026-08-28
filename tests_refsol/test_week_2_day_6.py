@@ -174,7 +174,7 @@ def test_utils_qwen3_1_7b():
     pass
 
 
-def helper_test_task_6(model_name: str, iters: int = 10):
+def helper_test_task_5(model_name: str, iters: int = 10):
     mlx_model, tokenizer = load(model_name)
     model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
     assert not model.embedding.use_custom_kernel
@@ -197,23 +197,23 @@ def helper_test_task_6(model_name: str, iters: int = 10):
 @pytest.mark.skipif(
     not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
-def test_task_6_qwen3_0_6b():
-    helper_test_task_6("Qwen/Qwen3-0.6B-MLX-4bit", 5)
+def test_task_5_qwen3_0_6b():
+    helper_test_task_5("Qwen/Qwen3-0.6B-MLX-4bit", 5)
 
 
 @pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_task_6_qwen3_4b():
-    helper_test_task_6("Qwen/Qwen3-4B-MLX-4bit", 1)
+def test_task_5_qwen3_4b():
+    helper_test_task_5("Qwen/Qwen3-4B-MLX-4bit", 1)
 
 
 @pytest.mark.skipif(
     not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
 )
-def test_task_6_qwen3_1_7b():
-    helper_test_task_6("Qwen/Qwen3-1.7B-MLX-4bit", 3)
+def test_task_5_qwen3_1_7b():
+    helper_test_task_5("Qwen/Qwen3-1.7B-MLX-4bit", 3)
 
 
-def helper_test_task_6_incremental(
+def helper_test_task_5_incremental(
     model_name: str,
     seq_len: int,
     iters: int = 1,
@@ -241,13 +241,13 @@ def helper_test_task_6_incremental(
 @pytest.mark.skipif(
     not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
 )
-def test_task_6_incremental_qwen3_0_6b():
-    helper_test_task_6_incremental("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
+def test_task_5_incremental_qwen3_0_6b():
+    helper_test_task_5_incremental("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
 
 
 @pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_task_6_incremental_qwen3_4b():
-    helper_test_task_6_incremental(
+def test_task_5_incremental_qwen3_4b():
+    helper_test_task_5_incremental(
         "Qwen/Qwen3-4B-MLX-4bit",
         seq_len=3,
     )
@@ -256,8 +256,8 @@ def test_task_6_incremental_qwen3_4b():
 @pytest.mark.skipif(
     not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
 )
-def test_task_6_incremental_qwen3_1_7b():
-    helper_test_task_6_incremental("Qwen/Qwen3-1.7B-MLX-4bit", seq_len=3)
+def test_task_5_incremental_qwen3_1_7b():
+    helper_test_task_5_incremental("Qwen/Qwen3-1.7B-MLX-4bit", seq_len=3)
 
 
 class FakeEmbedding:

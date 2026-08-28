@@ -365,7 +365,7 @@ def test_week3_custom_embedding_matches_readable_path():
     )
 
 
-def test_week3_default_inherits_week2_prefill_kernels():
+def test_week3_default_keeps_course_owned_embedding_and_prefill_flags():
     model = Qwen3ModelWeek3(_fake_qwen3_mlx_model())
     assert model.embedding.use_custom_kernel
     assert model.embedding.weight.use_simdgroup_matmul
