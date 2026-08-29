@@ -1,14 +1,26 @@
 # 🚧 Week 3 Day 1: Continuous Batching
 
-> 🚧 This chapter is under review and may change.
+You begin with the completed Week 2 single-request model: multi-offset RoPE and
+causal masking already have stable interfaces, and each request can own a dense
+KV cache. The Day 1 starter leaves four learner-owned slices behind those
+interfaces:
 
-In this chapter, we will implement **continuous batching**, which keeps a batch
-of active requests on the device and replaces each request as soon as it
-finishes.
+- dense batch assembly and masking in `BatchingKvCache`;
+- `mlx_quantized_linear` plus the per-weight selector and the explicit
+  `dispatch_week3_batch_model` factory;
+- selector propagation through `Qwen3ModelWeek2`; and
+- `Request.try_prefill` plus the request-admission/decode loop in
+  `batch_generate`.
 
-So far, each generation loop has processed only one request. That may not provide
-enough work to use the device efficiently, so we will decode several requests
-in each model call.
+Complete and test those slices in order. The resulting **continuous batch**
+keeps several active requests on the device and replaces each request as soon
+as it finishes. Only quantized projections cross the Week 3 MLX seam;
+normalization, activation, RoPE, cache state, attention, and scheduling remain
+course-owned.
+
+So far, each generation loop has processed only one request. That may not
+provide enough work to use the device efficiently, so Day 1 decodes several
+requests in each model call.
 
 A static batch could select five prompts and run them together until every
 request finishes. However, generated sequences have different lengths. If four
@@ -122,7 +134,7 @@ seam; normalization, RoPE, activation, attention, cache state, and scheduling
 remain in your solution. The model remains request-agnostic; slot ownership and
 lifecycle belong to the cache and scheduler.
 
-You should pass all of the tests by running:
+Verify the projection seam and its batch-model factory with:
 
 ```bash
 pdm run test --week 3 --day 1 -- -k task_3
@@ -139,19 +151,28 @@ call. Then complete the scheduler in `batch_generate`: move finished prefills
 into idle decode slots, collect the next token and offset for each slot, and
 remove requests that reach EOS or `max_seq_len`.
 
-Run the complete scheduler with:
+Use the supplied scheduler checkpoint for full prefill, admission and slot
+reuse, EOS/removal, and ordered results:
+
+```bash
+pdm run test --week 3 --day 1 -- -k task_4
+```
+
+Then run the complete scheduler against the real model:
 
 ```bash
 pdm run batch-main
 ```
 
-By default, this command uses Qwen3-0.6B with a batch size of five and a fixed
-set of prompts. Record the longest interval between consecutive decode steps
-when one queued request has a much longer prompt. That interval is the baseline
-for Day 2. Use Day 2's `bench-chunked-prefill` runner for a publishable
-comparison: its 512-token budget processes every prompt in the checked
-64–512-token trace in one chunk, so that row is the reproducible Day 1 control.
-The runner records the exact token ids, output budget, seed, process order, and
-decode-completion gaps rather than relying on the interactive prompts above.
+By default, `batch-main` uses Qwen3-0.6B with a batch size of five and a fixed
+prompt set. Treat it as a product smoke: watch requests enter, decode, finish,
+and release their slots. Its shuffled prompt order and cumulative wall-clock
+display are not the source of a decode-gap measurement.
+
+Day 2's deterministic `bench-chunked-prefill` runner owns that comparison. Its
+512-token budget processes every prompt in the checked 64–512-token trace in
+one chunk, so that row is the reproducible Day 1 control. The runner records
+the exact token ids, output budget, seed, process order, and decode-completion
+gaps before Day 2 changes the prefill budget.
 
 {{#include copyright.md}}

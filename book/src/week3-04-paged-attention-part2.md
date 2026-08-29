@@ -185,7 +185,7 @@ logical key position -> logical page -> physical page id -> slot in page
 ```
 
 After that lookup, the online-softmax update is the same recurrence as Week 2
-Day 4. Keep the page-walking schedule simple enough that block-table and
+Day 5. Keep the page-walking schedule simple enough that block-table and
 tail-page boundary errors are visible. Day 5 will tile its inner matrix work
 while preserving this address calculation.
 

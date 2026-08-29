@@ -4,15 +4,11 @@
 
 # 🚧 Week 2: A Step Closer to vLLM
 
-> **Status: Experimental.** Week 2 is under active development. Each chapter
-> carries its own verification notes; the summary below records what is
-> continuously tested versus what is one-machine research evidence.
-
-Week 2 keeps the Week 1 Python `mlx.core` model intact and builds a separate
-optimized Qwen3 path for single-request decoding. It begins with the algorithm
-change: prefill once, retain a dense KV cache, and decode one new token at a
-time. Later chapters introduce kernels that address the costs the KV cache
-exposes.
+You begin Week 2 with the runnable Week 1 Python `mlx.core` Qwen model. Keep
+that model intact. Your work lives in a separate Qwen3 path that first changes
+the generation algorithm—prefill once, retain a dense KV cache, and decode one
+new token at a time—then replaces the operators that dominate that cached
+path.
 
 > ⏱️ **Time commitment.** Days 3–7 write and tune custom Metal kernels.
 > Completing the full Week 2 sequence typically takes substantially longer than
@@ -25,30 +21,26 @@ dot products, and online-softmax state accumulate in FP32 inside Python
 reference expressions or kernel registers. This contract remains in force for
 Week 3.
 
-## Verification Status
+## What You Build
 
-Reference correctness and decode-attention boundaries are continuously tested
-on ARM64 macOS CI with Qwen3-0.6B. Qwen3-4B performance evidence is one-machine
-research data measured on an M4 Pro, not a cross-device guarantee. Raw
-measurements, rejected experiments, and retained dispatch choices live in the
-[performance evidence ledger](./appendix-performance.md).
+The seven days form one cumulative single-request path. The starter supplies
+model loading, the extension build system, benchmark runners, correctness
+tests, Python reference equations, and the stable interfaces between
+checkpoints. You implement the state transition on Day 1, establish the
+measurement control on Day 2, and own the operator work on Days 3–7:
 
-## Complete the Core Path
-
-The full reference solution is a substantial performance-engineering project.
-All seven days are required core material; schedule more than one week if
-needed:
-
-| Required work | Provided infrastructure | Optional work |
+| Learner-owned work | Supplied infrastructure | Optional work |
 |---|---|---|
 | Days 1–7: cached model integration, matched benchmarking, quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark runners, correctness tests, and Python-reference implementations | The short profiling notice, schedule searches, hardware-specific retuning, and the fixed-workload 80%-of-MLX stretch target |
 
-The tests define API and correctness contracts; they do not require a student
-to rediscover the reference schedule. Metal capture, Xcode visualization,
-`gpudebug`, and profiling microbenchmarks are not current requirements and are
-not acceptance gates.
+Run the supplied test selector after each day. Then run the live model or
+benchmark command beside that day so an isolated kernel never counts as a
+finished checkpoint. The full campaigns, raw samples, rejected experiments,
+and retained reference schedules live in the
+[performance appendix](./appendix-performance.md); you do not need to recreate
+that evidence ledger to complete the exercises.
 
-## What We Will Cover
+## The Cumulative Path
 
 - A dense per-request key-value cache for incremental decoding
 - Synchronized benchmarking and the dense decode roofline
@@ -64,21 +56,27 @@ not acceptance gates.
   M4 Pro, the final checkpoint reaches 88.2% of full-MLX prefill and 87.0% of
   full-MLX decode throughput. This is not a cross-shape or cross-device target.
 
-Week 2 does **not** call MLX-provided implementations of the operators we are
-learning. Your solution implements quantized matmul, decode attention, RMSNorm,
-RoPE, and SwiGLU in its own Python, C++, or Metal code. In particular, the
-completed checkpoint does not use `mx.quantized_matmul`, `mx.dequantize`,
+The completed Week 2 solution does **not** call MLX-provided implementations of
+the operators it teaches. It implements quantized matmul, decode attention,
+RMSNorm, RoPE, and SwiGLU in its own Python, C++, or Metal code. In particular,
+the required checkpoint does not use `mx.quantized_matmul`, `mx.dequantize`,
 `mx.fast` operators, or `mx.fast.scaled_dot_product_attention` as shortcuts.
-Its matrix path also avoids `mlx::steel`: the supplied course scaffold owns the
-cooperative tile loader and the direct Metal `simdgroup_matrix` fragment
-bookkeeping.
-The Day 1 baseline still uses Week 1's Python `mx.dequantize` loading helper;
-Day 3 replaces that loading path as part of keeping weights packed.
+Its matrix path also avoids `mlx::steel`: the course scaffold leaves the
+cooperative tile loader and direct Metal `simdgroup_matrix` fragment
+bookkeeping for you to complete. The Day 1 baseline still uses Week 1's Python
+`mx.dequantize` loading helper; Day 3 replaces that loading path as part of
+keeping weights packed.
+
+If you want to study the serving path without implementing every custom
+operator, Days 3–7 each name a local MLX substitute. Keep the same course
+interface and substitute only that day's operator. This is different from
+`--solution mlx`, which runs the separate complete MLX model and bypasses the
+course-owned model, cache, and scheduler.
 
 Week 2 uses `mlx_lm` to load model weights and `mlx.core` for arrays, graph
 evaluation, and device synchronization.
 
-## Weekly Checkpoints
+## Daily Checkpoints
 
 1. **KV cache:** port the Week 1 operators into a Week 2 model, add
    request-scoped state, and stop recomputing the prefix.
@@ -110,9 +108,8 @@ The seven learner days now map one-to-one to the existing supplied selectors:
 | Day 6 | `--week 2 --day 6` |
 | Day 7 | `--week 2 --day 7` |
 
-Run every group assigned to the chapter before continuing. The supplied test
-filenames and selectors are stable historical machine identities; the chapter
-headings and navigation now use the same seven-day sequence.
+Use the selector beside each chapter while you work; run the complete day gate
+before carrying its result forward.
 
 ## Week 2 to Week 3
 
@@ -128,9 +125,9 @@ scheduling remain course-owned. Full MLX is a separate benchmark baseline,
 not another name for this hybrid Week 3 course path.
 
 The explicit projection seam is a teaching boundary, not a performance credit
-for paging. Task #360 isolates the seam while holding the course-owned serving
-mechanisms fixed; the final-main benchmark corpus reports representative
-absolute performance after that choice. Keep those two questions separate.
+for paging. The performance appendix isolates the seam while holding the
+course-owned serving mechanisms fixed, then reports representative absolute
+performance after that choice. Keep those two questions separate.
 
 Run `pdm run bench-week2-progression` to measure each checkpoint against the
 Week 1 baseline and MLX. Full methodology and cumulative results are in the

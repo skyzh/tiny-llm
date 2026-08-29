@@ -1,13 +1,8 @@
 # 🚧 Week 2 Day 4: Fused Model Kernels
 
-> **Status: Experimental.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) for
-> what is continuously tested, locally measured, and still under review.
-
-Day 3 removed the largest projection gap. Day 4 now targets RMSNorm, RoPE, and
-SwiGLU, which recur around those projections in every transformer layer. Week 1
-expresses them as Python `mlx.core` equations. Week 2 keeps those implementations
-intact and asks you to write three Metal kernels behind a separate interface:
+Day 3 leaves the cached model using packed projections. Day 4 keeps the Week 1
+Python equations as readable oracles and completes three separate extension
+shells already present in the starter:
 
 ```plain
 src/tiny_llm/week2_kernels.py
@@ -15,16 +10,26 @@ src/extensions/src/week2_kernels.cpp
 src/extensions/src/week2_kernels.metal
 ```
 
+Implement and integrate RMSNorm first, then RoPE, then SwiGLU. Each operator
+task has a focused test and a live cumulative checkpoint, so you can attribute
+a failure or regression before composing all three:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 4 -- -k rms
+pdm run test --week 2 --day 4 -- -k rope
+pdm run test --week 2 --day 4 -- -k swiglu
+```
+
+RMSNorm, RoPE, and SwiGLU recur around the projections in every transformer
+layer. Week 1 expresses them as Python `mlx.core` equations; your Week 2 path
+places the same interfaces over purpose-built Metal kernels.
+
 Your solution still uses MLX arrays and its extension API. MLX schedules the
 graph node, owns its buffers, and dispatches the Metal function, but your
 solution owns the arithmetic inside that function. Your solution does not call
 `mx.fast.rms_norm`,
 `mx.fast.rope`, or an MLX-provided SiLU implementation.
-
-> **Optional profiling evidence.** The Day 3 kernel-group replay and the
-> [reference-solution attribution](./appendix-performance.md#checked-operator-attribution-that-selects-each-chapter)
-> show the pointwise cluster behind the optimized projections. They explain the
-> chapter order but are not prerequisites or acceptance gates.
 
 ## Why Fusion Helps
 
@@ -205,20 +210,13 @@ pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
   --section model-kernels --context 128
 ```
 
-Attach each cumulative model row, the three Python-reference/optimized/MLX operator
-rows, and the direct dispatch trace. Let the matched benchmark results decide
-whether the kernels stay.
+Keep one cumulative result per operator so a regression cannot hide inside the
+combined gain. The complete campaign and reference attribution are in the
+[performance appendix](./appendix-performance.md#day-4-fused-model-kernels).
 
-Continue to Day 5 when all three correctness gates pass, the direct
-fused-dispatch source trace reaches the intended kernels, the cumulative rows
-retain the gain, and the three operator comparisons justify keeping the fused
-implementations. Day 5 then tests whether attention is the next removable gap
-by sweeping cached context and query length before setting a dispatch guard.
-
-> **Optional profiling evidence.** The
-> [reference checkpoint](./appendix-performance.md#day-4-fused-model-kernels)
-> pairs the cumulative and operator measurements with an updated
-> attribution. That attribution can explain the transition, but it does not
-> replace the checkpoint evidence above.
+If you want to continue without writing one of these kernels, keep its public
+course interface and delegate only that operator to the corresponding MLX
+implementation. This local substitution still exercises the cached Week 2
+model and the other course-owned operators; `--solution mlx` does not.
 
 {{#include copyright.md}}

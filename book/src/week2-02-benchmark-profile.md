@@ -1,13 +1,21 @@
 # 🚧 Week 2 Day 2: Benchmarking and Profiling
 
-> **Status: Experimental.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) for
-> what is continuously tested, locally measured, and still under review.
+Day 1 leaves you with a cached BF16 model and a working `kv-cache` checkpoint.
+Day 2 does not add another model operator. The supplied `benches/bench.py`
+runner already owns request generation, warmups, synchronization, phase timing,
+and cache release. Your job is to run one like-for-like comparison, preserve
+its configuration with the result, and use the decode roofline to choose the
+next change.
 
-Day 1 gave us a cached model. Day 2 establishes a trustworthy dense BF16
-baseline: how fast are prefill and decode under one matched protocol, and what
-architectural cost should the next chapter attack? Benchmarking is required.
-Profiling is optional and is not a prerequisite or acceptance gate.
+First verify the benchmark lifecycle:
+
+```bash
+pdm run test --week 2 --day 2
+```
+
+Then record one matched `tiny_llm`/MLX pair with the commands below. That JSON
+is the Day 2 checkpoint. Profiling is optional and is not a prerequisite or
+acceptance gate.
 
 ## Benchmark the Cached Model
 
@@ -89,11 +97,8 @@ elapsed = perf_counter() - start
 ```
 
 The benchmark must also call the cache release hook after warmups and timed
-runs so cache implementations with owned or shared resources can return them:
-
-```bash
-pdm run test --week 2 --day 2
-```
+runs so cache implementations with owned or shared resources can return them;
+the focused Day 2 test checks both the successful and failing paths.
 
 ## Optional Profiling Boundary
 

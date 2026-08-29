@@ -1,10 +1,18 @@
 """Week 3 Day 1 continuous-batching tests."""
 
+from pathlib import Path
+
 import mlx.core as mx
 import numpy as np
 import pytest
 from mlx_lm import load
-import tiny_llm_ref.models as model_dispatch
+
+if Path(__file__).parent.name == "tests_refsol":
+    import tiny_llm_ref.batch as batch_runtime
+    import tiny_llm_ref.models as model_dispatch
+else:
+    import tiny_llm.batch as batch_runtime
+    import tiny_llm.models as model_dispatch
 
 from .tiny_llm_base import *
 from .utils import *
@@ -274,6 +282,101 @@ def test_task_3_mlx_projection_selector_is_causal(monkeypatch):
     assert calls[0][2]["transpose"] is True
     assert calls[0][2]["group_size"] == 4
     assert calls[0][2]["bits"] == 4
+
+
+class SchedulerFakeDetokenizer:
+    def __init__(self, _):
+        self.text = ""
+
+    def add_token(self, token):
+        self.text += str(token)
+
+
+class SchedulerFakeTokenizer:
+    eos_token_id = 99
+    _tokenizer = object()
+    detokenizer = SchedulerFakeDetokenizer(_tokenizer)
+
+    def encode(self, prompt, add_special_tokens=False):
+        assert not add_special_tokens
+        return {"a": [10], "bb": [20, 21], "c": [30]}[prompt]
+
+
+class SchedulerFakeModel:
+    num_hidden_layers = 1
+
+    def __init__(self):
+        self.cache_request_ids = {}
+        self.prefill_records = []
+        self.active_slots = []
+        self.next_request_id = 0
+
+    def create_kv_cache(self):
+        cache = TinyKvFullCache()
+        self.cache_request_ids[id(cache)] = self.next_request_id
+        self.next_request_id += 1
+        return [cache]
+
+    def __call__(self, inputs, offsets, cache, logits_to_keep=1):
+        assert logits_to_keep == 1
+        batch_cache = isinstance(cache[0], BatchingKvCache)
+        if batch_cache:
+            self.active_slots.append(
+                tuple(
+                    None
+                    if request_cache is None
+                    else self.cache_request_ids[id(request_cache)]
+                    for request_cache in cache[0].kv_caches
+                )
+            )
+        else:
+            request_id = self.cache_request_ids[id(cache[0])]
+            self.prefill_records.append((request_id, list(offsets), inputs.tolist()))
+
+        sequence_length = 1 if batch_cache else inputs.shape[1]
+        keys = mx.zeros((inputs.shape[0], 1, sequence_length, 1), dtype=mx.float32)
+        if batch_cache:
+            cache[0].update_and_fetch(keys, keys, mask_length=sequence_length)
+        else:
+            cache[0].update_and_fetch(keys, keys)
+
+        next_by_token = {0: 99, 1: 99, 2: 3, 3: 99, 4: 99, 10: 1, 21: 2, 30: 4}
+        logits = mx.zeros((inputs.shape[0], 1, 100), dtype=mx.float32)
+        for row, token in enumerate(inputs[:, -1].tolist()):
+            logits[row, 0, next_by_token[token]] = 1
+        return logits
+
+
+def test_task_4_batch_generate_prefills_reuses_slots_and_orders_results(monkeypatch):
+    monkeypatch.setattr(batch_runtime, "_print_progress", lambda *args: None)
+
+    probe_model = SchedulerFakeModel()
+    probe = batch_runtime.Request(
+        probe_model,
+        SchedulerFakeTokenizer(),
+        "a",
+        prompt_idx=0,
+    )
+    probe.try_prefill()
+    assert probe.is_prefill_done
+    assert probe.offset == 1
+    assert probe.next_token == 1
+
+    model = SchedulerFakeModel()
+    result = batch_runtime.batch_generate(
+        model,
+        SchedulerFakeTokenizer(),
+        ["a", "bb", "c"],
+        batch_size=2,
+    )
+
+    assert result == [(0, "1"), (1, "23"), (2, "4")]
+    assert model.prefill_records == [
+        (0, [0], [[10]]),
+        (1, [0], [[20, 21]]),
+        (2, [0], [[30]]),
+    ]
+    assert model.active_slots == [(0, None), (1, None), (1, 2)]
 
 
 @pytest.mark.skipif(
