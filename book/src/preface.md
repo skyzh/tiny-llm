@@ -169,28 +169,39 @@ does not currently provide a one-command hybrid checkpoint.
 
 ## Choose a Model for Your Mac
 
-The table below is a conservative starting point for common MacBook unified-memory sizes. Each entry is
-**recommended / maximum** for that week's course path. The recommendation is the checkpoint to use while completing the
-exercises; the maximum is the largest course-supported checkpoint worth trying with short prompts and the chapter's
+The table below is a conservative starting point for recent Apple-silicon Mac mini and MacBook unified-memory sizes up to
+64 GB. Across those machines, the available tiers are 8, 16, 18, 24, 32, 36, 48, and 64 GB.[^mac-memory-tiers] Each entry
+is **recommended / maximum** for that week's course path. The recommendation is the checkpoint to use while completing
+the exercises; the maximum is the largest course-supported checkpoint worth trying with short prompts and the chapter's
 default batch settings.
 
 | Unified memory | Week 1 | Week 2 | Week 3 | Week 4 |
 | --- | --- | --- | --- | --- |
+| 8 GB | 0.6B / 0.6B | 0.6B / 1.7B[^week2-dense] | 0.6B / 1.7B | 0.6B / 1.7B |
 | 16 GB | 0.6B / 1.7B | 4B / 8B[^week2-dense] | 4B / 8B | 4B / 8B |
+| 18 GB | 0.6B / 1.7B | 4B / 8B[^week2-dense] | 4B / 8B | 4B / 8B |
+| 24 GB | 0.6B / 1.7B | 4B / 8B[^week2-dense] | 4B / 8B | 4B / 8B |
 | 32 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
+| 36 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
+| 48 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
 | 64 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
 
-Week 1 reads an official 4-bit checkpoint but materializes its linear and embedding weights in BF16. On a 16 GB Mac,
-use 0.6B for the required work and treat 1.7B as an upper-end experiment. Week 2 Days 1–2
+Week 1 reads an official 4-bit checkpoint but materializes its linear and embedding weights in BF16. On an 8 GB Mac,
+keep the required path at 0.6B. On a 16–24 GB Mac, use 0.6B for the required work and treat 1.7B as an upper-end experiment.
+Week 2 Days 1–2
 retain that dense BF16 model; Day 3 keeps weights packed for the quantized-matvec checkpoint. Weeks 3
 and 4 inherit that packed path. More memory still helps after reaching the largest
 supported model because prompt length, batch size, KV caches, compilation, macOS, and other applications all share the
 same pool. These ceilings are therefore planning guidance, not a guarantee that every workload will avoid memory
 pressure.
 
-[^week2-dense]: Week 2 Days 1–2 use the dense Week 1 loader. On a 16 GB Mac, keep using 0.6B
-    until the packed quantized-matvec path is complete on Day 3; the 4B recommendation and 8B maximum
-    apply after that checkpoint.
+[^mac-memory-tiers]: Apple lists these tiers across the [M2 Mac mini](https://support.apple.com/en-us/111837),
+    [M3 Pro and M3 Max MacBook Pro](https://support.apple.com/en-us/117736),
+    [M4 Mac mini](https://support.apple.com/en-us/121555), and
+    [M5 MacBook Air](https://support.apple.com/en-us/126320) specifications. Higher-memory configurations are outside
+    this table.
+[^week2-dense]: Week 2 Days 1–2 use the dense Week 1 loader, so keep using the Week 1 recommendation
+    until the packed quantized-matvec path is complete on Day 3. The larger Week 2 entries apply after that checkpoint.
 [^moe]: 30B-A3B requires the optional Week 3 MoE implementation. In Week 4, select the Week 3 loader. Use batch size one
     and a short context when approaching this ceiling; 4B remains the required-course target.
 
