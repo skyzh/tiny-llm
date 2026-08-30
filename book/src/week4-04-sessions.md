@@ -17,23 +17,30 @@ exactly-once effect system.
 
 ## Files and Public Surface
 
+The final scaffold already declares compaction, steering, evaluation,
+branching, and evidence APIs. Leave those future TODO bodies alone. Day 4 owns
+only the checkpoint model and the two loop entry points below:
+
 Implement the TODO-only surfaces in:
 
 | File | Public names | Responsibility |
 | --- | --- | --- |
 | `src/tiny_llm/agent/checkpoint.py` | `ModelCheckpoint`, `AgentCheckpoint`, `create_checkpoint` | Represent and validate one in-memory conversation/model snapshot. |
 | `src/tiny_llm/agent/loop.py` | `run_to_checkpoint`, `resume_agent` | Stop after a complete observation, then continue with a fresh model. |
-| `src/tiny_llm/agent/__init__.py` | the names above | Export the cumulative Day 4 API. |
+| `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 4 exports within the final scaffold. |
 
-Run the learner checkpoint from the repository root:
+Copy and run the learner checkpoint from the repository root:
 
 ```bash
+pdm run copy-test --week 4 --day 4
 pdm run test --week 4 --day 4
 ```
 
 Before you implement the TODOs, all seven Day 4 tasks are expected to fail.
 The test uses a scripted model, fake cache metadata, a temporary workspace, and
-one exact Python validation command. It does not load model weights.
+one exact Python validation command. It does not load model weights. The test
+is day-local and does not rerun Days 1--3; `copy-test` refreshes the learner
+copy from the supplied checkpoint.
 
 Course maintainers can check the supplied implementation without copying the
 learner test:
@@ -172,10 +179,11 @@ effects completed.
 
 ## Task 7: Keep the Boundary Small
 
-The Day 4 starter adds only `checkpoint.py` and two loop entry points. Do not add
-session IDs, parent pointers, branches, rewind methods, compaction summaries,
-steering queues, disk cache files, or later-day modules. If the in-memory
-checkpoint is lost, start a new run.
+Day 4 implements only `checkpoint.py` and two loop entry points. Future modules
+are already declared in the final scaffold, but do not implement or depend on
+them here. Do not add session IDs, parent pointers, rewind methods, steering
+queues, disk cache files, or another checkpoint representation. If the
+in-memory checkpoint is lost, start a new run.
 
 ## Checkpoint
 
@@ -184,7 +192,15 @@ scripted model from the same conversation and fake-cache position. Inspect the
 checkpoint's messages and model fields, then confirm that the pre-checkpoint
 edit and command remain single completed effects.
 
+At this point, predict what resume is allowed to do: the next model response
+may request a new action, but no action already represented by the saved
+observation should run again. The approval and receipt counts in the focused
+scenario are the falsifying evidence.
+
 Continue with [Day 5: Compact Completed Work](week4-05-compaction.md) to derive
 a smaller model-visible transcript while keeping the exact effect receipts.
+The current Day 5 checkpoint receives a transcript and receipts directly; it
+is not yet wired into this resume path. The pending Week 4 capstone supplies
+that composition.
 
 {{#include copyright.md}}

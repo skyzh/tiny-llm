@@ -1,83 +1,125 @@
 # 🚧 Week 4: Build a Coding Agent
 
-> **Course status:** Week 4 is being published one checkpoint at a time. Days 1
-> through 9 are ready to learn and review. Additional capabilities will appear
-> only after their implementation, starter, and reviews are ready.
+Weeks 1 through 3 ended with a working inference path: render a conversation,
+run the model, and carry its KV cache into later decoding. Week 4 asks what has
+to surround that path before model text can act on a project.
 
-Weeks 1 through 3 built the inference path: tokenize a conversation, run the
-model, and manage the key/value cache that makes later decoding efficient.
-Week 4 puts that path inside a small coding-agent harness. The model proposes
-one structured action at a time; ordinary Python validates it, executes it
-through an explicit workspace boundary, returns the observation, and decides
-when the run must stop.
+The product you are building is one bounded coding-agent run:
 
-The goal is not broad autonomy. Each day adds one visible mechanism that you
-can inspect and test: bounded control flow, read-only tools, approved effects,
-receipts, checkpoints, context selection, steering, evaluation, prefix reuse,
-and bounded evidence retrieval.
+```text
+task -> model response -> validated action -> workspace observation
+     -> approved effect -> receipt -> checkpoint -> compacted view
+     -> visible steering -> observable evaluation
+     -> two isolated continuations -> explicit selection
+     -> bounded retrieval of oversized evidence
+```
+
+Each arrow is a harness decision, not a model privilege. The model proposes one
+JSON action. Ordinary Python decides whether the action is well formed,
+enabled, approved, executed, retained, or refused.
+
+## What Is Runnable Today
+
+The repository currently ships one **cumulative Day 9 declaration scaffold**.
+All Week 4 modules and exports are visible from Day 1, but later-day
+implementation surfaces remain out of scope until their chapter. Most are
+TODO stubs; Day 9 explicitly supplies one constructor-validation rule. This is
+not nine separately materialized starters.
+
+The deterministic learner checkpoint for each chapter is also currently
+**day-local**: `pdm run test --week 4 --day N` runs the copied Day N test, not
+Days 1 through N. A cumulative runner and one supplied Days 1--9 capstone are
+still pending. Until those arrive, rerun earlier day tests when changing a
+shared surface; do not treat a green later-day file as proof that every prior
+mechanism still works.
+
+The real-model `pdm run agent` command currently exercises the learner loop,
+workspace, approvals, and receipts from Days 1--3, but its MLX-LM adapter calls
+`mlx_lm.generate` directly. It does **not** exercise the learner-owned
+`generate_response` helper or the Week 1--3 course model/cache path. Day 8
+reconnects to that path in a deterministic test and a manual walkthrough. The
+final composed product command remains pending with the cumulative capstone.
+
+These limits are visible course state, not goals for the learner to repair in
+the prose-only checkpoint.
 
 ## The Nine-Day Progression
 
-| Day | Question | Visible mechanism |
-| --- | --- | --- |
-| [1](week4-01-agent-loop.md) | How does model text become one safe next step? | A validated JSON action protocol and bounded loop. |
-| [2](week4-02-tools.md) | How can the agent inspect a project? | A contained read-only workspace with listing and file reads. |
-| [3](week4-03-safe-editing.md) | How can it change and validate code deliberately? | Operator approval, exact edits and commands, and effect receipts. |
-| [4](week4-04-sessions.md) | Where can a run pause and resume? | One complete-observation checkpoint with model cache metadata. |
-| [5](week4-05-compaction.md) | How can older completed work use less context? | Receipt-backed deterministic compaction of completed interactions. |
-| [6](week4-06-steering.md) | How can an operator inspect and redirect a paused run? | A public status view and one visible steering message. |
-| [7](week4-07-evaluation.md) | How do we judge a run without grading hidden reasoning? | A deterministic report over declared observable outcomes. |
-| [8](week4-08-fork-steer-select.md) | How can two continuations reuse one inference prefix? | Dense tokenizer/KV-prefix reuse, isolated effects, and explicit selection. |
-| [9](week4-09-bound-tool-evidence.md) | How can a large tool result remain available without filling the prompt? | Content-addressed external bytes, bounded previews, and explicit range retrieval. |
+| Day | Product pressure | Learner-owned mechanism | Evidence to inspect |
+| --- | --- | --- | --- |
+| [1](week4-01-agent-loop.md) | Model text is not yet a safe next step. | A validated JSON action protocol and bounded loop. | Parsed events, exact observations, and stop reasons. |
+| [2](week4-02-tools.md) | A fake workspace cannot inspect a project. | Contained directory listing and UTF-8 reads. | Listed paths, returned bytes, and recoverable errors. |
+| [3](week4-03-safe-editing.md) | A read-only agent cannot finish a coding task. | Approval, exact edits and commands, and effect receipts. | Changed bytes, validation status, and receipt facts. |
+| [4](week4-04-sessions.md) | A stopped process loses its conversation/model position. | One complete-observation checkpoint and resume boundary. | Saved messages/cache metadata and no effect replay. |
+| [5](week4-05-compaction.md) | Completed evidence consumes prompt space. | Receipt-backed deterministic compaction. | Tokens before/after, saved tokens, and unchanged receipts. |
+| [6](week4-06-steering.md) | An operator needs a visible correction point. | Inspect, append one steering message, and resume. | Public status and message ordering. |
+| [7](week4-07-evaluation.md) | A final sentence is not proof. | A report over declared observable outcomes. | Named file/result/receipt checks. |
+| [8](week4-08-fork-steer-select.md) | Two continuations should not prefill one identical prefix twice. | Dense token/KV-prefix reuse, isolated effects, and explicit selection. | Prefix offsets, avoided logical prefill, branch-local facts, and reports. |
+| [9](week4-09-bound-tool-evidence.md) | A large result should not fill every later prompt. | Content-addressed bytes, bounded previews, and exact range retrieval. | Artifact size/digest, omitted interval, and returned range. |
 
-The sequence is cumulative. Later starters keep the earlier public surface, and
-later tests rely on the boundaries established before them. Work through the
-days in order even when one later mechanism is your main interest.
+The mechanisms are designed to compose in that order. Today, Days 4--9 are
+exercised as library checkpoints rather than one runnable CLI product. The
+pending capstone will supply the orchestration shell; it will not replace the
+mechanisms you implement here.
 
 ## Prerequisites and Environment
 
-Complete the repository setup and Weeks 1 through 3 first. Day 8 directly uses
-the course tokenizer, model, and dense KV cache; the earlier Week 4 days also
-assume you recognize the model-generation boundary those weeks established.
+Complete repository setup and Weeks 1 through 3 first. Day 8 directly uses the
+course tokenizer, model, and dense KV cache. The other deterministic Week 4
+tests use scripted models and temporary workspaces, so they need no model
+download.
 
-The supported environment is macOS on Apple Silicon with the project
-dependencies installed. The deterministic Week 4 learner tests use scripted
-models and temporary workspaces, so they do not need model downloads. The
-chapters that include real-model walkthroughs label them as manual and
-nondeterministic; uncached runs additionally need network access, disk space,
-and enough Apple unified memory for the selected MLX weights.
+The supported native environment is macOS on Apple Silicon with the project
+dependencies installed. Real-model sections are manual and nondeterministic.
+An uncached run also needs network access, free disk space, and enough unified
+memory for the selected MLX weights. Use only disposable workspaces with no
+secrets: tool observations become model input, and Day 3 can enable file
+changes plus one exact allowlisted command.
 
-Use only disposable workspaces with no secrets. Read observations become model
-input, and later days can enable file changes and an exact allowlisted command.
+## Work Through One Chapter
 
-## How to Use This Week
+For Day N:
 
-For each day:
+1. Read what the final scaffold already declares and which TODO bodies belong
+   to this day. Ignore future modules even though their declarations are
+   visible.
+2. Predict the named action, count, range, or stop reason before running the
+   focused scenario when the chapter asks for one.
+3. Copy the supplied Day N test explicitly, then run the day-local checkpoint:
 
-1. Read its teaching boundary and public starter surface.
-2. Run the day-specific learner command to see the expected failures.
-3. Implement only that day's numbered tasks in `src/tiny_llm/agent/`.
-4. Rerun the same cumulative checkpoint until it is green.
-5. Inspect the recorded events, files, receipts, reports, or cache facts named
-   by the chapter instead of trusting a final model sentence alone.
+   ```bash
+   pdm run copy-test --week 4 --day N
+   pdm run test --week 4 --day N
+   ```
 
-The day chapters contain the exact commands and checkpoints. Course maintainers
-can use the corresponding reference command without copying a learner test.
-Optional real-model walkthroughs come after the deterministic checkpoint; they
-are exploration, not a replacement for reproducible course-code evidence.
+   `copy-test` refreshes the learner copy from the supplied checkpoint. If you
+   skip it, `pdm run test` copies only when the target is absent; a differing
+   existing copy is preserved with a warning.
+4. Implement only the files and relationships named by that chapter.
+5. Rerun the checkpoint and inspect the artifact that can falsify your
+   prediction: events, files, receipts, checkpoints, reports, cache offsets, or
+   artifact bytes.
+6. When you change shared code, rerun the earlier affected day tests manually
+   until the cumulative runner is available.
 
-## The Cumulative Learning Arc
+Course maintainers can run the corresponding `test-refsol` command without
+copying a learner test. Optional model walkthroughs come after the deterministic
+checkpoint; they are exploration, not correctness evidence.
 
-Days 1 through 3 establish the ordinary agent cycle: propose, validate,
-observe, approve effects, and record evidence. Days 4 through 6 show how the
-harness can pause, reduce older context, and add an operator instruction while
-preserving completed work. Day 7 evaluates observable outcomes. Day 8 reconnects
-that control path to the tokenizer and KV cache from Weeks 1 through 3. Day 9
-keeps oversized results verifiable while exposing only a bounded view to the
-model.
+## Read the Metrics as Accounting
 
-By the end, you can explain both sides of the boundary: what the model sees and
-proposes, and what the harness validates, executes, retains, or refuses.
+Week 4 exposes three kinds of useful counts:
+
+- Day 5: transcript tokens before and after compaction;
+- Day 8: reused prefix tokens, layer offsets, and avoided-prefill tokens; and
+- Day 9: complete artifact bytes, model-visible bytes, and returned range
+  bytes.
+
+These values prove identity and logical-work accounting inside the teaching
+mechanisms. They do not establish wall-clock speedup, throughput, model
+quality, memory-capacity gain, or a universal policy. A manual cached-Qwen run
+may record the model ID, cache state, device, and observed actions, but its
+choices remain nondeterministic and non-comparative.
 
 ## Week Boundary
 
@@ -87,9 +129,5 @@ transaction system, distributed scheduler, session tree, hidden grader,
 semantic-perfect memory, network artifact service, or production serving
 framework. Completed effects are never presented as rewound, and a model's
 final prose is never treated as proof by itself.
-
-Each day states its narrower limits where they matter. Keep later or
-production-scale APIs out of the starter unless a chapter explicitly teaches
-them.
 
 {{#include copyright.md}}

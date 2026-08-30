@@ -41,12 +41,17 @@ validation command, and a simple receipt log. Keeping those effects out of Day
 
 ## Files and Public Surface
 
+The published starter is the cumulative Day 9 declaration scaffold. Receipt,
+checkpoint, compaction, and later modules are therefore visible already, but
+their implementation work belongs to later chapters. Day 2 owns only the
+workspace relationships below.
+
 Implement the TODO bodies in:
 
 | File | Public names | Responsibility |
 | --- | --- | --- |
 | `src/tiny_llm/agent/workspace.py` | `ToolPolicy`, `Workspace` | Bound one directory and expose `list_files` plus `read_file`. |
-| `src/tiny_llm/agent/__init__.py` | Day 1 API plus `ToolPolicy`, `Workspace` | Make the cumulative checkpoint importable. |
+| `src/tiny_llm/agent/__init__.py` | Day 1 API plus `ToolPolicy`, `Workspace` | Complete the Day 2 exports within the final scaffold. |
 
 `ToolPolicy` has three fields, in order:
 
@@ -64,8 +69,9 @@ max_list_entries: int = 200
 - `read_file(raw)`; and
 - `execute(action)`.
 
-The starter declarations are the contract. Do not add write, command, approval,
-receipt, session, checkpoint, or rewind APIs yet.
+The starter declarations are the contract. Do not implement or depend on the
+visible write, command, approval, receipt, checkpoint, compaction, steering,
+evaluation, branching, or evidence-retrieval declarations yet.
 
 ## Task 1: Normalize One Workspace Root
 
@@ -159,24 +165,26 @@ Inspect `result.events`: the first two events contain the parsed tool actions
 and exact observations, and the third contains the final answer. The same tool
 result appears in the next model input as `Tool result:\n...`.
 
-## Run the Cumulative Checkpoint
+## Run the Day 2 Checkpoint
 
-From the repository root, run:
+From the repository root, copy the supplied test explicitly, then run it:
 
 ```bash
+pdm run copy-test --week 4 --day 2
 pdm run test --week 4 --day 2
 ```
 
-This copies the cumulative Day 2 learner test into `tests/` and runs it against
-`tiny_llm`. Before you implement the TODOs, the implementation-dependent cases
-across six task groups are expected to fail. During course development, check
-the supplied implementation without copying the learner test:
+Before you implement the TODOs, the implementation-dependent cases across six
+task groups are expected to fail. `copy-test` refreshes the learner copy from
+the supplied checkpoint. The test is day-local; it does not rerun Day 1.
+During course development, check the
+supplied implementation without copying the learner test:
 
 ```bash
 pdm run test-refsol --week 4 --day 2
 ```
 
-The cumulative course-code guard compares the starter and reference public
+The course-code guard compares the starter and reference public
 signatures, dataclass fields, package exports, and solution-free method bodies.
 
 ## Explore with a Real Model
@@ -197,6 +205,10 @@ Hugging Face when they are not cached, so it also needs network access and the
 corresponding free disk space. If MLX is unavailable or the weights cannot be
 loaded, the command exits before the agent calls a workspace tool; it does not
 substitute scripted output.
+
+This CLI uses a supplied MLX-LM generation adapter. It exercises your Day 1
+loop and Day 2 workspace, but it does not call the learner-owned
+`generate_response()` helper or prove the Weeks 1--3 course model/cache path.
 
 Create a tiny read-only workspace, then give the model one goal:
 
@@ -229,5 +241,10 @@ enabling any effect tool.
 
 When this checkpoint is green, continue to [Day 3: Edit, Validate, and
 Record](week4-03-safe-editing.md).
+
+The final Week 4 capstone will eventually compose this read-only inspection
+with the later checkpoint, compaction, steering, evaluation, branching, and
+bounded-evidence mechanisms. That orchestration is not present in the current
+CLI yet.
 
 {{#include copyright.md}}
