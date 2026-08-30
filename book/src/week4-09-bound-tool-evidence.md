@@ -17,10 +17,14 @@ range to inspect from visible facts.
 
 ## Files You Implement
 
+This is the final declaration scaffold, so every earlier Week 4 module is
+already visible. Day 9 owns only the TODO bodies in the evidence adapter and
+its exports:
+
 | File | Public names | Responsibility |
 | --- | --- | --- |
 | `src/tiny_llm/agent/evidence.py` | `ArtifactRef`, `ArtifactStore`, `BoundedEvidenceWorkspace` | Store exact results, render bounded observations, and serve explicit ranges. |
-| `src/tiny_llm/agent/__init__.py` | the names above | Export the cumulative Day 9 API. |
+| `src/tiny_llm/agent/__init__.py` | the names above | Export the completed Day 9 declaration surface. |
 
 The protocol, loop, workspace, receipts, and Days 1–8 modules do not change.
 `BoundedEvidenceWorkspace` is a small adapter around the existing `Workspace`.
@@ -34,6 +38,8 @@ pdm run test --week 4 --day 9
 
 Before you implement the TODOs, the implementation-dependent cases across six
 tasks are expected to fail; the shared constructor-validation cases already pass.
+The test is day-local and does not rerun Days 1--8. `copy-test` refreshes the
+learner copy from the supplied checkpoint.
 
 Use this command for the supplied implementation:
 
@@ -93,9 +99,11 @@ and return a compact JSON observation containing:
 
 The entire compact observation, including metadata and previews, must fit
 `max_inline_bytes`. Reduce previews at UTF-8 boundaries when the metadata needs
-more space. Require `max_range_bytes >= 4` so the default range can always hold
-one maximum-width UTF-8 code point. Never split a code point or silently replace
-one.
+more space. The supplied constructor already requires
+`max_range_bytes >= 4`, so the default range can always hold one maximum-width
+UTF-8 code point. Preserve that supplied rule; the remaining externalization
+and range behavior is learner-owned. Never split a code point or silently
+replace one.
 
 ## Task 3: Reuse the Existing Tool Protocol
 
@@ -150,6 +158,11 @@ exact diagnostic range -> final answer
 `run_agent` is unchanged. Its first event contains only the bounded
 observation; the second contains only the selected range; the artifact file
 still matches the complete original result.
+
+Before running it, predict whether the first result stays inline or becomes an
+artifact, the omitted half-open byte interval, and the exact bytes returned by
+the model's range request. The first observation, artifact digest/file, and
+second observation must agree; a final model sentence is not the evidence.
 
 ## Task 6: Preserve the Workspace Contract
 
@@ -224,10 +237,22 @@ for artifact_path in artifact_root.iterdir():
     print(artifact_path.name, len(data), hashlib.sha256(data).hexdigest())
 ```
 
+Save that fragment as `/tmp/tiny-llm-day9.py`, then run the repository source
+explicitly so an older editable install cannot be imported by accident:
+
+```bash
+PYTHONPATH=src pdm run python /tmp/tiny-llm-day9.py
+```
+
 Model choices vary. Inspect the actual first observation, requested artifact
 ID and range, returned bytes, final answer, and on-disk artifact digest. Do not
 use a workspace or artifact root containing secrets. After inspection, call
 `workspace_directory.cleanup()` and `artifact_directory.cleanup()`.
+
+Invalid or repeated model JSON is an ordinary bounded outcome: the loop may
+stop at its invalid-action or step budget without externalizing anything. That
+does not invalidate the deterministic checkpoint, and a successful manual run
+does not become a correctness or performance result.
 
 ## Checkpoint
 
@@ -238,5 +263,12 @@ loop.
 
 Day 9 does not summarize the result, stream concurrent chunks, retain artifacts
 for production, or add a network service.
+
+The current checkpoint starts a standalone bounded-evidence loop. It does not
+yet receive Day 5's compacted transcript or Day 8's selected branch. The
+pending cumulative capstone will supply that composed handoff and report token,
+reuse, evaluation, and byte counts together. Those counts remain accounting
+evidence; they do not prove latency, throughput, quality, or memory-capacity
+improvement.
 
 {{#include copyright.md}}

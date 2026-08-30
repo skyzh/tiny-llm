@@ -15,7 +15,7 @@ from .tiny_llm_base import (
 
 
 def _count_fake_tokens(messages):
-    """Use the Day 4 fake model's one-character-per-token teaching counter."""
+    """Use Day 5's local deterministic message-content character counter."""
 
     return sum(len(message["content"]) for message in messages)
 

@@ -16,12 +16,14 @@ harness still retains the exact action and result.
 
 ## The Starter Surface
 
-Day 5 adds one small module:
+The cumulative Day 9 scaffold already contains later steering, evaluation,
+branching, and evidence declarations. Leave those future TODO bodies alone.
+Day 5 owns one small module:
 
 | File | Public names | Purpose |
 | --- | --- | --- |
 | `src/tiny_llm/agent/compaction.py` | `CompactionResult`, `compact_completed_interactions` | Derive a smaller model-visible transcript from completed, receipted effects. |
-| `src/tiny_llm/agent/__init__.py` | the names above | Export the cumulative Day 5 API. |
+| `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 5 exports within the final scaffold. |
 
 Copy the learner test, then run it:
 
@@ -37,6 +39,8 @@ pdm run test-refsol --week 4 --day 5
 ```
 
 Before you implement the TODOs, all six Day 5 tasks are expected to fail.
+The command runs only the Day 5 test. `copy-test` refreshes the learner copy
+from the supplied checkpoint.
 
 ## Start From the Existing Transcript
 
@@ -52,6 +56,11 @@ model. A completed effect has this shape:
 
 The compactor does not invent a second event log. It receives this transcript
 plus the Day 3 `EffectReceipt` values already produced by the workspace.
+
+Before implementing it, predict which older interaction in the focused
+fixture is eligible to compact, which recent interaction must stay verbatim,
+and whether `saved_tokens` must be positive. The returned messages, exact
+counter values, and unchanged receipts let you falsify that prediction.
 
 ## Task 1: Require Exact Receipt Evidence
 
@@ -119,8 +128,10 @@ def count_tokens(messages):
 
 Build the proposed compact view, count it again, and accept it only when the
 exact counter decreases. `CompactionResult` reports `tokens_before`,
-`tokens_after`, and `saved_tokens`. The focused tests inject the Day 4 fake
-model's simple counter, so they do not load or download a model.
+`tokens_after`, and `saved_tokens`. The focused tests inject their own
+deterministic character counter, which sums the message-content lengths. It is
+distinct from Day 4's cached-prefix counter and does not load or download a
+model.
 
 ## Task 5: Preserve the Source of Truth
 
@@ -177,5 +188,11 @@ receipt that retains its complete result, and feed the compact view to the next
 model call. Continue with [Day 6: Inspect and Steer a Paused
 Agent](week4-06-steering.md) to inspect one checkpoint, add one visible operator
 message, and resume without replaying completed work.
+
+The current Day 6 path resumes the Day 4 transcript; it does not yet consume
+`CompactionResult.messages`. The pending cumulative capstone will carry this
+compacted view into the later control path. Until then, Day 5's token counts
+prove only deterministic transcript accounting, not latency, throughput,
+quality, or memory-capacity improvement.
 
 {{#include copyright.md}}

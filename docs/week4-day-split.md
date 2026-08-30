@@ -1,7 +1,8 @@
 # Week 4 Day Split (reference for reviewers)
 
-Status: Days 1--9 are published checkpoints. Each day ships as one cumulative
-learner PR so reviewers can see exactly what belongs to that checkpoint.
+Status: Days 1--9 are published checkpoints. The earlier per-day cumulative-PR
+model is retired. The repository now ships one cumulative Day 9 declaration
+scaffold; this document records which visible prefix each day owns.
 
 ## 9-day structure
 
@@ -21,11 +22,14 @@ Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.
 
 ## Delivery shape
 
-- Each learner day is one complete Draft PR based on the previously merged day.
-- The PR includes the reference, solution-free starter, focused course-code
-  tests, and learner chapter for that checkpoint.
-- Days are implemented sequentially. A later day does not leak API or prose
-  into the current starter.
+- The solution-free starter exposes the public declarations for all nine days.
+  A learner implements only the prefix assigned by the current chapter and
+  leaves later-day TODO bodies alone.
+- Each day has a focused, day-local course-code test. It does not rerun earlier
+  days or prove the cumulative product path.
+- The supplied reference implements all nine days. Starter/reference API-sync
+  checks keep the visible declarations aligned while the chapters preserve
+  day-by-day ownership.
 
 ## Why 9 days
 

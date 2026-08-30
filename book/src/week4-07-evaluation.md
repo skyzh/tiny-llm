@@ -16,12 +16,13 @@ exact transcript shape.
 
 ## The Starter Surface
 
-Day 7 adds one module:
+The final Day 9 scaffold already exposes branching and bounded-evidence
+declarations. Leave those future TODO bodies alone. Day 7 owns one module:
 
 | File | Public names | Purpose |
 | --- | --- | --- |
 | `src/tiny_llm/agent/evaluation.py` | `FileExpectation`, `ResultExpectation`, `ReceiptExpectation`, `EvaluationCase`, `EvaluationCheck`, `EvaluationReport`, `evaluate_run` | Describe required observable facts and produce a stable pass/fail report. |
-| `src/tiny_llm/agent/__init__.py` | the names above | Export the cumulative Day 7 API. |
+| `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 7 exports within the final scaffold. |
 
 Copy and run the seven learner tasks:
 
@@ -37,6 +38,14 @@ pdm run test-refsol --week 4 --day 7
 ```
 
 Before you implement the TODOs, all seven Day 7 tasks are expected to fail.
+The command runs only the Day 7 test. `copy-test` refreshes the learner copy
+from the supplied checkpoint.
+
+Do not use the repository's registered `pdm run evaluate-agent` launcher as a
+Day 7 checkpoint. It still targets a retired `TaskPackage` / static-grader API
+and currently exits before evaluating any learner run. Replacing or removing
+that stale launcher is deferred to the executable Week 4 repair. The supported
+checkpoint in this chapter is `evaluate_run` through the test above.
 
 ## Task 1: Declare the Outcome
 
@@ -166,5 +175,9 @@ You now have the evidence needed to compare continuations. Continue with [Day
 8: Fork, Steer, and Select](week4-08-fork-steer-select.md) to reuse one real
 token/KV prefix, steer two isolated branches, and explicitly choose a passing
 outcome without rewinding completed effects.
+
+This evaluator is currently exercised as a library boundary. The pending Week
+4 capstone will supply a runnable task that feeds its report into branch
+selection and then into bounded evidence retrieval.
 
 {{#include copyright.md}}

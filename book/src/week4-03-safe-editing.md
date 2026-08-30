@@ -13,6 +13,12 @@ read file -> propose exact edit -> operator approves -> recheck bytes
 The important idea is not broad autonomy. It is an explicit boundary between a
 model proposal and a local side effect.
 
+Before running the focused cycle, predict three facts: how many approvals and
+receipts exist after a denied effect, whether stale-read detection changes any
+file bytes, and which evidence remains after a validation command returns a
+nonzero status. The workspace, receipt log, and event trace let you check those
+answers independently of the model's final sentence.
+
 ## The Teaching Boundary
 
 Use this checkpoint with one trusted operator, one Python process, and a
@@ -29,13 +35,18 @@ stops at this receipt boundary.
 
 ## Files and Public Surface
 
-Implement the TODO bodies in these cumulative starter files:
+Later checkpoint, compaction, steering, evaluation, branching, and evidence
+modules are already declared in the cumulative Day 9 scaffold. Their later-day
+implementation work is out of scope. Day 3 owns only the following Day 1--3
+surfaces:
+
+Implement the TODO bodies in these starter files:
 
 | File | Public names | Responsibility |
 | --- | --- | --- |
 | `src/tiny_llm/agent/workspace.py` | `ToolPolicy`, `Workspace` | Authorize reads, approved edits, and one exact validation command. |
 | `src/tiny_llm/agent/receipts.py` | `EffectReceipt`, `ReceiptStore` | Represent effects and optionally append verified JSONL records. |
-| `src/tiny_llm/agent/__init__.py` | cumulative Day 1--3 API | Export the two receipt types. |
+| `src/tiny_llm/agent/__init__.py` | Day 1--3 names within the final scaffold | Export the two receipt types. |
 
 `ToolPolicy` keeps its first three Day 2 fields and adds:
 
@@ -178,17 +189,20 @@ edit receipt names `app.py`; the validation receipt has an empty artifact tuple.
 The final answer is still a model statement, so the validation status in the
 trace is the evidence that matters.
 
-## Run the Cumulative Checkpoint
+## Run the Day 3 Checkpoint
 
-From the repository root, copy and run the learner checkpoint:
+From the repository root, copy and run the learner checkpoint explicitly:
 
 ```bash
+pdm run copy-test --week 4 --day 3
 pdm run test --week 4 --day 3
 ```
 
 Before you implement the TODOs, the copied test is expected to fail because the
-new starter methods return `None`. Keep those failures until you solve each
-task; do not import `tiny_llm_ref` from the starter.
+new starter methods return `None`. `copy-test` refreshes the learner copy from
+the supplied checkpoint. Keep those failures until you solve each task; do not
+import `tiny_llm_ref` from the starter. This is a day-local test, not a
+cumulative Days 1--3 runner.
 
 Course maintainers can check the supplied implementation without copying the
 learner test:
@@ -197,8 +211,9 @@ learner test:
 pdm run test-refsol --week 4 --day 3
 ```
 
-The cumulative course-code guard checks exact public signatures, dataclass
-fields, package exports, TODO-only starter bodies, and absence of future APIs.
+The course-code guard checks exact public signatures, dataclass fields,
+package exports, and TODO-only starter bodies across the final declaration
+scaffold.
 
 ## Explore the Full Cycle with a Real Model
 
@@ -218,6 +233,10 @@ corresponding free disk space. If MLX, network access, disk space, unified
 memory, or the weights are unavailable, model loading fails before any tool
 call; do not treat a scripted checkpoint as evidence that this live run
 occurred.
+
+As on Day 2, this CLI's supplied MLX-LM adapter bypasses the learner-owned
+`generate_response()` helper. It does exercise your loop, workspace,
+approval, effect, and receipt paths.
 
 Pre-create the workspace, an existing file, and one focused validation fixture:
 
@@ -270,5 +289,9 @@ the file, validate with one exact command, and retain simple evidence of both
 effects. Continue with [Day 4: Checkpoint and Resume](week4-04-sessions.md) to
 save one complete observation boundary and restore it through a fresh scripted
 model without turning Day 3 into production infrastructure.
+
+Day 3 is currently the last mechanism exposed by the real-model CLI. Days
+4--9 use deterministic library checkpoints until the supplied Week 4 capstone
+connects them into one runnable product path.
 
 {{#include copyright.md}}
