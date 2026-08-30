@@ -53,7 +53,7 @@ Implement the TODO bodies in:
 | `src/tiny_llm/agent/workspace.py` | `ToolPolicy`, `Workspace` | Bound one directory and expose `list_files` plus `read_file`. |
 | `src/tiny_llm/agent/__init__.py` | Day 1 API plus `ToolPolicy`, `Workspace` | Complete the Day 2 exports within the final scaffold. |
 
-`ToolPolicy` has three fields, in order:
+The Day 2-owned prefix of `ToolPolicy` has three fields, in order:
 
 ```python
 root: Path
@@ -61,7 +61,7 @@ max_file_bytes: int = 64 * 1024
 max_list_entries: int = 200
 ```
 
-`Workspace` exposes:
+Day 2 implements this prefix of `Workspace`:
 
 - `available_tools`, always `{"list_files", "read_file"}`;
 - `resolve_path(raw, must_exist=True)`;
@@ -174,7 +174,7 @@ pdm run copy-test --week 4 --day 2
 pdm run test --week 4 --day 2
 ```
 
-Before you implement the TODOs, the implementation-dependent cases across six
+Before you implement the TODOs, the implementation-dependent cases across eight
 task groups are expected to fail. `copy-test` refreshes the learner copy from
 the supplied checkpoint. The test is day-local; it does not rerun Day 1.
 During course development, check the

@@ -128,8 +128,10 @@ def count_tokens(messages):
 
 Build the proposed compact view, count it again, and accept it only when the
 exact counter decreases. `CompactionResult` reports `tokens_before`,
-`tokens_after`, and `saved_tokens`. The focused tests inject the Day 4 fake
-model's simple counter, so they do not load or download a model.
+`tokens_after`, and `saved_tokens`. The focused tests inject their own
+deterministic character counter, which sums the message-content lengths. It is
+distinct from Day 4's cached-prefix counter and does not load or download a
+model.
 
 ## Task 5: Preserve the Source of Truth
 
