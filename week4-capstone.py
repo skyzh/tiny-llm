@@ -18,6 +18,7 @@ with redirect_stdout(io.StringIO()):
 
 _TASK = "Set app.py to answer = 2, validate it, and inspect the build evidence."
 _DIAGNOSTIC = "ERROR code=E42 dependency mismatch"
+_VALIDATION_INTERPRETER = "./.week4-python"
 _BUILD_LOG = (
     "build start α\n"
     + "compile-unit-ok\n" * 96
@@ -42,7 +43,7 @@ def _validation_command() -> tuple[str, ...]:
         "Path('build.log').write_text(log, encoding='utf-8'); "
         "print('validation passed'); print(log, end='')"
     )
-    return (sys.executable, "-c", program)
+    return (_VALIDATION_INTERPRETER, "-c", program)
 
 
 def _count_characters(messages: list[dict[str, str]]) -> int:
@@ -190,6 +191,7 @@ def run_capstone(agent_api=learner_agent) -> dict[str, object]:
         workspace_root.mkdir(parents=True)
         (workspace_root / "app.py").write_text("answer = 1\n", encoding="utf-8")
         (workspace_root / "build-source.txt").write_text(_BUILD_LOG, encoding="utf-8")
+        (workspace_root / _VALIDATION_INTERPRETER).symlink_to(sys.executable)
         receipts = agent_api.ReceiptStore(base / "receipts.jsonl")
         workspace = agent_api.Workspace(
             agent_api.ToolPolicy(
@@ -249,7 +251,7 @@ def run_capstone(agent_api=learner_agent) -> dict[str, object]:
         initial_receipt_bytes = (base / "receipts.jsonl").read_bytes()
         for name in ("validate-only", "try-extra-edit"):
             branch_root = root / name
-            shutil.copytree(base, branch_root)
+            shutil.copytree(base, branch_root, symlinks=True)
             branch_roots[name] = branch_root
             receipt_path = branch_root / "receipts.jsonl"
             branch_receipts[name] = agent_api.ReceiptStore(receipt_path)
