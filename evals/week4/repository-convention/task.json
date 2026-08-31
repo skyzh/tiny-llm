@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "id": "repository-convention",
-  "prompt": "Follow the fixture policy to update config.json while preserving the policy file exactly.",
-  "max_steps": 6,
-  "editable_paths": [
-    "config.json"
-  ]
-}

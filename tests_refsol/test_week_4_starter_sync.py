@@ -18,6 +18,9 @@ sys.path.insert(0, str(ROOT / "src"))
 STARTER = ROOT / "src" / "tiny_llm" / "agent"
 REFSOL = ROOT / "src" / "tiny_llm_ref" / "agent"
 REAL_MODEL_CLI = ROOT / "agent.py"
+CAPSTONE_CLI = ROOT / "week4-capstone.py"
+STALE_EVALUATOR = ROOT / "evaluate-agent.py"
+STALE_EVALS = ROOT / "evals" / "week4"
 MODULES = (
     "branching",
     "checkpoint",
@@ -438,3 +441,59 @@ def test_real_model_cli_discloses_command_side_effect_scope(tmp_path, monkeypatc
         "command receipts record the command and result, not a complete filesystem diff"
         in text
     )
+
+
+@pytest.mark.parametrize("content", ("Tool result:\nwrong payload", "Tool result:"))
+def test_reference_observation_payload_mutations_are_killed(monkeypatch, content):
+    """Maintainer-only mutations retain the Day 1 observation causal guard."""
+
+    from tiny_llm_ref.agent import ToolPolicy, Workspace
+    from tiny_llm_ref.agent import loop as loop_module
+
+    workspace_root = ROOT
+    workspace = Workspace(ToolPolicy(workspace_root))
+    seen = []
+
+    def generate(messages):
+        seen.append([dict(message) for message in messages])
+        if len(seen) == 1:
+            return '{"tool":"read_file","path":"README.md"}'
+        assert messages[-1] == {
+            "role": "user",
+            "content": (
+                "Tool result:\n" + (ROOT / "README.md").read_text(encoding="utf-8")
+            ),
+        }, "the exact tool-result payload must reach the next model input"
+        return '{"final":"done"}'
+
+    def broken_append(messages, response, _result):
+        return [
+            *messages,
+            {"role": "assistant", "content": response},
+            {"role": "user", "content": content},
+        ]
+
+    monkeypatch.setattr(loop_module, "_append_tool_result", broken_append)
+    with pytest.raises(AssertionError, match="exact tool-result payload"):
+        loop_module.run_agent("inspect", generate, workspace)
+
+
+def test_capstone_is_learner_only_and_stale_evaluator_is_fully_removed():
+    assert CAPSTONE_CLI.is_file()
+    source = CAPSTONE_CLI.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assert "tiny_llm_ref" not in source
+    assert "--solution" not in source
+    assert "importlib" not in source
+    assert {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and not node.name.startswith("_")
+    } == {"run_capstone", "main"}
+
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "week4-capstone" in project
+    assert "evaluate-agent" not in project
+    assert not STALE_EVALUATOR.exists()
+    assert not STALE_EVALS.exists()

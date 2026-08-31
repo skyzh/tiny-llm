@@ -24,10 +24,9 @@ declarations. Leave those future TODO bodies alone. Day 7 owns one module:
 | `src/tiny_llm/agent/evaluation.py` | `FileExpectation`, `ResultExpectation`, `ReceiptExpectation`, `EvaluationCase`, `EvaluationCheck`, `EvaluationReport`, `evaluate_run` | Describe required observable facts and produce a stable pass/fail report. |
 | `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 7 exports within the final scaffold. |
 
-Copy and run the seven learner tasks:
+Run the cumulative learner checkpoint:
 
 ```bash
-pdm run copy-test --week 4 --day 7
 pdm run test --week 4 --day 7
 ```
 
@@ -37,15 +36,13 @@ Use this command for the supplied implementation:
 pdm run test-refsol --week 4 --day 7
 ```
 
-Before you implement the TODOs, all seven Day 7 tasks are expected to fail.
-The command runs only the Day 7 test. `copy-test` refreshes the learner copy
-from the supplied checkpoint.
+Before you implement the TODOs, all seven Day 7 tasks are expected to fail. The
+command force-refreshes and runs the supplied learner tests for Days 1--7
+together.
 
-Do not use the repository's registered `pdm run evaluate-agent` launcher as a
-Day 7 checkpoint. It still targets a retired `TaskPackage` / static-grader API
-and currently exits before evaluating any learner run. Replacing or removing
-that stale launcher is deferred to the executable Week 4 repair. The supported
-checkpoint in this chapter is `evaluate_run` through the test above.
+The retired `pdm run evaluate-agent` launcher and its unconsumed static-grader
+packages are no longer part of the repository. The supported Day 7 learner
+checkpoint is `evaluate_run` through the cumulative test above.
 
 ## Task 1: Declare the Outcome
 
@@ -176,8 +173,8 @@ You now have the evidence needed to compare continuations. Continue with [Day
 token/KV prefix, steer two isolated branches, and explicitly choose a passing
 outcome without rewinding completed effects.
 
-This evaluator is currently exercised as a library boundary. The pending Week
-4 capstone will supply a runnable task that feeds its report into branch
-selection and then into bounded evidence retrieval.
+This evaluator is exercised as a library boundary. After Day 9, the supplied
+Week 4 capstone feeds its report into branch selection and then bounded
+evidence retrieval.
 
 {{#include copyright.md}}

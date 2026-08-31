@@ -3,7 +3,14 @@
 """Week 4 Day 9 bounded tool-evidence course-code tests."""
 
 import hashlib
+import importlib
+import importlib.util
 import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +23,11 @@ from .tiny_llm_base import (
     ToolPolicy,
     Workspace,
     run_agent,
+)
+
+
+_CAPSTONE_RECORD_SHA256 = (
+    "e906b7977917b44eacc7e59932ddf393828614dd3a737a929f077f0d84730901"
 )
 
 
@@ -33,6 +45,124 @@ def _workspace(tmp_path, content: str, **limits):
     workspace = Workspace(ToolPolicy(workspace_root, max_file_bytes=32_000))
     artifacts = ArtifactStore(artifact_root)
     return BoundedEvidenceWorkspace(workspace, artifacts, **limits), artifacts
+
+
+def test_task_0_supplied_capstone_composes_the_completed_active_package(tmp_path):
+    repository_root = Path(__file__).parents[1]
+    capstone_path = repository_root / "week4-capstone.py"
+    spec = importlib.util.spec_from_file_location("week4_capstone", capstone_path)
+    assert spec is not None and spec.loader is not None
+    capstone = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(capstone)
+    package_name = run_agent.__module__.rsplit(".", 1)[0]
+    agent_api = importlib.import_module(package_name)
+
+    first = capstone.run_capstone(agent_api)
+    second = capstone.run_capstone(agent_api)
+
+    assert first == second
+    assert set(first) == {"artifact", "branches", "compaction", "selection"}
+    assert first["compaction"]["tokens_before"] > first["compaction"]["tokens_after"]
+    assert first["compaction"]["saved_tokens"] > 0
+    assert len(first["compaction"]["receipt_ids"]) == 2
+    assert first["compaction"]["checkpoint_status"]["last_action"] == (
+        '{"path":"build.log","tool":"read_file"}'
+    )
+
+    branches = {branch["name"]: branch for branch in first["branches"]}
+    assert set(branches) == {"try-extra-edit", "validate-only"}
+    assert branches["validate-only"]["evaluation"]["passed"]
+    assert not branches["try-extra-edit"]["evaluation"]["passed"]
+    for branch in branches.values():
+        assert branch["reused_tokens"] > 0
+        assert branch["reused_tokens"] == branch["avoided_prefill_tokens"]
+        assert branch["layer_offsets"] == [branch["reused_tokens"]] * 2
+
+    selection = first["selection"]
+    assert selection["selected_name"] == "validate-only"
+    assert selection["app_py_sha256"] == hashlib.sha256(b"answer = 2\n").hexdigest()
+    assert selection["modified_files"] == {
+        "base": ["app.py"],
+        "selected_branch": [],
+    }
+    assert len(selection["base_receipt_ids"]) == 2
+    assert selection["selected_receipt_ids"][:2] == selection["base_receipt_ids"]
+    assert len(selection["selected_receipt_ids"]) == 3
+
+    artifact = first["artifact"]
+    assert artifact["artifact_id"] == f"artifact-{artifact['sha256']}"
+    assert (
+        artifact["full_byte_count"] > artifact["model_visible_observation_byte_count"]
+    )
+    assert artifact["range_text"] == "ERROR code=E42 dependency mismatch"
+    assert artifact["range_byte_count"] == len(artifact["range_text"].encode())
+    assert (
+        artifact["range_end"] - artifact["range_start"] == artifact["range_byte_count"]
+    )
+    completed_package = tmp_path / "completed-source" / "tiny_llm"
+    completed_package.mkdir(parents=True)
+    shutil.copytree(
+        repository_root / "src" / "tiny_llm_ref" / "agent",
+        completed_package / "agent",
+    )
+    (completed_package / "__init__.py").write_text("", encoding="utf-8")
+    (completed_package / "kv_cache.py").write_text(
+        "class TinyKvFullCache:\n    pass\n", encoding="utf-8"
+    )
+    interpreter_paths = (
+        tmp_path / "first-interpreter-path",
+        tmp_path / "second-interpreter-path",
+    )
+    for interpreter_path in interpreter_paths:
+        interpreter_path.symlink_to(sys.executable)
+
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(completed_package.parent)
+    records = []
+    for interpreter_path in interpreter_paths:
+        interpreter_environment = {
+            **environment,
+            "PYTHONEXECUTABLE": str(interpreter_path),
+        }
+        observed_interpreter = subprocess.run(
+            [str(interpreter_path), "-c", "import sys; print(sys.executable)"],
+            env=interpreter_environment,
+            capture_output=True,
+            check=True,
+        )
+        assert observed_interpreter.stdout.rstrip() == str(interpreter_path).encode()
+        completed = subprocess.run(
+            [str(interpreter_path), str(capstone_path)],
+            cwd=repository_root,
+            env=interpreter_environment,
+            capture_output=True,
+            check=True,
+        )
+        assert completed.stderr == b""
+        assert completed.stdout.endswith(b"\n")
+        records.append(completed.stdout)
+
+    assert records[0] == records[1]
+    assert hashlib.sha256(records[0]).hexdigest() == _CAPSTONE_RECORD_SHA256
+    payloads = [json.loads(record) for record in records]
+    assert (
+        payloads[0]["selection"]["base_receipt_ids"]
+        == payloads[1]["selection"]["base_receipt_ids"]
+    )
+    assert (
+        payloads[0]["selection"]["selected_receipt_ids"]
+        == payloads[1]["selection"]["selected_receipt_ids"]
+    )
+    assert payloads[0]["compaction"] == payloads[1]["compaction"]
+    forbidden_paths = (
+        *interpreter_paths,
+        Path(sys.executable),
+        tmp_path,
+        repository_root,
+    )
+    for record in records:
+        for forbidden_path in forbidden_paths:
+            assert str(forbidden_path).encode() not in record
 
 
 def test_task_1_artifact_store_preserves_exact_bytes_and_identity(tmp_path):

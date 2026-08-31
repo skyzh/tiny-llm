@@ -136,3 +136,48 @@ def test_missing_command_fails_closed(tmp_path):
     )
     assert result.returncode == 2
     assert "the following arguments are required" in result.stderr
+
+
+def test_week_4_day_selection_refreshes_and_runs_every_day_so_far(tmp_path):
+    supplied = tmp_path / "tests_refsol"
+    learner = tmp_path / "tests"
+    supplied.mkdir()
+    learner.mkdir()
+    for day in range(1, 5):
+        (supplied / f"test_week_4_day_{day}.py").write_text(
+            f'def test_day_{day}():\n    print("FRESH-DAY-{day}")\n',
+            encoding="utf-8",
+        )
+    (learner / "test_week_4_day_2.py").write_text(
+        'def test_stale():\n    print("STALE-DAY-2")\n    assert False\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(DEV_TOOLS),
+            "test",
+            "--week",
+            "4",
+            "--day",
+            "3",
+            "--",
+            "-q",
+            "-s",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert all(f"FRESH-DAY-{day}" in result.stdout for day in range(1, 4))
+    assert "STALE-DAY-2" not in result.stdout
+    assert "FRESH-DAY-4" not in result.stdout
+    assert "3 passed" in result.stdout
+    assert not (learner / "test_week_4_day_4.py").exists()
+    assert (learner / "test_week_4_day_2.py").read_bytes() == (
+        supplied / "test_week_4_day_2.py"
+    ).read_bytes()

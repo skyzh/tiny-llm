@@ -44,25 +44,22 @@ Implement the TODO bodies in these Day 1 starter files:
 messages with the course tokenizer, decodes at most `max_tokens` with a fresh
 cache, stops at EOS, and releases every cache in a `finally` block.
 
-The current supplied Day 1 test uses scripted response strings and does not
-call `generate_response()`. The current `pdm run agent` CLI also uses its own
-MLX-LM generation adapter. Implement the helper as specified, but do not read a
-green Day 1 checkpoint or a successful CLI run as behavioral proof of this one
-function. A focused course-model witness is pending with the cumulative Week 4
-runner.
+The supplied Day 1 test checks `generate_response()` with the course tokenizer
+and model boundary: exact prompt and thinking offsets, EOS stopping, the token
+limit, a fresh cache for each call, and cache release on normal and exceptional
+paths. The `pdm run agent` CLI still uses its own MLX-LM generation adapter, so
+a successful live CLI run is not evidence for this helper; the cumulative Day
+1 checkpoint is.
 
-Copy the supplied learner test, then run the **day-local** checkpoint from the
-repository root:
+Run the cumulative learner checkpoint from the repository root:
 
 ```bash
-pdm run copy-test --week 4 --day 1
 pdm run test --week 4 --day 1
 ```
 
-`copy-test` refreshes the learner copy from the supplied checkpoint. Before you
-implement the TODOs, the implementation-dependent cases across nine task
-groups are expected to fail. No model download is required. This command does
-not run later days.
+The command force-refreshes the supplied Day 1 learner test before running it.
+Before you implement the TODOs, the implementation-dependent cases across ten
+task groups are expected to fail. No model download is required.
 
 Course maintainers can check the supplied implementation without copying the
 learner test:
@@ -197,9 +194,9 @@ budgeted stop reason. Revisit your opening prediction: a disabled or malformed
 request must not reach the workspace, and the exact error must remain visible
 to the following model turn.
 
-This checkpoint proves the scripted protocol and loop. It does not yet prove
-`generate_response()` or the Weeks 1--3 model/cache handoff; keep that boundary
-explicit until the cumulative product witness is supplied.
+This checkpoint proves the scripted protocol and loop, plus the focused
+`generate_response()` model/cache boundary. It does not make the separate
+real-model CLI exercise that helper.
 
 You now have a validated, bounded model → action → observation loop. Continue
 with [Day 2: Inspect a Workspace](week4-02-tools.md) to replace the fake tool

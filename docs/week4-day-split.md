@@ -25,11 +25,15 @@ Extension (not a day): COW/radix cache — `docs/week4-cow-radix-extension-plan.
 - The solution-free starter exposes the public declarations for all nine days.
   A learner implements only the prefix assigned by the current chapter and
   leaves later-day TODO bodies alone.
-- Each day has a focused, day-local course-code test. It does not rerun earlier
-  days or prove the cumulative product path.
+- `pdm run test --week 4 --day N` force-refreshes the supplied learner tests
+  for Days 1--N and runs them together. The corresponding maintainer
+  `test-refsol` command remains day-local.
 - The supplied reference implements all nine days. Starter/reference API-sync
   checks keep the visible declarations aligned while the chapters preserve
   day-by-day ownership.
+- After Day 9, `pdm run week4-capstone` composes the completed learner APIs in
+  one deterministic disposable scenario and prints the accounting/evidence
+  record.
 
 ## Why 9 days
 

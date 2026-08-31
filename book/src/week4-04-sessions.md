@@ -29,18 +29,17 @@ Implement the TODO-only surfaces in:
 | `src/tiny_llm/agent/loop.py` | `run_to_checkpoint`, `resume_agent` | Stop after a complete observation, then continue with a fresh model. |
 | `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 4 exports within the final scaffold. |
 
-Copy and run the learner checkpoint from the repository root:
+Run the cumulative learner checkpoint from the repository root:
 
 ```bash
-pdm run copy-test --week 4 --day 4
 pdm run test --week 4 --day 4
 ```
 
 Before you implement the TODOs, all seven Day 4 tasks are expected to fail.
 The test uses a scripted model, fake cache metadata, a temporary workspace, and
-one exact Python validation command. It does not load model weights. The test
-is day-local and does not rerun Days 1--3; `copy-test` refreshes the learner
-copy from the supplied checkpoint.
+one exact Python validation command. It does not load model weights. The
+command force-refreshes and runs the supplied learner tests for Days 1--4
+together.
 
 Course maintainers can check the supplied implementation without copying the
 learner test:
@@ -199,8 +198,8 @@ scenario are the falsifying evidence.
 
 Continue with [Day 5: Compact Completed Work](week4-05-compaction.md) to derive
 a smaller model-visible transcript while keeping the exact effect receipts.
-The current Day 5 checkpoint receives a transcript and receipts directly; it
-is not yet wired into this resume path. The pending Week 4 capstone supplies
-that composition.
+The Day 5 checkpoint receives a transcript and receipts directly rather than
+changing this resume path. After Day 9, the supplied Week 4 capstone composes
+the two mechanisms through its deterministic orchestration.
 
 {{#include copyright.md}}
