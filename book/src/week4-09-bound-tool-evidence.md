@@ -29,17 +29,16 @@ its exports:
 The protocol, loop, workspace, receipts, and Days 1–8 modules do not change.
 `BoundedEvidenceWorkspace` is a small adapter around the existing `Workspace`.
 
-Copy the Day 9 test into the learner workspace:
+Run the cumulative learner checkpoint:
 
 ```bash
-pdm run copy-test --week 4 --day 9
 pdm run test --week 4 --day 9
 ```
 
 Before you implement the TODOs, the implementation-dependent cases across six
-tasks are expected to fail; the shared constructor-validation cases already pass.
-The test is day-local and does not rerun Days 1--8. `copy-test` refreshes the
-learner copy from the supplied checkpoint.
+tasks are expected to fail; the shared constructor-validation cases already
+pass. The command force-refreshes and runs all nine supplied Week 4 learner
+tests together.
 
 Use this command for the supplied implementation:
 
@@ -264,11 +263,18 @@ loop.
 Day 9 does not summarize the result, stream concurrent chunks, retain artifacts
 for production, or add a network service.
 
-The current checkpoint starts a standalone bounded-evidence loop. It does not
-yet receive Day 5's compacted transcript or Day 8's selected branch. The
-pending cumulative capstone will supply that composed handoff and report token,
-reuse, evaluation, and byte counts together. Those counts remain accounting
-evidence; they do not prove latency, throughput, quality, or memory-capacity
-improvement.
+The focused checkpoint starts a standalone bounded-evidence loop. After it is
+green, run the composed product witness:
+
+```bash
+pdm run week4-capstone
+```
+
+The command uses the completed learner package in a disposable deterministic
+scenario. Its sorted JSON reports compaction accounting, both steered branches
+and their evaluations, the explicitly selected `validate-only` branch, and the
+exact E42 artifact range retrieved by identity. The reported token, reuse, and
+byte counts remain accounting evidence; they do not prove latency, throughput,
+quality, or memory-capacity improvement.
 
 {{#include copyright.md}}

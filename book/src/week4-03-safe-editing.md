@@ -191,18 +191,16 @@ trace is the evidence that matters.
 
 ## Run the Day 3 Checkpoint
 
-From the repository root, copy and run the learner checkpoint explicitly:
+From the repository root, run the cumulative learner checkpoint:
 
 ```bash
-pdm run copy-test --week 4 --day 3
 pdm run test --week 4 --day 3
 ```
 
-Before you implement the TODOs, the copied test is expected to fail because the
-new starter methods return `None`. `copy-test` refreshes the learner copy from
-the supplied checkpoint. Keep those failures until you solve each task; do not
-import `tiny_llm_ref` from the starter. This is a day-local test, not a
-cumulative Days 1--3 runner.
+Before you implement the TODOs, the Day 3 cases are expected to fail because
+the new starter methods return `None`. The command force-refreshes and runs the
+supplied learner tests for Days 1--3 together. Keep the Day 3 failures until you
+solve each task; do not import `tiny_llm_ref` from the starter.
 
 Course maintainers can check the supplied implementation without copying the
 learner test:
@@ -290,8 +288,8 @@ effects. Continue with [Day 4: Checkpoint and Resume](week4-04-sessions.md) to
 save one complete observation boundary and restore it through a fresh scripted
 model without turning Day 3 into production infrastructure.
 
-Day 3 is currently the last mechanism exposed by the real-model CLI. Days
-4--9 use deterministic library checkpoints until the supplied Week 4 capstone
-connects them into one runnable product path.
+Day 3 is the last mechanism exposed by the real-model CLI. Days 4--9 use
+deterministic library checkpoints, and the separate supplied Week 4 capstone
+connects all nine completed days into one runnable deterministic product path.
 
 {{#include copyright.md}}

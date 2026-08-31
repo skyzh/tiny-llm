@@ -167,18 +167,17 @@ result appears in the next model input as `Tool result:\n...`.
 
 ## Run the Day 2 Checkpoint
 
-From the repository root, copy the supplied test explicitly, then run it:
+From the repository root, run the cumulative learner checkpoint:
 
 ```bash
-pdm run copy-test --week 4 --day 2
 pdm run test --week 4 --day 2
 ```
 
 Before you implement the TODOs, the implementation-dependent cases across eight
-task groups are expected to fail. `copy-test` refreshes the learner copy from
-the supplied checkpoint. The test is day-local; it does not rerun Day 1.
-During course development, check the
-supplied implementation without copying the learner test:
+task groups are expected to fail. The command force-refreshes the supplied
+learner tests for Days 1 and 2, then runs both; completed Day 1 behavior should
+remain green. During course development, check the supplied implementation
+with the day-local maintainer command:
 
 ```bash
 pdm run test-refsol --week 4 --day 2
@@ -242,9 +241,9 @@ enabling any effect tool.
 When this checkpoint is green, continue to [Day 3: Edit, Validate, and
 Record](week4-03-safe-editing.md).
 
-The final Week 4 capstone will eventually compose this read-only inspection
-with the later checkpoint, compaction, steering, evaluation, branching, and
-bounded-evidence mechanisms. That orchestration is not present in the current
-CLI yet.
+After all nine days are complete, the supplied deterministic capstone composes
+this read-only inspection with checkpointing, compaction, steering, evaluation,
+branching, and bounded evidence. That orchestration is a separate
+`week4-capstone` command, not part of the real-model `agent` CLI.
 
 {{#include copyright.md}}

@@ -10,9 +10,9 @@ discarding the full receipts. Those boundaries also create a useful moment for
 an operator: inspect what the paused run has actually recorded, add one new
 instruction, and let a fresh model continue.
 
-The current focused scenario resumes the original Day 4 transcript rather
-than `CompactionResult.messages`. Day 5 and Day 6 are designed to compose, but
-the supplied cumulative capstone that connects them is still pending.
+The focused Day 6 scenario resumes the original Day 4 transcript rather than
+`CompactionResult.messages`. After Day 9, the supplied deterministic capstone
+connects the compacted view to this later control path.
 
 Day 6 implements only that interaction. It does not inspect hidden reasoning or
 guess the model's plan. It reports public facts from the checkpoint, appends one
@@ -29,10 +29,9 @@ one module:
 | `src/tiny_llm/agent/steering.py` | `AgentStatus`, `inspect_checkpoint`, `resume_with_steering` | Inspect one complete-observation checkpoint, append one operator message, and resume. |
 | `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 6 exports within the final scaffold. |
 
-Copy and run the six learner tasks:
+Run the cumulative learner checkpoint:
 
 ```bash
-pdm run copy-test --week 4 --day 6
 pdm run test --week 4 --day 6
 ```
 
@@ -42,9 +41,9 @@ Use this command for the supplied implementation:
 pdm run test-refsol --week 4 --day 6
 ```
 
-Before you implement the TODOs, all six Day 6 tasks are expected to fail.
-This is a day-local checkpoint, not a cumulative Days 1--6 run. `copy-test`
-refreshes the learner copy from the supplied checkpoint.
+Before you implement the TODOs, all six Day 6 tasks are expected to fail. The
+command force-refreshes and runs the supplied learner tests for Days 1--6
+together.
 
 ## Start at a Safe Pause
 
@@ -202,8 +201,8 @@ Continue with [Day 7: Evaluate Observable Outcomes](week4-07-evaluation.md) to
 turn the final workspace, tool results, and durable receipts into a structured
 pass/fail report without grading hidden reasoning or exact transcript shape.
 
-Today that report is another deterministic library checkpoint. The final Week
-4 capstone will supply the one runnable path that carries checkpoint,
+That report is another deterministic library checkpoint. After Day 9, the
+supplied Week 4 capstone provides the runnable path that carries checkpoint,
 compaction, steering, evaluation, branch selection, and bounded evidence
 together.
 

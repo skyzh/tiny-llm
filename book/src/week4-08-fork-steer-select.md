@@ -31,10 +31,9 @@ TODO bodies alone. Day 8 owns one module and extends the approval result:
 | `src/tiny_llm/agent/branching.py` | `PrefixReuse`, `KvPrefixGenerator`, `BranchOutcome`, `run_branch`, `select_branch` | Reuse a dense KV prefix, run isolated steered continuations, evaluate them, and make one explicit choice. |
 | `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 8 exports within the final scaffold. |
 
-Copy and run the five learner tasks:
+Run the cumulative learner checkpoint:
 
 ```bash
-pdm run copy-test --week 4 --day 8
 pdm run test --week 4 --day 8
 ```
 
@@ -44,9 +43,9 @@ Use this command for the supplied implementation:
 pdm run test-refsol --week 4 --day 8
 ```
 
-Before you implement the TODOs, all five Day 8 tasks are expected to fail.
-This command runs only the Day 8 test; it does not prove Days 1--7 remain
-green. `copy-test` refreshes the learner copy from the supplied checkpoint.
+Before you implement the TODOs, all five Day 8 tasks are expected to fail. The
+command force-refreshes and runs the supplied learner tests for Days 1--8
+together.
 
 Before running the focused scenario, predict four values or facts: the shared
 base receipt in both roots, the receipt added only by the validate branch, the
@@ -171,11 +170,11 @@ model = Qwen3ModelWeek3(mlx_model, enable_paged_attention=False)
 prefix_generator = KvPrefixGenerator(model, tokenizer, max_tokens=128)
 ```
 
-This section is an integration outline, not a complete runnable program in the
-current repository. You still have to construct `paused`, both copied
-workspace/receipt roots, the evaluation cases, and each scripted or live
-continuation. The supplied capstone will make those pieces one bounded command;
-until then the deterministic Day 8 test is the executable contract.
+This section is an integration outline, not a complete cached-Qwen program.
+You still have to construct `paused`, both copied workspace/receipt roots, the
+evaluation cases, and each scripted or live continuation. The supplied
+capstone composes those mechanisms with a deterministic checkpoint model; it
+does not make this nondeterministic model walkthrough a correctness test.
 
 First create a Day 4 checkpoint named `paused` after a complete tool
 observation. Its messages are the control boundary you want to share, while its
@@ -222,7 +221,8 @@ Continue with [Day 9: Bound Tool Evidence](week4-09-bound-tool-evidence.md) to
 keep oversized results verifiable without placing their complete bytes in each
 later model prompt.
 
-The current Day 9 test starts its own loop rather than consuming the selected
-Day 8 outcome. The pending Week 4 capstone supplies that final handoff.
+The Day 9 test starts its own loop rather than consuming the selected Day 8
+outcome. After Day 9, the supplied Week 4 capstone exercises that final handoff
+in one deterministic scenario.
 
 {{#include copyright.md}}

@@ -25,10 +25,9 @@ Day 5 owns one small module:
 | `src/tiny_llm/agent/compaction.py` | `CompactionResult`, `compact_completed_interactions` | Derive a smaller model-visible transcript from completed, receipted effects. |
 | `src/tiny_llm/agent/__init__.py` | the names above | Complete the Day 5 exports within the final scaffold. |
 
-Copy the learner test, then run it:
+Run the cumulative learner checkpoint:
 
 ```bash
-pdm run copy-test --week 4 --day 5
 pdm run test --week 4 --day 5
 ```
 
@@ -38,9 +37,9 @@ Use this command for the supplied implementation:
 pdm run test-refsol --week 4 --day 5
 ```
 
-Before you implement the TODOs, all six Day 5 tasks are expected to fail.
-The command runs only the Day 5 test. `copy-test` refreshes the learner copy
-from the supplied checkpoint.
+Before you implement the TODOs, all six Day 5 tasks are expected to fail. The
+command force-refreshes and runs the supplied learner tests for Days 1--5
+together.
 
 ## Start From the Existing Transcript
 
@@ -189,10 +188,10 @@ model call. Continue with [Day 6: Inspect and Steer a Paused
 Agent](week4-06-steering.md) to inspect one checkpoint, add one visible operator
 message, and resume without replaying completed work.
 
-The current Day 6 path resumes the Day 4 transcript; it does not yet consume
-`CompactionResult.messages`. The pending cumulative capstone will carry this
-compacted view into the later control path. Until then, Day 5's token counts
-prove only deterministic transcript accounting, not latency, throughput,
-quality, or memory-capacity improvement.
+The Day 6 path resumes the Day 4 transcript; it does not consume
+`CompactionResult.messages`. After Day 9, the supplied capstone carries this
+compacted view into the later control path. Day 5's token counts and the
+capstone's combined report prove only deterministic transcript accounting, not
+latency, throughput, quality, or memory-capacity improvement.
 
 {{#include copyright.md}}

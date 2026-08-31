@@ -26,19 +26,19 @@ implementation surfaces remain out of scope until their chapter. Most are
 TODO stubs; Day 9 explicitly supplies one constructor-validation rule. This is
 not nine separately materialized starters.
 
-The deterministic learner checkpoint for each chapter is also currently
-**day-local**: `pdm run test --week 4 --day N` runs the copied Day N test, not
-Days 1 through N. A cumulative runner and one supplied Days 1--9 capstone are
-still pending. Until those arrive, rerun earlier day tests when changing a
-shared surface; do not treat a green later-day file as proof that every prior
-mechanism still works.
+The deterministic learner checkpoint is cumulative within Week 4:
+`pdm run test --week 4 --day N` force-refreshes the supplied learner tests for
+Days 1 through N, then runs those files together. A later checkpoint therefore
+rechecks every earlier mechanism it builds on.
 
 The real-model `pdm run agent` command currently exercises the learner loop,
 workspace, approvals, and receipts from Days 1--3, but its MLX-LM adapter calls
 `mlx_lm.generate` directly. It does **not** exercise the learner-owned
-`generate_response` helper or the Week 1--3 course model/cache path. Day 8
-reconnects to that path in a deterministic test and a manual walkthrough. The
-final composed product command remains pending with the cumulative capstone.
+`generate_response` helper or the Week 1--3 course model/cache path. Day 1 now
+tests that helper directly, and Day 8 reconnects to the course model/cache path
+in a deterministic test and a manual walkthrough. After all nine days are
+complete, `pdm run week4-capstone` composes the deterministic mechanisms in one
+disposable scenario.
 
 These limits are visible course state, not goals for the learner to repair in
 the prose-only checkpoint.
@@ -57,10 +57,10 @@ the prose-only checkpoint.
 | [8](week4-08-fork-steer-select.md) | Two continuations should not prefill one identical prefix twice. | Dense token/KV-prefix reuse, isolated effects, and explicit selection. | Prefix offsets, avoided logical prefill, branch-local facts, and reports. |
 | [9](week4-09-bound-tool-evidence.md) | A large result should not fill every later prompt. | Content-addressed bytes, bounded previews, and exact range retrieval. | Artifact size/digest, omitted interval, and returned range. |
 
-The mechanisms are designed to compose in that order. Today, Days 4--9 are
-exercised as library checkpoints rather than one runnable CLI product. The
-pending capstone will supply the orchestration shell; it will not replace the
-mechanisms you implement here.
+The mechanisms compose in that order. Days 4--9 remain library APIs rather
+than additions to the real-model `agent` CLI. The supplied deterministic
+capstone is the orchestration shell that exercises those completed APIs
+together; it does not replace the mechanisms you implement here.
 
 ## Prerequisites and Environment
 
@@ -85,26 +85,32 @@ For Day N:
    visible.
 2. Predict the named action, count, range, or stop reason before running the
    focused scenario when the chapter asks for one.
-3. Copy the supplied Day N test explicitly, then run the day-local checkpoint:
+3. Run the cumulative learner checkpoint:
 
    ```bash
-   pdm run copy-test --week 4 --day N
    pdm run test --week 4 --day N
    ```
 
-   `copy-test` refreshes the learner copy from the supplied checkpoint. If you
-   skip it, `pdm run test` copies only when the target is absent; a differing
-   existing copy is preserved with a warning.
+   For Week 4, this command force-refreshes the learner tests for Days 1
+   through N from the supplied checkpoints, then runs all of them in one
+   pytest invocation. Keep your implementation in `src/`; do not modify a
+   copied test because the next run replaces it.
 4. Implement only the files and relationships named by that chapter.
 5. Rerun the checkpoint and inspect the artifact that can falsify your
    prediction: events, files, receipts, checkpoints, reports, cache offsets, or
    artifact bytes.
-6. When you change shared code, rerun the earlier affected day tests manually
-   until the cumulative runner is available.
+6. After Day 9 is green, run the composed product witness:
 
-Course maintainers can run the corresponding `test-refsol` command without
-copying a learner test. Optional model walkthroughs come after the deterministic
-checkpoint; they are exploration, not correctness evidence.
+   ```bash
+   pdm run week4-capstone
+   ```
+
+   Inspect its sorted JSON sections for compaction, both branches, the selected
+   branch, and the externalized artifact range.
+
+Course maintainers can run the corresponding day-local `test-refsol` command
+without copying learner tests. Optional model walkthroughs come after the
+deterministic checkpoint; they are exploration, not correctness evidence.
 
 ## Read the Metrics as Accounting
 
