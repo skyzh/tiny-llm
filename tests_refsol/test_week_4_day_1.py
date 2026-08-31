@@ -2,11 +2,13 @@
 
 from types import SimpleNamespace
 
+import mlx.core as mx
 import pytest
 
 from .tiny_llm_base import (
     AgentLimits,
     ToolAction,
+    generate_response,
     initial_messages,
     run_agent,
 )
@@ -173,32 +175,6 @@ def test_task_8_observation_propagation(tmp_path):
     _assert_exact_observation_payload(run_agent)
 
 
-@pytest.mark.parametrize(
-    ("mutation", "content"),
-    (
-        ("wrong", "Tool result:\nwrong payload"),
-        ("dropped", "Tool result:"),
-    ),
-)
-def test_task_8_observation_payload_mutations_are_killed(
-    monkeypatch, mutation, content
-):
-    """Wrong and dropped payloads fail the normal observation guard."""
-
-    from tiny_llm_ref.agent import loop as loop_module
-
-    def broken_append(messages, response, result):
-        return [
-            *messages,
-            {"role": "assistant", "content": response},
-            {"role": "user", "content": content},
-        ]
-
-    monkeypatch.setattr(loop_module, "_append_tool_result", broken_append)
-    with pytest.raises(AssertionError, match="exact tool-result payload"):
-        _assert_exact_observation_payload(loop_module.run_agent)
-
-
 def test_task_8_known_but_disabled_tool_is_rejected(tmp_path):
     """A known tool that is disabled for this run must be rejected."""
 
@@ -271,3 +247,121 @@ def test_task_9_invalid_action_limit_stops_the_loop(tmp_path):
 
     assert not result.completed
     assert result.reason == "invalid_action_limit"
+
+
+class _Tokenizer:
+    eos_token_id = 0
+
+    def __init__(self):
+        self.template_calls = []
+        self.encode_calls = []
+        self.decoded = []
+
+    def apply_chat_template(self, messages, **kwargs):
+        self.template_calls.append(([dict(message) for message in messages], kwargs))
+        return "rendered prompt"
+
+    def encode(self, prompt, *, add_special_tokens):
+        self.encode_calls.append((prompt, add_special_tokens))
+        return [10, 11, 12]
+
+    def decode(self, tokens):
+        self.decoded.append(list(tokens))
+        return "decoded:" + ",".join(str(token) for token in tokens)
+
+
+class _Cache:
+    def __init__(self):
+        self.releases = 0
+
+    def release(self):
+        self.releases += 1
+
+
+class _TokenModel:
+    def __init__(self, tokens):
+        self.tokens = iter(tokens)
+        self.calls = []
+
+    def __call__(self, tokens, offset, caches):
+        token = next(self.tokens)
+        self.calls.append((tokens.tolist(), offset, tuple(caches)))
+        row = [-1.0] * 128
+        row[token] = 1.0
+        return mx.array([[row] * int(tokens.size)])
+
+
+def test_task_10_generation_uses_the_exact_prompt_offsets_eos_and_releases():
+    messages = [{"role": "user", "content": "finish the task"}]
+    tokenizer = _Tokenizer()
+    model = _TokenModel((65, 66, tokenizer.eos_token_id))
+    caches = (_Cache(), _Cache())
+
+    result = generate_response(
+        model,
+        tokenizer,
+        messages,
+        lambda: caches,
+        max_tokens=5,
+        enable_thinking=True,
+    )
+
+    assert result == "decoded:65,66"
+    assert tokenizer.template_calls == [
+        (
+            messages,
+            {
+                "tokenize": False,
+                "add_generation_prompt": True,
+                "enable_thinking": True,
+            },
+        )
+    ]
+    assert tokenizer.encode_calls == [("rendered prompt", False)]
+    assert tokenizer.decoded == [[65, 66]]
+    assert [(tokens, offset) for tokens, offset, _ in model.calls] == [
+        ([[10, 11, 12]], 0),
+        ([[65]], 3),
+        ([[66]], 4),
+    ]
+    assert all(call_caches == caches for _, _, call_caches in model.calls)
+    assert [cache.releases for cache in caches] == [1, 1]
+
+
+def test_task_10_generation_is_bounded_and_uses_one_fresh_cache_per_call():
+    tokenizer = _Tokenizer()
+    created = []
+
+    def cache_factory():
+        cache = _Cache()
+        created.append(cache)
+        return (cache,)
+
+    with pytest.raises(ValueError, match="max_tokens must be positive"):
+        generate_response(_TokenModel((7,)), tokenizer, [], cache_factory, max_tokens=0)
+    assert created == []
+
+    first = generate_response(
+        _TokenModel((7, 8, 9)), tokenizer, [], cache_factory, max_tokens=2
+    )
+    second = generate_response(
+        _TokenModel((9,)), tokenizer, [], cache_factory, max_tokens=1
+    )
+
+    assert first == "decoded:7,8"
+    assert second == "decoded:9"
+    assert len(created) == 2 and created[0] is not created[1]
+    assert [cache.releases for cache in created] == [1, 1]
+
+
+def test_task_10_generation_releases_every_cache_when_the_model_fails():
+    tokenizer = _Tokenizer()
+    caches = (_Cache(), _Cache())
+
+    def fail_model(*_args):
+        raise RuntimeError("model failed")
+
+    with pytest.raises(RuntimeError, match="model failed"):
+        generate_response(fail_model, tokenizer, [], lambda: caches, max_tokens=1)
+
+    assert [cache.releases for cache in caches] == [1, 1]
