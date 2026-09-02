@@ -4,13 +4,13 @@ The starter already provides `softmax`. Your Day 1 work is to complete `scaled_d
 `SimpleMultiHeadAttention` in `src/tiny_llm/attention.py`, plus the `linear` helper in `src/tiny_llm/basics.py`. Other
 attention functions in the starter are for later days and are not part of this chapter.
 
-Start by running the focused Task 1 tests. The command copies the supplied Day 1 test into `tests/` before running it:
+Start by running the focused Task 1 tests. The command refreshes the supplied Day 1 test in `tests/` before running it:
 
 ```console
 pdm run test --week 1 --day 1 -- -k task_1
 ```
 
-The untouched starter reports 4 passing and 24 failing tests. The four passing cases cover the supplied `softmax`; the
+The untouched starter reports 4 passing and 32 failing tests. The four passing cases cover the supplied `softmax`; the
 failures show the behavior that your attention implementation must add.
 
 An attention layer processes an input sequence and weighs the relevance of its different positions when producing each
@@ -90,7 +90,7 @@ At the end of this task, you should be able to pass the following tests:
 pdm run test --week 1 --day 1 -- -k task_1
 ```
 
-The completed Task 1 reports 28 passed.
+The completed Task 1 reports 36 passed.
 
 ## Task 2: Implement `SimpleMultiHeadAttention`
 
@@ -121,8 +121,7 @@ Use the focused linear tests as your next checkpoint:
 pdm run test --week 1 --day 1 -- -k test_task_2_linear
 ```
 
-Before you implement `linear`, three cases fail and one unsupported FP16-on-CPU case is skipped. Afterward, the checkpoint
-reports 3 passed and 1 skipped.
+Before you implement `linear`, all four cases fail. Afterward, the checkpoint reports 4 passed.
 
 For `SimpleMultiHeadAttention`, the input tensors `query`, `key`, and `value` have shape `N x L x E`, where `E` is the
 embedding dimension for one token. The Q, K, and V projections each map `E` to `H x D`: `H` heads, each with dimension
@@ -156,7 +155,7 @@ At the end of the task, you should be able to pass the following tests:
 pdm run test --week 1 --day 1 -- -k task_2
 ```
 
-The completed Task 2 reports 7 passed and 1 skipped.
+The completed Task 2 reports 8 passed.
 
 You can run all tests for the day with:
 
@@ -164,8 +163,7 @@ You can run all tests for the day with:
 pdm run test --week 1 --day 1
 ```
 
-The completed day reports 35 passed and 1 skipped. Day 3 will generalize this attention mechanism to grouped-query
-attention for Qwen3; the `SimpleMultiHeadAttention` layer built here is a standalone exercise, not the model's exact call
-path.
+The completed day reports 44 passed. Day 3 will generalize this attention mechanism to grouped-query attention for Qwen3;
+the `SimpleMultiHeadAttention` layer built here is a standalone exercise, not the model's exact call path.
 
 {{#include copyright.md}}

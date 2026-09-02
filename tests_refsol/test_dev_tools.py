@@ -86,24 +86,25 @@ def test_non_positive_week_day_selection_fails_closed(tmp_path, command, selecto
         assert "Week and day must be positive integers" in result.stdout
 
 
-def test_copy_test_missing_source_fails_closed(tmp_path):
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(DEV_TOOLS),
-            "copy-test",
-            "--week",
-            "99",
-            "--day",
-            "99",
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode != 0
-    assert "tests_refsol/test_week_99_day_99.py" in result.stderr
+def test_copy_and_test_missing_source_fail_closed(tmp_path):
+    for command in ("copy-test", "test"):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(DEV_TOOLS),
+                command,
+                "--week",
+                "99",
+                "--day",
+                "99",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "tests_refsol/test_week_99_day_99.py" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -138,7 +139,7 @@ def test_missing_command_fails_closed(tmp_path):
     assert "the following arguments are required" in result.stderr
 
 
-def test_week_4_day_selection_refreshes_and_runs_every_day_so_far(tmp_path):
+def test_day_selection_refreshes_supplied_tests_without_overwriting_source(tmp_path):
     supplied = tmp_path / "tests_refsol"
     learner = tmp_path / "tests"
     supplied.mkdir()
@@ -181,3 +182,42 @@ def test_week_4_day_selection_refreshes_and_runs_every_day_so_far(tmp_path):
     assert (learner / "test_week_4_day_2.py").read_bytes() == (
         supplied / "test_week_4_day_2.py"
     ).read_bytes()
+
+    # The ordinary Week 1-3 path also refreshes a stale copied test on every run.
+    # Only the selected test fixture is replaced; learner implementation stays intact.
+    implementation = tmp_path / "src" / "tiny_llm" / "attention.py"
+    implementation.parent.mkdir(parents=True)
+    implementation.write_text("LEARNER-IMPLEMENTATION\n", encoding="utf-8")
+    fresh_test = 'def test_fresh():\n    print("FRESH-DAY-1")\n'
+    stale_test = 'def test_stale():\n    print("STALE-DAY-1")\n    assert False\n'
+    supplied_test = supplied / "test_week_1_day_1.py"
+    learner_test = learner / "test_week_1_day_1.py"
+    supplied_test.write_text(fresh_test, encoding="utf-8")
+
+    for _ in range(2):
+        learner_test.write_text(stale_test, encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(DEV_TOOLS),
+                "test",
+                "--week",
+                "1",
+                "--day",
+                "1",
+                "--",
+                "-q",
+                "-s",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "FRESH-DAY-1" in result.stdout
+        assert "STALE-DAY-1" not in result.stdout
+        assert "1 passed" in result.stdout
+        assert learner_test.read_text(encoding="utf-8") == fresh_test
+        assert implementation.read_text(encoding="utf-8") == "LEARNER-IMPLEMENTATION\n"
