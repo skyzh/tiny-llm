@@ -1,8 +1,20 @@
 # Week 1 Day 1: Attention and Multi-Head Attention
 
-On Day 1, we will implement basic attention and multi-head attention. An attention layer processes an input sequence and
-weighs the relevance of its different positions when producing each output. Attention is a key building block of Transformer
-models.
+The starter already provides `softmax`. Your Day 1 work is to complete `scaled_dot_product_attention_simple` and
+`SimpleMultiHeadAttention` in `src/tiny_llm/attention.py`, plus the `linear` helper in `src/tiny_llm/basics.py`. Other
+attention functions in the starter are for later days and are not part of this chapter.
+
+Start by running the focused Task 1 tests. The command copies the supplied Day 1 test into `tests/` before running it:
+
+```console
+pdm run test --week 1 --day 1 -- -k task_1
+```
+
+The untouched starter reports 4 passing and 24 failing tests. The four passing cases cover the supplied `softmax`; the
+failures show the behavior that your attention implementation must add.
+
+An attention layer processes an input sequence and weighs the relevance of its different positions when producing each
+output. Attention is a key building block of Transformer models.
 
 [📚 Reading: Transformer Architecture](https://huggingface.co/learn/llm-course/chapter1/6)
 
@@ -78,6 +90,8 @@ At the end of this task, you should be able to pass the following tests:
 pdm run test --week 1 --day 1 -- -k task_1
 ```
 
+The completed Task 1 reports 28 passed.
+
 ## Task 2: Implement `SimpleMultiHeadAttention`
 
 In this task, we will implement the multi-head attention layer.
@@ -100,6 +114,15 @@ O.
 First, implement the `linear` function in `basics.py`. It takes a tensor of shape `N.. x I`, a weight matrix of shape
 `O x I`, and an optional bias vector of shape `O`. Its output has shape `N.. x O`, where `I` is the input dimension and
 `O` is the output dimension.
+
+Use the focused linear tests as your next checkpoint:
+
+```console
+pdm run test --week 1 --day 1 -- -k test_task_2_linear
+```
+
+Before you implement `linear`, three cases fail and one unsupported FP16-on-CPU case is skipped. Afterward, the checkpoint
+reports 3 passed and 1 skipped.
 
 For `SimpleMultiHeadAttention`, the input tensors `query`, `key`, and `value` have shape `N x L x E`, where `E` is the
 embedding dimension for one token. The Q, K, and V projections each map `E` to `H x D`: `H` heads, each with dimension
@@ -129,14 +152,20 @@ w_o: E x (H x D)
 
 At the end of the task, you should be able to pass the following tests:
 
-```
+```console
 pdm run test --week 1 --day 1 -- -k task_2
 ```
 
+The completed Task 2 reports 7 passed and 1 skipped.
+
 You can run all tests for the day with:
 
-```
+```console
 pdm run test --week 1 --day 1
 ```
+
+The completed day reports 35 passed and 1 skipped. Day 3 will generalize this attention mechanism to grouped-query
+attention for Qwen3; the `SimpleMultiHeadAttention` layer built here is a standalone exercise, not the model's exact call
+path.
 
 {{#include copyright.md}}

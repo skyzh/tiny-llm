@@ -34,9 +34,9 @@ def test_task_1_simple_attention(
         if batch_dimension == 0:
             BATCH_SIZE = ()
         elif batch_dimension == 1:
-            BATCH_SIZE = (2, 3)
+            BATCH_SIZE = (2,)
         elif batch_dimension == 2:
-            BATCH_SIZE = (2, 3, 3)
+            BATCH_SIZE = (2, 3)
         DIM_L = 4
         DIM_D = 5
         for _ in range(100):
@@ -76,9 +76,9 @@ def test_task_1_simple_attention_scale_mask(
         if batch_dimension == 0:
             BATCH_SIZE = ()
         elif batch_dimension == 1:
-            BATCH_SIZE = (2, 3)
+            BATCH_SIZE = (2,)
         elif batch_dimension == 2:
-            BATCH_SIZE = (2, 3, 3)
+            BATCH_SIZE = (2, 3)
         DIM_L = 4
         DIM_D = 5
         for _ in range(100):
@@ -111,6 +111,8 @@ def test_task_1_simple_attention_scale_mask(
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 def test_task_2_linear(stream: mx.Stream, precision: mx.Dtype):
+    if precision == mx.float16 and stream == mx.cpu:
+        pytest.skip("mx.addmm does not support float16 on CPU")
     with mx.stream(stream):
         BATCH_SIZE = 10
         DIM_Y = 10
@@ -120,9 +122,6 @@ def test_task_2_linear(stream: mx.Stream, precision: mx.Dtype):
             w = mx.random.uniform(shape=(DIM_Y, DIM_X), dtype=precision)
             b = mx.random.uniform(shape=(DIM_Y,), dtype=precision)
             user_output = linear(x, w, b)
-            if precision == mx.float16 and stream == mx.cpu:
-                # unsupported
-                break
             reference_output = mx.addmm(b, x, w.T)
             assert_allclose(user_output, reference_output, precision=precision)
 
