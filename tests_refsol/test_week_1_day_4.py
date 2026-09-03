@@ -78,6 +78,31 @@ def test_task_1_rms_norm_leading_dimensions_and_dtype(
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize("precision", [mx.float16, mx.bfloat16], ids=["f16", "bf16"])
+def test_task_1_rms_norm_rank_one_custom_epsilon(
+    stream: mx.Stream,
+    precision: mx.Dtype,
+):
+    dim = 5
+    eps = 3e-4
+    data = mx.array([-0.035, -0.0175, 0.0, 0.0125, 0.0275]).astype(precision)
+    weight = mx.array(np.linspace(0.5, 1.5, dim)).astype(precision)
+
+    data_f32 = np.array(data.astype(mx.float32))
+    normalized_f32 = data_f32 / np.sqrt(
+        np.mean(np.square(data_f32), axis=-1, keepdims=True) + eps
+    )
+    expected = mx.array(normalized_f32).astype(precision) * weight
+
+    with mx.stream(stream):
+        output = RMSNorm(dim, weight, eps=eps)(data)
+
+    assert output.shape == (dim,)
+    assert output.dtype == precision
+    assert_allclose(output, expected, precision)
+
+
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize(
     "precision",
     [*PRECISIONS, mx.bfloat16],
@@ -169,13 +194,17 @@ def test_task_2_qwen_mlp(stream: mx.Stream, precision: mx.Dtype, dims: dict):
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize(
+    "leading_shape", [(2, 1, 3), (3,)], ids=["three_leading", "no_batch"]
+)
 def test_task_2_qwen_mlp_leading_dimensions_bfloat16(
     stream: mx.Stream,
+    leading_shape: tuple[int, ...],
 ):
     precision = mx.bfloat16
     dim = 4
     hidden_dim = 6
-    shape = (2, 1, 3, dim)
+    shape = (*leading_shape, dim)
     data = mx.array(np.linspace(-0.5, 0.5, np.prod(shape)).reshape(shape)).astype(
         precision
     )
