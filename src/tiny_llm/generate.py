@@ -17,6 +17,7 @@ def simple_generate(
     tokenizer: TokenizerWrapper,
     prompt: str,
     sampler: Callable[[mx.array], mx.array] | None,
+    max_tokens: int = 256,
 ) -> None:
     def _step(model, y):
         pass

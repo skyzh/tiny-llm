@@ -18,6 +18,7 @@ def simple_generate(
     tokenizer: TokenizerWrapper,
     prompt: str,
     sampler: Callable[[mx.array], mx.array] | None,
+    max_tokens: int = 256,
 ) -> None:
     def _step(model, y):
         logits = model(y[None])
@@ -33,10 +34,12 @@ def simple_generate(
 
     # prefill with the prompt
     tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
+    if tokens.size == 0:
+        raise ValueError("prompt must encode to at least one token")
     detokenizer = tokenizer.detokenizer
     detokenizer.reset()
     # generate/decode
-    while True:
+    for _ in range(max_tokens):
         token = _step(model, tokens)
         mx.eval(token)
         tokens = mx.concat([tokens, token])
@@ -44,6 +47,8 @@ def simple_generate(
             break
         detokenizer.add_token(token.item())
         print(detokenizer.last_segment, end="", flush=True)
+    detokenizer.finalize()
+    print(detokenizer.last_segment, end="", flush=True)
 
 
 def simple_generate_with_kv_cache(
