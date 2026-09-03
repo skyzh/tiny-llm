@@ -109,6 +109,7 @@ def test_task_1_attention_composes_learner_rmsnorm_for_q_and_k(monkeypatch):
     q_norm = mx.arange(head_dim).astype(mx.bfloat16)
     k_norm = (mx.arange(head_dim) + 1).astype(mx.bfloat16)
     norm_inits = []
+    norm_calls = []
 
     class RecordingRMSNorm:
         def __init__(self, dim: int, weight: mx.array, eps: float = 1e-5):
@@ -116,6 +117,10 @@ def test_task_1_attention_composes_learner_rmsnorm_for_q_and_k(monkeypatch):
             self.weight = weight
             self.eps = eps
             norm_inits.append(self)
+
+        def __call__(self, value: mx.array) -> mx.array:
+            norm_calls.append((self, tuple(value.shape)))
+            return value
 
     monkeypatch.setattr(qwen3_week1, "RMSNorm", RecordingRMSNorm)
 
@@ -138,6 +143,13 @@ def test_task_1_attention_composes_learner_rmsnorm_for_q_and_k(monkeypatch):
     assert [norm.eps for norm in norm_inits] == [rms_norm_eps, rms_norm_eps]
     assert norm_inits[0].weight is q_norm
     assert norm_inits[1].weight is k_norm
+
+    attention(mx.zeros((1, 2, hidden_size)))
+
+    assert norm_calls == [
+        (attention.q_norm, (1, 2, num_attention_heads, head_dim)),
+        (attention.k_norm, (1, 2, num_kv_heads, head_dim)),
+    ]
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
