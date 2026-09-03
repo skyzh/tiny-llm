@@ -12,7 +12,9 @@ hf download Qwen/Qwen3-1.7B-MLX-4bit
 hf download Qwen/Qwen3-4B-MLX-4bit
 ```
 
-Tests that require an unavailable model will be skipped.
+The deterministic checkpoint tests do not need downloaded model files. The default 0.6B model is required for the final
+Day 5 integration check; only checks for the optional larger models are skipped when those files are unavailable. A skip
+means that the model-backed check did not run, not that it passed.
 
 ## Task 1: Implement `Qwen3TransformerBlock`
 
@@ -45,6 +47,9 @@ Qwen3 uses the following Transformer block structure:
 output
 ```
 
+Read `head_dim` independently from the model configuration rather than deriving it from `hidden_size` and the number of
+attention heads. Match the reference block's output dtype.
+
 Run the tests for this task with:
 
 ```bash
@@ -73,6 +78,9 @@ Output: N.. x embedding_dim (vectors)
 
 This can be implemented with array indexing.
 
+Token IDs may have any number of leading dimensions. The lookup appends `embedding_dim` to that shape and preserves the
+BF16 model-facing dtype.
+
 When input and output embeddings are tied, Qwen3 also uses the embedding weight as a linear projection from hidden vectors
 back to vocabulary logits.
 
@@ -83,11 +91,13 @@ Input: N.. x embedding_dim
 Output: N.. x vocab_size
 ```
 
+The projection accepts the same arbitrary leading dimensions, replacing only the final `embedding_dim` axis with
+`vocab_size` and preserving BF16.
+
 Run the tests for this task with:
 
 ```bash
-# This task's tests use the 0.6B model and tokenizer.
-hf download Qwen/Qwen3-0.6B-MLX-4bit
+# Deterministic lookup and projection checks always run. The downloaded model adds integration parity.
 pdm run test --week 1 --day 5 -- -k task_2
 ```
 
@@ -127,6 +137,10 @@ is defined by [`ModelArgs`](https://github.com/ml-explore/mlx-lm/blob/main/mlx_l
 are available through `mlx_model.model`; use the Qwen3 implementation and model metadata to identify the corresponding
 layer names.
 
+Instantiate every configured Transformer block in model order, run all of them, and apply the final RMSNorm before the
+vocabulary projection. `head_dim`, the query and key/value head counts, intermediate size, RMS epsilon, maximum positions,
+and RoPE theta are separate configuration fields; map each one directly.
+
 By this point, you have implemented `RMSNorm`. Replace the temporary Day 3 calls to `mx.fast.rms_norm` with
 `RMSNorm(head_dim, q_norm, eps=...)` and `RMSNorm(head_dim, k_norm, eps=...)`. They implement the same formula; the built-in
 calls existed only to keep the GQA chapter focused on attention.
@@ -151,17 +165,22 @@ it prevents each position from attending to future tokens.
 Run the tests for this task with:
 
 ```bash
-# Download each model you want to test. Missing models are skipped.
+# Deterministic assembly checks always run, including tied and untied output projections.
+# The default 0.6B integration model is required; download it if it is not already cached.
 hf download Qwen/Qwen3-0.6B-MLX-4bit
-hf download Qwen/Qwen3-1.7B-MLX-4bit
-hf download Qwen/Qwen3-4B-MLX-4bit
 pdm run test --week 1 --day 5 -- -k task_3
 ```
+
+You may also download the optional 1.7B and 4B models from the commands at the top of this chapter. Their checks skip when
+the corresponding files are absent.
 
 At the end of the day, you should be able to pass all tests of this day:
 
 ```bash
 pdm run test --week 1 --day 5
 ```
+
+Before treating this as a pass, confirm that the deterministic Task 2 and Task 3 checks ran and that the required 0.6B
+integration check passed rather than skipped.
 
 {{#include copyright.md}}
