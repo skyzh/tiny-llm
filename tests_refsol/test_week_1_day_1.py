@@ -115,6 +115,27 @@ def test_task_1_simple_attention_scale_mask(
             )
             assert_allclose(user_output, reference_output, precision=precision)
 
+        if batch_dimension == 2:
+            mask = mx.array(
+                [
+                    [0.0, -0.5, -1.0, -1.5],
+                    [-1.5, 0.0, -0.5, -1.0],
+                    [-1.0, -1.5, 0.0, -0.5],
+                    [-0.5, -1.0, -1.5, 0.0],
+                ],
+                dtype=precision,
+            )
+            scores = mx.matmul(query, key.swapaxes(-2, -1)) * scale + mask
+            reference_output = mx.matmul(mx.softmax(scores, axis=-1), value)
+            user_output = scaled_dot_product_attention_simple(
+                query,
+                key,
+                value,
+                scale=scale,
+                mask=mask,
+            )
+            assert_allclose(user_output, reference_output, precision=precision)
+
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
@@ -129,6 +150,10 @@ def test_task_2_linear(stream: mx.Stream, precision: mx.Dtype):
             b = mx.random.uniform(shape=(DIM_Y,), dtype=precision)
             user_output = linear(x, w, b)
             reference_output = mx.addmm(b, x, w.T)
+            assert_allclose(user_output, reference_output, precision=precision)
+
+            user_output = linear(x, w)
+            reference_output = mx.matmul(x, w.T)
             assert_allclose(user_output, reference_output, precision=precision)
 
 
