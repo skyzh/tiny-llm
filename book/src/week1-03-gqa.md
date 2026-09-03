@@ -59,7 +59,10 @@ output: N.. x H_q x L x D
 ```
 
 In addition to grouped heads, this function supports different query and key/value sequence lengths: Q uses length `L`,
-while K and V use length `S`.
+while K and V use length `S`. `H_q = H` gives ordinary multi-head attention, while `H = 1` gives multi-query
+attention. The leading `N..` batch shape may contain any number of positive-sized dimensions, and `D` is an independent
+head dimension rather than necessarily `hidden_size // H_q`. An array mask is additive and must be forwarded to the
+attention scores.
 
 You can test your implementation by running the following command:
 
@@ -79,9 +82,10 @@ Causal masking prevents attention from reading future tokens. When `mask` is set
 mask.
 
 The additive causal mask has shape `(L, S)`, where `L` is the query sequence length and `S` is the key/value sequence length.
-Allowed positions contain 0, and masked positions contain `-inf`. When `S` is greater than `L`, shift the diagonal by
-`S - L` so that the queries correspond to the final `L` positions in the key/value sequence. For example, if `L = 3`
-and `S = 5`, the mask is:
+Allowed positions contain 0, and masked positions contain `-inf`, and the returned mask must use the requested `dtype`.
+Causal attention requires `S >= L`; reject inputs with more query positions than key/value positions. When `S` is greater
+than `L`, shift the diagonal by `S - L` so that the queries correspond to the final `L` positions in the key/value
+sequence. For example, if `L = 3` and `S = 5`, the mask is:
 
 ```
 0   0   0   -inf -inf
@@ -123,9 +127,13 @@ x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, H_q, L, D  
 x = linear(x, wo) -> B, L, E
 ```
 
-Qwen3 attention has no Q/K/V projection biases, and it applies RMSNorm to each Q and K head before RoPE. We will implement
-the reusable `RMSNorm` layer on Day 4, so call `mx.fast.rms_norm` directly for `q_norm` and `k_norm` today. Use
-non-traditional RoPE.
+Qwen3 attention has no Q/K/V projection biases. Apply RMSNorm to each Q and K head before applying non-traditional RoPE;
+the order matters when the normalization weights are nonuniform. We will implement the reusable `RMSNorm` layer on Day 4,
+so call `mx.fast.rms_norm` directly for `q_norm` and `k_norm` today.
+
+The grouped attention arithmetic must run in float32: cast the projected, normalized, and rotated Q and K tensors and the
+projected V tensor to float32 before calling `scaled_dot_product_attention_grouped`. Cast its result back to the input
+model dtype before the final output projection. Forward `None`, `"causal"`, or an additive array mask unchanged.
 
 You can test your implementation by running the following command:
 
