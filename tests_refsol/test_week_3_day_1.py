@@ -391,6 +391,7 @@ class SchedulerFakeModel:
             20: 5,
             30: 6,
             40: 99,
+            50: 51,
             51: 7,
         }
         logits = mx.zeros((inputs.shape[0], 1, 100), dtype=mx.float32)
@@ -399,16 +400,46 @@ class SchedulerFakeModel:
         return logits
 
 
+def make_stage_compatible_request(model, prompt, *, prefill_max_step, prompt_idx):
+    """Construct through the public Day 1 or cumulative Day 2 API."""
+    try:
+        return (
+            batch_runtime.Request(
+                model,
+                SchedulerFakeTokenizer(),
+                prompt,
+                prefill_max_step=prefill_max_step,
+                prompt_idx=prompt_idx,
+                max_seq_len=8,
+            ),
+            True,
+        )
+    except TypeError:
+        return (
+            batch_runtime.Request(
+                model,
+                SchedulerFakeTokenizer(),
+                prompt,
+                prefill_max_step=prefill_max_step,
+                prompt_idx=prompt_idx,
+            ),
+            False,
+        )
+
+
 def test_task_4_request_prefills_the_complete_prompt_in_one_call():
-    request = batch_runtime.Request(
+    request, cumulative_day_2 = make_stage_compatible_request(
         SchedulerFakeModel(),
-        SchedulerFakeTokenizer(),
         "two-token-prompt",
-        prefill_max_step=2,
+        prefill_max_step=1,
         prompt_idx=7,
     )
 
     request.try_prefill()
+
+    if cumulative_day_2:
+        while not request.is_prefill_done:
+            request.try_prefill()
 
     assert request.is_prefill_done
     assert request.offset == 2
@@ -458,15 +489,38 @@ def test_task_4_batch_generate_stops_before_crossing_max_seq_len(
 def test_task_4_batch_generate_rejects_an_oversized_prompt(monkeypatch):
     monkeypatch.setattr(batch_runtime, "_print_progress", lambda *args: None)
 
-    with pytest.raises(ValueError):
-        batch_runtime.batch_generate(
-            SchedulerFakeModel(),
+    class FailOnModelWork:
+        num_hidden_layers = 1
+
+        def create_kv_cache(self):
+            pytest.fail("cache creation happened before oversized rejection")
+
+        def __call__(self, *args, **kwargs):
+            pytest.fail("model forward happened before oversized rejection")
+
+    model = FailOnModelWork()
+    try:
+        batch_runtime.Request(
+            model,
             SchedulerFakeTokenizer(),
-            ["two-token-prompt"],
+            "two-token-prompt",
+            prefill_max_step=1,
             max_seq_len=1,
-            batch_size=1,
-            prefill_step=1,
         )
+    except TypeError:
+        with pytest.raises(ValueError):
+            batch_runtime.batch_generate(
+                model,
+                SchedulerFakeTokenizer(),
+                ["two-token-prompt"],
+                max_seq_len=1,
+                batch_size=1,
+                prefill_step=1,
+            )
+    except ValueError:
+        pass
+    else:
+        pytest.fail("oversized prompt was accepted")
 
 
 def test_task_4_batch_generate_reuses_capacity_and_returns_completion_order(
