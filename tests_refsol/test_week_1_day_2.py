@@ -5,18 +5,21 @@ import numpy as np
 from .utils import *
 
 
+ROPE_CONFIGS = [
+    (1, 10, 8, 4, 20, 10000),
+    (2, 5, 3, 8, 17, 10),
+]
+ROPE_CONFIG_IDS = ["baseline", "different-shape-and-base"]
+
+
 def rope_helper(
     stream: mx.Stream,
     traditional: bool,
     precision: mx.Dtype,
     with_offset: bool,
+    config: tuple[int, int, int, int, int, int],
 ):
-    BATCH_SIZE = 1
-    NUM_HEADS = 8
-    HEAD_DIM = 4
-    MAX_SEQ_LEN = 20
-    SEQ_LEN = 10
-    BASE = 10000
+    BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM, MAX_SEQ_LEN, BASE = config
     with mx.stream(stream):
         for _ in range(100):
             user_layer = RoPE(HEAD_DIM, MAX_SEQ_LEN, BASE, traditional=traditional)
@@ -56,10 +59,14 @@ def rope_helper(
     "with_offset", [True, False], ids=["with_offset", "without_offset"]
 )
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
+@pytest.mark.parametrize("config", ROPE_CONFIGS, ids=ROPE_CONFIG_IDS)
 def test_task_1_rope_mlx_traditional(
-    stream: mx.Stream, with_offset: bool, precision: mx.Dtype
+    stream: mx.Stream,
+    with_offset: bool,
+    precision: mx.Dtype,
+    config: tuple[int, int, int, int, int, int],
 ):
-    rope_helper(stream, True, precision, with_offset)
+    rope_helper(stream, True, precision, with_offset, config)
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
@@ -67,7 +74,11 @@ def test_task_1_rope_mlx_traditional(
     "with_offset", [True, False], ids=["with_offset", "without_offset"]
 )
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
+@pytest.mark.parametrize("config", ROPE_CONFIGS, ids=ROPE_CONFIG_IDS)
 def test_task_2_rope_mlx_non_traditional(
-    stream: mx.Stream, with_offset: bool, precision: mx.Dtype
+    stream: mx.Stream,
+    with_offset: bool,
+    precision: mx.Dtype,
+    config: tuple[int, int, int, int, int, int],
 ):
-    rope_helper(stream, False, precision, with_offset)
+    rope_helper(stream, False, precision, with_offset, config)
