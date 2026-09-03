@@ -140,6 +140,22 @@ def test_task_1_grouped_attention(
     grouped_attention_helper(stream, precision, batch_dimension, scale, False)
 
 
+def test_task_1_grouped_attention_three_leading_axes_without_mask():
+    with mx.stream(mx.cpu):
+        query = deterministic_array((3, 2, 10, 18, 3, 5), 0.5, mx.float32)
+        key = deterministic_array((3, 2, 10, 6, 7, 5), 0.4, mx.float32)
+        value = deterministic_array((3, 2, 10, 6, 7, 5), 0.3, mx.float32)
+        expected = mx.fast.scaled_dot_product_attention(
+            query.reshape(-1, 18, 3, 5),
+            key.reshape(-1, 6, 7, 5),
+            value.reshape(-1, 6, 7, 5),
+            scale=5**-0.5,
+            mask=None,
+        ).reshape(query.shape)
+        actual = scaled_dot_product_attention_grouped(query, key, value, mask=None)
+        assert_allclose(actual, expected, precision=mx.float32)
+
+
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 def test_task_1_mqa_and_non_divisible_heads(stream: mx.Stream):
     with mx.stream(stream):
