@@ -3,7 +3,7 @@ import math
 
 
 def softmax(x: mx.array, axis: int) -> mx.array:
-    # TODO: manual implementation
+    # Supplied for Day 1; a manual implementation is an optional bonus exercise.
     return mx.softmax(x, axis=axis)
 
 
