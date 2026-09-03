@@ -372,7 +372,7 @@ class SchedulerFakeModel:
         assert logits_to_keep == 1
         batch_cache = isinstance(cache[0], BatchingKvCache)
         sequence_length = 1 if batch_cache else inputs.shape[1]
-        keys = inputs[:, None, -sequence_length:, None].astype(mx.float32)
+        keys = (inputs[:, None, -sequence_length:, None] + 1).astype(mx.float32)
         prompt_totals = None
         if batch_cache:
             cache[0].update_and_fetch(keys, keys, mask_length=sequence_length)
@@ -399,7 +399,7 @@ class SchedulerFakeModel:
         logits = mx.zeros((inputs.shape[0], 1, 100), dtype=mx.float32)
         for row, token in enumerate(inputs[:, -1].tolist()):
             next_token = next_by_token[token]
-            if prompt_totals is not None and token == 51 and prompt_totals[row] == 101:
+            if prompt_totals is not None and token == 51 and prompt_totals[row] == 103:
                 next_token = 7
             logits[row, 0, next_token] = 1
         return logits
