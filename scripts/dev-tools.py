@@ -51,7 +51,7 @@ def test(args):
                     return status
                 targets.append(f"tests/test_week_{args.week}_day_{day}.py")
             return pytest.main(["-v", *targets] + args.remainders)
-        copy_test(args, skip_if_exists=True)
+        copy_test(args, force=True)
         return pytest.main(
             ["-v", f"tests/test_week_{args.week}_day_{args.day}.py"] + args.remainders
         )

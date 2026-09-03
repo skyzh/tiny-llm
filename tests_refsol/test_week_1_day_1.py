@@ -21,7 +21,9 @@ def test_task_1_softmax(stream: mx.Stream, precision: mx.Dtype):
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 @pytest.mark.parametrize(
-    "batch_dimension", [0, 1, 2], ids=["batch_0", "batch_1", "batch_2"]
+    "batch_dimension",
+    [0, 1, 2, 3],
+    ids=["batch_0", "batch_1", "batch_2", "batch_3"],
 )
 def test_task_1_simple_attention(
     stream: mx.Stream, precision: mx.Dtype, batch_dimension: int
@@ -34,8 +36,10 @@ def test_task_1_simple_attention(
         if batch_dimension == 0:
             BATCH_SIZE = ()
         elif batch_dimension == 1:
-            BATCH_SIZE = (2, 3)
+            BATCH_SIZE = (2,)
         elif batch_dimension == 2:
+            BATCH_SIZE = (2, 3)
+        elif batch_dimension == 3:
             BATCH_SIZE = (2, 3, 3)
         DIM_L = 4
         DIM_D = 5
@@ -64,7 +68,9 @@ def test_task_1_simple_attention(
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 @pytest.mark.parametrize(
-    "batch_dimension", [0, 1, 2], ids=["batch_0", "batch_1", "batch_2"]
+    "batch_dimension",
+    [0, 1, 2, 3],
+    ids=["batch_0", "batch_1", "batch_2", "batch_3"],
 )
 def test_task_1_simple_attention_scale_mask(
     stream: mx.Stream, precision: mx.Dtype, batch_dimension: int
@@ -76,8 +82,10 @@ def test_task_1_simple_attention_scale_mask(
         if batch_dimension == 0:
             BATCH_SIZE = ()
         elif batch_dimension == 1:
-            BATCH_SIZE = (2, 3)
+            BATCH_SIZE = (2,)
         elif batch_dimension == 2:
+            BATCH_SIZE = (2, 3)
+        elif batch_dimension == 3:
             BATCH_SIZE = (2, 3, 3)
         DIM_L = 4
         DIM_D = 5
@@ -107,6 +115,27 @@ def test_task_1_simple_attention_scale_mask(
             )
             assert_allclose(user_output, reference_output, precision=precision)
 
+        if batch_dimension == 2:
+            mask = mx.array(
+                [
+                    [0.0, -0.5, -1.0, -1.5],
+                    [-1.5, 0.0, -0.5, -1.0],
+                    [-1.0, -1.5, 0.0, -0.5],
+                    [-0.5, -1.0, -1.5, 0.0],
+                ],
+                dtype=precision,
+            )
+            scores = mx.matmul(query, key.swapaxes(-2, -1)) * scale + mask
+            reference_output = mx.matmul(mx.softmax(scores, axis=-1), value)
+            user_output = scaled_dot_product_attention_simple(
+                query,
+                key,
+                value,
+                scale=scale,
+                mask=mask,
+            )
+            assert_allclose(user_output, reference_output, precision=precision)
+
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
@@ -120,10 +149,11 @@ def test_task_2_linear(stream: mx.Stream, precision: mx.Dtype):
             w = mx.random.uniform(shape=(DIM_Y, DIM_X), dtype=precision)
             b = mx.random.uniform(shape=(DIM_Y,), dtype=precision)
             user_output = linear(x, w, b)
-            if precision == mx.float16 and stream == mx.cpu:
-                # unsupported
-                break
             reference_output = mx.addmm(b, x, w.T)
+            assert_allclose(user_output, reference_output, precision=precision)
+
+            user_output = linear(x, w)
+            reference_output = mx.matmul(x, w.T)
             assert_allclose(user_output, reference_output, precision=precision)
 
 
