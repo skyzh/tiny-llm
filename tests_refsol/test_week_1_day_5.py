@@ -4,6 +4,18 @@ from .tiny_llm_base import Qwen3ModelWeek1, Embedding, dequantize_linear, qwen3_
 from mlx_lm import load
 
 
+REQUIRED_MODEL = "Qwen/Qwen3-0.6B-MLX-4bit"
+REQUIRED_MODEL_DOWNLOAD = f"hf download {REQUIRED_MODEL}"
+
+
+def require_default_model():
+    if not qwen3_0_6b_model_exists():
+        pytest.fail(
+            f"The default Day 5 model is required. Run `{REQUIRED_MODEL_DOWNLOAD}` "
+            "and rerun this checkpoint."
+        )
+
+
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 @pytest.mark.parametrize("mask", [None, "causal"], ids=["no_mask", "causal_mask"])
@@ -18,6 +30,7 @@ def test_task_1_transformer_block(
         NUM_ATTENTION_HEAD = 4
         NUM_KV_HEADS = 2
         HIDDEN_SIZE = 32
+        HEAD_DIM = 12
         INTERMEDIATE_SIZE = HIDDEN_SIZE * 4
 
         args = qwen3.ModelArgs(
@@ -27,7 +40,7 @@ def test_task_1_transformer_block(
             intermediate_size=INTERMEDIATE_SIZE,
             num_attention_heads=NUM_ATTENTION_HEAD,
             num_key_value_heads=NUM_KV_HEADS,
-            head_dim=HIDDEN_SIZE // NUM_ATTENTION_HEAD,
+            head_dim=HEAD_DIM,
             rms_norm_eps=1e-6,
             vocab_size=1000,
             max_position_embeddings=128,
@@ -59,7 +72,7 @@ def test_task_1_transformer_block(
             num_attention_heads=NUM_ATTENTION_HEAD,
             num_kv_heads=NUM_KV_HEADS,
             hidden_size=HIDDEN_SIZE,
-            head_dim=HIDDEN_SIZE // NUM_ATTENTION_HEAD,
+            head_dim=HEAD_DIM,
             intermediate_size=INTERMEDIATE_SIZE,
             rms_norm_eps=1e-6,
             wq=wq,
@@ -84,27 +97,73 @@ def test_task_1_transformer_block(
         assert_allclose(
             user_output, mlx_output, precision=precision, rtol=1e-1, atol=1e-1
         )
+        assert user_output.dtype == mlx_output.dtype
 
 
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize(
+    "leading_shape",
+    [(), (5,), (2, 3), (2, 1, 3)],
+    ids=["zero_leading", "one_leading", "two_leading", "three_leading"],
 )
-def test_utils_qwen3_0_6b():
-    pass
+def test_task_2_embedding_lookup_without_download(
+    stream: mx.Stream,
+    leading_shape: tuple[int, ...],
+):
+    vocab_size = 7
+    embedding_dim = 5
+    weight = mx.array(
+        np.linspace(-0.75, 0.875, vocab_size * embedding_dim).reshape(
+            vocab_size, embedding_dim
+        )
+    ).astype(mx.bfloat16)
+    token_ids = (
+        mx.arange(int(np.prod(leading_shape)), dtype=mx.int32).reshape(leading_shape)
+        * 3
+        + 1
+    ) % vocab_size
+
+    with mx.stream(stream):
+        output = Embedding(vocab_size, embedding_dim, weight)(token_ids)
+        expected = weight[token_ids, :]
+
+    assert output.shape == (*leading_shape, embedding_dim)
+    assert output.dtype == mx.bfloat16
+    assert_allclose(output, expected, precision=mx.bfloat16)
 
 
-@pytest.mark.skipif(
-    not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+@pytest.mark.parametrize(
+    "leading_shape",
+    [(), (5,), (2, 3), (2, 1, 3)],
+    ids=["zero_leading", "one_leading", "two_leading", "three_leading"],
 )
-def test_utils_qwen3_4b():
-    pass
+def test_task_2_embedding_as_linear_without_download(
+    stream: mx.Stream,
+    leading_shape: tuple[int, ...],
+):
+    vocab_size = 7
+    embedding_dim = 5
+    weight = mx.array(
+        np.linspace(-0.625, 0.75, vocab_size * embedding_dim).reshape(
+            vocab_size, embedding_dim
+        )
+    ).astype(mx.bfloat16)
+    hidden = mx.array(
+        np.linspace(
+            -0.5,
+            0.625,
+            int(np.prod(leading_shape)) * embedding_dim,
+        ).reshape(*leading_shape, embedding_dim)
+    ).astype(mx.bfloat16)
 
+    with mx.stream(stream):
+        output = Embedding(vocab_size, embedding_dim, weight).as_linear(hidden)
+        expected = mx.matmul(hidden, weight.T)
 
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_utils_qwen3_1_7b():
-    pass
+    assert output.shape == (*leading_shape, vocab_size)
+    assert output.dtype == mx.bfloat16
+    assert_allclose(output, expected, precision=mx.bfloat16)
 
 
 def helper_test_task_3(model_name: str, iters: int = 10):
@@ -123,11 +182,9 @@ def helper_test_task_3(model_name: str, iters: int = 10):
         )
 
 
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
 def test_task_2_embedding_call():
-    mlx_model, _ = load("Qwen/Qwen3-0.6B-MLX-4bit")
+    require_default_model()
+    mlx_model, _ = load(REQUIRED_MODEL)
     embedding = Embedding(
         mlx_model.args.vocab_size,
         mlx_model.args.hidden_size,
@@ -140,11 +197,9 @@ def test_task_2_embedding_call():
         assert_allclose(user_output, ref_output, precision=mx.bfloat16)
 
 
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
 def test_task_2_embedding_as_linear():
-    mlx_model, _ = load("Qwen/Qwen3-0.6B-MLX-4bit")
+    require_default_model()
+    mlx_model, _ = load(REQUIRED_MODEL)
     embedding = Embedding(
         mlx_model.args.vocab_size,
         mlx_model.args.hidden_size,
@@ -157,16 +212,12 @@ def test_task_2_embedding_as_linear():
         assert_allclose(user_output, ref_output, precision=mx.bfloat16, atol=1e-1)
 
 
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
 def test_task_3_qwen3_0_6b():
-    helper_test_task_3("Qwen/Qwen3-0.6B-MLX-4bit", 5)
+    require_default_model()
+    helper_test_task_3(REQUIRED_MODEL, 5)
 
 
-@pytest.mark.skipif(
-    not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found"
-)
+@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
 def test_task_3_qwen3_4b():
     helper_test_task_3("Qwen/Qwen3-4B-MLX-4bit", 1)
 
