@@ -83,6 +83,7 @@ def grouped_attention_helper(
         S = 7
         BATCH = 10
         BATCH_2 = 2
+        BATCH_3 = 3
         if batch_dimension == 0:
             q_shape = (H_q, L, D)
             kv_shape = (H, S, D)
@@ -95,6 +96,10 @@ def grouped_attention_helper(
             q_shape = (BATCH_2, BATCH, H_q, L, D)
             kv_shape = (BATCH_2, BATCH, H, S, D)
             mask_shape = (BATCH_2, BATCH, H_q, L, S)
+        elif batch_dimension == 3:
+            q_shape = (BATCH_3, BATCH_2, BATCH, H_q, L, D)
+            kv_shape = (BATCH_3, BATCH_2, BATCH, H, S, D)
+            mask_shape = (BATCH_3, BATCH_2, BATCH, H_q, L, S)
         for _ in range(100):
             query = mx.random.uniform(shape=q_shape, dtype=precision)
             key = mx.random.uniform(shape=kv_shape, dtype=precision)
@@ -124,7 +129,9 @@ def grouped_attention_helper(
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 @pytest.mark.parametrize(
-    "batch_dimension", [0, 1, 2], ids=["batch_0", "batch_1", "batch_2"]
+    "batch_dimension",
+    [0, 1, 2, 3],
+    ids=["batch_0", "batch_1", "batch_2", "batch_3"],
 )
 @pytest.mark.parametrize("scale", [None, 0.8])
 def test_task_1_grouped_attention(
@@ -229,7 +236,9 @@ def test_task_2_mask_dtype_and_causal_domain(stream: mx.Stream):
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize("precision", PRECISIONS, ids=PRECISION_IDS)
 @pytest.mark.parametrize(
-    "batch_dimension", [0, 1, 2], ids=["batch_0", "batch_1", "batch_2"]
+    "batch_dimension",
+    [0, 1, 2, 3],
+    ids=["batch_0", "batch_1", "batch_2", "batch_3"],
 )
 @pytest.mark.parametrize("scale", [None, 0.8])
 def test_task_2_grouped_attention_causal_mask(
