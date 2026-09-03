@@ -71,9 +71,9 @@ pdm run copy-test --week 1 --day 7
 pdm run test --week 1 --day 7 -- -q --tb=short
 ```
 
-The transformation cases observe the numeric logits passed to categorical
-sampling; a separate seeded case checks repeatability. An unseeded draw should
-not be expected to return one particular token.
+The distribution cases observe returned-token support and frequencies; the
+seeded case checks same-seed repeatability and different-seed divergence. An
+unseeded draw should not be expected to return one particular token.
 
 After the focused checkpoint passes, verify the completed sampler in the full
 Week 1 product loop:

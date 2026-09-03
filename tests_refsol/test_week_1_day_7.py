@@ -149,11 +149,12 @@ def test_task_1_oversized_top_k_preserves_existing_error():
 
 def test_task_1_seeded_sampling_repeats_and_changes_with_seed():
     logprobs = log_probabilities([0.05, 0.15, 0.3, 0.5])
-    sampler = make_sampler(0.8, 0.95, 4)
 
-    first = sampled_tokens(sampler, logprobs, draws=32)
-    second = sampled_tokens(sampler, logprobs, draws=32)
-    different_seed = sampled_tokens(sampler, logprobs, draws=32, seed=2027)
+    first = sampled_tokens(make_sampler(0.8, 0.95, 4), logprobs, draws=32)
+    second = sampled_tokens(make_sampler(0.8, 0.95, 4), logprobs, draws=32)
+    different_seed = sampled_tokens(
+        make_sampler(0.8, 0.95, 4), logprobs, draws=32, seed=2027
+    )
 
     np.testing.assert_array_equal(first, second)
     assert np.any(first != different_seed)
