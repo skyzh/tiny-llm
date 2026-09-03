@@ -103,6 +103,38 @@ def test_task_1_rms_norm_rank_one_custom_epsilon(
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
+def test_task_1_rms_norm_cast_back_before_weight_scaling(stream: mx.Stream):
+    precision = mx.float16
+    dim = 65_536
+    eps = 1e-5
+    smallest_subnormal = np.nextafter(np.float16(0), np.float16(1))
+    largest_finite = np.finfo(np.float16).max
+
+    data_np = np.zeros(dim, dtype=np.float16)
+    data_np[0] = smallest_subnormal
+    data_np[-1] = largest_finite
+    weight_np = np.ones(dim, dtype=np.float16)
+    weight_np[0] = largest_finite
+    data = mx.array(data_np)
+    weight = mx.array(weight_np)
+
+    data_f32 = np.array(data.astype(mx.float32))
+    normalized_f32 = data_f32 / np.sqrt(np.mean(np.square(data_f32)) + eps)
+    expected = mx.array(normalized_f32).astype(precision) * weight
+
+    with mx.stream(stream):
+        output = RMSNorm(dim, weight, eps=eps)(data)
+
+    expected_f32 = np.array(expected.astype(mx.float32))
+    output_f32 = np.array(output.astype(mx.float32))
+    assert output.shape == (dim,)
+    assert output.dtype == precision
+    assert expected_f32[0] == 0
+    assert output_f32[0] == 0
+    assert_allclose(output, expected, precision)
+
+
+@pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize(
     "precision",
     [*PRECISIONS, mx.bfloat16],
