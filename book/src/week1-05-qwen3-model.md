@@ -165,8 +165,7 @@ it prevents each position from attending to future tokens.
 Run the tests for this task with:
 
 ```bash
-# Deterministic assembly checks always run, including tied and untied output projections.
-# The default 0.6B integration model is required; download it if it is not already cached.
+# The required 0.6B integration check exercises Task 3; download it if it is not already cached.
 hf download Qwen/Qwen3-0.6B-MLX-4bit
 pdm run test --week 1 --day 5 -- -k task_3
 ```
@@ -180,7 +179,7 @@ At the end of the day, you should be able to pass all tests of this day:
 pdm run test --week 1 --day 5
 ```
 
-Before treating this as a pass, confirm that the deterministic Task 2 and Task 3 checks ran and that the required 0.6B
+Before treating this as a pass, confirm that the deterministic Task 2 checks ran and that the required 0.6B Task 3
 integration check passed rather than skipped.
 
 {{#include copyright.md}}
