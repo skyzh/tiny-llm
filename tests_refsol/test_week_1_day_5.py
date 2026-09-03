@@ -100,11 +100,51 @@ def test_task_1_transformer_block(
         assert user_output.dtype == mlx_output.dtype
 
 
+def test_task_1_attention_composes_learner_rmsnorm_for_q_and_k(monkeypatch):
+    hidden_size = 32
+    num_attention_heads = 4
+    num_kv_heads = 2
+    head_dim = 12
+    rms_norm_eps = 1e-6
+    q_norm = mx.arange(head_dim).astype(mx.bfloat16)
+    k_norm = (mx.arange(head_dim) + 1).astype(mx.bfloat16)
+    norm_inits = []
+
+    class RecordingRMSNorm:
+        def __init__(self, dim: int, weight: mx.array, eps: float = 1e-5):
+            self.dim = dim
+            self.weight = weight
+            self.eps = eps
+            norm_inits.append(self)
+
+    monkeypatch.setattr(qwen3_week1, "RMSNorm", RecordingRMSNorm)
+
+    attention = qwen3_week1.Qwen3MultiHeadAttention(
+        hidden_size=hidden_size,
+        num_heads=num_attention_heads,
+        num_kv_heads=num_kv_heads,
+        head_dim=head_dim,
+        wq=mx.zeros((num_attention_heads * head_dim, hidden_size)),
+        wk=mx.zeros((num_kv_heads * head_dim, hidden_size)),
+        wv=mx.zeros((num_kv_heads * head_dim, hidden_size)),
+        wo=mx.zeros((hidden_size, num_attention_heads * head_dim)),
+        q_norm=q_norm,
+        k_norm=k_norm,
+        rms_norm_eps=rms_norm_eps,
+    )
+
+    assert norm_inits == [attention.q_norm, attention.k_norm]
+    assert [norm.dim for norm in norm_inits] == [head_dim, head_dim]
+    assert [norm.eps for norm in norm_inits] == [rms_norm_eps, rms_norm_eps]
+    assert norm_inits[0].weight is q_norm
+    assert norm_inits[1].weight is k_norm
+
+
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize(
     "leading_shape",
-    [(5,), (2, 3), (2, 1, 3)],
-    ids=["one_leading", "two_leading", "three_leading"],
+    [(), (5,), (2, 3), (2, 1, 3)],
+    ids=["zero_leading", "one_leading", "two_leading", "three_leading"],
 )
 def test_task_2_embedding_lookup_without_download(
     stream: mx.Stream,
@@ -135,8 +175,8 @@ def test_task_2_embedding_lookup_without_download(
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
 @pytest.mark.parametrize(
     "leading_shape",
-    [(5,), (2, 3), (2, 1, 3)],
-    ids=["one_leading", "two_leading", "three_leading"],
+    [(), (5,), (2, 3), (2, 1, 3)],
+    ids=["zero_leading", "one_leading", "two_leading", "three_leading"],
 )
 def test_task_2_embedding_as_linear_without_download(
     stream: mx.Stream,
