@@ -149,6 +149,9 @@ claims.
 To run a completed checkpoint without solving it first:
 
 ```bash
+# Build the supplied reference extension once after setup or a clean checkout.
+pdm run build-ext-ref
+
 # Run one supplied reference test group.
 pdm run test-refsol --week 3 --day 1
 
