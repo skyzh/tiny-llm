@@ -61,7 +61,8 @@ class ScriptedModel:
         if not self.next_tokens:
             raise AssertionError("model received an unexpected call")
         next_token = self.next_tokens.pop(0)
-        if 6 in np.array(tokens).reshape(-1).tolist():
+        token_ids = np.array(tokens).reshape(-1).tolist()
+        if token_ids == [7] or 6 in token_ids:
             next_token = 4
         logits = np.full((1, tokens.shape[1], VOCAB_SIZE), -10_000.0)
         logits[:, :-1, self.decoy_token] = 10_000.0
