@@ -46,10 +46,15 @@ the model.
 
 Generate tokens in a loop until the model emits `tokenizer.eos_token_id` or `max_tokens` new tokens have been produced.
 Append each new token to the token array so that the next model call receives the complete sequence. An EOS token already
-inside the prompt is context and does not stop generation; only a newly generated EOS does. Feed non-EOS output tokens
-to `tokenizer.detokenizer`, and print each new text segment as it becomes available. On either termination path, call
-`tokenizer.detokenizer.finalize()` and print its final `last_segment` so buffered text is not lost. The function returns
-`None` after streaming the response.
+inside the prompt is context and does not stop generation; only a newly generated EOS does.
+
+Before the loop, bind one streaming detokenizer with `detokenizer = tokenizer.detokenizer`, then call
+`detokenizer.reset()` once. Keep and reuse that same stateful object throughout generation: feed every non-EOS output
+token to `detokenizer.add_token(...)` and print each `detokenizer.last_segment` as it becomes available. With the locked
+mlx-lm 0.31.3 dependency, each separate access to the `tokenizer.detokenizer` property creates a fresh streaming
+detokenizer, so repeatedly accessing the property would discard the buffered text. On either termination path, call
+`detokenizer.finalize()` on the saved object and print its final `last_segment` so buffered text is not lost. The
+function returns `None` after streaming the response.
 
 An example of the sequences provided to the `_step` function is as below:
 

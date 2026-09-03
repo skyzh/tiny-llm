@@ -3,6 +3,7 @@ from __future__ import annotations
 import mlx.core as mx
 import numpy as np
 import pytest
+from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from .tiny_llm_base import simple_generate
 
@@ -12,7 +13,7 @@ VOCAB_SIZE = 8
 
 
 class FakeDetokenizer:
-    def __init__(self):
+    def __init__(self, tokenizer=None):
         self.last_segment = ""
         self.pending = "stale"
 
@@ -33,12 +34,22 @@ class FakeTokenizer:
     def __init__(self, prompt_tokens: list[int]):
         self.prompt_tokens = prompt_tokens
         self.eos_token_id = EOS
-        self.detokenizer = FakeDetokenizer()
+
+    @property
+    def detokenizer(self):
+        return FakeDetokenizer()
 
     def encode(self, prompt: str, add_special_tokens: bool = True) -> list[int]:
         if add_special_tokens:
             return [6, *self.prompt_tokens]
         return list(self.prompt_tokens)
+
+
+class MinimalTokenizer(FakeTokenizer):
+    chat_template = None
+
+    def get_vocab(self) -> dict[str, int]:
+        return {}
 
 
 class ScriptedModel:
@@ -96,6 +107,35 @@ def test_task_1_max_tokens_bounds_non_eos_generation(capsys):
     simple_generate(model, tokenizer, "prompt", sampler=None, max_tokens=3)
 
     assert capsys.readouterr().out == "AAA"
+
+
+def test_task_1_caller_can_lower_max_tokens(capsys):
+    tokenizer = FakeTokenizer([5])
+    model = ScriptedModel([2, 2])
+
+    simple_generate(model, tokenizer, "prompt", sampler=None, max_tokens=1)
+
+    assert capsys.readouterr().out == "A"
+
+
+def test_task_1_default_max_tokens_is_256(capsys):
+    tokenizer = FakeTokenizer([5])
+    model = ScriptedModel([2] * 257)
+
+    simple_generate(model, tokenizer, "prompt", sampler=None)
+
+    assert capsys.readouterr().out == "A" * 256
+
+
+def test_task_1_real_tokenizer_wrapper_streams_nonempty_bounded_output(capsys):
+    tokenizer = TokenizerWrapper(
+        MinimalTokenizer([5]), detokenizer_class=FakeDetokenizer
+    )
+    model = ScriptedModel([2, 2])
+
+    simple_generate(model, tokenizer, "prompt", sampler=None, max_tokens=1)
+
+    assert capsys.readouterr().out == "A"
 
 
 def test_task_1_rejects_empty_encoding():
