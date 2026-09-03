@@ -42,6 +42,7 @@ def rope_helper(
                 offset=input_pos_mx or 0,
             ).transpose(0, 2, 1, 3)
             user_output = user_layer(x, input_pos_user)
+            assert user_output.dtype == x.dtype
             assert_allclose(
                 user_output,
                 reference_output,
