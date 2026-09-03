@@ -56,6 +56,8 @@ def scaled_dot_product_attention_grouped(
     scores = mx.matmul(query, key.swapaxes(-2, -1)) * factor
     if mask is not None:
         if mask == "causal":
+            if L > S:
+                raise ValueError("causal attention requires S >= L")
             mask = causal_mask(L, S, scores.dtype)
             scores = scores + mask
         else:
