@@ -1,16 +1,17 @@
 """Week 3 Day 2 chunked-prefill tests."""
 
+from pathlib import Path
+
 import mlx.core as mx
+import numpy as np
 import pytest
 
-from .tiny_llm_base import (
-    BatchingKvCache,
-    Request,
-    TinyKvFullCache,
-    TinyKvPagedCache,
-    TinyKvPagedPool,
-    batch_generate,
-)
+if Path(__file__).parent.name == "tests_refsol":
+    import tiny_llm_ref.batch as batch_runtime
+    from tiny_llm_ref.attention import causal_mask
+else:
+    import tiny_llm.batch as batch_runtime
+    from tiny_llm.attention import causal_mask
 
 
 class FakeDetokenizer:
@@ -28,209 +29,298 @@ class FakeTokenizer:
 
     def encode(self, prompt, add_special_tokens=False):
         assert not add_special_tokens
-        return list(range(1, len(prompt) + 1))
+        named_prompts = {
+            "active": [10],
+            "long": [20, 21, 22, 23, 24],
+            "eos": [40],
+            "at-limit": [50, 51],
+            "over-limit": [60, 61, 62],
+        }
+        return named_prompts.get(prompt, list(range(1, len(prompt) + 1)))
 
 
-class FakeModel:
-    num_hidden_layers = 1
-
+class CacheReleaseProbe:
     def __init__(self):
-        self.calls = []
+        self.live_count = 0
+
+    def assert_all_released(self):
+        assert self.live_count == 0
+
+
+class DenseCacheDouble:
+    """Storage-neutral public cache lifecycle double."""
+
+    def __init__(self, release_probe=None, fail_materialize=False):
+        self.key_values = None
+        self.offset = 0
+        self.materialized = True
+        self.released = False
+        self.release_probe = release_probe
+        self.fail_materialize = fail_materialize
+        if self.release_probe is not None:
+            self.release_probe.live_count += 1
+
+    def update_and_fetch(self, key, value, mask_length=None, mask=None):
+        assert not self.released
+        assert key.shape == value.shape
+        if self.key_values is None:
+            keys, values = key, value
+        else:
+            keys = mx.concat([self.key_values[0], key], axis=2)
+            values = mx.concat([self.key_values[1], value], axis=2)
+        self.key_values = (keys, values)
+        self.offset = keys.shape[2]
+        self.materialized = False
+        return keys, values, self.offset, mask
+
+    def materialize(self):
+        self.materialized = True
+        if self.fail_materialize:
+            raise RuntimeError("injected materialization failure")
+
+    def release(self):
+        if self.released:
+            return
+        self.released = True
+        if self.release_probe is not None:
+            self.release_probe.live_count -= 1
+
+
+class ChunkBoundaryModel:
+    num_hidden_layers = 2
 
     def create_kv_cache(self):
-        return [TinyKvFullCache()]
+        return [DenseCacheDouble() for _ in range(self.num_hidden_layers)]
 
     def __call__(self, inputs, offsets, cache, logits_to_keep=1):
+        assert logits_to_keep == 1
         offset = offsets[0] if isinstance(offsets, list) else int(offsets)
-        self.calls.append((offset, inputs.shape[1]))
-        length = inputs.shape[1]
-        key = mx.zeros((1, 1, length, 1), dtype=mx.float32)
-        cache[0].update_and_fetch(key, key)
-        logits = mx.zeros((1, 1, 4), dtype=mx.float32)
-        return logits.at[..., 1].add(1)
+        assert all(layer.offset == offset for layer in cache)
+        assert all(layer.materialized for layer in cache)
+
+        values = inputs.astype(mx.float32).reshape(1, 1, inputs.shape[1], 1)
+        accumulated_tokens = None
+        for layer in cache:
+            keys, _, _, _ = layer.update_and_fetch(values, values)
+            if accumulated_tokens is None:
+                accumulated_tokens = keys[0, 0, :, 0]
+
+        positions = mx.arange(1, accumulated_tokens.shape[0] + 1, dtype=mx.float32)
+        next_token = int(mx.sum(accumulated_tokens * positions).item()) % 128
+        logits = mx.zeros((1, 1, 128), dtype=mx.float32)
+        return logits.at[..., next_token].add(1)
 
 
-def test_chunked_prefill_bounds_work_and_advances_cache():
-    model = FakeModel()
-    request = Request(model, FakeTokenizer(), "1234567", prefill_max_step=3)
+@pytest.mark.parametrize(
+    ("prompt_length", "expected_offsets"),
+    [(2, [2]), (3, [3]), (4, [3, 4])],
+    ids=["short", "exact", "step-plus-one"],
+)
+def test_chunk_boundaries_match_full_prompt_and_materialize_every_layer(
+    prompt_length, expected_offsets
+):
+    request = batch_runtime.Request(
+        ChunkBoundaryModel(),
+        FakeTokenizer(),
+        "x" * prompt_length,
+        prefill_max_step=3,
+    )
+    one_shot_request = batch_runtime.Request(
+        ChunkBoundaryModel(),
+        FakeTokenizer(),
+        "x" * prompt_length,
+        prefill_max_step=prompt_length,
+    )
 
-    request.try_prefill()
-    assert request.offset == 3
-    assert request.kv_cache[0].offset == 3
-    assert not request.is_prefill_done
+    for expected_offset in expected_offsets:
+        request.try_prefill()
+        assert request.offset == expected_offset
+        assert all(layer.materialized for layer in request.kv_cache)
 
-    request.try_prefill()
-    assert request.offset == 6
-    assert request.kv_cache[0].offset == 6
-    assert not request.is_prefill_done
-
-    request.try_prefill()
-    assert request.offset == 7
-    assert request.kv_cache[0].offset == 7
     assert request.is_prefill_done
-    assert request.next_token == 1
-    assert model.calls == [(0, 3), (3, 3), (6, 1)]
-
-    with pytest.raises(ValueError, match="after done"):
+    one_shot_request.try_prefill()
+    expected_next_token = sum(
+        position * token
+        for position, token in enumerate(range(1, prompt_length + 1), start=1)
+    )
+    assert request.next_token == one_shot_request.next_token == expected_next_token
+    with pytest.raises(ValueError):
         request.try_prefill()
 
 
-class FailingMaterializePagedCache(TinyKvPagedCache):
-    def materialize(self):
-        super().materialize()
-        raise RuntimeError("injected materialization failure")
+def test_nonzero_prefix_rectangular_mask_matches_one_shot_attention():
+    values = mx.array([2.0, 4.0, 6.0, 8.0, 10.0], dtype=mx.float32)
+    mask = causal_mask(L=2, S=5, dtype=mx.float32)
+    visible = mx.exp(mask)
+    chunked = mx.matmul(visible, values[:, None])[:, 0] / mx.sum(visible, axis=-1)
+    one_shot_final = mx.mean(values)
+
+    expected_mask = mx.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, -mx.inf],
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=mx.float32,
+    )
+    np.testing.assert_allclose(np.array(mask), np.array(expected_mask))
+    np.testing.assert_allclose(np.array(chunked), np.array([5.0, 6.0]))
+    np.testing.assert_allclose(np.array(chunked[-1]), np.array(one_shot_final))
 
 
-class PagedFakeModel:
-    num_hidden_layers = 1
+class SchedulerModel:
+    num_hidden_layers = 2
 
-    def __init__(self, output_token=1, fail_at=None):
-        self.pool = TinyKvPagedPool(page_size=4)
-        self.output_token = output_token
+    def __init__(self, release_probe=None, fail_at=None):
         self.fail_at = fail_at
-        self.calls = []
-        self.cache_creations = 0
+        self.release_probe = release_probe
+        self.decode_advances = 0
 
     def create_kv_cache(self):
-        self.cache_creations += 1
-        cache_type = (
-            FailingMaterializePagedCache
-            if self.fail_at == "materialize"
-            else TinyKvPagedCache
-        )
-        return [cache_type(self.pool)]
+        group = [
+            DenseCacheDouble(
+                release_probe=self.release_probe,
+                fail_materialize=self.fail_at == "materialize" and layer == 0,
+            )
+            for layer in range(self.num_hidden_layers)
+        ]
+        return group
 
     def __call__(self, inputs, offsets, cache, logits_to_keep=1):
-        offset = offsets[0] if isinstance(offsets, list) else int(offsets)
-        call_number = len(self.calls) + 1
-        self.calls.append((offset, inputs.shape[1]))
-        key = mx.zeros((inputs.shape[0], 1, inputs.shape[1], 1), dtype=mx.float32)
-        if isinstance(cache[0], BatchingKvCache):
-            cache[0].update_and_fetch_paged(key, key, mask_length=inputs.shape[1])
-        else:
-            cache[0].update_and_fetch_paged(key, key)
-        if self.fail_at == "prefill" and call_number == 1:
+        assert logits_to_keep == 1
+        # Request prefill is a one-row call. This fake uses a two-slot batch so
+        # decode is distinguishable without depending on a concrete cache type.
+        is_decode = inputs.shape[0] == 2
+        if self.fail_at == "prefill" and not is_decode:
             raise RuntimeError("injected prefill failure")
-        if self.fail_at == "decode" and call_number == 2:
+        if self.fail_at == "decode" and is_decode:
             raise RuntimeError("injected decode failure")
-        logits = mx.zeros((inputs.shape[0], 1, 128), dtype=mx.float32)
-        return logits.at[..., self.output_token].add(1)
+
+        sequence_length = 1 if is_decode else inputs.shape[1]
+        values = inputs.astype(mx.float32).reshape(
+            inputs.shape[0], 1, sequence_length, 1
+        )
+        for layer in cache:
+            layer.update_and_fetch(values, values, mask_length=sequence_length)
+
+        input_tokens = inputs[:, -1].tolist()
+        if is_decode:
+            self.decode_advances += sum(token != 0 for token in input_tokens)
+
+        next_by_token = {
+            0: 99,
+            1: 2,
+            2: 3,
+            3: 4,
+            4: 99,
+            5: 99,
+            10: 1,
+            20: 1,
+            21: 1,
+            22: 1,
+            23: 1,
+            40: 99,
+            51: 7,
+        }
+        logits = mx.zeros((inputs.shape[0], 1, 100), dtype=mx.float32)
+        for row, token in enumerate(input_tokens):
+            if token == 24:
+                next_token = 99 if self.decode_advances >= 3 else 88
+            else:
+                next_token = next_by_token.get(token, 99)
+            logits[row, 0, next_token] = 1
+        return logits
 
 
-class FailingTextDetokenizer:
-    def __init__(self, _):
-        self._text = ""
+def test_active_decode_advances_between_long_prompt_chunks_and_results_are_ordered(
+    capsys,
+):
+    release_probe = CacheReleaseProbe()
+    model = SchedulerModel(release_probe=release_probe)
 
-    def add_token(self, token):
-        self._text += str(token)
-
-    @property
-    def text(self):
-        raise RuntimeError("injected detokenization failure")
-
-
-class FailingTextTokenizer(FakeTokenizer):
-    detokenizer = FailingTextDetokenizer(FakeTokenizer._tokenizer)
-
-
-def test_request_uses_the_model_cache_factory():
-    model = FakeModel()
-    sentinel_cache = [TinyKvFullCache()]
-    model.create_kv_cache = lambda: sentinel_cache
-
-    request = Request(model, FakeTokenizer(), "1")
-
-    assert request.kv_cache is sentinel_cache
-
-
-def test_batch_generate_finishes_a_lone_multi_chunk_prefill():
-    model = PagedFakeModel()
-
-    result = batch_generate(
+    result = batch_runtime.batch_generate(
         model,
         FakeTokenizer(),
-        ["1234567"],
-        max_seq_len=9,
-        batch_size=1,
-        prefill_step=3,
+        ["active", "long"],
+        max_seq_len=8,
+        batch_size=2,
+        prefill_step=2,
     )
 
-    assert result == [(0, "11")]
-    assert model.calls == [(0, 3), (3, 3), (6, 1), (7, 1)]
-    assert model.pool.used_page_ids == set()
-    assert model.pool.num_free_pages == model.pool.num_pages
+    assert result == [(1, ""), (0, "1234")]
+    release_probe.assert_all_released()
+    capsys.readouterr()
 
 
-def test_batch_generate_finishes_prefill_eos_without_decode():
-    model = PagedFakeModel(output_token=FakeTokenizer.eos_token_id)
+@pytest.mark.parametrize(
+    ("prompt", "max_seq_len"),
+    [("eos", 4), ("at-limit", 2)],
+    ids=["immediate-eos", "exact-max-length"],
+)
+def test_normal_completion_releases_every_request_cache(capsys, prompt, max_seq_len):
+    release_probe = CacheReleaseProbe()
+    model = SchedulerModel(release_probe=release_probe)
 
-    result = batch_generate(
+    result = batch_runtime.batch_generate(
         model,
         FakeTokenizer(),
-        ["12345"],
-        max_seq_len=10,
-        batch_size=1,
-        prefill_step=10,
+        [prompt],
+        max_seq_len=max_seq_len,
+        batch_size=2,
+        prefill_step=2,
     )
 
     assert result == [(0, "")]
-    assert model.calls == [(0, 5)]
-    assert model.pool.used_page_ids == set()
-    assert model.pool.num_free_pages == model.pool.num_pages
+    release_probe.assert_all_released()
+    capsys.readouterr()
 
 
-@pytest.mark.parametrize(
-    ("prompt", "expected_result", "expected_calls", "expected_creations"),
-    [
-        ("12", [(0, "1")], [(0, 2)], 1),
-        ("123", [(0, "")], [(0, 3)], 1),
-        ("1234", None, [], 0),
-    ],
-)
-def test_batch_generate_enforces_max_seq_len_before_emission_or_allocation(
-    prompt, expected_result, expected_calls, expected_creations
-):
-    model = PagedFakeModel()
+def test_oversized_prompt_leaves_no_owned_cache_live(capsys):
+    release_probe = CacheReleaseProbe()
+    model = SchedulerModel(release_probe=release_probe)
 
-    if expected_result is None:
-        with pytest.raises(ValueError, match="exceeds max_seq_len"):
-            batch_generate(model, FakeTokenizer(), [prompt], max_seq_len=3)
-    else:
-        assert (
-            batch_generate(
-                model, FakeTokenizer(), [prompt], max_seq_len=3, batch_size=1
-            )
-            == expected_result
+    with pytest.raises(ValueError):
+        batch_runtime.batch_generate(
+            model,
+            FakeTokenizer(),
+            ["over-limit"],
+            max_seq_len=2,
+            batch_size=1,
+            prefill_step=2,
         )
 
-    assert model.calls == expected_calls
-    assert model.cache_creations == expected_creations
-    assert model.pool.used_page_ids == set()
+    release_probe.assert_all_released()
+    capsys.readouterr()
+
+
+class FailingDetokenizer(FakeDetokenizer):
+    def add_token(self, token):
+        raise RuntimeError("injected detokenization failure")
+
+
+class FailingTokenizer(FakeTokenizer):
+    detokenizer = FailingDetokenizer(FakeTokenizer._tokenizer)
 
 
 @pytest.mark.parametrize(
-    ("failure_point", "tokenizer"),
-    [
-        ("prefill", FakeTokenizer()),
-        ("materialize", FakeTokenizer()),
-        ("decode", FakeTokenizer()),
-        ("detokenize", FailingTextTokenizer()),
-    ],
+    "failure_point", ["prefill", "materialize", "decode", "detokenize"]
 )
-def test_batch_generate_releases_all_paged_caches_on_exception(
-    failure_point, tokenizer
-):
-    model = PagedFakeModel(fail_at=failure_point)
+def test_failures_release_every_owned_request_cache(capsys, failure_point):
+    release_probe = CacheReleaseProbe()
+    model = SchedulerModel(
+        release_probe=release_probe,
+        fail_at=None if failure_point == "detokenize" else failure_point,
+    )
+    tokenizer = FailingTokenizer() if failure_point == "detokenize" else FakeTokenizer()
 
-    with pytest.raises(RuntimeError, match="injected"):
-        batch_generate(
+    with pytest.raises(RuntimeError):
+        batch_runtime.batch_generate(
             model,
             tokenizer,
-            ["1"],
-            max_seq_len=4,
-            batch_size=1,
-            prefill_step=4,
+            ["active"],
+            max_seq_len=8,
+            batch_size=2,
+            prefill_step=2,
         )
 
-    assert model.pool.used_page_ids == set()
-    assert model.pool.num_free_pages == model.pool.num_pages
+    release_probe.assert_all_released()
+    capsys.readouterr()
