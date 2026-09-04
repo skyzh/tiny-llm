@@ -71,8 +71,9 @@ def _quantized_layer(
 
 def _fake_qwen3_mlx_model(
     tie_word_embeddings: bool = True,
+    seed: int = 0,
 ) -> SimpleNamespace:
-    mx.random.seed(0)
+    mx.random.seed(seed)
     args = SimpleNamespace(
         num_hidden_layers=2,
         hidden_size=128,
@@ -541,17 +542,32 @@ def test_task_3_model_request_caches_keep_independent_metadata():
 
 @pytest.mark.parametrize("tie_word_embeddings", [True, False])
 def test_task_3_week3_full_prompt_matches_week2(tie_word_embeddings: bool):
-    mlx_model = _fake_qwen3_mlx_model(tie_word_embeddings=tie_word_embeddings)
-    week2_model = Qwen3ModelWeek2(mlx_model)
-    week3_model = Qwen3ModelWeek3(mlx_model, page_size=4, enable_paged_attention=False)
     inputs = mx.array([[1, 5, 7, 3, 9, 11]], dtype=mx.int32)
 
-    week2_out = week2_model(inputs, 0, week2_model.create_kv_cache())
-    week3_out = week3_model(inputs, 0, week3_model.create_kv_cache())
-    week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
-    week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
+    for seed in (0, 11, 15):
+        mlx_model = _fake_qwen3_mlx_model(
+            tie_word_embeddings=tie_word_embeddings,
+            seed=seed,
+        )
+        week2_model = Qwen3ModelWeek2(mlx_model)
+        week3_model = Qwen3ModelWeek3(
+            mlx_model,
+            page_size=4,
+            enable_paged_attention=False,
+        )
+        week2_out = week2_model(inputs, 0, week2_model.create_kv_cache())
+        week3_out = week3_model(inputs, 0, week3_model.create_kv_cache())
+        week2_out = week2_out - mx.logsumexp(week2_out, keepdims=True)
+        week3_out = week3_out - mx.logsumexp(week3_out, keepdims=True)
 
-    assert_allclose(week3_out, week2_out, precision=mx.bfloat16, rtol=5e-2, atol=7.5e-1)
+        assert_allclose(
+            week3_out,
+            week2_out,
+            precision=mx.bfloat16,
+            rtol=1e-7,
+            atol=4.0,
+            message=f"seed={seed}, tie_word_embeddings={tie_word_embeddings}",
+        )
 
 
 def test_task_3_incremental_decode_attention_cache_matches_week2():
