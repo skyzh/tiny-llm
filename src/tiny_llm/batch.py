@@ -39,11 +39,14 @@ class Request:
 
     def try_prefill(self):
         """
-        Prefill this request up to max_step size, returns None if prefill is not done
+        Prefill this request's complete remaining prompt on Day 1.
+
+        Week 3 Day 2 Task 1 makes ``prefill_max_step`` an active per-iteration
+        budget and introduces chunked prefill.
         """
         if self.is_prefill_done:
             raise ValueError("prefill called after done")
-        # TODO: in task 4, prefill the full request at once; in task 5, prefill a chunk at a time
+        # TODO: in Day 1 Task 4, prefill the complete remaining prompt at once.
 
     def decode_done(self, token, update_offset=True):
         if self.is_done:

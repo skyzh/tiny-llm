@@ -65,7 +65,7 @@ mask whose query and source lengths may differ. Verify those two Week 2
 interfaces before adding the scheduler so the serving layer can use one model
 contract for every request position.
 
-Verify multi-offset RoPE and both attention paths with:
+Verify multi-offset RoPE and the rectangular causal mask with:
 
 ```bash
 pdm run test --week 3 --day 1 -- -k task_1
@@ -147,12 +147,21 @@ src/tiny_llm/batch.py
 ```
 
 First implement `Request.try_prefill` by prefilling the complete prompt in one
-call. Then complete the scheduler in `batch_generate`: move finished prefills
-into idle decode slots, collect the next token and offset for each slot, and
-remove requests that reach EOS or `max_seq_len`.
+call. The visible `prefill_max_step` input is reserved for Day 2; on Day 1, give
+this call a budget that covers the complete remaining prompt. Then complete the
+scheduler in `batch_generate`: move finished prefills into idle decode slots,
+collect the next token and offset for each slot, and remove requests that reach
+EOS or `max_seq_len`. A prompt longer than `max_seq_len` must fail before model
+or cache work, and a generated token that would cross the limit is not emitted.
+
+Results are returned in **completion order**, because short requests can leave
+the batch before earlier long requests. Each result's `prompt_idx` maps it back
+to the original input position; do not reorder completed results into input
+order.
 
 Use the supplied scheduler checkpoint for full prefill, admission and slot
-reuse, EOS/removal, and ordered results:
+reuse, immediate EOS, maximum-length termination, completion-order results,
+and their original `prompt_idx` values:
 
 ```bash
 pdm run test --week 3 --day 1 -- -k task_4
