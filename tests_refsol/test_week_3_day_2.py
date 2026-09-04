@@ -99,10 +99,14 @@ class ChunkBoundaryModel:
         assert all(layer.materialized for layer in cache)
 
         values = inputs.astype(mx.float32).reshape(1, 1, inputs.shape[1], 1)
+        accumulated_tokens = None
         for layer in cache:
-            layer.update_and_fetch(values, values)
+            keys, _, _, _ = layer.update_and_fetch(values, values)
+            if accumulated_tokens is None:
+                accumulated_tokens = keys[0, 0, :, 0]
 
-        next_token = int(inputs[0, -1].item()) + 1
+        positions = mx.arange(1, accumulated_tokens.shape[0] + 1, dtype=mx.float32)
+        next_token = int(mx.sum(accumulated_tokens * positions).item()) % 128
         logits = mx.zeros((1, 1, 128), dtype=mx.float32)
         return logits.at[..., next_token].add(1)
 
@@ -112,7 +116,7 @@ class ChunkBoundaryModel:
     [(2, [2]), (3, [3]), (4, [3, 4])],
     ids=["short", "exact", "step-plus-one"],
 )
-def test_chunk_boundaries_use_absolute_offsets_and_materialize_every_layer(
+def test_chunk_boundaries_match_full_prompt_and_materialize_every_layer(
     prompt_length, expected_offsets
 ):
     request = batch_runtime.Request(
@@ -121,6 +125,12 @@ def test_chunk_boundaries_use_absolute_offsets_and_materialize_every_layer(
         "x" * prompt_length,
         prefill_max_step=3,
     )
+    one_shot_request = batch_runtime.Request(
+        ChunkBoundaryModel(),
+        FakeTokenizer(),
+        "x" * prompt_length,
+        prefill_max_step=prompt_length,
+    )
 
     for expected_offset in expected_offsets:
         request.try_prefill()
@@ -128,7 +138,12 @@ def test_chunk_boundaries_use_absolute_offsets_and_materialize_every_layer(
         assert all(layer.materialized for layer in request.kv_cache)
 
     assert request.is_prefill_done
-    assert request.next_token == prompt_length + 1
+    one_shot_request.try_prefill()
+    expected_next_token = sum(
+        position * token
+        for position, token in enumerate(range(1, prompt_length + 1), start=1)
+    )
+    assert request.next_token == one_shot_request.next_token == expected_next_token
     with pytest.raises(ValueError):
         request.try_prefill()
 
