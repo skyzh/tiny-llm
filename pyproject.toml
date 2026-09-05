@@ -3,7 +3,7 @@ requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 
 [project]
-name = "tiny-llm"
+name = "tiny-llm-course"
 version = "0.1.0"
 requires-python = ">=3.10, <3.13"
 readme = "README.md"
