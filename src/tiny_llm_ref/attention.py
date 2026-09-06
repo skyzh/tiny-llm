@@ -79,10 +79,12 @@ def paged_attention(
     mask: mx.array | str | None = None,
 ) -> mx.array:
     """
-    Paged attention backed by the C++/Metal extension.
+    Paged attention backed by correctness-first C++/Metal kernels.
 
     The Python wrapper keeps the model-facing shape as [B, H_q, L, D], while
     the extension sees flattened query heads and contiguous page storage.
+    Week 3 Day 4 handles both float32 and BF16 long prefill; Day 5 can replace
+    that internal schedule without changing this public boundary.
     """
     if isinstance(mask, mx.array):
         raise NotImplementedError("Paged attention only supports mask=None or causal")

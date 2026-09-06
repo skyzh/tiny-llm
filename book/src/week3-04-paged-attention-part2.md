@@ -150,7 +150,7 @@ your hardware:
 | Shape | Dispatch in your solution | Work decomposition |
 |---|---|---|
 | `L <= 8` | Vector paged decode | One threadgroup per query row; 32 SIMD groups stride over the context and merge partial `(max, sum, output)` states. |
-| `L > 8` | Direct paged prefill | Walk logical K/V tiles through the block table and keep the schedule deliberately inspectable. Day 5 optimizes it. |
+| `L > 8` | Direct paged prefill for float32 and BF16 | Walk logical K/V tiles through the block table and keep the schedule deliberately inspectable. Day 5 optimizes the BF16 schedule. |
 
 Put the shape decision at the extension boundary rather than converting inputs
 or falling back to dense attention in Python. Benchmark values immediately
@@ -298,7 +298,8 @@ Modify these exact starter functions:
 - `paged_attention` in `src/tiny_llm/attention.py`;
 - `tiny_llm_ext::paged_attention`, `PagedAttention::eval_cpu`, and
   `PagedAttention::eval_gpu` in `src/extensions/src/paged_attention.cpp`;
-- `paged_attention_decode` and `paged_attention_scalar_f32` in
+- `paged_attention_decode`, `paged_attention_scalar_f32`, and
+  `paged_attention_scalar_bf16` in
   `src/extensions/src/paged_attention.metal`.
 
 This checkpoint also turns the already-readable quantized token lookup into
@@ -337,12 +338,29 @@ Implement two correctness-first GPU dispatches:
 2. For longer queries, assign query rows to a direct page-walking schedule and
    resolve every K/V tile through `block_table`. When a tile is aligned and
    cannot cross a page boundary, share its one physical page id across the
-   whole tile. Favor inspectable ownership over the final tiled performance
+   whole tile. Implement this direct schedule for both float32 and BF16, using
+   float accumulators for BF16's dot products, online-softmax state, and output
+   accumulation. Favor inspectable ownership over the final tiled performance
    schedule.
 
 Compare small deterministic fixtures with the readable equation written with
 `mlx.core` and the dense Week 2 attention path before tuning the page-walking
 schedule.
+
+Rebuild the extension, then use the BF16 long-prefill checkpoint as the first
+feedback loop for this task:
+
+```bash
+pdm run build-ext
+pdm run test --week 3 --day 4 -- -k task_2_bfloat16_long_prefill
+```
+
+The focused checkpoint constructs valid page metadata directly. It checks a
+nine-token prefill and a longer multi-page prefill with noncontiguous physical
+pages, poisoned unused tail slots, and causal prefix masking. It does not
+require the quantized embedding, model dispatch, continuous batching, or the
+Day 5 kernel. Kernel names and implementation structure are not part of the
+test contract; only the public numerical, metadata, and dtype behavior is.
 
 For the final Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
 four contiguous dimensions of Q, K, V, and the output. After all context
@@ -352,6 +370,12 @@ with `simd_sum`. This organizes the reduction in 4.25 KiB of scratch instead
 of storing one full partial vector per scalar output thread. Keep a generic
 BF16 specialization for other head dimensions so the optimization cannot
 silently reinterpret `D = 32` as `D = 128`.
+
+Keep the correctness-first BF16 prefill separate from the Day 5
+`paged_attention_mma_bf16_d128` optimization. Day 4 must work without that
+future tiled/cooperative/MMA kernel; Day 5 may replace only the internal BF16
+long-query dispatch while preserving the same public API and page-table
+semantics.
 
 ### Your solution's boundary
 

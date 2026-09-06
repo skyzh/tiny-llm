@@ -493,13 +493,14 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
     }
 }
 
-[[kernel]] void paged_attention_scalar_f32(
-    device const float* q [[buffer(0)]],
-    device const float* key_pages [[buffer(1)]],
-    device const float* value_pages [[buffer(2)]],
+template <typename T>
+[[kernel]] void paged_attention_scalar(
+    device const T* q [[buffer(0)]],
+    device const T* key_pages [[buffer(1)]],
+    device const T* value_pages [[buffer(2)]],
     device const int* block_table [[buffer(3)]],
     device const int* context_lens [[buffer(4)]],
-    device float* out [[buffer(5)]],
+    device T* out [[buffer(5)]],
     constant const int& N [[buffer(6)]],
     constant const int& L [[buffer(7)]],
     constant const int& D [[buffer(8)]],
@@ -654,9 +655,12 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
             const int dim = lane + output_idx * BK;
             if (dim < D) {
                 out[n * L * D + query_row * D + dim] = running_sum == 0.0f
-                    ? 0.0f
-                    : output_fragment[output_idx] / running_sum;
+                    ? T(0.0f)
+                    : T(output_fragment[output_idx] / running_sum);
             }
         }
     }
 }
+
+instantiate_kernel("paged_attention_scalar_f32", paged_attention_scalar, float);
+instantiate_kernel("paged_attention_scalar_bf16", paged_attention_scalar, bfloat16_t);

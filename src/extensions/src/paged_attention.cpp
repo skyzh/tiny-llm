@@ -26,7 +26,9 @@ void PagedCacheUpdate::eval_gpu(const std::vector<mx::array> &, std::vector<mx::
     checkpoint_todo("PagedCacheUpdate::eval_gpu", "Week 3, Day 3");
 }
 
-// Week 3, Day 4. Day 5 replaces the long-query schedule behind this API.
+// Week 3, Day 4 owns short decode plus correctness-first float32 and BF16
+// long prefill. Day 5 replaces only the BF16 long-query schedule behind this
+// stable API.
 mx::array paged_attention(const mx::array &, const mx::array &, const mx::array &, const mx::array &, const mx::array &,
                           float, bool, int, int, mx::StreamOrDevice) {
     checkpoint_todo("paged_attention", "Week 3, Day 4");

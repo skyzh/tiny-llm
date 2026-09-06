@@ -58,4 +58,9 @@ def paged_attention(
     scale: float | None = None,
     mask: mx.array | str | None = None,
 ) -> mx.array:
+    """Attend to paged K/V storage without reconstructing a dense cache.
+
+    Week 3 Day 4 owns the correctness-first decode and long-prefill paths for
+    both float32 and BF16. Day 5 optimizes the same public boundary.
+    """
     pass

@@ -7,6 +7,7 @@ using namespace metal;
 // Week 3, Day 4:
 //   paged_attention_decode
 //   paged_attention_scalar_f32
+//   paged_attention_scalar_bf16
 // Week 3, Day 5:
 //   paged_attention_mma_bf16_d128
 //

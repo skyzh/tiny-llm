@@ -187,28 +187,8 @@ void PagedAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<
         return;
     }
 
-    if (q.dtype() == mx::bfloat16) {
-        if (D != 128) {
-            throw std::runtime_error("paged_attention: bfloat16 prefill requires head dimension 128");
-        }
-        auto kernel = d.get_kernel("paged_attention_mma_bf16_d128", library);
-        compute_encoder.set_compute_pipeline_state(kernel);
-        bind_arrays();
-        compute_encoder.set_bytes(N, 6);
-        compute_encoder.set_bytes(L, 7);
-        compute_encoder.set_bytes(page_size, 8);
-        compute_encoder.set_bytes(max_pages, 9);
-        compute_encoder.set_bytes(is_causal, 10);
-        compute_encoder.set_bytes(num_kv_heads_, 11);
-        compute_encoder.set_bytes(num_heads_, 12);
-        compute_encoder.set_bytes(scale_, 13);
-        const int batch_size = N / num_heads_;
-        const int query_blocks = (L + 63) / 64;
-        compute_encoder.dispatch_threadgroups(MTL::Size(query_blocks, num_heads_, batch_size), MTL::Size(32, 8, 1));
-        return;
-    }
-
-    auto kernel = d.get_kernel("paged_attention_scalar_f32", library);
+    const char *kernel_name = q.dtype() == mx::bfloat16 ? "paged_attention_scalar_bf16" : "paged_attention_scalar_f32";
+    auto kernel = d.get_kernel(kernel_name, library);
     compute_encoder.set_compute_pipeline_state(kernel);
     bind_arrays();
     compute_encoder.set_bytes(N, 6);
