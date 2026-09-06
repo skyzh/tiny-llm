@@ -175,14 +175,11 @@ this mutation boundary is explicit and safe as long as the cache owns its page
 and attention depends on the returned array. Full-buffer copies remain only
 when geometric capacity grows.
 
-Complete every learner-extension integration point before rebuilding:
-
-- create `src/extensions/src/paged_attention.cpp` for the primitive and
-  `src/extensions/src/paged_attention.metal` for its kernel,
-- register those C++ and Metal sources in their respective lists in
-  `src/extensions/CMakeLists.txt`,
-- declare `paged_cache_update` in `src/extensions/src/tiny_llm_ext.h`, and
-- register its Python binding in `src/extensions/bindings.cpp`.
+The learner extension already contains the C++ and Metal source files, CMake
+entries, header declaration, and Python binding. Replace the
+`paged_cache_update` stubs in `src/extensions/src/paged_attention.cpp` and
+`src/extensions/src/paged_attention.metal`; do not create or register a second
+primitive.
 
 Then rebuild:
 
@@ -389,7 +386,7 @@ pdm run main --solution tiny_llm --loader week3 \
   --disable-paged-attention --model qwen3-0.6b
 
 pdm run bench --solution tiny_llm --loader week3 \
-  --disable-paged-attention --model qwen3-0.6b
+  --disable-paged-attention --batch-decode --model qwen3-0.6b
 ```
 
 In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
