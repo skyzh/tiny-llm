@@ -2,9 +2,12 @@
 
 > 🚧 This chapter is under review and may change.
 
-In this chapter, we will build **direct paged attention**. The scheduler passes
-request-local block tables and context lengths to a GPU kernel, which reads K/V
-from the shared layer pool without gathering a dense batch first.
+In this chapter, you will make **direct paged attention** handle long prefill in
+both float32 and BF16 with a correctness-first page-walking kernel. The scheduler
+passes request-local block tables and context lengths to the kernel, which reads
+K/V from the shared layer pool without gathering a dense batch first. Day 5
+keeps this behavior but optimizes the BF16 path with tiled, cooperative, and MMA
+work.
 
 > **Prerequisite:** Complete Week 3 Day 3's paged storage and Week 2 Day 5's
 > online-softmax attention. The new concept here is translating logical K/V
