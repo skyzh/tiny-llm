@@ -2,7 +2,7 @@
 
 > 🚧 This chapter is under review and may change.
 
-In this chapter, you will replace the slower, correctness-first implementation
+In this chapter, you will replace the correctness-first implementation
 for the supported BF16 long-prefill hot case with paged FlashAttention. The
 operator still translates logical K/V positions through `block_table`, but it
 now stages page-backed tiles on chip and combines them with online softmax.
@@ -192,7 +192,7 @@ pdm run test --week 3 --day 5
 If this command is green before you begin Day 5, you have confirmed that Day
 4's correctness boundary is intact. Continue with the optimized implementation
 and use the trace below to confirm that the supported hot case no longer takes
-the slower fallback.
+the scalar fallback.
 
 ## Task 4: Integrate and Measure
 
@@ -280,7 +280,7 @@ samples are in
 > part of automated grading.
 >
 > ```text
-> Trace the actual control flow for Week 3 long-prefill paged attention in this repository. Start at the Python model call, follow native dispatch into Metal, and determine whether BF16 queries with L > 8 and D == 128 reach the intended FlashAttention implementation. Verify that short decode and unsupported or generic shapes retain correct fallback behavior. Cite file and line evidence, flag dead or unreachable kernels, judge the control flow rather than function or kernel names, and report findings only—do not modify files.
+> Trace the actual control flow for Week 3 long-prefill paged attention. First determine whether the implementation stays in this repository or crosses into an external low-level library. For a repository implementation, start at the Python model call and follow native dispatch into Metal. For an external implementation, trace from the Python model call to the library boundary and record equivalent boundary evidence, including the call site, arguments, and selected backend. Determine whether BF16 queries with L > 8 and D == 128 reach the learner's optimized tiled or FlashAttention-equivalent implementation rather than the correctness fallback. Verify that short decode and unsupported or generic shapes retain correct fallback behavior. Cite file and line evidence for repository code and equivalent boundary evidence for external code, flag dead or unreachable paths, judge control flow rather than function or kernel names, and report findings only—do not modify files.
 > ```
 
 {{#include copyright.md}}
