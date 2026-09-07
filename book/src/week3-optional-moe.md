@@ -204,7 +204,7 @@ out:         ..., output_dim
 Each row uses the expert selected by the matching row in `expert_ids`:
 
 ```plain
-out[row] = a[row] @ dequantize(w_experts[expert_ids[row]]).T
+out[row] = x[row] @ dequantize(w_experts[expert_ids[row]]).T
 ```
 
 One direct implementation is:
@@ -273,8 +273,9 @@ src/tiny_llm/models.py
 ```
 
 Modify `is_qwen3_moe_sparse_layer` and `Qwen3ModelWeek3.__init__` in
-`src/tiny_llm/qwen3_week3.py`, plus `dispatch_model` in
-`src/tiny_llm/models.py`.
+`src/tiny_llm/qwen3_week3.py`. The existing `dispatch_model` public path in
+`src/tiny_llm/models.py` already recognizes the Qwen3-MoE alias; exercise that
+path in the checkpoint rather than modifying it.
 
 Add a Qwen3-MoE loader path that reuses the Week 3 Qwen3 attention and paged KV
 cache behavior, but swaps selected block MLPs for `Moe`.

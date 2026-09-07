@@ -135,7 +135,6 @@ DOC_TASK_MARKERS = {
         "Task 4": {
             "is_qwen3_moe_sparse_layer",
             "Qwen3ModelWeek3.__init__",
-            "dispatch_model",
         },
     },
 }
