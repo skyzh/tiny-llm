@@ -1,4 +1,4 @@
-# 🚧 Week 3 Optional Extension: Mixture of Experts
+# 🚧 Week 3 Day 6 (Optional): Mixture of Experts
 
 > 🚧 This chapter is under review and may change.
 In this chapter, we will implement the feed-forward shape of **Mixture of
@@ -7,6 +7,17 @@ Experts**, or **MoE**, for the Qwen3 family.
 This extension is optional. It changes the model's feed-forward layers but not
 the scheduler, paged cache, or attention contract, so students can complete the
 Week 3 serving engine without it.
+
+Start from the learner checkpoint and keep it running as you complete each task:
+
+```bash
+pdm run test --week 3 --day 6
+```
+
+The focused suite uses small generated weights. It checks the expert mapping,
+router, sparse block, and a complete mixed dense/sparse model without downloading
+a model. The 30B commands at the end are optional product smokes after this loop
+is green.
 
 So far, every transformer block in tiny-llm has used the same dense Qwen3 MLP:
 
@@ -94,13 +105,13 @@ The useful pieces are:
 There is no shared expert in the Qwen3-MoE block we are following. The sparse
 feed-forward output is just the weighted top-k expert mixture.
 
-## Grouped Quantized Matmul
+## Grouped Expert Linear
 
 MLX does not give us a single high-level MoE block in `mlx.nn`. It does have a
 lower-level primitive, `mx.gather_qmm`, that performs quantized matrix
-multiplication while selecting a different matrix for each row. In this chapter,
-we will build a narrow teaching version of that idea:
-`grouped_quantized_matmul`.
+multiplication while selecting a different matrix for each row. Use that
+primitive, an equivalent low-level library operation, or your own grouped kernel
+to implement the public `grouped_expert_linear` relation.
 
 For MoE, that means:
 
@@ -113,9 +124,10 @@ output:      N, O
 
 The row with `expert_ids[i] = e` should multiply by `weights[e]`.
 
-Task 1 will assume the rows are already sorted by expert id. The MoE helper will
-keep the inverse order from the sort so the result can be restored to the
-original token order.
+The helper may sort rows by expert id for locality, but it must restore the
+original token/expert order before returning. The supplied test observes that
+mapping and the numerical result; it does not grade the library, kernel, or
+sorting strategy you choose.
 
 ## Router Step
 
@@ -155,7 +167,7 @@ expert(x) = down_proj(SiLU(gate_proj(x)) * up_proj(x))
 ```
 
 The implementation should build token-expert jobs, group them by expert, and run
-the expert projections with `grouped_quantized_matmul`:
+the expert projections with `grouped_expert_linear`:
 
 ```plain
 selected expert ids -> expanded token-expert rows
@@ -169,41 +181,24 @@ The reorder is part of the model implementation. It keeps all token rows for the
 same expert contiguous so the expert bank can be applied with grouped matrix
 multiplication.
 
-## Task 1: Grouped Quantized Matmul
+## Task 1: Grouped Expert Linear
 
 ```
-src/extensions/src/quantized_matmul.cpp
-src/extensions/src/quantized_matmul.metal
-src/tiny_llm/quantize.py
 src/tiny_llm/moe.py
 ```
 
-Implement `grouped_quantized_matmul`, then use it from `grouped_expert_linear`.
-This is the quantized grouped-matmul core of MoE.
-
-This optional interface is **intentionally not predeclared** in
-`src/extensions/src/tiny_llm_ext.h`, the bindings, or the core CMake target.
-The required Week 2/3 interfaces are scaffolded from setup, but this optional
-chapter is a staged reveal: if you choose the extension variant, add the new
-`tiny_llm_ext::grouped_quantized_matmul` declaration, binding, C++ source
-function, `grouped_quantized_matmul` Metal kernel, and build registration here.
-Then modify the existing `grouped_expert_linear` function in
-`src/tiny_llm/moe.py` to call it. Keeping it out of the core starter prevents
-an optional future interface from appearing to be required by earlier
-checkpoints.
-
-`grouped_quantized_matmul` accepts:
+Implement `grouped_expert_linear`. It accepts:
 
 ```plain
-a:           R, D
+x:           ..., D
 w_experts:   packed QuantizedWeights for num_experts, output_dim, D
-expert_ids:  R, sorted by expert id
+expert_ids:  ...
 ```
 
 It returns:
 
 ```plain
-out:         R, output_dim
+out:         ..., output_dim
 ```
 
 Each row uses the expert selected by the matching row in `expert_ids`:
@@ -212,42 +207,20 @@ Each row uses the expert selected by the matching row in `expert_ids`:
 out[row] = a[row] @ dequantize(w_experts[expert_ids[row]]).T
 ```
 
-The implementation should:
+One direct implementation is:
 
 ```plain
-1. add a Python wrapper for grouped_quantized_matmul,
-2. extend the quantized matmul extension with a grouped entrypoint,
-3. read expert_ids[row] inside the kernel,
-4. use that expert id to choose the expert weight, scale, and bias row.
-```
-
-After that, implement `grouped_expert_linear` in `src/tiny_llm/moe.py`:
-
-```plain
-1. flatten token rows and expert ids,
-2. sort rows by expert id,
-3. call grouped_quantized_matmul,
-4. restore the original order.
-```
-
-The call should look like:
-
-```python
-out = grouped_quantized_matmul(
-    w_experts.scales,
-    w_experts.biases,
-    group_size=w_experts.group_size,
-    bits=w_experts.bits,
-    a=grouped_rows,
-    b=w_experts.weight,
-    expert_ids=grouped_expert_ids,
-    transpose_b=True,
-)
+1. flatten the leading token/expert dimensions,
+2. sort rows by expert id and retain the inverse order,
+3. call mx.gather_qmm with the matching expert ids,
+4. restore the original order and shape.
 ```
 
 This task maps to the same idea as `QuantizedSwitchLinear` in `mlx-lm`: each
 token row uses a different packed expert matrix, and the expert ids choose the
-right matrix.
+right matrix. If you want a deeper systems exercise, you may instead add a
+repository-native grouped C++/Metal operation, binding, and build registration.
+That native kernel is an optional stretch goal, not part of the Day 6 checkpoint.
 
 ## Task 2: Router Top-k
 
@@ -322,14 +295,15 @@ logits = model(tokens, offset, cache)
 
 No scheduler API change in `src/tiny_llm/batch.py` is required for correctness.
 
-Run the focused tests with:
+The focused command from the chapter opening validates this task without a model
+download. Its final case constructs a two-layer quantized fixture containing one
+dense `mlp_only_layers` layer and one sparse layer, dispatches it through the
+public model alias, runs it with a real KV cache, and compares normalized logits
+with MLX.
 
-```bash
-pdm run test --week 3 --day 6
-```
-
-Run this task through the normal generation entrypoints instead of adding a
-separate serving entrypoint. For example:
+After that passes, you may smoke-test the same public path through the normal
+generation entrypoints. This optional check downloads a large model and is not
+required for checkpoint feedback:
 
 ```bash
 hf download Qwen/Qwen3-30B-A3B-MLX-4bit

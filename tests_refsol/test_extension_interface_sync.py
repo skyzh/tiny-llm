@@ -129,7 +129,7 @@ DOC_TASK_MARKERS = {
         "Task 4": {"Qwen3MultiHeadAttention.__call__", "PagedAttention::eval_gpu"},
     },
     "book/src/week3-optional-moe.md": {
-        "Task 1": {"tiny_llm_ext::grouped_quantized_matmul", "grouped_expert_linear"},
+        "Task 1": {"grouped_expert_linear"},
         "Task 2": {"route_topk"},
         "Task 3": {"Moe.__init__", "Moe.__call__"},
         "Task 4": {
@@ -528,10 +528,7 @@ def test_each_extension_task_names_the_exact_starter_functions_to_modify():
             _assert_task_pairs(chapter, task, pairs)
 
 
-def test_optional_grouped_moe_interface_remains_a_staged_reveal():
-    reference_header = _read("src/extensions_ref/src/tiny_llm_ext.h")
-    optional_chapter = _read("book/src/week3-optional-moe.md")
-
+def test_optional_future_interfaces_do_not_leak_into_earlier_checkpoints():
     starter_surfaces = [
         "src/extensions/src/tiny_llm_ext.h",
         "src/extensions/bindings.cpp",
@@ -554,10 +551,6 @@ def test_optional_grouped_moe_interface_remains_a_staged_reveal():
         source = _read(path)
         for symbol in withheld_symbols:
             assert symbol not in source, f"{symbol} leaked into {path}"
-
-    assert "grouped_quantized_matmul" not in reference_header
-    assert "intentionally not predeclared" in optional_chapter
-    assert "`grouped_quantized_matmul` Metal kernel" in optional_chapter
 
 
 def test_cpp_fail_closed_guard_rejects_a_fake_success_body():

@@ -24,8 +24,8 @@ than carrying the teaching kernel's projection cost through every benchmark.
 - Chunked prefill and scheduler fairness
 - Paged KV storage and page-walking attention
 - Paged FlashAttention for long prefill
-- Optional speculative decoding over rewindable caches
-- Optional Mixture-of-Experts model support
+- Optional Day 6 Mixture-of-Experts model support
+- Optional Day 7 speculative decoding over rewindable caches
 
 Day 1 introduces that projection seam and batches independent request states. Day 2
 splits long prefills so they cannot monopolize the scheduler. Day 3 replaces a
@@ -50,9 +50,9 @@ focused measurement, while the
 [performance appendix](./appendix-performance.md) records the matched
 chapter-by-chapter results.
 
-Speculative decoding follows the paged-attention chapters because rejection
-needs a precise cache rewind operation, and multi-token verification needs the
-page-aware long-query path. MoE is independent of the cache and scheduler, so
-it remains an optional model extension and is not required to complete Week 3.
+Optional Day 6 adds MoE model support independently of the cache and scheduler.
+Optional Day 7 then adds speculative decoding, whose rejection path needs a
+precise cache rewind operation and whose multi-token verification needs the
+page-aware long-query path. Neither extension is required to complete Week 3.
 
 {{#include copyright.md}}
