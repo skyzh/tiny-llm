@@ -2,11 +2,19 @@
 
 > 🚧 This chapter is under review and may change.
 
-In this chapter, we will tile page-aware attention for multi-token queries.
-The operator translates logical K/V positions through `block_table`, stages
-page-backed tiles on chip, and combines them with online softmax. Short queries
-continue to use the vector decode schedule from Day 4; long prefill chunks use
-the tiled schedule developed here.
+In this chapter, you will replace the slower, correctness-first implementation
+for the supported BF16 long-prefill hot case with paged FlashAttention. The
+operator still translates logical K/V positions through `block_table`, but it
+now stages page-backed tiles on chip and combines them with online softmax.
+Short decode and shapes outside the optimized region keep their correct Day 4
+fallbacks.
+
+Day 5 starts differently from an ordinary correctness checkpoint: the public
+behavior tests may already pass with your Day 4 implementation. That is
+intentional. Your work is to make the optimized path real and reachable while
+preserving the same observable behavior. The manual control-flow trace at the
+end of the chapter is the completion feedback for that performance change; it
+is guidance, not a hidden grading requirement.
 
 This is a required chapter. FlashAttention belongs here rather than in Week 2
 because the serving model's real K/V source is now the page pool. Building a
@@ -38,8 +46,8 @@ that intermediate too large. Paged FlashAttention does both:
 2. it keeps only a query tile, one K/V tile, and online-softmax state on chip;
 3. it writes the normalized output once after all visible pages are consumed.
 
-The algorithm is still exact attention. Only the order of loads and reductions
-changes.
+The algorithm remains numerically equivalent attention under the course's BF16
+rounding tolerance. Only the order of loads and reductions changes.
 
 ## Keep the Day 4 Interface
 
@@ -58,22 +66,27 @@ paged_attention(
 )
 ```
 
-Put the shape dispatch inside the extension:
+The reference solution puts this shape dispatch inside the extension:
 
 | Query shape | Schedule |
 |---|---|
 | `L <= 8` | Keep the Day 4 vector paged-decode kernel. |
 | `L > 8`, BF16, `D == 128` | Use the tiled paged FlashAttention kernel. |
+| Every other supported shape | Keep a correct direct page-walking fallback. |
 
-The completed Week 3 model therefore has one paged-attention contract and two
-workload-specific GPU schedules.
+The completed Week 3 model therefore has one paged-attention contract and an
+optimized BF16 long-prefill region. The public tests do not grade a kernel
+name, dispatch threshold, tile shape, private route flag, helper, or source
+layout. A behaviorally equivalent implementation, including one built with an
+external low-level library, is valid.
 
 ## Task 1: Tile Queries and Paged K/V
 
-Begin `paged_attention_mma_bf16_d128` in
+The reference walkthrough begins `paged_attention_mma_bf16_d128` in
 `src/extensions/src/paged_attention.metal`. Keep
-`paged_attention_decode` and `paged_attention_scalar_f32` from Day 4 unchanged;
-they remain the short-query and generic controls.
+`paged_attention_decode`, `paged_attention_scalar_f32`, and
+`paged_attention_scalar_bf16` from Day 4 unchanged; they remain the short-query
+and generic controls.
 
 Use eight SIMD groups to cover a 64-row query block. Each SIMD group owns eight
 query rows and represents matrix operands as 8×8 fragments. Stage 32 logical
@@ -96,11 +109,11 @@ The Qwen path uses 128-token pages and a 32-token K/V tile. An aligned tile is
 therefore physically contiguous even when the logical sequence as a whole is
 not. Assign each thread contiguous elements through a cooperative block loader
 so adjacent lanes issue coalesced reads. Keep a generic loader for a tile that
-crosses a page boundary. Reuse the course-owned `CooperativeTileLoader` and
-direct `simdgroup_matrix` fragments from Week 2; do not import a Steel loader
-or matrix helper. Your solution owns page translation, the contiguous and
-cross-page load paths, tile schedule, causal mask, online softmax, primitive,
-and dispatch. It does not instantiate MLX attention.
+crosses a page boundary. The reference reuses the course-owned
+`CooperativeTileLoader` and direct `simdgroup_matrix` fragments from Week 2 so
+those mechanisms remain visible. You may choose a different internal helper or
+low-level library as long as the operator retains direct page-table semantics
+and equivalent public behavior.
 
 Tail cases are required. A query block, K/V tile, final page, or context may be
 partially full, and physical page ids need not be consecutive.
@@ -152,17 +165,22 @@ Use the GPU-debugging ladder from Week 2 Day 3:
 1. compare Day 4 page-walking attention with the readable equation written
    with `mlx.core`;
 2. compare paged FlashAttention with the Day 4 path;
-3. only then benchmark the tiled kernel.
+3. trace the model-to-kernel route, then design a matched operator benchmark
+   before making a speed claim.
 
-Required fixtures include:
+The behavior fixtures cover:
 
 - a context contained in one page;
-- a tile that crosses a page boundary;
-- non-consecutive physical page ids;
-- `L = 65` and a context whose length is not a tile multiple;
-- causal decode after the paged prefill;
-- GQA where multiple query heads map to one K/V head;
-- output dtype remains BF16.
+- a partial query block and context tail with non-consecutive physical pages;
+- poisoned unused pages and tail slots, which must not affect the result;
+- batched GQA where multiple query heads map to one K/V head;
+- causal and non-causal calls, including an explicit scale;
+- short decode and generic BF16 head-dimension fallbacks;
+- a model-level long-prefill comparison through the public Week 3 path;
+- output shape and dtype, plus numerical agreement with dense attention.
+
+These are public input/output checks. They do not inspect allocator choices,
+page identifiers chosen by an implementation, kernel names, or routing state.
 
 Force `mx.eval` immediately after each operator so compilation, dispatch, and
 addressing failures are reported at the responsible call.
@@ -170,6 +188,11 @@ addressing failures are reported at the responsible call.
 ```bash
 pdm run test --week 3 --day 5
 ```
+
+If this command is green before you begin Day 5, you have confirmed that Day
+4's correctness boundary is intact. Continue with the optimized implementation
+and use the trace below to confirm that the supported hot case no longer takes
+the slower fallback.
 
 ## Task 4: Integrate and Measure
 
@@ -183,9 +206,14 @@ Neither path gathers a dense K/V tensor. Canonical Week 3 uses MLX quantized
 projections, but its cache, paged attention, batching, and scheduling remain
 course-owned. This hybrid course path is not the full-MLX baseline.
 
-Measure the completed operator in the continuous-serving trace. Report prompt
-range, page size, batch size, hardware, prefill throughput, decode throughput,
-request throughput, peak KV storage, and logical KV copy volume:
+The checked continuous-serving trace is useful system context, but it is not a
+matched scalar-versus-tiled Day 5 experiment. The current model-free runner
+also lacks that isolated long-BF16 comparison. Do not claim a Day 5 speedup
+from these rows. A separate benchmark follow-up should hold inputs, page tables,
+precision, warmup, synchronization, and every non-attention mechanism fixed
+while changing only the scalar-versus-tiled schedule.
+
+For reference, the existing cumulative command is:
 
 ```bash
 pdm run bench-serving-progression --offline --repeats 4 \
@@ -196,7 +224,8 @@ pdm run bench-serving-progression --offline --repeats 4 \
   --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
 ```
 
-FlashAttention is expected to matter more as prefill grows. It should not
+FlashAttention is expected to matter more as prefill grows. Treat that as a
+hypothesis until a matched operator benchmark measures it. It should not
 replace the Day 4 decode schedule: a one-token query has no query-tile reuse.
 
 On the checked M4 Pro trace, all three course rows share the same projection
@@ -217,9 +246,9 @@ results; they do not isolate the Day 5 prefill schedule from paging, direct
 decode, allocation, or scheduling, and they do not credit the MLX projection
 seam to paged attention.
 
-Use a separate 8K static sweep as a kernel diagnostic after the serving trace.
-It shows when query tiling begins to offset page-table overhead, but it does not
-measure request turnover, page reuse, or capacity. The
+The existing 8K static sweep is another cumulative diagnostic. It does not
+isolate scalar versus tiled paged attention, measure request turnover, page
+reuse, or capacity. The
 [performance appendix](./appendix-performance.md) records the matched serving
 and long-context measurements. Long-context decode remains a Day 4 vector
 kernel workload; do not credit a prefill schedule with a decode gain.
@@ -238,11 +267,20 @@ pdm run bench-course-progression --offline --suite course \
 | Week 3 seam + course paged path | 463.69 | 27.42 |
 | Full MLX | 639.73 | 28.37 |
 
-The Week 3 prefill path is 43.1% faster than Week 2 and reaches 72.5% of full
-MLX at this shape. This remains a static diagnostic: it does not measure
-request turnover, page reuse, admission capacity, or the projection seam
-causally. Its decode row is the Day 4 vector schedule, not evidence for the
-tiled prefill kernel. Full method and raw samples are in
+The cumulative Week 3 row is 43.1% faster than the cumulative Week 2 row and
+reaches 72.5% of full MLX at this shape. This remains a static diagnostic: it
+does not measure request turnover, page reuse, admission capacity, the
+projection seam, or the Day 5 schedule causally. Its decode row is the Day 4
+vector schedule, not evidence for the tiled prefill kernel. Full method and raw
+samples are in
 `benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`.
+
+> **Trace the implementation, not its names.** Copy the prompt below into GPT
+> or Claude after your behavior tests pass. This is learner guidance and is not
+> part of automated grading.
+>
+> ```text
+> Trace the actual control flow for Week 3 long-prefill paged attention in this repository. Start at the Python model call, follow native dispatch into Metal, and determine whether BF16 queries with L > 8 and D == 128 reach the intended FlashAttention implementation. Verify that short decode and unsupported or generic shapes retain correct fallback behavior. Cite file and line evidence, flag dead or unreachable kernels, judge the control flow rather than function or kernel names, and report findings only—do not modify files.
+> ```
 
 {{#include copyright.md}}

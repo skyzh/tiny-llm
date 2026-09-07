@@ -537,19 +537,21 @@ attention paths directly.
 | Day 1 | Continuous scheduler | Defines request turnover and active-batch throughput. | Establishes the serving workload. |
 | Day 2 | Chunked admission with dense reconstruction | 711.18 prefill; 35.23 output; 57.59 decode tok/s | Establishes the dense serving baseline. |
 | Day 3 | Paged storage with compatibility gather | 725.46 prefill; 41.64 output; 78.53 decode tok/s | +18.2% output; +36.4% decode; -50.6% copy volume. |
-| Day 4 | Direct paged decode schedule | 105.01 aggregate decode tok/s | +33.7% decode over the compatibility gather path. |
-| Day 5 | Complete direct paged path | 672.68 prefill; 46.36 output; 105.01 decode tok/s | +31.6% output/request throughput over dense serving. |
+| Day 4 | Correct direct paged behavior | 105.01 aggregate decode tok/s in the cumulative endpoint | Removes dense K/V reconstruction; this corpus does not isolate Day 4's scalar prefill. |
+| Day 5 | BF16 long-prefill tiled schedule | No isolated scalar-versus-tiled row | The cumulative serving row below includes Day 5 but is not causal evidence for it. |
 
 Day 1 introduces scheduling, not a kernel speedup. Day 2 makes the hidden cost
 measurable: appending one token still reconstructs a padded dense batch. Day 3
 makes pages canonical but retains `gather_dense()` as a compatibility
-checkpoint. Days 4 and 5 then remove that compatibility movement for decode
-and long-query prefill respectively.
+checkpoint. Day 4 then removes that compatibility movement for every query
+shape. Day 5 changes only the internal schedule for supported BF16 long
+prefill.
 
 Days 4 and 5 share the final direct-paged process: queries with `L <= 8`
-dispatch to the Day 4 decode schedule, while longer chunks dispatch to the Day
-5 tiled schedule. The phase timers report their decode and prefill throughput
-inside the same request trace; they are not results from different workloads.
+dispatch to the Day 4 decode schedule, supported BF16 long-prefill calls use
+the Day 5 tiled schedule, and generic shapes retain a direct scalar fallback.
+The phase timers report decode and prefill throughput inside the same request
+trace; they do not isolate the Day 5 schedule.
 
 Every headline number above comes from the same continuous-batch campaign. The
 cumulative serving endpoints are:

@@ -2,12 +2,13 @@
 
 > 🚧 This chapter is under review and may change.
 
-In this chapter, you will make **direct paged attention** handle long prefill in
-both float32 and BF16 with a correctness-first page-walking kernel. The scheduler
-passes request-local block tables and context lengths to the kernel, which reads
-K/V from the shared layer pool without gathering a dense batch first. Day 5
-keeps this behavior but optimizes the BF16 path with tiled, cooperative, and MMA
-work.
+In this chapter, you will make **direct paged attention** handle decode and
+prefill in both float32 and BF16. The scheduler passes request-local block
+tables and context lengths to the operator, which reads K/V from the shared
+layer pool without gathering a dense batch first. One correct page-walking
+kernel may serve every query shape; separate decode and prefill kernels are an
+optimization choice. Day 5 replaces the supported BF16 long-prefill hot case
+with a tiled implementation.
 
 > **Prerequisite:** Complete Week 3 Day 3's paged storage and Week 2 Day 5's
 > online-softmax attention. The new concept here is translating logical K/V
@@ -131,11 +132,12 @@ The runtime should be able to:
 
 This is the point where decode stops paying the repeated dense-repack cost from Day 1.
 
-## Choose a Schedule for Each Query Shape
+## Establish the Direct Page-Walking Boundary
 
-Before implementing the GPU path, separate decode from prefill. A single tile
-shape cannot keep the GPU busy for both a one-token query and a long prompt.
-Use these design rules:
+First make every supported query shape correct through the same direct paged
+boundary. You may reuse one kernel for decode and prefill. If you split the
+workloads, a single tile shape is unlikely to keep the GPU busy for both a
+one-token query and a long prompt. Use these design rules:
 
 1. Preserve the Week 2 BF16 model boundary and reuse its internal accumulation
    policy unchanged.
@@ -147,18 +149,19 @@ Use these design rules:
    attention kernel in your solution as correctness oracles for the new
    page-walking schedule.
 
-Start with this dispatch plan and treat its thresholds as values to verify on
-your hardware:
+The reference solution uses this optional split. Treat its threshold as a
+value to verify on your hardware, not part of the public checkpoint:
 
 | Shape | Dispatch in your solution | Work decomposition |
 |---|---|---|
 | `L <= 8` | Vector paged decode | One threadgroup per query row; 32 SIMD groups stride over the context and merge partial `(max, sum, output)` states. |
-| `L > 8` | Direct paged prefill for float32 and BF16 | Walk logical K/V tiles through the block table and keep the schedule deliberately inspectable. Day 5 optimizes the BF16 schedule. |
+| `L > 8` | Scalar direct paged prefill | Walk logical K/V tiles through the block table and keep the schedule deliberately inspectable. Day 5 optimizes the supported BF16 hot case. |
 
-Put the shape decision at the extension boundary rather than converting inputs
-or falling back to dense attention in Python. Benchmark values immediately
-below and above each threshold while keeping the model-facing
-`paged_attention` API unchanged.
+If you make a shape decision, put it at the extension boundary rather than
+converting inputs or falling back to dense attention in Python. Keep the
+model-facing `paged_attention` API unchanged. Public Day 4 tests grade only its
+shape, dtype, validation, page addressing, masking, and numerical behavior;
+they do not require this split or any kernel name.
 
 ## How This Maps to `tiny-llm`
 
@@ -171,8 +174,8 @@ def paged_attention(...):
     ...
 ```
 
-In your solution, make it a correctness-first page-walking
-Metal kernel with online softmax:
+In your solution, make it a correctness-first page-walking Metal operation
+with online softmax. It may use one kernel or several internal schedules:
 
 1. use `block_table[b]` to find the physical pages for request `b`,
 2. use `context_lens[b]` to ignore unused tail capacity,
@@ -192,11 +195,11 @@ Day 5. Keep the page-walking schedule simple enough that block-table and
 tail-page boundary errors are visible. Day 5 will tile its inner matrix work
 while preserving this address calculation.
 
-One-token decode needs a different work decomposition. A 64-row prefill tile
-would leave almost every query row idle, so dispatch short queries to a
-vector-oriented kernel that partitions the context across SIMD groups and
-merges their partial online-softmax states. Do not run decode through a fixed
-32-row scalar prefill tile.
+For performance, one-token decode benefits from a different work decomposition.
+A 64-row prefill tile would leave almost every query row idle, so the reference
+dispatches short queries to a vector-oriented kernel that partitions the
+context across SIMD groups and merges their partial online-softmax states. This
+split is an optimization, not a public correctness requirement.
 
 The page pool should therefore expose contiguous physical storage:
 
@@ -296,14 +299,14 @@ src/extensions/src/paged_attention.cpp
 src/extensions/src/paged_attention.metal
 ```
 
-Modify these exact starter functions:
+Modify the stable starter boundary:
 
 - `paged_attention` in `src/tiny_llm/attention.py`;
 - `tiny_llm_ext::paged_attention`, `PagedAttention::eval_cpu`, and
   `PagedAttention::eval_gpu` in `src/extensions/src/paged_attention.cpp`;
-- `paged_attention_decode`, `paged_attention_scalar_f32`, and
-  `paged_attention_scalar_bf16` in
-  `src/extensions/src/paged_attention.metal`.
+- one or more kernels in `src/extensions/src/paged_attention.metal` that
+  implement the same public behavior. The starter's decode and scalar names
+  mirror the reference design, but they are not required by the tests.
 
 This checkpoint also turns the already-readable quantized token lookup into
 the Week 3 one-dispatch path. Modify `QuantizedEmbedding.__call__` in
@@ -331,20 +334,24 @@ After all visible pages are consumed, divide `output` by `running_sum`.
 This is the key idea that lets the kernel avoid materializing dense K/V while
 still producing the same result as dense attention.
 
-Implement two correctness-first GPU dispatches:
+The reference solution implements two correctness-first GPU dispatches:
 
 1. For `L <= 8`, partition logical context positions across SIMD groups and
    merge their partial `(max, sum, output)` states in threadgroup memory. The
    initial schedule uses 32 SIMD groups per query. Resolve the physical page
    once, then let group `g` visit slots `g`, `g + 32`, `g + 64`, and so on
    within that page; do not divide and reload `block_table` for every token.
-2. For longer queries, assign query rows to a direct page-walking schedule and
-   resolve every K/V tile through `block_table`. When a tile is aligned and
+2. For longer queries, it assigns query rows to a direct page-walking schedule
+   and resolves every K/V tile through `block_table`. When a tile is aligned and
    cannot cross a page boundary, share its one physical page id across the
-   whole tile. Implement this direct schedule for both float32 and BF16, using
-   float accumulators for BF16's dot products, online-softmax state, and output
-   accumulation. Favor inspectable ownership over the final tiled performance
-   schedule.
+   whole tile. Its direct schedule handles both float32 and BF16, using float
+   accumulators for BF16's dot products, online-softmax state, and output
+   accumulation.
+
+You may instead reuse one correct direct kernel for every query length. Favor
+inspectable page ownership over the final tiled performance schedule; Day 5 is
+where the supported BF16 long-prefill region receives a dedicated performance
+implementation.
 
 Compare small deterministic fixtures with the readable equation written with
 `mlx.core` and the dense Week 2 attention path before tuning the page-walking
@@ -365,7 +372,7 @@ require the quantized embedding, model dispatch, continuous batching, or the
 Day 5 kernel. Kernel names and implementation structure are not part of the
 test contract; only the public numerical, metadata, and dtype behavior is.
 
-For the final Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
+For the reference Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
 four contiguous dimensions of Q, K, V, and the output. After all context
 positions are visited, transpose the 32 partial output vectors through one
 compact 32×32 threadgroup tile. Each SIMD group then reduces four dimensions
@@ -374,21 +381,21 @@ of storing one full partial vector per scalar output thread. Keep a generic
 BF16 specialization for other head dimensions so the optimization cannot
 silently reinterpret `D = 32` as `D = 128`.
 
-Keep the correctness-first BF16 prefill separate from the Day 5
-`paged_attention_mma_bf16_d128` optimization. Day 4 must work without that
-future tiled/cooperative/MMA kernel; Day 5 may replace only the internal BF16
-long-query dispatch while preserving the same public API and page-table
-semantics.
+Day 4 must work without a future tiled/cooperative/MMA kernel. A dedicated
+prefill kernel is optional here: reusing the direct decode implementation for
+long queries is valid when it preserves the public behavior. Day 5 may replace
+only the internal supported BF16 long-query region while preserving the same
+API, generic fallback, and page-table semantics.
 
 ### Your solution's boundary
 
-MLX remains the array runtime for shapes, reshapes, transposes, contiguous
-storage, dtype conversion, allocation, and custom-primitive dispatch. The
-attention implementation itself must remain in your solution: do not call
-`mx.fast.scaled_dot_product_attention`, reuse an MLX attention/Steel kernel, or
-reconstruct dense K/V and express the paged operator as MLX matmul plus
-softmax. MLX SDPA may appear only in tests and benchmarks as an external
-correctness oracle and performance baseline.
+The walkthrough keeps page translation and online softmax in a course-owned
+Metal operation so you can inspect them. The public checkpoint does not grade
+an internal helper, tile, symbol, or library choice: a behaviorally equivalent
+implementation or external low-level library is valid. To preserve the
+chapter's systems outcome, the completed operator still consumes page storage
+and its block table directly rather than rebuilding dense K/V in Python. MLX
+SDPA remains a useful correctness oracle and performance baseline.
 
 Both prefill and decode read page storage through this interface. Do not add a
 dense-only special case: Day 5 optimizes this same paged contract.
@@ -406,15 +413,15 @@ embedding only at this cumulative checkpoint.
 Update the model so it can route to paged attention when the cache provides paged runtime metadata.
 
 Append K/V to the page pool and pass its metadata to attention for every query
-shape. Long queries use the direct paged-prefill schedule from this chapter;
-short queries use the vector paged-decode schedule. Neither path changes cache
-dtype or gathers a dense K/V tensor.
+shape. The reference uses scalar prefill and vector decode schedules, but one
+correct direct schedule may serve both. Neither choice changes cache dtype or
+gathers a dense K/V tensor.
 
 This creates the Day 4 routing policy:
 
 ```plain
-prefill or long chunk -> direct page-walking attention
-decode or short chunk -> paged vector attention
+every query shape -> correct direct page-walking attention
+optional split -> scalar prefill and vector decode
 ```
 
 Day 5 replaces the long-query schedule with paged FlashAttention without

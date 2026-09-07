@@ -6,8 +6,9 @@
 Week 3 turns the optimized single-request model into a multi-request serving
 engine. Students add scheduling, request-owned cache state, shared page pools,
 and the runtime metadata needed to read noncontiguous K/V directly. The final
-model uses one page-aware attention interface with separate schedules for
-one-token decode and multi-token prefill.
+model uses one page-aware attention interface. A correct direct page-walking
+implementation may serve every query shape; the completed reference adds a
+tiled schedule for the supported BF16 long-prefill hot case.
 
 Week 2's course-owned quantized projections remain the inspectable endpoint of
 that week's kernel lessons. Week 3 deliberately switches dense-model
@@ -30,15 +31,16 @@ Day 1 introduces that projection seam and batches independent request states. Da
 splits long prefills so they cannot monopolize the scheduler. Day 3 replaces a
 growing dense cache with fixed-size pages while retaining a dense-gather
 compatibility path. Day 4 removes that gather by teaching attention to walk the
-page table directly with a correctness-first schedule. Day 5 then tiles that
-same page-walking operation with Week 2's matrix fragments. Page translation
-is therefore introduced before it is optimized.
+page table directly with a correctness-first implementation; one kernel may
+serve all query shapes. Day 5 then replaces the supported BF16 long-prefill hot
+case with a tiled schedule. Page translation is therefore introduced before
+it is optimized.
 
 These five days form the required path in your solution. The final model in
-your solution runs paged FlashAttention for long prefill and the paged vector
-kernel for short queries.
-Both schedules read the same page pool through the same block-table interface;
-neither rebuilds dense K/V.
+your solution runs paged FlashAttention for supported BF16 long prefill and
+retains correct direct fallbacks for short queries and generic shapes. Every
+schedule reads the same page pool through the same block-table interface;
+none rebuilds dense K/V.
 
 Paged attention is not an automatic single-request latency win. The checked
 trace measures lower KV storage, page reuse, incremental growth, and batching;
