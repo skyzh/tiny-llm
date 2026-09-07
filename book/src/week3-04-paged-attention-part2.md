@@ -305,8 +305,9 @@ Modify the stable starter boundary:
 - `tiny_llm_ext::paged_attention`, `PagedAttention::eval_cpu`, and
   `PagedAttention::eval_gpu` in `src/extensions/src/paged_attention.cpp`;
 - one or more kernels in `src/extensions/src/paged_attention.metal` that
-  implement the same public behavior. The starter's decode and scalar names
-  mirror the reference design, but they are not required by the tests.
+  implement the same public behavior. The starter names
+  `paged_attention_decode` and `paged_attention_scalar_f32` mirror the
+  reference design, but they are not required by the tests.
 
 This checkpoint also turns the already-readable quantized token lookup into
 the Week 3 one-dispatch path. Modify `QuantizedEmbedding.__call__` in
