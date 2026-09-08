@@ -602,6 +602,27 @@ def test_full_acceptance_honors_output_budget_without_catch_up():
     _assert_released(target, draft)
 
 
+def test_full_acceptance_emits_the_last_bonus_without_a_stale_draft_call():
+    target = ScriptedModel([[1], [2, 3]], "target")
+    draft = ScriptedModel([[9], [2]], "draft")
+    draft_tokenizer, tokenizer = _tokenizers()
+
+    result = speculative_generate(
+        draft,
+        target,
+        draft_tokenizer,
+        tokenizer,
+        "prompt",
+        proposal_length=1,
+        max_tokens=3,
+    )
+
+    assert result == "ABC"
+    assert len(target.calls) == 2
+    assert len(draft.calls) == 2
+    _assert_released(target, draft)
+
+
 @pytest.mark.parametrize("cache_kind", ["dense", "paged"])
 @pytest.mark.parametrize("scenario", ["mismatch", "full_acceptance"])
 def test_real_cache_paths_preserve_output_and_release_pages(cache_kind, scenario):

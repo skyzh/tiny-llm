@@ -358,6 +358,9 @@ def speculative_generate(
             bonus_token_id = target_predictions[-1]
             if bonus_token_id in target_eos_ids:
                 return _finish()
+            if emitted + 1 == max_tokens:
+                _emit([bonus_token_id])
+                return _finish()
 
             _, draft_offset = _draft_generate(
                 verification_ids[-1],
