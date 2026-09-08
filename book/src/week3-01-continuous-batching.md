@@ -170,7 +170,7 @@ pdm run test --week 3 --day 1 -- -k task_4
 Then run the complete scheduler against the real model:
 
 ```bash
-pdm run batch-main
+pdm run batch-main --solution tiny_llm --loader week2
 ```
 
 By default, `batch-main` uses Qwen3-0.6B with a batch size of five and a fixed

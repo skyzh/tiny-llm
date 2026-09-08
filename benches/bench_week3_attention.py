@@ -1,4 +1,5 @@
 import argparse
+import importlib
 import json
 import os
 import statistics
@@ -20,6 +21,7 @@ QUERY_HEADS = 32
 KV_HEADS = 8
 HEAD_DIM = 128
 VARIANTS = ("dense-gather", "paged", "mlx")
+SOLUTION_PACKAGES = {"ref": "tiny_llm_ref", "tiny_llm": "tiny_llm"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cooldown-seconds", type=float, default=0.0)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--solution", choices=tuple(SOLUTION_PACKAGES), default="ref")
     parser.add_argument("--variant", choices=VARIANTS, action="append")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -64,12 +67,26 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def build_case(context: int, page_size: int, seed: int) -> dict:
-    from tiny_llm_ref.attention import (
-        paged_attention,
-        scaled_dot_product_attention_grouped,
+def solution_package(solution: str) -> str:
+    return SOLUTION_PACKAGES[solution]
+
+
+def load_solution_surfaces(solution: str):
+    package = solution_package(solution)
+    return (
+        importlib.import_module(f"{package}.attention"),
+        importlib.import_module(f"{package}.paged_kv_cache"),
     )
-    from tiny_llm_ref.paged_kv_cache import TinyKvPagedCache, TinyKvPagedPool
+
+
+def build_case(context: int, page_size: int, seed: int, solution: str = "ref") -> dict:
+    attention, paged_kv_cache = load_solution_surfaces(solution)
+    paged_attention = attention.paged_attention
+    scaled_dot_product_attention_grouped = (
+        attention.scaled_dot_product_attention_grouped
+    )
+    TinyKvPagedCache = paged_kv_cache.TinyKvPagedCache
+    TinyKvPagedPool = paged_kv_cache.TinyKvPagedPool
 
     mx.random.seed(seed + context)
     query = mx.random.normal((1, QUERY_HEADS, 1, HEAD_DIM)).astype(mx.bfloat16)
@@ -134,7 +151,7 @@ def build_case(context: int, page_size: int, seed: int) -> dict:
 def benchmark_variant(args: argparse.Namespace, variant: str) -> dict:
     results = []
     for context in args.contexts:
-        case = build_case(context, args.page_size, args.seed)
+        case = build_case(context, args.page_size, args.seed, args.solution)
         run = case["functions"][variant]
         for _ in range(args.warmup):
             mx.eval(run())
@@ -167,6 +184,8 @@ def run_fresh_process(args: argparse.Namespace, variant: str) -> dict:
         "-m",
         "benches.bench_week3_attention",
         "--worker",
+        "--solution",
+        args.solution,
         "--variant",
         variant,
         "--contexts",
@@ -202,6 +221,30 @@ def run_fresh_process(args: argparse.Namespace, variant: str) -> dict:
         text=True,
     )
     return json.loads(completed.stdout)
+
+
+def result_configuration(args: argparse.Namespace, variants: list[str]) -> dict:
+    return {
+        "model_shape": "qwen3-4b",
+        "solution": solution_package(args.solution),
+        "operator": "paged_attention",
+        "contexts": args.contexts,
+        "page_size": args.page_size,
+        "warmup": args.warmup,
+        "iterations": args.iterations,
+        "repeats": args.repeats,
+        "seed": args.seed,
+        "offline": args.offline,
+        "cooldown_seconds": args.cooldown_seconds,
+        "dtype": "bfloat16",
+        "batch": 1,
+        "query_heads": QUERY_HEADS,
+        "kv_heads": KV_HEADS,
+        "query_tokens": 1,
+        "head_dim": HEAD_DIM,
+        "scale": HEAD_DIM**-0.5,
+        "variants": variants,
+    }
 
 
 def main() -> None:
@@ -271,27 +314,7 @@ def main() -> None:
         payload = {
             "source": collect_source_metadata(Path(__file__).resolve().parents[1]),
             "host": host,
-            "configuration": {
-                "model_shape": "qwen3-4b",
-                "solution": "tiny_llm_ref",
-                "operator": "paged_attention",
-                "contexts": args.contexts,
-                "page_size": args.page_size,
-                "warmup": args.warmup,
-                "iterations": args.iterations,
-                "repeats": args.repeats,
-                "seed": args.seed,
-                "offline": args.offline,
-                "cooldown_seconds": args.cooldown_seconds,
-                "dtype": "bfloat16",
-                "batch": 1,
-                "query_heads": QUERY_HEADS,
-                "kv_heads": KV_HEADS,
-                "query_tokens": 1,
-                "head_dim": HEAD_DIM,
-                "scale": HEAD_DIM**-0.5,
-                "variants": variants,
-            },
+            "configuration": result_configuration(args, variants),
             "execution_order": execution_order,
             "correctness": correctness,
             "samples": {

@@ -135,9 +135,12 @@ pdm run test --week 3 --day 7
 Run the integrated path with a small draft model and a larger target model:
 
 ```bash
-pdm run main --solution tiny_llm_ref --loader week3 \
+pdm run main --solution tiny_llm --loader week3 \
   --draft-model qwen3-0.6b --model qwen3-4b --max-tokens 64
 ```
+
+This runs your completed Week 3 solution. To compare the completed reference
+on the same inputs, rerun it separately with `--solution tiny_llm_ref`.
 
 The draft-model CLI is greedy-only. It rejects temperature, top-p, and top-k
 sampling options instead of silently ignoring them. Probability-correct sampled

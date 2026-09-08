@@ -1,3 +1,4 @@
+import subprocess
 import sys
 
 import pytest
@@ -69,3 +70,90 @@ def test_week3_operator_comparison_rejects_odd_process_order(monkeypatch):
 
     with pytest.raises(SystemExit):
         bench_week3_attention.parse_args()
+
+
+def test_week3_operator_solution_defaults_to_reference(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["bench-week3-attention"])
+
+    assert bench_week3_attention.parse_args().solution == "ref"
+
+
+@pytest.mark.parametrize("solution", ["ref", "tiny_llm"])
+def test_week3_operator_accepts_public_solution_choices(monkeypatch, solution):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bench-week3-attention", "--solution", solution],
+    )
+
+    assert bench_week3_attention.parse_args().solution == solution
+
+
+def test_week3_operator_rejects_unknown_solution(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bench-week3-attention", "--solution", "unknown"],
+    )
+
+    with pytest.raises(SystemExit):
+        bench_week3_attention.parse_args()
+
+
+@pytest.mark.parametrize(
+    ("solution", "package"),
+    [("ref", "tiny_llm_ref"), ("tiny_llm", "tiny_llm")],
+)
+def test_week3_operator_imports_both_surfaces_from_selected_package(solution, package):
+    attention, paged_kv_cache = bench_week3_attention.load_solution_surfaces(solution)
+
+    assert attention.__package__ == package
+    assert paged_kv_cache.__package__ == package
+
+
+@pytest.mark.parametrize("solution", ["ref", "tiny_llm"])
+def test_week3_operator_propagates_solution_once_to_worker(monkeypatch, solution):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench-week3-attention",
+            "--solution",
+            solution,
+            "--variant",
+            "paged",
+            "--repeats",
+            "1",
+        ],
+    )
+    args = bench_week3_attention.parse_args()
+    captured = []
+
+    def run(command, **_kwargs):
+        captured.extend(command)
+        return subprocess.CompletedProcess(command, 0, stdout='{"results": []}')
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert bench_week3_attention.run_fresh_process(args, "paged") == {"results": []}
+    assert captured.count("--solution") == 1
+    assert captured[captured.index("--solution") + 1] == solution
+
+
+@pytest.mark.parametrize(
+    ("solution", "package"),
+    [("ref", "tiny_llm_ref"), ("tiny_llm", "tiny_llm")],
+)
+def test_week3_operator_json_attribution_matches_selected_solution(
+    monkeypatch, solution, package
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bench-week3-attention", "--solution", solution],
+    )
+    args = bench_week3_attention.parse_args()
+
+    configuration = bench_week3_attention.result_configuration(args, ["paged"])
+
+    assert configuration["solution"] == package

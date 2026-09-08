@@ -469,14 +469,19 @@ metadata; the MLX row measures its fused attention operator on the already
 gathered tensor:
 
 ```bash
-pdm run bench-week3-attention --offline --contexts 128 1024 \
+pdm run bench-week3-attention --solution tiny_llm --offline --contexts 128 1024 \
   --page-size 128 --warmup 5 --iterations 60 --repeats 4 \
   --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-attention-final-main.json
+  --json-output benchmark_results/task367-final-main/raw/learner-week3-attention.json
 ```
 
-Each value is the median of four balanced fresh-process medians, with 60
+This command measures your `tiny_llm` operators. The checked reference values
+below are medians of four balanced fresh-process medians, with 60
 synchronized calls after five warmups per process:
+
+To reproduce those checked rows separately, rerun the command with
+`--solution ref` and
+`--json-output benchmark_results/task367-final-main/raw/week3-attention-final-main.json`.
 
 | Context | Dense + gather | Direct paged | MLX fused |
 |---:|---:|---:|---:|
@@ -551,15 +556,16 @@ long-prefill schedule rather than routing around the page-table contract.
 Use the paired serving runner rather than a preallocated static request:
 
 ```bash
-pdm run bench-serving-progression --offline --repeats 4 \
+pdm run bench-serving-progression --solution tiny_llm --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 --prefill-step 128 \
   --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
+  --json-output benchmark_results/task367-final-main/raw/learner-week3-serving.json
 ```
 
-It compares Week 2 dense batch reconstruction, Week 3 paged storage with the
+This command compares your Week 2 dense batch reconstruction, Week 3 paged
+storage with the
 dense-gather compatibility path, and Week 3 direct paged attention. All three
 course rows use the same MLX quantized-projection seam; they differ in KV
 representation and attention path. The runner resets page capacity after
@@ -574,6 +580,8 @@ These are cumulative system results, not an isolated Day 4 kernel speedup. The
 ledger at
 `benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
 records the fixed trace, balanced process order, and denominator boundary.
+Reproduce that checked reference trace separately with `--solution ref` and
+`--json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json`.
 
 ```bash
 pdm run test --week 3 --day 4

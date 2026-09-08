@@ -213,16 +213,20 @@ from these rows. A separate benchmark follow-up should hold inputs, page tables,
 precision, warmup, synchronization, and every non-attention mechanism fixed
 while changing only the scalar-versus-tiled schedule.
 
-For reference, the existing cumulative command is:
+Run the cumulative system check on your solution:
 
 ```bash
-pdm run bench-serving-progression --offline --repeats 4 \
+pdm run bench-serving-progression --solution tiny_llm --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 --prefill-step 128 \
   --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
+  --json-output benchmark_results/task367-final-main/raw/learner-week3-serving.json
 ```
+
+The table below is checked reference evidence. Reproduce it separately with
+`--solution ref` and
+`--json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json`.
 
 FlashAttention is expected to matter more as prefill grows. Treat that as a
 hypothesis until a matched operator benchmark measures it. It should not
@@ -254,12 +258,17 @@ and long-context measurements. Long-context decode remains a Day 4 vector
 kernel workload; do not credit a prefill schedule with a decode gain.
 
 ```bash
-pdm run bench-course-progression --offline --suite course \
+pdm run bench-course-progression --solution tiny_llm --offline --suite course \
   --variant week2 --variant week3 --variant mlx --model qwen3-4b \
   --input-len 8192 --output-len 2 --prefill-logits last \
   --warmup 1 --repeats 4 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-8k-final-main.json
+  --json-output benchmark_results/task367-final-main/raw/learner-week3-8k.json
 ```
+
+This command measures your Week 2 and Week 3 course rows while retaining MLX
+as the library baseline. The checked table below is reference evidence;
+reproduce it separately with `--solution ref` and
+`--json-output benchmark_results/task367-final-main/raw/week3-8k-final-main.json`.
 
 | 8K static checkpoint | Prefill tok/s | Decode tok/s |
 |---|---:|---:|
