@@ -24,7 +24,10 @@ def simple_generate(
 
 
 def simple_generate_with_kv_cache(
-    model: Qwen3ModelWeek2, tokenizer: TokenizerWrapper, prompt: str
+    model: Qwen3ModelWeek2,
+    tokenizer: TokenizerWrapper,
+    prompt: str,
+    max_tokens: int = 256,
 ) -> str:
     def _step(model, y, offset, kv_cache):
         pass
@@ -37,5 +40,6 @@ def speculative_generate(
     tokenizer: TokenizerWrapper,
     prompt: str,
     proposal_length: int = 4,
+    max_tokens: int = 256,
 ) -> str:
     pass

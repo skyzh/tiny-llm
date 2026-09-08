@@ -406,6 +406,52 @@ def test_task_1_paged_cache_rewind_then_append_matches_full_cache():
     assert_allclose(paged_value, full_value, precision=mx.float32)
 
 
+@pytest.mark.parametrize("cache_kind", ["dense", "paged"])
+def test_task_1_rewind_zero_and_full_length_are_symmetric(cache_kind):
+    pool = TinyKvPagedPool(page_size=4)
+    cache = TinyKvFullCache() if cache_kind == "dense" else TinyKvPagedCache(pool=pool)
+    key, value = _random_chunk(5)
+    cache.update_and_fetch(key, value)
+    before_key, before_value = cache.key_values
+    mx.eval(before_key, before_value)
+
+    cache.rewind(0)
+
+    assert cache.offset == 5
+    after_key, after_value = cache.key_values
+    assert_allclose(after_key, before_key, precision=mx.float32)
+    assert_allclose(after_value, before_value, precision=mx.float32)
+
+    cache.rewind(5)
+
+    assert cache.offset == 0
+    assert cache.key_values is None
+    if cache_kind == "paged":
+        assert pool.num_free_pages == pool.num_pages
+
+
+@pytest.mark.parametrize("cache_kind", ["dense", "paged"])
+@pytest.mark.parametrize("rewind_length", [-1, 6, 1.5, True])
+def test_task_1_invalid_rewind_fails_without_mutating_cache(cache_kind, rewind_length):
+    pool = TinyKvPagedPool(page_size=4)
+    cache = TinyKvFullCache() if cache_kind == "dense" else TinyKvPagedCache(pool=pool)
+    key, value = _random_chunk(5)
+    cache.update_and_fetch(key, value)
+    before_offset = cache.offset
+    before_key, before_value = cache.key_values
+    mx.eval(before_key, before_value)
+    before_free_pages = pool.num_free_pages
+
+    with pytest.raises(ValueError):
+        cache.rewind(rewind_length)
+
+    assert cache.offset == before_offset
+    after_key, after_value = cache.key_values
+    assert_allclose(after_key, before_key, precision=mx.float32)
+    assert_allclose(after_value, before_value, precision=mx.float32)
+    assert pool.num_free_pages == before_free_pages
+
+
 def test_task_1_request_caches_keep_independent_metadata():
     pool = TinyKvPagedPool(page_size=4)
     first = TinyKvPagedCache(pool=pool)

@@ -412,7 +412,8 @@ class TinyKvPagedCache(TinyKvCache):
             mx.eval(key_pages, value_pages)
 
     def rewind(self, n: int):
-        assert 0 <= n <= self.offset
+        if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= self.offset:
+            raise ValueError("rewind length must be between zero and the cache length")
         new_offset = self.offset - n
         if new_offset == self.offset:
             return

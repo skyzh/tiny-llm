@@ -12,6 +12,13 @@ draft tokens are accepted while they match the target model's greedy tokens.
 Extending the same loop to sampling requires the probability-correct acceptance
 and residual sampling rules; simple token equality is not enough.
 
+Start with the model-free checkpoint. It uses generated token streams and cache
+objects, so it gives useful feedback without downloading either model:
+
+```bash
+pdm run test --week 3 --day 7 -- -k "proposal_length or target_only"
+```
+
 ## Objectives
 
 By the end of this chapter, you should be able to:
@@ -36,11 +43,14 @@ several proposed tokens at once is a long-query attention call over the paged
 prefix. The paged-cache lifecycle and page-aware long-query operator therefore
 form the stable interface on which speculative decoding is built.
 
-## Task 1: Make Cache Rewind a Contract
+## Task 1: Reuse the Cache-Rewind Contract
 
-Add `rewind(n)` to the common KV-cache interface. A dense cache removes the last
-`n` logical positions. A paged cache must also return pages that become unused
-and shorten the valid prefix of the new tail page.
+Day 3 already added `rewind(n)` to the common KV-cache interface. Verify that
+prerequisite before building the speculative loop. A dense cache removes the
+last `n` logical positions. A paged cache must also return pages that become
+unused and shorten the valid prefix of the new tail page. Both implementations
+accept zero through the current logical length and reject other values before
+changing the cache.
 
 Verify zero-length rewind, a rewind within one page, a rewind across page
 boundaries, and a full rewind:
@@ -67,7 +77,20 @@ speculative_generate(
     tokenizer,
     prompt,
     proposal_length=4,
+    max_tokens=256,
 )
+```
+
+`max_tokens` bounds newly emitted non-EOS tokens. Zero returns without running a
+model or creating a cache, invalid values fail before either model runs, and EOS
+may stop generation earlier. Keep the explicit default so existing direct
+callers remain source-compatible.
+
+After the target-only fallback and bounded proposal work, rerun the focused
+cases:
+
+```bash
+pdm run test --week 3 --day 7 -- -k "proposal_length or target_only or budget"
 ```
 
 ## Task 3: Verify in One Target Call
@@ -83,6 +106,12 @@ concatenation to 64-bit indices, which quantized embeddings reject.
 The first supplied token is already accepted. Starting at the next position,
 find the longest matching prefix. If every draft token matches, keep the target
 model's next token so generation can continue without an extra target call.
+
+Use the one-call and full-acceptance cases as the next checkpoint:
+
+```bash
+pdm run test --week 3 --day 7 -- -k "verification or full_acceptance"
+```
 
 ## Task 4: Commit or Rewind
 
@@ -107,8 +136,12 @@ Run the integrated path with a small draft model and a larger target model:
 
 ```bash
 pdm run main --solution tiny_llm_ref --loader week3 \
-  --draft-model qwen3-0.6b --model qwen3-4b
+  --draft-model qwen3-0.6b --model qwen3-4b --max-tokens 64
 ```
+
+The draft-model CLI is greedy-only. It rejects temperature, top-p, and top-k
+sampling options instead of silently ignoring them. Probability-correct sampled
+speculation remains a separate future extension.
 
 ## Design the Measurement
 
@@ -117,11 +150,13 @@ target-only and speculative timings, so it is not performance evidence.
 
 For a performance decision, run ordinary cached target generation and
 speculative generation in balanced fresh processes with the same prompt,
-tokenizer, output budget, seed, and synchronization boundary. Verify identical
-greedy output, then report proposal length, accepted tokens per proposal,
-target verification calls, draft-model time, target-model time, cache
-maintenance time, and end-to-end tokens per second for both paths. Record the
-raw samples and process order.
+tokenizer, `--max-tokens` value, seed, and synchronization boundary. For
+example, compare the command above with the same command without
+`--draft-model`, keeping `--max-tokens 64` on both. Verify identical greedy
+output, then report proposal length, accepted tokens per proposal, target
+verification calls, draft-model time, target-model time, cache maintenance time,
+and end-to-end tokens per second for both paths. Record the raw samples and
+process order.
 
 Until such a paired artifact exists, this chapter makes no speedup claim.
 Acceptance rate alone omits draft work, verification, synchronization, and

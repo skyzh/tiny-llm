@@ -280,7 +280,14 @@ class TinyKvFullCache(TinyKvCache):
             mx.eval(*self.key_values)
 
     def rewind(self, n: int):
+        if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= self.offset:
+            raise ValueError("rewind length must be between zero and the cache length")
+        if n == 0:
+            return
         self.offset -= n
+        if self.offset == 0:
+            self.key_values = None
+            return
         self.key_values = (
             self.key_values[0][:, :, : self.offset],
             self.key_values[1][:, :, : self.offset],

@@ -20,6 +20,12 @@ parser.add_argument("--device", type=str, default="gpu")
 parser.add_argument("--sampler-temp", type=float, default=0)
 parser.add_argument("--sampler-top-p", type=float, default=None)
 parser.add_argument("--sampler-top-k", type=int, default=None)
+parser.add_argument(
+    "--max-tokens",
+    type=int,
+    default=256,
+    help="maximum number of newly emitted non-EOS tokens",
+)
 parser.add_argument("--enable-thinking", action="store_true")
 parser.add_argument(
     "--disable-paged-attention",
@@ -63,6 +69,16 @@ if args.disable_paged_attention and args.loader != "week3":
     parser.error("--disable-paged-attention requires --loader week3")
 if args.disable_paged_attention and args.solution == "mlx":
     parser.error("--disable-paged-attention is not supported with --solution mlx")
+if args.max_tokens < 0:
+    parser.error("--max-tokens must be non-negative")
+if args.draft_model and (
+    args.sampler_temp != 0
+    or args.sampler_top_p is not None
+    or args.sampler_top_k is not None
+):
+    parser.error("--draft-model supports greedy decoding only; remove sampler options")
+if args.draft_model and args.loader == "week1":
+    parser.error("--draft-model is not supported with --loader week1")
 
 use_mlx = False
 if args.solution == "tiny_llm":
@@ -93,14 +109,15 @@ elif args.solution == "mlx":
 else:
     raise ValueError(f"Solution {args.solution} not supported")
 
+if args.max_tokens == 0:
+    raise SystemExit(0)
+
 args.model = shortcut_name_to_full_name(args.model)
 mlx_model, tokenizer = load(args.model)
 
 if args.draft_model:
     args.draft_model = shortcut_name_to_full_name(args.draft_model)
     draft_mlx_model, draft_tokenizer = load(args.draft_model)
-    if args.loader == "week1":
-        raise ValueError("Draft model not supported for week1")
 else:
     draft_mlx_model = None
     draft_tokenizer = None
@@ -170,7 +187,13 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
             args.sampler_temp, top_p=args.sampler_top_p, top_k=args.sampler_top_k
         )
         if args.loader == "week1":
-            simple_generate(tiny_llm_model, tokenizer, prompt, sampler=sampler)
+            simple_generate(
+                tiny_llm_model,
+                tokenizer,
+                prompt,
+                sampler=sampler,
+                max_tokens=args.max_tokens,
+            )
         elif args.loader in ("week2", "week3"):
             if draft_tiny_llm_model is not None:
                 speculative_generate(
@@ -179,12 +202,24 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
                     draft_tokenizer,
                     tokenizer,
                     prompt,
+                    max_tokens=args.max_tokens,
                 )
             else:
-                simple_generate_with_kv_cache(tiny_llm_model, tokenizer, prompt)
+                simple_generate_with_kv_cache(
+                    tiny_llm_model,
+                    tokenizer,
+                    prompt,
+                    max_tokens=args.max_tokens,
+                )
     else:
         sampler = mlx_lm.sample_utils.make_sampler(
             args.sampler_temp, top_p=args.sampler_top_p, top_k=args.sampler_top_k
         )
-        for resp in stream_generate(tiny_llm_model, tokenizer, prompt, sampler=sampler):
+        for resp in stream_generate(
+            tiny_llm_model,
+            tokenizer,
+            prompt,
+            sampler=sampler,
+            max_tokens=args.max_tokens,
+        ):
             print(resp.text, end="", flush=True)
