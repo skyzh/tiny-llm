@@ -114,13 +114,13 @@ one explicit byte range through the existing loop.
 | 2.5 | Fused Decode Attention | ✅ | ✅ | ✅ | 🚧 |
 | 2.6 | SIMD-Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 2.7 | Split-K Prefill | ✅ | ✅ | ✅ | 🚧 |
-| 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
-| 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
-| 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |
-| 3.4 | Direct Paged Attention | ✅ | ✅ | ✅ | 🚧 |
-| 3.5 | Paged FlashAttention | ✅ | ✅ | ✅ | 🚧 |
-| 3.6 (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ | 🚧 |
-| 3.7 (optional) | Speculative Decoding | ✅ | ✅ | ✅ | 🚧 |
+| 3.1 | Continuous Batching | ✅ | ✅ | ✅ | ✅ |
+| 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | ✅ |
+| 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | ✅ |
+| 3.4 | Direct Paged Attention | ✅ | ✅ | ✅ | ✅ |
+| 3.5 | Paged FlashAttention | ✅ | ✅ | ✅ | ✅ |
+| 3.6 (optional) | MoE (Mixture of Experts) | ✅ | ✅ | ✅ | ✅ |
+| 3.7 (optional) | Speculative Decoding | ✅ | ✅ | ✅ | ✅ |
 | 4.1 | Validated Agent Loop | ✅ | ✅ | ✅ | 🚧 |
 | 4.2 | Inspect a Workspace | ✅ | ✅ | ✅ | 🚧 |
 | 4.3 | Edit, Validate, and Record | ✅ | ✅ | ✅ | 🚧 |
