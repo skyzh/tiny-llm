@@ -83,9 +83,9 @@ solution may use different helper names and internal organization; it must
 produce the same public attention behavior and preserve the fallback.
 
 If you completed the old Week 2 Day 5 attention exercise before the course was
-reordered, keep that work. The [legacy Day 5 page](./week2-05-decode-attention.md)
-shows the compatibility selector and test route; after completing the new Day
-5 SIMD checkpoint, your attention implementation becomes this optional branch.
+reordered, keep that work. Complete the current Day 5 SIMD checkpoint first,
+then use this canonical optional Day 6 chapter and its commands to verify your
+retained attention implementation.
 
 ## Task 3: Re-measure and Decide
 
