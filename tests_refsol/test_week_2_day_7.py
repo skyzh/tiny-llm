@@ -6,14 +6,19 @@ from .tiny_llm_base import Qwen3ModelWeek2, quantized_matmul
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def test_split_k_checkpoint_is_cumulative_and_day_6_stays_unsplit():
-    day_6 = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
+def test_split_k_checkpoint_inherits_core_without_optional_attention():
+    day_5 = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
+    day_6 = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
     day_7 = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="split-k")
 
+    assert day_5.layers_inner[0].self_attn.wk.use_simdgroup_matmul
+    assert not day_5.layers_inner[0].self_attn.use_decode_attention
     assert day_6.layers_inner[0].self_attn.wk.use_simdgroup_matmul
     assert not day_6.layers_inner[0].self_attn.wk.use_split_k_matmul
+    assert day_6.layers_inner[0].self_attn.use_decode_attention
     assert day_7.layers_inner[0].self_attn.wk.use_simdgroup_matmul
     assert day_7.layers_inner[0].self_attn.wk.use_split_k_matmul
+    assert not day_7.layers_inner[0].self_attn.use_decode_attention
 
 
 def test_split_k_matches_unsplit_qwen_4b_kv_shape_gpu():

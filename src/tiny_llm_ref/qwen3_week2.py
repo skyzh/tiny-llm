@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 import mlx.core as mx
@@ -16,16 +18,73 @@ from .week2_kernels import (
     swiglu,
 )
 
-WEEK2_CHECKPOINTS = (
-    "kv-cache",
-    "quantized-matvec",
-    "rmsnorm",
-    "rope",
-    "swiglu",
-    "decode-attention",
-    "simd-matmul",
-    "split-k",
+
+@dataclass(frozen=True)
+class Week2CheckpointFeatures:
+    quantized_weights: bool = False
+    fast_rms_norm: bool = False
+    fast_rope: bool = False
+    fast_swiglu: bool = False
+    simdgroup_matmul: bool = False
+    decode_attention: bool = False
+    split_k_matmul: bool = False
+
+
+WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
+    {
+        "kv-cache": Week2CheckpointFeatures(),
+        "quantized-matvec": Week2CheckpointFeatures(quantized_weights=True),
+        "rmsnorm": Week2CheckpointFeatures(quantized_weights=True, fast_rms_norm=True),
+        "rope": Week2CheckpointFeatures(
+            quantized_weights=True, fast_rms_norm=True, fast_rope=True
+        ),
+        "swiglu": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+        ),
+        "simd-matmul": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+        ),
+        "decode-attention": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+            decode_attention=True,
+        ),
+        "split-k": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+            split_k_matmul=True,
+        ),
+        "legacy-day-5": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            decode_attention=True,
+        ),
+        "legacy-day-6": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+            decode_attention=True,
+        ),
+    }
 )
+WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
 
 DECODE_ATTENTION_MAX_CONTEXT = 256
 DECODE_ATTENTION_MAX_QUERY = 2
@@ -259,21 +318,15 @@ class Qwen3ModelWeek2:
                 f"unknown Week 2 checkpoint {checkpoint!r}; "
                 f"choose one of {WEEK2_CHECKPOINTS}"
             )
-        checkpoint_index = WEEK2_CHECKPOINTS.index(checkpoint)
         self.checkpoint = checkpoint
-        use_quantized_weights = checkpoint_index >= WEEK2_CHECKPOINTS.index(
-            "quantized-matvec"
-        )
-        use_fast_rms_norm = checkpoint_index >= WEEK2_CHECKPOINTS.index("rmsnorm")
-        use_fast_rope = checkpoint_index >= WEEK2_CHECKPOINTS.index("rope")
-        use_fast_swiglu = checkpoint_index >= WEEK2_CHECKPOINTS.index("swiglu")
-        use_decode_attention = checkpoint_index >= WEEK2_CHECKPOINTS.index(
-            "decode-attention"
-        )
-        use_simdgroup_matmul = checkpoint_index >= WEEK2_CHECKPOINTS.index(
-            "simd-matmul"
-        )
-        use_split_k_matmul = checkpoint_index >= WEEK2_CHECKPOINTS.index("split-k")
+        features = WEEK2_CHECKPOINT_FEATURES[checkpoint]
+        use_quantized_weights = features.quantized_weights
+        use_fast_rms_norm = features.fast_rms_norm
+        use_fast_rope = features.fast_rope
+        use_fast_swiglu = features.fast_swiglu
+        use_decode_attention = features.decode_attention
+        use_simdgroup_matmul = features.simdgroup_matmul
+        use_split_k_matmul = features.split_k_matmul
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.use_fast_rope = use_fast_rope
         self.hidden_size = mlx_model.args.hidden_size

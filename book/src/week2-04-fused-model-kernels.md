@@ -200,19 +200,29 @@ Keep the three cumulative checkpoints separate so a regression cannot hide
 inside their combined gain:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --variant week2-quantized-matvec \
   --variant week2-rmsnorm --variant week2-rope --variant week2-swiglu \
   --variant mlx --model qwen3-4b \
   --input-len 128 --output-len 129 --warmup 2 --prefill-logits last
 
-pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
-  --section model-kernels --context 128
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case quantized-matvec:decode:128 --case swiglu:decode:128 \
+  --case swiglu:prefill:128 --warmup 4 --iterations 12 \
+  --json-output week2-day4-attribution.json
 ```
 
 Keep one cumulative result per operator so a regression cannot hide inside the
 combined gain. The complete campaign and reference attribution are in the
 [performance appendix](./appendix-performance.md#day-4-fused-model-kernels).
+
+In the checked M4 Pro example, the fused kernels reduced the attributed
+normalization/position/activation category by 79.0%. Re-profiling then placed
+projections at 81.4% of decode attribution and 99.1% of 128-token prefill
+attribution. That is why the next core chapter is
+[SIMD-Matrix Prefill](./week2-05-simd-matrix-prefill.md), not a prescribed
+attention kernel. Repeat the same measurement on your machine and record the
+result that would falsify this next-change hypothesis.
 
 If you want to continue without writing one of these kernels, keep its public
 course interface and delegate only that operator to the corresponding MLX

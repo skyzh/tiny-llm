@@ -46,7 +46,7 @@ NB_MODULE(_ext, m) {
           "stream"_a = nb::none());
     m.def("swiglu", &tiny_llm_ext::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
 
-    // Week 2, Day 5.
+    // Week 2, Day 6.
     m.def("decode_attention", &tiny_llm_ext::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
           "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
 

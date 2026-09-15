@@ -126,3 +126,156 @@ def test_student_and_reference_profiles_share_the_production_guard():
         implementation = profile.load_implementation(name)
         assert implementation.decode_attention_max_query == 2
         assert implementation.decode_attention_max_context == 256
+
+
+def test_decision_requires_exact_source_solution_model_and_workload_identity():
+    baseline = {
+        "source": {"tree": "tree"},
+        "solution": "tiny_llm",
+        "model": "model",
+        "checkpoint": "swiglu",
+        "workload_id": "workload",
+    }
+    candidate = {
+        **baseline,
+        "checkpoint": "simd-matmul",
+    }
+    result = profile.build_decision(
+        baseline,
+        candidate,
+        dominant_category="projections",
+        hypothesis="SIMD prefill reduces projection time",
+        observed_effect="candidate reduced matched product and attribution time",
+        decision="keep",
+        next_experiment="profile the next dominant category",
+    )
+    assert result["baseline_checkpoint"] == "swiglu"
+    assert result["candidate_checkpoint"] == "simd-matmul"
+    assert result["decision"] == "keep"
+
+    for field in ("source", "solution", "model", "workload_id"):
+        mismatch = dict(candidate)
+        mismatch[field] = "different"
+        with pytest.raises(ValueError, match=field.replace("_", ".*")):
+            profile.build_decision(
+                baseline,
+                mismatch,
+                dominant_category="projections",
+                hypothesis="hypothesis",
+                observed_effect="effect",
+                decision="inconclusive",
+                next_experiment="next",
+            )
+
+
+def test_profile_workload_identity_covers_every_workload_field(monkeypatch):
+    baseline = profile.ProfileCase("swiglu", "prefill", 128)
+    candidate = profile.ProfileCase("simd-matmul", "prefill", 128)
+    original = profile.workload_record("model", baseline, 2, 4)
+    assert original == profile.workload_record("model", candidate, 2, 4)
+
+    variants = [
+        profile.workload_record("other-model", baseline, 2, 4),
+        profile.workload_record(
+            "model", profile.ProfileCase("swiglu", "decode", 128), 2, 4
+        ),
+        profile.workload_record(
+            "model", profile.ProfileCase("swiglu", "prefill", 64), 2, 4
+        ),
+        profile.workload_record("model", baseline, 3, 4),
+        profile.workload_record("model", baseline, 2, 5),
+    ]
+    with monkeypatch.context() as patch:
+        patch.setattr(profile, "PROMPT_RULE", "other-prompt-rule")
+        variants.append(profile.workload_record("model", baseline, 2, 4))
+    with monkeypatch.context() as patch:
+        patch.setattr(profile, "PREFILL_LOGITS", "last")
+        variants.append(profile.workload_record("model", baseline, 2, 4))
+
+    original_hash = profile.canonical_hash(original)
+    assert all(profile.canonical_hash(variant) != original_hash for variant in variants)
+    assert [
+        {key for key in original if original[key] != variant[key]}
+        for variant in variants
+    ] == [
+        {"model"},
+        {"phase"},
+        {"tokens"},
+        {"warmup"},
+        {"iterations"},
+        {"prompt_rule"},
+        {"prefill_logits"},
+    ]
+
+
+def test_default_attribution_follows_canonical_core_then_optional_branch():
+    cases = [profile.parse_case(value) for value in profile.DEFAULT_CASES]
+    checkpoints = [case.checkpoint for case in cases]
+    assert checkpoints.index("simd-matmul") < checkpoints.index("decode-attention")
+    assert checkpoints[-1] == "split-k"
+
+    for implementation_name in ("tiny_llm", "tiny_llm_ref"):
+        implementation = profile.load_implementation(implementation_name)
+        assert implementation.checkpoints[-5:] == (
+            "simd-matmul",
+            "decode-attention",
+            "split-k",
+            "legacy-day-5",
+            "legacy-day-6",
+        )
+
+
+def test_profile_refuses_existing_output_before_loading_implementation(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "existing.json"
+    output.write_text("preserve")
+    monkeypatch.setattr(
+        profile,
+        "parse_args",
+        lambda: SimpleNamespace(json_output=output, decision_output=None),
+    )
+    monkeypatch.setattr(
+        profile,
+        "load_implementation",
+        lambda _name: pytest.fail("implementation/model work must not begin"),
+    )
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        profile.main()
+
+
+@pytest.mark.parametrize("alias_kind", ("exact", "lexical", "symlink-parent"))
+def test_profile_refuses_output_alias_before_loading_implementation(
+    tmp_path, monkeypatch, alias_kind
+):
+    output = tmp_path / "real" / "result.json"
+    if alias_kind == "exact":
+        alias = output
+    elif alias_kind == "lexical":
+        alias = output.parent / "unused" / ".." / output.name
+    else:
+        output.parent.mkdir()
+        linked_parent = tmp_path / "linked"
+        linked_parent.symlink_to(output.parent, target_is_directory=True)
+        alias = linked_parent / output.name
+    monkeypatch.setattr(
+        profile,
+        "parse_args",
+        lambda: SimpleNamespace(json_output=output, decision_output=alias),
+    )
+    monkeypatch.setattr(
+        profile,
+        "load_implementation",
+        lambda _name: pytest.fail("implementation/model work must not begin"),
+    )
+    with pytest.raises(ValueError, match="distinct"):
+        profile.main()
+
+
+def test_profile_preserves_distinct_output_role_order(tmp_path):
+    json_output = tmp_path / "profile.json"
+    decision_output = tmp_path / "decision.json"
+    assert profile.normalize_output_paths(json_output, decision_output) == (
+        json_output.resolve(),
+        decision_output.resolve(),
+    )

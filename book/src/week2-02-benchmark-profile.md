@@ -1,11 +1,11 @@
 # 🚧 Week 2 Day 2: Benchmarking and Profiling
 
 Day 1 leaves you with a cached BF16 model and a working `kv-cache` checkpoint.
-Day 2 does not add another model operator. The supplied `benches/bench.py`
-runner already owns request generation, warmups, synchronization, phase timing,
-and cache release. Your job is to run one like-for-like comparison, preserve
-its configuration with the result, and use the decode roofline to choose the
-next change.
+Day 2 does not add another model operator. The supplied benchmark and portable
+attribution runners own request generation, warmups, synchronization, phase
+timing, and cache release. Your job is to freeze one like-for-like workload,
+identify its dominant operator category, and write the short decision that
+chooses the next change.
 
 First verify the benchmark lifecycle:
 
@@ -13,9 +13,9 @@ First verify the benchmark lifecycle:
 pdm run test --week 2 --day 2
 ```
 
-Then record one matched `tiny_llm`/MLX pair with the commands below. That JSON
-is the Day 2 checkpoint. Profiling is optional and is not a prerequisite or
-acceptance gate.
+Then record one matched `tiny_llm`/MLX pair and one attribution result. Those
+portable JSON records and your decision are the Day 2 checkpoint. Metal
+capture is optional and is not a prerequisite or acceptance gate.
 
 ## Benchmark the Cached Model
 
@@ -68,7 +68,7 @@ your solution with the reference solution instead of MLX.
 Or run the cumulative ladder in fresh processes:
 
 ```bash
-pdm run bench-week2-progression --offline --repeats 4 \
+pdm run bench-week2-progression --offline --repeats 2 \
   --solution tiny_llm \
   --variant week2-kv-cache --variant mlx \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
@@ -100,17 +100,36 @@ The benchmark must also call the cache release hook after warmups and timed
 runs so cache implementations with owned or shared resources can return them;
 the focused Day 2 test checks both the successful and failing paths.
 
-## Optional Profiling Boundary
+## Attribute the Cached Model
 
-The required Day 2 work ends with the synchronized benchmark JSON. Metal
-capture, Xcode visualization, `gpudebug`, and related profiling
-microbenchmarks are not part of the current course requirements. They require
-the macOS 27 tooling release and will return as optional material after that
-release is available.
+Now run the maintained cross-platform attribution case on the same learner
+solution, model, decode phase, and 128-token context:
 
-The [optional profiling notice](./week2-advanced-profiling.md) records this
-boundary. You may skip it and continue directly to Day 3. No profiling tool,
-trace, screenshot, or microbenchmark is a prerequisite or acceptance gate.
+```bash
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case kv-cache:decode:128 --warmup 4 --iterations 12 \
+  --json-output week2-day2-attribution.json
+```
+
+The result records its source, checkpoint, phase, token count, prompt rule,
+software, host, category medians, and category shares. It does not require a
+particular private function name or Metal symbol. On the checked M4 Pro run,
+dense projections accounted for 83.9% of attributed cached-decode time. That
+bounded observation selected packed W4 projections for Day 3; it does not say
+that projections dominate every device or shape.
+
+Write three sentences beside the result:
+
+1. “Dense projections dominate this exact cached-decode workload.”
+2. “Packing W4 weights and changing only the selected projection path should
+   reduce that category and improve matched decode.”
+3. “I will reject or revise the hypothesis if projection time does not fall or
+   complete-model decode regresses under the same workload.”
+
+Use your own observed category in place of the checked example. The required
+work ends with this benchmark, attribution, and decision record. The
+[macOS 27 capture lab](./week2-advanced-profiling.md) is optional; no trace,
+`gpudebug` output, screenshot, or device-specific counter gates Day 3.
 
 ## Why Quantize: The Decode Roofline
 

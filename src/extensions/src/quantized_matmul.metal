@@ -8,7 +8,7 @@ using namespace metal;
 // Week 2, Day 3:
 //   quantized_matmul_vanilla_w4a16_g128
 //   quantized_matvec_x4_fast_w4a16_g128
-// Week 2, Day 6:
+// Week 2, Day 5:
 //   quantized_matmul_simdgroup_w4a16_g128
 // Week 2, Day 7:
 //   quantized_matmul_simdgroup_splitk_w4a16_g128

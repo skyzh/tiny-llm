@@ -14,7 +14,7 @@ INTERFACES = {
     "rms_norm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
     "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "decode_attention": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "decode_attention": ("Week 2, Day 6", "week2_kernels.cpp"),
     "paged_cache_update": ("Week 3, Day 3", "paged_attention.cpp"),
     "quantized_embedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "paged_attention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -25,7 +25,7 @@ PRIMITIVE_CLASSES = {
     "Week2RMSNorm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2DecodeAttention": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2DecodeAttention": ("Week 2, Day 6", "week2_kernels.cpp"),
     "PagedCacheUpdate": ("Week 3, Day 3", "paged_attention.cpp"),
     "QuantizedEmbedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "PagedAttention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -35,7 +35,7 @@ METAL_CHECKPOINTS = {
     "quantized_matmul.metal": {
         "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 3",
         "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 3",
-        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 6",
+        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 5",
         "quantized_matmul_simdgroup_splitk_w4a16_g128": "Week 2, Day 7",
         "quantized_matmul_splitk_reduce": "Week 2, Day 7",
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
@@ -44,7 +44,7 @@ METAL_CHECKPOINTS = {
         "week2_rms_norm": "Week 2, Day 4",
         "week2_rope": "Week 2, Day 4",
         "week2_swiglu": "Week 2, Day 4",
-        "week2_decode_attention": "Week 2, Day 5",
+        "week2_decode_attention": "Week 2, Day 6",
     },
     "paged_attention.metal": {
         "paged_cache_update_kernel": "Week 3, Day 3",
@@ -75,30 +75,23 @@ DOC_TASK_MARKERS = {
         "Task 3": {"tiny_llm_ext::swiglu", "Week2SwiGLU::eval_gpu", "week2_swiglu"},
         "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MLP.__call__"},
     },
-    "book/src/week2-05-decode-attention.md": {
-        "Task 1": {"scaled_dot_product_attention"},
+    "book/src/week2-05-simd-matrix-prefill.md": {
+        "Task 2": {
+            "QuantizedMatmul::eval_gpu",
+            "quantized_matmul_simdgroup_w4a16_g128",
+        },
+    },
+    "book/src/week2-06-operator-lab.md": {
         "Task 2": {
             "tiny_llm_ext::decode_attention",
             "Week2DecodeAttention::eval_gpu",
             "week2_decode_attention",
+            "Qwen3MultiHeadAttention.__call__",
+            "decode_attention_custom",
         },
-        "Task 3": {"Qwen3MultiHeadAttention.__call__", "decode_attention_custom"},
-    },
-    "book/src/week2-06-simd-matrix-prefill.md": {
-        "Task 1": {
-            "QuantizedMatmul::eval_gpu",
-            "quantized_matmul_simdgroup_w4a16_g128",
-        },
-        "Task 2": {"quantized_matmul_simdgroup_w4a16_g128"},
-        "Task 3": {"quantized_matmul_simdgroup_w4a16_g128"},
-        "Task 4": {"Qwen3ModelWeek2.__call__"},
-        "Task 5": {"QuantizedMatmul::eval_gpu", "Qwen3ModelWeek2.__call__"},
     },
     "book/src/week2-07-split-k-prefill.md": {
-        "Task 1": {"quantized_matmul_simdgroup_w4a16_g128"},
-        "Task 2": {"quantized_matmul_simdgroup_splitk_w4a16_g128"},
         "Task 3": {"QuantizedMatmul::eval_gpu"},
-        "Task 4": {"quantized_matmul_splitk_reduce", "QuantizedMatmul::eval_gpu"},
     },
     "book/src/week3-03-paged-attention-part1.md": {
         "Task 1": {
@@ -180,7 +173,16 @@ EXTENSION_TASK_PAIRS = {
             ("src/extensions/src/week2_kernels.metal", "week2_swiglu"),
         },
     },
-    "book/src/week2-05-decode-attention.md": {
+    "book/src/week2-05-simd-matrix-prefill.md": {
+        "Task 2": {
+            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
+            (
+                "src/extensions/src/quantized_matmul.metal",
+                "quantized_matmul_simdgroup_w4a16_g128",
+            ),
+        },
+    },
+    "book/src/week2-06-operator-lab.md": {
         "Task 2": {
             (
                 "src/extensions/src/week2_kernels.cpp",

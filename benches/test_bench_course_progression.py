@@ -2,10 +2,14 @@ import json
 import re
 import unicodedata
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from benches.bench_course_progression import WEEK2_VARIANTS
+from benches import bench_course_progression as progression
+
+
+WEEK2_VARIANTS = progression.WEEK2_VARIANTS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,8 +105,8 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-rmsnorm": "2.4 Fast RMSNorm",
         "week2-rope": "2.4 + Fast RoPE",
         "week2-swiglu": "2.4 + Fused SwiGLU",
-        "week2-decode-attention": "2.5 Decode attention",
-        "week2-simd-matmul": "2.6 SIMD matrix prefill",
+        "week2-simd-matmul": "2.5 SIMD matrix prefill",
+        "week2-decode-attention": "2.6 Optional decode attention",
         "week2-split-k": "2.7 Split-K prefill",
         "mlx": "MLX",
     }
@@ -112,14 +116,14 @@ def test_week2_live_labels_follow_the_seven_day_book():
     assert "| 2.2 | Benchmarking and Profiling |" in readme
     assert "| 2.3 | Quantize the Model |" in readme
     assert "| 2.4 | Fused Model Kernels |" in readme
-    assert "| 2.5 | Fused Decode Attention |" in readme
-    assert "| 2.6 | SIMD-Matrix Prefill |" in readme
-    assert "| 2.7 | Split-K Prefill |" in readme
+    assert "| 2.5 | SIMD-Matrix Prefill |" in readme
+    assert "| 2.6 (optional) | Workload-Conditioned Operator Lab |" in readme
+    assert "| 2.7 | Conditional Split-K and Final Decision |" in readme
     assert "./week2-02-benchmark-profile.md" in summary
     assert "./week2-03-quantize-model.md" in summary
     assert "./week2-04-fused-model-kernels.md" in summary
-    assert "./week2-05-decode-attention.md" in summary
-    assert "./week2-06-simd-matrix-prefill.md" in summary
+    assert "./week2-05-simd-matrix-prefill.md" in summary
+    assert "./week2-06-operator-lab.md" in summary
     assert "./week2-07-split-k-prefill.md" in summary
 
     chapter_headings = {
@@ -128,13 +132,36 @@ def test_week2_live_labels_follow_the_seven_day_book():
         ),
         "week2-03-quantize-model.md": "# 🚧 Week 2 Day 3: Quantize the Model",
         "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Kernels",
-        "week2-05-decode-attention.md": "# 🚧 Week 2 Day 5: Fused Decode Attention",
-        "week2-06-simd-matrix-prefill.md": "# 🚧 Week 2 Day 6: SIMD-Matrix Prefill",
-        "week2-07-split-k-prefill.md": "# 🚧 Week 2 Day 7: Split-K Prefill",
+        "week2-05-simd-matrix-prefill.md": "# 🚧 Week 2 Day 5: SIMD-Matrix Prefill",
+        "week2-06-operator-lab.md": (
+            "# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab"
+        ),
+        "week2-07-split-k-prefill.md": (
+            "# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision"
+        ),
     }
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
         assert heading == expected_heading
+
+
+def test_benchmark_refuses_existing_json_before_host_or_model_work(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "existing.json"
+    output.write_text("preserve")
+    monkeypatch.setattr(
+        progression,
+        "parse_args",
+        lambda: SimpleNamespace(json_output=output),
+    )
+    monkeypatch.setattr(
+        progression,
+        "collect_host_metadata",
+        lambda: pytest.fail("host/model work must not begin"),
+    )
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        progression.main()
 
 
 def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
@@ -143,55 +170,67 @@ def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
     appendix = (ROOT / "book/src/week2-advanced-profiling.md").read_text()
 
     assert "pdm run bench" in day2
-    assert "Profiling is optional" in day2
+    assert "capture is optional" in day2
+    assert "pdm run profile-week2-kernels --solution tiny_llm" in day2
     assert "macOS 27" in day2
     assert "pdm run test --week 2 --day 3" in day3
     assert "Week 2 Day 2: Benchmark, Profile, and Quantize" not in day3
 
-    removed_workflow_tokens = (
-        "capture-week2-shader",
-        "MLX_METAL_DEBUG",
-        "MTL_CAPTURE_ENABLED",
-        ".gputrace",
-        "profile-week2-kernels",
-    )
+    removed_workflow_tokens = ("capture-week2-shader", "MLX_METAL_DEBUG")
     live_week2 = "\n".join(
         (ROOT / "book/src" / f"week2-0{day}-{name}.md").read_text()
         for day, name in (
             (2, "benchmark-profile"),
             (3, "quantize-model"),
             (4, "fused-model-kernels"),
-            (5, "decode-attention"),
-            (6, "simd-matrix-prefill"),
+            (5, "simd-matrix-prefill"),
+            (6, "operator-lab"),
             (7, "split-k-prefill"),
         )
     )
     assert not any(token in live_week2 for token in removed_workflow_tokens)
-    assert not (ROOT / "benches/capture_week2_shader.py").exists()
-    assert not (ROOT / "benches/test_capture_week2_shader.py").exists()
-    assert "capture-week2-shader" not in (ROOT / "pyproject.toml").read_text()
-    assert "not required" in appendix
+    scripts = (ROOT / "pyproject.toml").read_text()
+    assert "capture-week2" in scripts
+    assert "reduce-week2-gpudebug" in scripts
+    assert "never an acceptance gate" in appendix
     assert "macOS 27" in appendix
 
 
-def test_required_week2_progression_never_depends_on_optional_profiling():
+def test_required_week2_progression_uses_portable_attribution_not_local_capture():
     days = {
         day: (ROOT / "book/src" / filename).read_text()
         for day, filename in {
             3: "week2-03-quantize-model.md",
             4: "week2-04-fused-model-kernels.md",
-            5: "week2-05-decode-attention.md",
-            6: "week2-06-simd-matrix-prefill.md",
+            5: "week2-05-simd-matrix-prefill.md",
+            6: "week2-06-operator-lab.md",
         }.items()
     }
 
-    for day, chapter in days.items():
-        _assert_required_progression_is_profile_free(chapter, day)
+    expected_cases = {
+        3: ("kv-cache:decode:128", "quantized-matvec:decode:128"),
+        4: ("quantized-matvec:decode:128", "swiglu:decode:128"),
+        5: ("swiglu:prefill:128", "simd-matmul:prefill:128"),
+        6: ("simd-matmul:decode:128", "decode-attention:decode:128"),
+    }
+    local_capture_tokens = (
+        "Xcode GPU capture",
+        "Metal System Trace",
+        ".gputrace",
+        "gpudebug",
+        "screenshot",
+        "GPU duration",
+    )
 
-    day3 = days[3]
-    assert "matrix schedule. Use a source trace through those branches" in day3
-    assert "direct source trace of the dispatch branches" in day3
-    assert "source trace proves" in day3
+    for day, chapter in days.items():
+        assert "pdm run profile-week2-kernels --solution tiny_llm" in chapter
+        assert all(case in chapter for case in expected_cases[day])
+        assert not any(token in chapter for token in local_capture_tokens)
+
+    assert "The re-profile then exposed normalization" in days[3]
+    assert "Re-profiling then placed" in days[4]
+    assert "Rerun the exact commands from the baseline section" in days[5]
+    assert "Continue to [Day 7]" in days[6]
 
 
 @pytest.mark.parametrize(

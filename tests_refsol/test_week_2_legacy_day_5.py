@@ -1,4 +1,4 @@
-"""Week 2 Day 6 optional decode-attention tests."""
+"""Legacy Week 2 Day 5 decode-attention tests."""
 
 from math import prod
 
@@ -18,11 +18,10 @@ from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
 def test_model_integrates_decode_attention_after_fast_kernels():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="legacy-day-5")
     layer = model.layers_inner[0]
 
     assert layer.self_attn.use_decode_attention
-    assert layer.self_attn.wq.use_simdgroup_matmul
     assert isinstance(layer.input_layernorm, FastRMSNorm)
     assert isinstance(layer.self_attn.rope, FastRoPE)
     assert layer.mlp.use_fast_swiglu
@@ -54,7 +53,7 @@ def test_model_uses_decode_attention_only_through_measured_context(monkeypatch):
         (248, 8, "readable", 256),
     )
     for prefix_length, query_length, expected_path, expected_context in cases:
-        model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
+        model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="legacy-day-5")
         attention = model.layers_inner[0].self_attn
         cache = model.create_kv_cache()[0]
         hidden = model.hidden_size
@@ -78,7 +77,7 @@ def test_model_uses_decode_attention_only_through_measured_context(monkeypatch):
 
 
 def test_model_keeps_explicit_masks_on_readable_path(monkeypatch):
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="legacy-day-5")
     attention = model.layers_inner[0].self_attn
     cache = model.create_kv_cache()[0]
     module = __import__(Qwen3ModelWeek2.__module__, fromlist=["unused"])

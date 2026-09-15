@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 import mlx.core as mx
@@ -12,16 +14,73 @@ from .week2_kernels import (
     swiglu,
 )
 
-WEEK2_CHECKPOINTS = (
-    "kv-cache",
-    "quantized-matvec",
-    "rmsnorm",
-    "rope",
-    "swiglu",
-    "decode-attention",
-    "simd-matmul",
-    "split-k",
+
+@dataclass(frozen=True)
+class Week2CheckpointFeatures:
+    quantized_weights: bool = False
+    fast_rms_norm: bool = False
+    fast_rope: bool = False
+    fast_swiglu: bool = False
+    simdgroup_matmul: bool = False
+    decode_attention: bool = False
+    split_k_matmul: bool = False
+
+
+WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
+    {
+        "kv-cache": Week2CheckpointFeatures(),
+        "quantized-matvec": Week2CheckpointFeatures(quantized_weights=True),
+        "rmsnorm": Week2CheckpointFeatures(quantized_weights=True, fast_rms_norm=True),
+        "rope": Week2CheckpointFeatures(
+            quantized_weights=True, fast_rms_norm=True, fast_rope=True
+        ),
+        "swiglu": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+        ),
+        "simd-matmul": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+        ),
+        "decode-attention": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+            decode_attention=True,
+        ),
+        "split-k": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+            split_k_matmul=True,
+        ),
+        "legacy-day-5": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            decode_attention=True,
+        ),
+        "legacy-day-6": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            simdgroup_matmul=True,
+            decode_attention=True,
+        ),
+    }
 )
+WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
 
 DECODE_ATTENTION_MAX_CONTEXT = 256
 DECODE_ATTENTION_MAX_QUERY = 2

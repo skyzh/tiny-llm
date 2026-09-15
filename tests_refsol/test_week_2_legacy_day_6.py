@@ -1,4 +1,4 @@
-"""Week 2 Day 5 SIMD-matrix prefill tests."""
+"""Legacy Week 2 Day 6 cumulative SIMD/decode-attention tests."""
 
 from pathlib import Path
 
@@ -21,13 +21,13 @@ from mlx_lm import load
 
 
 def test_simd_matmul_checkpoint_is_completed_week2_model():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="legacy-day-6")
     layer = model.layers_inner[0]
 
     assert not model.embedding.use_custom_kernel
     assert model.embedding.weight.use_simdgroup_matmul
     assert layer.self_attn.wq.use_simdgroup_matmul
-    assert not layer.self_attn.use_decode_attention
+    assert layer.self_attn.use_decode_attention
 
 
 def test_task_2_simdgroup_matmul_matches_vanilla_gpu():
@@ -177,7 +177,7 @@ def test_utils_qwen3_1_7b():
 
 def helper_test_task_5(model_name: str, iters: int = 10):
     mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
+    model = Qwen3ModelWeek2(mlx_model, checkpoint="legacy-day-6")
     assert not model.embedding.use_custom_kernel
     assert model.embedding.weight.use_simdgroup_matmul
     assert all(layer.self_attn.wq.use_simdgroup_matmul for layer in model.layers_inner)
@@ -220,7 +220,7 @@ def helper_test_task_5_incremental(
     iters: int = 1,
 ):
     mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
+    model = Qwen3ModelWeek2(mlx_model, checkpoint="legacy-day-6")
     for _ in range(iters):
         inputs = mx.random.randint(0, tokenizer.vocab_size, (1, seq_len))
         ref_outputs = mlx_model(inputs)
