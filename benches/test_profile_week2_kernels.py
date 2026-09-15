@@ -208,7 +208,7 @@ def test_profile_workload_identity_covers_every_workload_field(monkeypatch):
     ]
 
 
-def test_default_attribution_follows_canonical_core_then_optional_branch():
+def test_default_attribution_and_model_expose_only_canonical_checkpoints():
     cases = [profile.parse_case(value) for value in profile.DEFAULT_CASES]
     checkpoints = [case.checkpoint for case in cases]
     assert checkpoints.index("simd-matmul") < checkpoints.index("decode-attention")
@@ -216,12 +216,15 @@ def test_default_attribution_follows_canonical_core_then_optional_branch():
 
     for implementation_name in ("tiny_llm", "tiny_llm_ref"):
         implementation = profile.load_implementation(implementation_name)
-        assert implementation.checkpoints[-5:] == (
+        assert implementation.checkpoints == (
+            "kv-cache",
+            "quantized-matvec",
+            "rmsnorm",
+            "rope",
+            "swiglu",
             "simd-matmul",
             "decode-attention",
             "split-k",
-            "legacy-day-5",
-            "legacy-day-6",
         )
 
 

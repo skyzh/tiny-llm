@@ -67,21 +67,6 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
             simdgroup_matmul=True,
             split_k_matmul=True,
         ),
-        "legacy-day-5": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            decode_attention=True,
-        ),
-        "legacy-day-6": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            simdgroup_matmul=True,
-            decode_attention=True,
-        ),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)

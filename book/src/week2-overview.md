@@ -98,20 +98,11 @@ the completed reference in some contexts, which would not measure your work.
 ### Migrating Work from the Earlier Day Order
 
 The course formerly taught decode attention on Day 5 and SIMD-matrix prefill
-on Day 6. That work remains useful. If your checkout already contains those
-solutions, preserve it and run:
-
-```bash
-pdm run test --week 2 --day 5 --legacy-week2-order
-pdm run test --week 2 --day 6 --legacy-week2-order
-```
-
-The saved checkpoints remain available as `legacy-day-5` and
-`legacy-day-6`. Complete the new Day 5 SIMD gate, then treat your attention
-implementation as the optional Day 6 branch. The old
-[Day 5](./week2-05-decode-attention.md) and
-[Day 6](./week2-06-simd-matrix-prefill.md) URLs remain as migration pages, so
-existing bookmarks still resolve.
+on Day 6. If your checkout already contains that work, keep it: complete the
+current Day 5 SIMD gate, then verify the retained attention implementation with
+the optional Day 6 gate. The ordinary `--week 2 --day 5` and
+`--week 2 --day 6` commands above are the only selectors you need. Old Day 5
+and Day 6 bookmarks redirect to those canonical lessons.
 
 ## Verification Status
 
