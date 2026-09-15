@@ -4,134 +4,140 @@
 
 # 🚧 Week 2: A Step Closer to vLLM
 
-You begin Week 2 with the runnable Week 1 Python `mlx.core` Qwen model. Keep
-that model intact. Your work lives in a separate Qwen3 path that first changes
-the generation algorithm—prefill once, retain a dense KV cache, and decode one
-new token at a time—then replaces the operators that dominate that cached
-path.
+Week 2 turns the readable Week 1 Qwen3 model into a measured single-request
+serving path. You will change one mechanism, run the same synchronized
+workload, attribute the remaining cost, and let that evidence choose the next
+change. The result is a causal optimization loop rather than a checklist of
+kernels.
 
-> ⏱️ **Time commitment.** Days 3–7 write and tune custom Metal kernels.
-> Completing the full Week 2 sequence typically takes substantially longer than
-> Week 1 Days 6–7. All seven days are required core material; plan accordingly.
+The core route is Days 1–5. Day 6 is an optional workload-conditioned operator
+lab. Day 7 adds Split-K only where a short-shape measurement supports it, then
+closes the week with a fixed-workload keep/reject decision.
+
+> ⏱️ **Time commitment.** Days 3–5 implement custom Metal kernels and can take
+> substantially longer than Week 1 Days 6–7. Day 6 is optional. Day 7's
+> Split-K schedule is conditional: correctness is required, but no absolute
+> timing or universal crossover gates completion.
 
 Week 2 keeps BF16 for dense weights, quantization scales and biases,
 activations, projections, KV-cache entries, and model-facing kernel outputs.
-Packed W4 weight codes are stored as `uint32`. Numerically sensitive reductions,
-dot products, and online-softmax state accumulate in FP32 inside Python
-reference expressions or kernel registers. This contract remains in force for
-Week 3.
+Packed W4 weight codes use `uint32`. Reductions, dot products, and
+online-softmax state accumulate in FP32 before returning BF16. Week 3 inherits
+these interfaces and precision boundaries.
 
-## What You Build
+## The Causal Loop
 
-The seven days form one cumulative single-request path. The starter supplies
-model loading, the extension build system, benchmark runners, correctness
-tests, Python reference equations, and the stable interfaces between
-checkpoints. You implement the state transition on Day 1, establish the
-measurement control on Day 2, and own the operator work on Days 3–7:
+Every checkpoint follows the same four moves:
 
-| Learner-owned work | Supplied infrastructure | Optional work |
-|---|---|---|
-| Days 1–7: cached model integration, matched benchmarking, quantization, fused model kernels, bounded decode-attention, SIMD-matrix prefill, and shape-aware Split-K | Model loading, extension build system, benchmark runners, correctness tests, and Python-reference implementations | The short profiling notice, schedule searches, hardware-specific retuning, and the fixed-workload 80%-of-MLX stretch target |
+1. **Prove correctness.** Run the focused supplied test before timing.
+2. **Freeze the workload.** Record model, checkpoint, phase, token counts,
+   prefill-logit mode, warmups, iterations, software, and device.
+3. **Attribute before editing.** Name the dominant operator category and one
+   bounded hypothesis.
+4. **Repeat and decide.** Rerun the identical product and attribution workload,
+   then record `keep`, `reject`, or `inconclusive` and a falsifier.
 
-Run the supplied test selector after each day. Then run the live model or
-benchmark command beside that day so an isolated kernel never counts as a
-finished checkpoint. The full campaigns, raw samples, rejected experiments,
-and retained reference schedules live in the
-[performance appendix](./appendix-performance.md); you do not need to recreate
-that evidence ledger to complete the exercises.
-
-## The Cumulative Path
-
-- A dense per-request key-value cache for incremental decoding
-- Synchronized benchmarking and the dense decode roofline
-- Packed W4 quantization and a SIMD matrix-vector Metal kernel
-- Fused RMSNorm, RoPE, and SwiGLU Metal kernels
-- An online-softmax decode-attention kernel
-- A BF16 SIMD-matrix quantized prefill kernel
-- A shape-aware split-K schedule for small Qwen prefill matrices
-- A last-token output interface for generation
-- An optional stretch target of 80% of MLX prefill and decode throughput on one
-  fixed Qwen3-4B workload: 128 prompt tokens, 129 output tokens, last-row
-  logits, two warmups, and four balanced fresh-process samples. On the checked
-  M4 Pro, the final checkpoint reaches 88.2% of full-MLX prefill and 87.0% of
-  full-MLX decode throughput. This is not a cross-shape or cross-device target.
-
-The completed Week 2 solution does **not** call MLX-provided implementations of
-the operators it teaches. It implements quantized matmul, decode attention,
-RMSNorm, RoPE, and SwiGLU in its own Python, C++, or Metal code. In particular,
-the required checkpoint does not use `mx.quantized_matmul`, `mx.dequantize`,
-`mx.fast` operators, or `mx.fast.scaled_dot_product_attention` as shortcuts.
-Its matrix path also avoids `mlx::steel`: the course scaffold leaves the
-cooperative tile loader and direct Metal `simdgroup_matrix` fragment
-bookkeeping for you to complete. The Day 1 baseline still uses Week 1's Python
-`mx.dequantize` loading helper; Day 3 replaces that loading path as part of
-keeping weights packed.
-
-If you want to study the serving path without implementing every custom
-operator, Days 3–7 each name a local MLX substitute. Keep the same course
-interface and substitute only that day's operator. This is different from
-`--solution mlx`, which runs the separate complete MLX model and bypasses the
-course-owned model, cache, and scheduler.
-
-Week 2 uses `mlx_lm` to load model weights and `mlx.core` for arrays, graph
-evaluation, and device synchronization.
+The synchronized benchmark and portable attribution runner are the ordinary
+path for every learner. Apple GPU capture and `gpudebug` are an
+[optional macOS 27 lab](./week2-advanced-profiling.md), never a prerequisite.
 
 ## Daily Checkpoints
 
-1. **KV cache:** port the Week 1 operators into a Week 2 model, add
-   request-scoped state, and stop recomputing the prefix.
-2. **Benchmarking and profiling:** measure the cached model against MLX with a
-   matched, synchronized protocol. Profiling is optional and deferred until the
-   macOS 27 tooling is available.
-3. **Quantize the model:** keep W4 weights packed, implement the matrix-vector
-   Metal path, wire it into the live model, and rerun the Day 2 benchmark.
-4. **Fused model kernels:** fuse RMSNorm, RoPE, and SwiGLU one operator at a
-   time after packed projections narrow the benchmark gap.
-5. **Decode attention:** introduce online softmax over its tested
-   short-context range and verify it with a matched workload.
-6. **SIMD-matrix prefill:** return to the fixed 128-token workload and replace
-   the correctness-first matrix path with cooperative tiles.
-7. **Split-K prefill:** partition the reduction dimension only for under-filled
-   short projections and fall back to Day 6 at the measured crossover.
+1. **KV cache:** make decode incremental, then record a matched Week 1 versus
+   cached Week 2 observation.
+2. **Discover:** learn synchronized measurement, attribute the cached model,
+   and choose the first bounded optimization. The checked run selected dense
+   projections.
+3. **Packed W4 matvec:** keep weights packed, optimize decode projections, and
+   re-profile. The checked run then exposed normalization, position, and
+   activation work.
+4. **Fused model kernels:** implement RMSNorm, RoPE, and SwiGLU one at a time,
+   retaining each from a matched measurement. Re-profile prefill before
+   choosing Day 5.
+5. **SIMD-matrix prefill:** replace the matrix-shaped projection schedule
+   selected by the fixed 128-token prefill attribution.
+6. **Optional operator lab:** choose a secondary category for one explicit
+   workload. The supplied branch studies bounded decode attention; an
+   equivalent evidence-led operator experiment is valid.
+7. **Conditional Split-K and final decision:** test an under-filled 32-token
+   projection, preserve the unsplit Day 5 fallback, then rerun the fixed
+   128×129 product workload and keep or reject the change there.
 
-### Run the Supplied Test Gates
+## What Is Supplied and What You Own
 
-The seven learner days now map one-to-one to the existing supplied selectors:
+The starter supplies model loading, the extension build system, benchmark and
+attribution runners, correctness tests, Python reference equations, stable
+checkpoint interfaces, and a compact checked M4 Pro evidence file. You own the
+cache transition, packed-weight integration, custom operator behavior, and
+the evidence-to-decision record.
 
-| Course day | Test command selector |
+The completed course path does not use MLX-provided implementations of the
+operators it teaches. If you want to study the later serving mechanisms
+without implementing one custom kernel, keep that course interface and wire
+the corresponding MLX operator locally. That local substitution is not the
+same as `--solution mlx`, which runs the separate full-MLX model.
+
+## Run the Supplied Gates
+
+New learners use the canonical selectors:
+
+| Course day | Test command |
 |---|---|
-| Day 1 | `--week 2 --day 1` |
-| Day 2 | `--week 2 --day 2` |
-| Day 3 | `--week 2 --day 3` |
-| Day 4 | `--week 2 --day 4` |
-| Day 5 | `--week 2 --day 5` |
-| Day 6 | `--week 2 --day 6` |
-| Day 7 | `--week 2 --day 7` |
+| Day 1 | `pdm run test --week 2 --day 1` |
+| Day 2 | `pdm run test --week 2 --day 2` |
+| Day 3 | `pdm run test --week 2 --day 3` |
+| Day 4 | `pdm run test --week 2 --day 4` |
+| Day 5 | `pdm run test --week 2 --day 5` |
+| Day 6 (optional) | `pdm run test --week 2 --day 6` |
+| Day 7 | `pdm run test --week 2 --day 7` |
 
-Use the selector beside each chapter while you work; run the complete day gate
-before carrying its result forward.
+Commands that exercise a model, benchmark, profile, capture, or reducer name
+`--solution tiny_llm` explicitly. The command-line tools otherwise default to
+the completed reference in some contexts, which would not measure your work.
+
+### Migrating Work from the Earlier Day Order
+
+The course formerly taught decode attention on Day 5 and SIMD-matrix prefill
+on Day 6. That work remains useful. If your checkout already contains those
+solutions, preserve it and run:
+
+```bash
+pdm run test --week 2 --day 5 --legacy-week2-order
+pdm run test --week 2 --day 6 --legacy-week2-order
+```
+
+The saved checkpoints remain available as `legacy-day-5` and
+`legacy-day-6`. Complete the new Day 5 SIMD gate, then treat your attention
+implementation as the optional Day 6 branch. The old
+[Day 5](./week2-05-decode-attention.md) and
+[Day 6](./week2-06-simd-matrix-prefill.md) URLs remain as migration pages, so
+existing bookmarks still resolve.
+
+## Verification Status
+
+The required gates check public behavior: checkpoint and workload identity,
+operator results, fallbacks, synchronized output, and decision-record schema.
+They do not grade exact private function names, Metal symbols, file routes,
+device timings, or whether optional `gpudebug` tooling is installed. A fresh
+or equivalently organized learner solution can pass.
+
+For the checked example, all absolute measurements are bounded to one M4 Pro,
+macOS 27, Qwen3-4B, the fixed 128-token prompt and 129-output-token product
+control, and `n=2` balanced product samples. Six of eight captures exposed full
+shader/counter detail; the pre-SIMD prefill capture did not expose a shader
+ranking, and the Split-K capture exposed only static dispatch. Missing data is
+reported as unavailable, never inferred.
 
 ## Week 2 to Week 3
 
 The completed Week 2 model decodes one token at a time from a dense KV cache,
-dispatches separate prefill and decode matrix schedules, and keeps weights
-quantized throughout. Week 1 continues to use its Python `mlx.core` full-prefix
-generation loop.
+dispatches separate prefill and decode projection schedules, and keeps weights
+quantized. Week 3 preserves these model, cache, precision, and operator
+interfaces while adding paging and batching. Day 6's optional attention branch
+is not a Week 3 prerequisite; Day 7 likewise starts from Day 5's unsplit SIMD
+path.
 
-Week 3 keeps these Week 2 interfaces, but it deliberately changes projection
-ownership: canonical dense Week 3 and the Week 3 scheduler factory select MLX
-quantized projections. Cache management, attention, paging, batching, and
-scheduling remain course-owned. Full MLX is a separate benchmark baseline,
-not another name for this hybrid Week 3 course path.
-
-The explicit projection seam is a teaching boundary, not a performance credit
-for paging. The performance appendix isolates the seam while holding the
-course-owned serving mechanisms fixed, then reports representative absolute
-performance after that choice. Keep those two questions separate.
-
-Run `pdm run bench-week2-progression` to measure each checkpoint against the
-Week 1 baseline and MLX. Full methodology and cumulative results are in the
-[performance appendix](./appendix-performance.md). The default runs reference
-checkpoints; add `--solution tiny_llm` to measure your implementation.
+See the [performance evidence ledger](./appendix-performance.md) for the
+checked causal example and its limits.
 
 {{#include copyright.md}}

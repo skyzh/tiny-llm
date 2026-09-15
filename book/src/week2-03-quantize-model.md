@@ -480,7 +480,7 @@ dimension. Day 3 uses this explicit dispatch:
 | Activation rows | Kernel | Role at this checkpoint |
 |---:|---|---|
 | `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
-| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 6 replaces it with a cooperative tiled kernel. |
+| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 5 replaces it with a cooperative tiled kernel. |
 
 The cutoff does not mean the SIMD kernel expands to cover larger `M`. The two
 paths are separate schedules: Day 3 optimizes the vector-shaped decode
@@ -501,7 +501,7 @@ control flow mirrors the equation and makes it a useful debugging control. The
 Python `mlx.core` equation remains the correctness oracle for both Metal
 schedules.
 
-Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 6
+Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 5
 revisits that workload with cooperative tiling.
 
 ### Stage 2: SIMD Matvec
@@ -568,7 +568,7 @@ Implement both required kernel layouts in `quantized_matmul.metal`:
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
 - For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
-  SIMD matvec schedule; Day 6 introduces the tiled prefill schedule.
+  SIMD matvec schedule; Day 5 introduces the tiled prefill schedule.
 - The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
@@ -688,19 +688,24 @@ model command verifies that those pieces compose.
 Measure the cumulative model and the real projection shapes:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 4 \
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --variant week2-kv-cache --variant week2-quantized-matvec --variant mlx \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last
 
-pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
-  --section decode-projections --context 128
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case kv-cache:decode:128 --case quantized-matvec:decode:128 \
+  --warmup 4 --iterations 12 \
+  --json-output week2-day3-attribution.json
 ```
 
 Keep one cumulative model row and one representative real-shape projection
-comparison. First require a clear decode gain over `kv-cache`; then use the
-projection row to decide whether the matvec still needs work. The complete
-campaign and reference attribution are in the
+comparison. In the checked M4 Pro example, packed W4 reduced attributed
+projection time by 69.0% and fixed-workload decode rose from 24.38 to 58.90
+tokens/s. The re-profile then exposed normalization, position, and activation
+at 33.5% of attributed time, selecting Day 4. These are bounded observations
+from one machine and two product samples, not portable timing thresholds. The
+complete campaign and attribution are in the
 [performance appendix](./appendix-performance.md#day-3-keep-weights-packed).
 
 If you want to continue without writing the custom Day 3 kernels, implement

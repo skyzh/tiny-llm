@@ -31,7 +31,8 @@ This course is divided into four weeks. We will serve Qwen3 MLX models, optimize
 small coding agent.
 
 - Week 1: Serve Qwen3 using array and matrix operations written in Python.
-- Week 2: Implement custom C++ and Metal kernels to accelerate the model.
+- Week 2: Measure the cached model, implement the selected C++ and Metal
+  kernels, and re-profile after each change.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
@@ -101,9 +102,10 @@ functions in `src/tiny_llm`.
 The cumulative dependencies are deliberate:
 
 - **Week 1 → Week 2:** Week 2 starts from the readable Qwen3 model and replaces
-  costs one mechanism at a time: first the generation algorithm and KV cache,
-  then quantized and fused kernels. Days 1–2 establish state and measurement;
-  Days 3–7 expose optimization seams.
+  costs one measured mechanism at a time: first the generation algorithm and
+  KV cache, then quantized and fused kernels. Days 1–2 establish state and a
+  repeatable measurement; Days 3–5 follow the dominant cost, Day 6 is an
+  optional operator lab, and Day 7 closes with a conditional schedule decision.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -136,11 +138,12 @@ every Metal kernel, you can make these explicit local substitutions:
 | Days 1–2 | Dense KV-cache state, the Week 2 model boundary, and the matched measurement method | None; these are state and methodology rather than replaceable operators. |
 | Day 3 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
 | Day 4 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
-| Day 5 | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the custom decode-attention kernel. |
-| Days 6–7 | The same quantized-projection interface and dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing SIMD-matrix and Split-K schedules. |
+| Day 5 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing the SIMD-matrix schedule. |
+| Day 6 (optional) | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the supplied bounded decode-attention branch. |
+| Day 7 | The Day 5 unsplit projection fallback and measured dispatch boundary | Keep the unsplit path rather than implementing Split-K where your measurement does not support it. |
 
 Only the quantized-projection seam is already selected by canonical Week 3.
-The Day 4 and Day 5 alternatives require you to wire the MLX call at the
+The Day 4 and optional Day 6 alternatives require you to wire the MLX call at the
 existing course interface; there is no `--use-mlx-for-day` command. These
 off-ramps let you study later mechanisms, but they do not complete the skipped
 day's custom-kernel exercises, implementation-specific tests, or performance

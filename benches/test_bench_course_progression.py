@@ -117,8 +117,8 @@ def test_week2_live_labels_follow_the_seven_day_book():
     assert "| 2.3 | Quantize the Model |" in readme
     assert "| 2.4 | Fused Model Kernels |" in readme
     assert "| 2.5 | SIMD-Matrix Prefill |" in readme
-    assert "| 2.6 | Workload-Conditioned Operator Lab |" in readme
-    assert "| 2.7 | Split-K Prefill |" in readme
+    assert "| 2.6 (optional) | Workload-Conditioned Operator Lab |" in readme
+    assert "| 2.7 | Conditional Split-K and Final Decision |" in readme
     assert "./week2-02-benchmark-profile.md" in summary
     assert "./week2-03-quantize-model.md" in summary
     assert "./week2-04-fused-model-kernels.md" in summary
@@ -133,8 +133,12 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-03-quantize-model.md": "# 🚧 Week 2 Day 3: Quantize the Model",
         "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Kernels",
         "week2-05-simd-matrix-prefill.md": "# 🚧 Week 2 Day 5: SIMD-Matrix Prefill",
-        "week2-06-operator-lab.md": "# 🚧 Week 2 Day 6: Workload-Conditioned Operator Lab",
-        "week2-07-split-k-prefill.md": "# 🚧 Week 2 Day 7: Split-K Prefill",
+        "week2-06-operator-lab.md": (
+            "# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab"
+        ),
+        "week2-07-split-k-prefill.md": (
+            "# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision"
+        ),
     }
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
@@ -166,7 +170,8 @@ def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
     appendix = (ROOT / "book/src/week2-advanced-profiling.md").read_text()
 
     assert "pdm run bench" in day2
-    assert "Profiling is optional" in day2
+    assert "capture is optional" in day2
+    assert "pdm run profile-week2-kernels --solution tiny_llm" in day2
     assert "macOS 27" in day2
     assert "pdm run test --week 2 --day 3" in day3
     assert "Week 2 Day 2: Benchmark, Profile, and Quantize" not in day3
@@ -187,11 +192,11 @@ def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
     scripts = (ROOT / "pyproject.toml").read_text()
     assert "capture-week2" in scripts
     assert "reduce-week2-gpudebug" in scripts
-    assert "not required" in appendix
+    assert "never an acceptance gate" in appendix
     assert "macOS 27" in appendix
 
 
-def test_required_week2_progression_never_depends_on_optional_profiling():
+def test_required_week2_progression_uses_portable_attribution_not_local_capture():
     days = {
         day: (ROOT / "book/src" / filename).read_text()
         for day, filename in {
@@ -202,13 +207,30 @@ def test_required_week2_progression_never_depends_on_optional_profiling():
         }.items()
     }
 
-    for day, chapter in days.items():
-        _assert_required_progression_is_profile_free(chapter, day)
+    expected_cases = {
+        3: ("kv-cache:decode:128", "quantized-matvec:decode:128"),
+        4: ("quantized-matvec:decode:128", "swiglu:decode:128"),
+        5: ("swiglu:prefill:128", "simd-matmul:prefill:128"),
+        6: ("simd-matmul:decode:128", "decode-attention:decode:128"),
+    }
+    local_capture_tokens = (
+        "Xcode GPU capture",
+        "Metal System Trace",
+        ".gputrace",
+        "gpudebug",
+        "screenshot",
+        "GPU duration",
+    )
 
-    day3 = days[3]
-    assert "matrix schedule. Use a source trace through those branches" in day3
-    assert "direct source trace of the dispatch branches" in day3
-    assert "source trace proves" in day3
+    for day, chapter in days.items():
+        assert "pdm run profile-week2-kernels --solution tiny_llm" in chapter
+        assert all(case in chapter for case in expected_cases[day])
+        assert not any(token in chapter for token in local_capture_tokens)
+
+    assert "The re-profile then exposed normalization" in days[3]
+    assert "Re-profiling then placed" in days[4]
+    assert "Rerun the exact commands from the baseline section" in days[5]
+    assert "Continue to [Day 7]" in days[6]
 
 
 @pytest.mark.parametrize(

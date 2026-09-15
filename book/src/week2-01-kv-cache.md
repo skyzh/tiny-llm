@@ -265,23 +265,25 @@ pdm run main --solution tiny_llm_ref --loader week2 \
 
 ## Integrate and Measure
 
-Run the cached Week 1 checkpoint end to end before changing any operator:
+Close Day 1 with a matched Week 1 versus cached Week 2 observation. The runner
+uses fresh processes, applies the same Qwen3-4B 128×129 workload to both rows,
+and writes the configuration beside the result:
 
 ```bash
-pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-4b \
-  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
+  --variant week1 --variant week2-kv-cache \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last --json-output week2-day1-cache.json
 ```
 
-Keep one result as the input to Day 2's matched comparison. Every later command
-changes one cumulative checkpoint.
+Keep this JSON as Day 2's baseline. Do not carry the speedup to another model,
+prompt length, output length, or device: the useful result is the matched
+observation and its recorded workload identity.
 
 Day 1 is an algorithmic checkpoint, so it does not invent a shader-level
 limiter from a GPU trace. The checkpoint removes full-prefix recomputation;
-use the end-to-end benchmark to measure that algorithmic change. Day 2 measures
-this model and identifies the projection-weight bandwidth bottleneck. Day 3
-introduces 4-bit quantization and implements the SIMD matvec kernel that
-operates on packed weights directly.
+use the end-to-end benchmark to measure that algorithmic change. Day 2 teaches
+you to attribute this exact cached workload and choose a falsifiable next
+change. Day 3 begins only after that evidence names dense projections.
 
 {{#include copyright.md}}
