@@ -199,6 +199,69 @@ def test_capture_checks_destinations_before_platform_or_model_work(tmp_path):
         gpu.capture(args)
 
 
+@pytest.mark.parametrize("roles", ((0, 1), (0, 2), (1, 2)))
+@pytest.mark.parametrize("alias_kind", ("exact", "lexical", "symlink-parent"))
+def test_capture_rejects_aliases_between_every_output_role(tmp_path, roles, alias_kind):
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    outputs = [
+        real_parent / "trace.gputrace",
+        real_parent / "capture.json",
+        real_parent / "trace.sha256",
+    ]
+    source, alias_role = roles
+    if alias_kind == "exact":
+        outputs[alias_role] = outputs[source]
+    elif alias_kind == "lexical":
+        outputs[alias_role] = (
+            outputs[source].parent / "unused" / ".." / outputs[source].name
+        )
+    else:
+        linked_parent = tmp_path / f"linked-{source}-{alias_role}"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        outputs[alias_role] = linked_parent / outputs[source].name
+
+    args = Namespace(trace=outputs[0], metadata=outputs[1], manifest=outputs[2])
+    with pytest.raises(ValueError, match="distinct"):
+        gpu.capture(args)
+
+
+@pytest.mark.parametrize("file_role", (1, 2))
+@pytest.mark.parametrize("direction", ("inside-trace", "trace-inside"))
+def test_capture_rejects_trace_package_overlap(tmp_path, file_role, direction):
+    outputs = [
+        tmp_path / "trace.gputrace",
+        tmp_path / "capture.json",
+        tmp_path / "trace.sha256",
+    ]
+    if direction == "inside-trace":
+        outputs[file_role] = outputs[0] / outputs[file_role].name
+    else:
+        outputs[0] = outputs[file_role] / outputs[0].name
+
+    args = Namespace(trace=outputs[0], metadata=outputs[1], manifest=outputs[2])
+    with pytest.raises(ValueError, match="must not overlap"):
+        gpu.capture(args)
+
+
+def test_capture_distinct_outputs_preserve_roles_and_package_identity(tmp_path):
+    trace = tmp_path / "trace.gputrace"
+    metadata = tmp_path / "capture.json"
+    manifest = tmp_path / "trace.sha256"
+    assert gpu.normalize_capture_outputs(trace, metadata, manifest) == (
+        trace.resolve(),
+        metadata.resolve(),
+        manifest.resolve(),
+    )
+
+    trace.mkdir()
+    (trace / "capture.bin").write_bytes(b"capture")
+    before = gpu.package_manifest(trace)
+    manifest.write_text(before[0])
+    metadata.write_text("{}\n")
+    assert gpu.package_manifest(trace) == before
+
+
 def test_checked_result_is_compact_bounded_and_explicit_about_missing_trees():
     path = (
         ROOT

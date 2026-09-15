@@ -168,15 +168,44 @@ def test_decision_requires_exact_source_solution_model_and_workload_identity():
             )
 
 
-def test_profile_workload_identity_is_canonical_and_checkpoint_independent():
+def test_profile_workload_identity_covers_every_workload_field(monkeypatch):
     baseline = profile.ProfileCase("swiglu", "prefill", 128)
     candidate = profile.ProfileCase("simd-matmul", "prefill", 128)
-    assert profile.workload_record("model", baseline, 2, 4) == profile.workload_record(
-        "model", candidate, 2, 4
-    )
-    assert profile.canonical_hash(
-        profile.workload_record("model", baseline, 2, 4)
-    ) == profile.canonical_hash(profile.workload_record("model", candidate, 2, 4))
+    original = profile.workload_record("model", baseline, 2, 4)
+    assert original == profile.workload_record("model", candidate, 2, 4)
+
+    variants = [
+        profile.workload_record("other-model", baseline, 2, 4),
+        profile.workload_record(
+            "model", profile.ProfileCase("swiglu", "decode", 128), 2, 4
+        ),
+        profile.workload_record(
+            "model", profile.ProfileCase("swiglu", "prefill", 64), 2, 4
+        ),
+        profile.workload_record("model", baseline, 3, 4),
+        profile.workload_record("model", baseline, 2, 5),
+    ]
+    with monkeypatch.context() as patch:
+        patch.setattr(profile, "PROMPT_RULE", "other-prompt-rule")
+        variants.append(profile.workload_record("model", baseline, 2, 4))
+    with monkeypatch.context() as patch:
+        patch.setattr(profile, "PREFILL_LOGITS", "last")
+        variants.append(profile.workload_record("model", baseline, 2, 4))
+
+    original_hash = profile.canonical_hash(original)
+    assert all(profile.canonical_hash(variant) != original_hash for variant in variants)
+    assert [
+        {key for key in original if original[key] != variant[key]}
+        for variant in variants
+    ] == [
+        {"model"},
+        {"phase"},
+        {"tokens"},
+        {"warmup"},
+        {"iterations"},
+        {"prompt_rule"},
+        {"prefill_logits"},
+    ]
 
 
 def test_default_attribution_follows_canonical_core_then_optional_branch():
@@ -213,3 +242,40 @@ def test_profile_refuses_existing_output_before_loading_implementation(
     )
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         profile.main()
+
+
+@pytest.mark.parametrize("alias_kind", ("exact", "lexical", "symlink-parent"))
+def test_profile_refuses_output_alias_before_loading_implementation(
+    tmp_path, monkeypatch, alias_kind
+):
+    output = tmp_path / "real" / "result.json"
+    if alias_kind == "exact":
+        alias = output
+    elif alias_kind == "lexical":
+        alias = output.parent / "unused" / ".." / output.name
+    else:
+        output.parent.mkdir()
+        linked_parent = tmp_path / "linked"
+        linked_parent.symlink_to(output.parent, target_is_directory=True)
+        alias = linked_parent / output.name
+    monkeypatch.setattr(
+        profile,
+        "parse_args",
+        lambda: SimpleNamespace(json_output=output, decision_output=alias),
+    )
+    monkeypatch.setattr(
+        profile,
+        "load_implementation",
+        lambda _name: pytest.fail("implementation/model work must not begin"),
+    )
+    with pytest.raises(ValueError, match="distinct"):
+        profile.main()
+
+
+def test_profile_preserves_distinct_output_role_order(tmp_path):
+    json_output = tmp_path / "profile.json"
+    decision_output = tmp_path / "decision.json"
+    assert profile.normalize_output_paths(json_output, decision_output) == (
+        json_output.resolve(),
+        decision_output.resolve(),
+    )

@@ -73,6 +73,23 @@ def ensure_outputs_absent(paths: Iterable[Path]) -> None:
         raise FileExistsError(f"refusing to overwrite {existing[0]}")
 
 
+def normalize_capture_outputs(
+    trace: Path, metadata: Path, manifest: Path
+) -> tuple[Path, Path, Path]:
+    outputs = tuple(
+        path.expanduser().resolve(strict=False) for path in (trace, metadata, manifest)
+    )
+    if len(set(outputs)) != len(outputs):
+        raise ValueError("capture output paths must be distinct")
+    normalized_trace, normalized_metadata, normalized_manifest = outputs
+    for output in (normalized_metadata, normalized_manifest):
+        if output.is_relative_to(normalized_trace) or normalized_trace.is_relative_to(
+            output
+        ):
+            raise ValueError("trace package must not overlap metadata or manifest")
+    return outputs
+
+
 def package_manifest(package: Path) -> tuple[str, int, int]:
     package = package.resolve(strict=True)
     if not package.is_dir():
@@ -232,8 +249,10 @@ def summarize_gpudebug(objects: list[Any], commands: list[Any]) -> dict[str, Any
 
 
 def capture(args: argparse.Namespace) -> None:
-    outputs = (args.trace, args.metadata, args.manifest)
-    ensure_outputs_absent(outputs)
+    raw_outputs = (args.trace, args.metadata, args.manifest)
+    ensure_outputs_absent(raw_outputs)
+    args.trace, args.metadata, args.manifest = normalize_capture_outputs(*raw_outputs)
+    ensure_outputs_absent((args.trace, args.metadata, args.manifest))
     if sys.platform != "darwin":
         raise RuntimeError("capture-week2 requires macOS and Apple Metal")
     if os.environ.get("MTL_CAPTURE_ENABLED") != "1":

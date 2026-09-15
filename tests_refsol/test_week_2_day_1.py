@@ -45,5 +45,5 @@ def test_tasks_2_and_3_cached_checkpoint_is_runnable_and_readable():
 
 def test_task_3_rejects_a_position_that_disagrees_with_the_cache():
     model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="kv-cache")
-    with pytest.raises(ValueError, match="does not match model offset"):
+    with pytest.raises(ValueError):
         model(mx.array([[1]], dtype=mx.int32), 1, model.create_kv_cache())

@@ -162,6 +162,19 @@ def canonical_hash(value: object) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def normalize_output_paths(
+    json_output: Path | None, decision_output: Path | None
+) -> tuple[Path | None, Path | None]:
+    normalized = tuple(
+        path.expanduser().resolve(strict=False) if path is not None else None
+        for path in (json_output, decision_output)
+    )
+    present = [path for path in normalized if path is not None]
+    if len(set(present)) != len(present):
+        raise ValueError("output paths must be distinct")
+    return normalized
+
+
 def source_metadata(root: Path) -> dict[str, object]:
     def git(*args: str) -> str:
         return subprocess.run(
@@ -469,6 +482,13 @@ def profile_case(
 
 def main() -> None:
     args = parse_args()
+    raw_outputs = [path for path in (args.json_output, args.decision_output) if path]
+    existing = [path for path in raw_outputs if path.exists() or path.is_symlink()]
+    if existing:
+        raise FileExistsError(f"refusing to overwrite {existing[0]}")
+    args.json_output, args.decision_output = normalize_output_paths(
+        args.json_output, args.decision_output
+    )
     outputs = [path for path in (args.json_output, args.decision_output) if path]
     existing = [path for path in outputs if path.exists() or path.is_symlink()]
     if existing:
