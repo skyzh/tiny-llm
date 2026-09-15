@@ -1,8 +1,10 @@
 import argparse
+import hashlib
 import importlib
 import importlib.metadata
 import json
 import platform
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -25,12 +27,14 @@ DEFAULT_CASES = (
     "kv-cache:decode:128",
     "quantized-matvec:decode:128",
     "swiglu:decode:128",
-    "decode-attention:decode:128",
-    "decode-attention:prefill:128",
     "simd-matmul:prefill:128",
     "simd-matmul:prefill:32",
+    "decode-attention:decode:128",
+    "decode-attention:prefill:128",
     "split-k:prefill:32",
 )
+PROMPT_RULE = "synthetic-token-ids"
+PREFILL_LOGITS = "all"
 
 
 @dataclass(frozen=True)
@@ -109,8 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--solution",
         choices=("tiny_llm", "tiny_llm_ref"),
-        default="tiny_llm_ref",
-        help="implementation to profile (default: tiny_llm_ref)",
+        required=True,
+        help="implementation to profile; learner evidence uses tiny_llm",
     )
     parser.add_argument(
         "--case",
@@ -124,12 +128,100 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=4)
     parser.add_argument("--iterations", type=int, default=12)
     parser.add_argument("--json-output", type=Path)
+    parser.add_argument("--decision-output", type=Path)
+    parser.add_argument("--baseline-checkpoint")
+    parser.add_argument("--candidate-checkpoint")
+    parser.add_argument("--dominant-category")
+    parser.add_argument("--hypothesis")
+    parser.add_argument("--observed-effect")
+    parser.add_argument("--decision", choices=("keep", "reject", "inconclusive"))
+    parser.add_argument("--next-experiment")
     args = parser.parse_args()
     if args.warmup < 0 or args.iterations <= 0:
         parser.error("warmup cannot be negative and iterations must be positive")
     if args.case is None:
         args.case = [parse_case(value) for value in DEFAULT_CASES]
+    decision_fields = (
+        args.baseline_checkpoint,
+        args.candidate_checkpoint,
+        args.dominant_category,
+        args.hypothesis,
+        args.observed_effect,
+        args.decision,
+        args.next_experiment,
+    )
+    if args.decision_output is not None and not all(decision_fields):
+        parser.error("--decision-output requires every decision-record field")
+    if args.decision_output is None and any(decision_fields):
+        parser.error("decision-record fields require --decision-output")
     return args
+
+
+def canonical_hash(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def source_metadata(root: Path) -> dict[str, object]:
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    return {
+        "commit": git("rev-parse", "HEAD"),
+        "tree": git("rev-parse", "HEAD^{tree}"),
+        "tracked_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
+    }
+
+
+def workload_record(
+    model: str, case: ProfileCase, warmup: int, iterations: int
+) -> dict[str, object]:
+    return {
+        "model": model,
+        "phase": case.phase,
+        "tokens": case.tokens,
+        "prompt_rule": PROMPT_RULE,
+        "prefill_logits": PREFILL_LOGITS,
+        "warmup": warmup,
+        "iterations": iterations,
+    }
+
+
+def build_decision(
+    baseline: dict[str, object],
+    candidate: dict[str, object],
+    *,
+    dominant_category: str,
+    hypothesis: str,
+    observed_effect: str,
+    decision: str,
+    next_experiment: str,
+) -> dict[str, object]:
+    for field in ("source", "solution", "model", "workload_id"):
+        if baseline[field] != candidate[field]:
+            raise ValueError(f"decision {field} mismatch")
+    if decision not in {"keep", "reject", "inconclusive"}:
+        raise ValueError("decision must be keep, reject, or inconclusive")
+    return {
+        "schema_version": 1,
+        "source": baseline["source"],
+        "solution": baseline["solution"],
+        "model": baseline["model"],
+        "workload_id": baseline["workload_id"],
+        "baseline_checkpoint": baseline["checkpoint"],
+        "candidate_checkpoint": candidate["checkpoint"],
+        "dominant_category": dominant_category,
+        "hypothesis": hypothesis,
+        "observed_effect": observed_effect,
+        "decision": decision,
+        "next_experiment": next_experiment,
+    }
 
 
 def evaluate(outputs: list[mx.array]) -> None:
@@ -339,6 +431,7 @@ class KernelReplay:
 def profile_case(
     implementation: KernelImplementation,
     mlx_model: object,
+    model_name: str,
     case: ProfileCase,
     warmup: int,
     iterations: int,
@@ -364,10 +457,11 @@ def profile_case(
             f"  {category.name:<40} {category.median_us:>10.1f} us "
             f"{category.share:>6.1%}"
         )
+    workload = workload_record(model_name, case, warmup, iterations)
     return {
         "checkpoint": case.checkpoint,
-        "phase": case.phase,
-        "tokens": case.tokens,
+        "workload": workload,
+        "workload_id": canonical_hash(workload),
         "attributed_us": total,
         "categories": [asdict(category) for category in categories],
     }
@@ -375,6 +469,10 @@ def profile_case(
 
 def main() -> None:
     args = parse_args()
+    outputs = [path for path in (args.json_output, args.decision_output) if path]
+    existing = [path for path in outputs if path.exists() or path.is_symlink()]
+    if existing:
+        raise FileExistsError(f"refusing to overwrite {existing[0]}")
     implementation = load_implementation(args.solution)
     unknown = [
         case.checkpoint
@@ -395,18 +493,45 @@ def main() -> None:
         "the measured groups."
     )
     profiles = [
-        profile_case(implementation, mlx_model, case, args.warmup, args.iterations)
+        profile_case(
+            implementation,
+            mlx_model,
+            model_name,
+            case,
+            args.warmup,
+            args.iterations,
+        )
         for case in args.case
     ]
-    result = {
-        "schema_version": 1,
-        "solution": implementation.name,
-        "model": model_name,
-        "mlx_version": importlib.metadata.version("mlx"),
-        "mlx_lm_version": importlib.metadata.version("mlx-lm"),
+    root = Path(__file__).resolve().parents[1]
+    source = source_metadata(root)
+    software = {
+        "mlx": importlib.metadata.version("mlx"),
+        "mlx_lm": importlib.metadata.version("mlx-lm"),
+        "python": platform.python_version(),
+    }
+    host = {
         "machine": platform.machine(),
         "platform": platform.platform(),
         "device": mx.device_info(),
+    }
+    for profile in profiles:
+        profile.update(
+            source=source,
+            solution=implementation.name,
+            model=model_name,
+            software=software,
+            host=host,
+            warmup=args.warmup,
+            iterations=args.iterations,
+        )
+    result = {
+        "schema_version": 2,
+        "source": source,
+        "solution": implementation.name,
+        "model": model_name,
+        "software": software,
+        "host": host,
         "warmup": args.warmup,
         "iterations": args.iterations,
         "profiles": profiles,
@@ -414,6 +539,32 @@ def main() -> None:
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
         args.json_output.write_text(json.dumps(result, indent=2) + "\n")
+    if args.decision_output is not None:
+        matches = {
+            profile["checkpoint"]: profile
+            for profile in profiles
+            if profile["checkpoint"]
+            in {args.baseline_checkpoint, args.candidate_checkpoint}
+        }
+        missing = {
+            args.baseline_checkpoint,
+            args.candidate_checkpoint,
+        } - matches.keys()
+        if missing:
+            raise ValueError(
+                f"decision checkpoint was not profiled: {sorted(missing)[0]}"
+            )
+        decision = build_decision(
+            matches[args.baseline_checkpoint],
+            matches[args.candidate_checkpoint],
+            dominant_category=args.dominant_category,
+            hypothesis=args.hypothesis,
+            observed_effect=args.observed_effect,
+            decision=args.decision,
+            next_experiment=args.next_experiment,
+        )
+        args.decision_output.parent.mkdir(parents=True, exist_ok=True)
+        args.decision_output.write_text(json.dumps(decision, indent=2) + "\n")
 
 
 if __name__ == "__main__":

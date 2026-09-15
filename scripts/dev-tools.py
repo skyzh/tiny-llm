@@ -18,10 +18,20 @@ def validate_week_day(args, required=False):
     return True
 
 
+def test_source_file(args):
+    if (
+        getattr(args, "legacy_week2_order", False)
+        and args.week == 2
+        and args.day in (5, 6)
+    ):
+        return f"tests_refsol/test_week_2_legacy_day_{args.day}.py"
+    return f"tests_refsol/test_week_{args.week}_day_{args.day}.py"
+
+
 def copy_test(args, skip_if_exists=False, force=False):
     if not validate_week_day(args, required=True):
         return 1
-    source_file = f"tests_refsol/test_week_{args.week}_day_{args.day}.py"
+    source_file = test_source_file(args)
     target_file = f"tests/test_week_{args.week}_day_{args.day}.py"
     if skip_if_exists and os.path.exists(target_file) and not force:
         # diff the two files and warn if they are different
@@ -45,7 +55,11 @@ def test(args):
         if args.week == 4:
             targets = []
             for day in range(1, args.day + 1):
-                day_args = argparse.Namespace(week=args.week, day=day)
+                day_args = argparse.Namespace(
+                    week=args.week,
+                    day=day,
+                    legacy_week2_order=args.legacy_week2_order,
+                )
                 status = copy_test(day_args, force=True)
                 if status:
                     return status
@@ -62,10 +76,8 @@ def test_refsol(args):
     if not validate_week_day(args):
         return 1
     if args.week is not None:
-        return pytest.main(
-            ["-v", f"tests_refsol/test_week_{args.week}_day_{args.day}.py"]
-            + args.remainders
-        )
+        source_file = test_source_file(args)
+        return pytest.main(["-v", source_file] + args.remainders)
     return pytest.main(["-v", "tests_refsol"] + args.remainders)
 
 
@@ -76,15 +88,18 @@ def main():
     copy_test_parser.add_argument("--week", type=int, required=True)
     copy_test_parser.add_argument("--day", type=int, required=True)
     copy_test_parser.add_argument("--force", action="store_true")
+    copy_test_parser.add_argument("--legacy-week2-order", action="store_true")
     copy_test_parser.set_defaults(copy_test_parser=True)
     test_parser = subparsers.add_parser("test")
     test_parser.add_argument("--week", type=int, required=False)
     test_parser.add_argument("--day", type=int, required=False)
+    test_parser.add_argument("--legacy-week2-order", action="store_true")
     test_parser.add_argument("remainders", nargs="*")
     test_parser.set_defaults(test_parser=True)
     test_refsol_parser = subparsers.add_parser("test-refsol")
     test_refsol_parser.add_argument("--week", type=int, required=False)
     test_refsol_parser.add_argument("--day", type=int, required=False)
+    test_refsol_parser.add_argument("--legacy-week2-order", action="store_true")
     test_refsol_parser.add_argument("remainders", nargs="*")
     test_refsol_parser.set_defaults(test_refsol_parser=True)
     args = parser.parse_args()

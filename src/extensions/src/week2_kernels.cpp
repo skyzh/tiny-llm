@@ -50,18 +50,18 @@ void Week2SwiGLU::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array
     checkpoint_todo("Week2SwiGLU::eval_gpu", "Week 2, Day 4");
 }
 
-// Week 2, Day 5.
+// Week 2, Day 6.
 mx::array decode_attention(const mx::array &, const mx::array &, const mx::array &, const mx::array &, float, bool,
                            bool, int, int, mx::StreamOrDevice) {
-    checkpoint_todo("decode_attention", "Week 2, Day 5");
+    checkpoint_todo("decode_attention", "Week 2, Day 6");
 }
 
 void Week2DecodeAttention::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
-    checkpoint_todo("Week2DecodeAttention::eval_cpu", "Week 2, Day 5");
+    checkpoint_todo("Week2DecodeAttention::eval_cpu", "Week 2, Day 6");
 }
 
 void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
-    checkpoint_todo("Week2DecodeAttention::eval_gpu", "Week 2, Day 5");
+    checkpoint_todo("Week2DecodeAttention::eval_gpu", "Week 2, Day 6");
 }
 
 }  // namespace tiny_llm_ext

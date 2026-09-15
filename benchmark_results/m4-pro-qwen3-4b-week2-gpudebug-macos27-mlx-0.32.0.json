@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "week2-gpudebug-compact-example",
+  "provenance": {
+    "task": 525,
+    "report_sha256": "ecfce490a9a0f31e6f114b170d5c5efffe933dbb4747d87f2542804c1a561fa6",
+    "compact_bundle_sha256": "a06043a651c51eacf1b9dc2ecfaea56e174a7110d12013e78b7c2e7166487d62"
+  },
+  "source": {
+    "commit": "add389b747793e910f0506f5720dd0aac373d126",
+    "tree": "b8b95438d13586440651c3a090ce3fd19d06cc6c",
+    "tracked_dirty": false,
+    "solution": "tiny_llm_ref"
+  },
+  "host": {
+    "machine": "MacBook Pro",
+    "chip": "Apple M4 Pro",
+    "operating_system": "macOS 27.0",
+    "build": "26A428",
+    "scope": "one-machine observation; not a portable timing claim"
+  },
+  "software": {
+    "mlx": "0.32.0",
+    "gpudebug": "1.0"
+  },
+  "fixed_product_workload": {
+    "model": "Qwen/Qwen3-4B-MLX-4bit",
+    "prompt_tokens": 128,
+    "output_tokens": 129,
+    "prefill_logits": "last",
+    "measurement": "synchronized balanced fresh-process medians"
+  },
+  "decisions": [
+    {
+      "change": "packed-w4-projections",
+      "dominant_before": "dense projections",
+      "evidence": {
+        "decode_projection_share_percent": 83.9,
+        "projection_replay_effect_percent": -69.0,
+        "product_decode_tokens_per_second": {
+          "before": 24.38,
+          "after": 58.90
+        }
+      },
+      "decision": "keep",
+      "reason": "matched attribution and product measurements improved on this host"
+    },
+    {
+      "change": "fused-pointwise-kernels",
+      "dominant_before": "normalization, position, and activation",
+      "evidence": {
+        "attributed_category_effect_percent": -79.0
+      },
+      "decision": "keep",
+      "reason": "the matched attributed category shrank on this host"
+    },
+    {
+      "change": "simd-matrix-prefill",
+      "dominant_before": "prefill projections",
+      "evidence": {
+        "prefill_projection_share_percent": 99.1,
+        "projection_replay_effect_percent": -86.4,
+        "product_prefill_tokens_per_second": {
+          "before": 106.44,
+          "after": 721.60
+        }
+      },
+      "decision": "keep",
+      "reason": "matched attribution and product measurements improved on this host"
+    },
+    {
+      "change": "decode-attention",
+      "dominant_before": "attention under the bounded decode workload",
+      "evidence": {
+        "product_effect_percent": 2.91,
+        "attention_attribution_effect_percent": -0.75,
+        "total_attribution_effect_percent": 0.97
+      },
+      "decision": "inconclusive",
+      "reason": "small effects disagree; retain only as an optional workload-conditioned lab"
+    },
+    {
+      "change": "split-k",
+      "dominant_before": "short-shape projections",
+      "evidence": {
+        "fixed_128_product_effect_percent": -0.45,
+        "short_32_attribution_effect_percent": 4.87
+      },
+      "decision": "reject-for-fixed-128-retain-conditionally-for-32",
+      "reason": "the fixed course workload did not improve; the short shape remains a bounded conditional experiment"
+    }
+  ],
+  "captures": [
+    {
+      "checkpoint": "kv-cache",
+      "phase": "decode",
+      "tokens": 128,
+      "trace_package": {
+        "bytes": 10823442700,
+        "files": 1585,
+        "manifest_sha256": "8ad1db17d743af17969b6b53ca867942ef3a025321f8360dde8ac1bf0456e092"
+      },
+      "gpudebug": {
+        "timeline": {"available": true},
+        "shader_ranking": {"available": true},
+        "counters": {"available": true}
+      }
+    },
+    {
+      "checkpoint": "quantized-matvec",
+      "phase": "decode",
+      "tokens": 128,
+      "trace_package": {
+        "bytes": 2812816969,
+        "files": 1378,
+        "manifest_sha256": "cd4afadcc0bdf6229ff84c3d2735302064788264d211736fd88d1a7e76f378d2"
+      },
+      "gpudebug": {
+        "timeline": {"available": true},
+        "shader_ranking": {"available": true},
+        "counters": {"available": true}
+      }
+    },
+    {
+      "checkpoint": "swiglu",
+      "phase": "decode",
+      "tokens": 128,
+      "trace_package": {
+        "bytes": 2776016660,
+        "files": 1372,
+        "manifest_sha256": "3718f2d06032becf0c017fbe711d2c97a63e093df2ba368c5a3d3922347e4ffc"
+      },
+      "gpudebug": {
+        "timeline": {"available": true},
+        "shader_ranking": {"available": true},
+        "counters": {"available": true}
+      }
+    },
+    {
+      "checkpoint": "decode-attention",
+      "phase": "decode",
+      "tokens": 128,
+      "trace_package": {
+        "bytes": 2752449482,
+        "files": 1317,
+        "manifest_sha256": "1644f3a5c591d29deac11550f84e921051be6fc2d35d0c312a70237f590c2379"
+      },
+      "gpudebug": {
+        "timeline": {"available": true},
+        "shader_ranking": {"available": true},
+        "counters": {"available": true}
+      }
+    },
+    {
+      "checkpoint": "decode-attention",
+      "phase": "prefill",
+      "tokens": 128,
+      "trace_package": {
+        "bytes": 2730394330,
+        "files": 1176,
+        "manifest_sha256": "e6b247dacb16e37c211c5e9c38e07c72f2ba547146de7de5a8b49f5de5166e6f"
+      },
+      "gpudebug": {
+        "timeline": {"available": true},
+        "shader_ranking": {
+          "available": false,
+          "reason": "the capture exposed timeline and counters but no complete shader-ranking tree"
+        },
+        "counters": {"available": true}
+      }
+    },
+    {
+      "checkpoint": "simd-matmul",
+      "phase": "prefill",
+      "tokens": 128,
+      "trace_package": {
+        "bytes": 2730395588,
+        "files": 1176,
+        "manifest_sha256": "cd08aa07b9b3aab03fddaa14baf6cbebd50541f68a2223b90d8b6bf95f2847ab"
+      },
+      "gpudebug": {
+        "timeline": {"available": true},
+        "shader_ranking": {"available": true},
+        "counters": {"available": true}
+      }
+    },
+    {
+      "checkpoint": "simd-matmul",
+      "phase": "prefill",
+      "tokens": 32,
+      "trace_package": {
+        "bytes": 2411428667,
+        "files": 1174,
+        "manifest_sha256": "7932981c5c568c327bb6206ecbb349dfd841e49a6bfce812938f65b04779ce31"
+      },
+      "gpudebug": {
+        "timeline": {"available": true},
+        "shader_ranking": {"available": true},
+        "counters": {"available": true}
+      }
+    },
+    {
+      "checkpoint": "split-k",
+      "phase": "prefill",
+      "tokens": 32,
+      "trace_package": {
+        "bytes": 2447445413,
+        "files": 1208,
+        "manifest_sha256": "251d7014eded726643f2e502b0bb7f9c6a6f42c8d8432f2fbbe129dbbbb4d6e2"
+      },
+      "gpudebug": {
+        "timeline": {
+          "available": false,
+          "reason": "only static dispatch evidence was retained"
+        },
+        "shader_ranking": {
+          "available": false,
+          "reason": "only static dispatch evidence was retained"
+        },
+        "counters": {
+          "available": false,
+          "reason": "no counter tree was exposed; no occupancy conclusion is made"
+        },
+        "static_dispatch": {"available": true}
+      }
+    }
+  ]
+}

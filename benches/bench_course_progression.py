@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -75,18 +76,18 @@ WEEK2_VARIANTS = (
         ("--week2-checkpoint", "swiglu"),
     ),
     Variant(
-        "week2-decode-attention",
-        "2.5 Decode attention",
-        "ref",
-        "week2",
-        ("--week2-checkpoint", "decode-attention"),
-    ),
-    Variant(
         "week2-simd-matmul",
-        "2.6 SIMD matrix prefill",
+        "2.5 SIMD matrix prefill",
         "ref",
         "week2",
         ("--week2-checkpoint", "simd-matmul"),
+    ),
+    Variant(
+        "week2-decode-attention",
+        "2.6 Optional decode attention",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "decode-attention"),
     ),
     Variant(
         "week2-split-k",
@@ -116,8 +117,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--solution",
         choices=("ref", "tiny_llm"),
-        default="ref",
-        help="benchmark the reference or student course checkpoints",
+        required=True,
+        help="benchmark the reference or learner course checkpoints explicitly",
     )
     parser.add_argument(
         "--suite",
@@ -351,9 +352,21 @@ def collect_source_metadata(root: Path) -> dict:
         text=True,
     ).stdout
     return {
-        "git_commit": commit,
-        "git_tracked_dirty": bool(tracked_status),
+        "commit": commit,
+        "tree": subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip(),
+        "tracked_dirty": bool(tracked_status),
     }
+
+
+def canonical_hash(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def relative_to(value: float, baseline: float) -> str:
@@ -401,6 +414,10 @@ def print_table(
 
 def main() -> None:
     args = parse_args()
+    if args.json_output is not None and (
+        args.json_output.exists() or args.json_output.is_symlink()
+    ):
+        raise FileExistsError(f"refusing to overwrite {args.json_output}")
     root = Path(__file__).resolve().parents[1]
     host = collect_host_metadata()
     variants = [VARIANTS_BY_KEY[key] for key in args.variant]
@@ -441,9 +458,22 @@ def main() -> None:
     print_table(variants, medians)
 
     if args.json_output:
+        workload = {
+            "model": args.model,
+            "input_tokens": args.input_len,
+            "output_tokens": args.output_len,
+            "seed": args.seed,
+            "prompt_rule": "synthetic-token-ids",
+            "prefill_logits": args.prefill_logits,
+            "warmup": args.warmup,
+            "repeats": args.repeats,
+        }
         payload = {
+            "schema_version": 2,
             "source": collect_source_metadata(root),
             "host": host,
+            "workload": workload,
+            "workload_id": canonical_hash(workload),
             "configuration": {
                 "model": args.model,
                 "solution": args.solution,
