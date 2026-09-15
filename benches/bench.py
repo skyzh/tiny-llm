@@ -95,8 +95,6 @@ def parse_args() -> argparse.Namespace:
             "simd-matmul",
             "decode-attention",
             "split-k",
-            "legacy-day-5",
-            "legacy-day-6",
         ),
         help="run one cumulative Week 2 end-to-end checkpoint",
     )

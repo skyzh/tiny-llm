@@ -13,5 +13,9 @@ renderer = ["html"]
 additional-css = ["custom.css"]
 git-repository-url = "https://github.com/skyzh/tiny-llm"
 
+[output.html.redirect]
+"/week2-05-decode-attention.html" = "week2-06-operator-lab.html"
+"/week2-06-simd-matrix-prefill.html" = "week2-05-simd-matrix-prefill.html"
+
 [preprocessor.katex]
 after = ["links"]

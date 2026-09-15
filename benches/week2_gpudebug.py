@@ -26,8 +26,6 @@ KNOWN_CHECKPOINTS = (
     "simd-matmul",
     "decode-attention",
     "split-k",
-    "legacy-day-5",
-    "legacy-day-6",
 )
 
 

@@ -19,12 +19,6 @@ def validate_week_day(args, required=False):
 
 
 def test_source_file(args):
-    if (
-        getattr(args, "legacy_week2_order", False)
-        and args.week == 2
-        and args.day in (5, 6)
-    ):
-        return f"tests_refsol/test_week_2_legacy_day_{args.day}.py"
     return f"tests_refsol/test_week_{args.week}_day_{args.day}.py"
 
 
@@ -58,7 +52,6 @@ def test(args):
                 day_args = argparse.Namespace(
                     week=args.week,
                     day=day,
-                    legacy_week2_order=args.legacy_week2_order,
                 )
                 status = copy_test(day_args, force=True)
                 if status:
@@ -88,18 +81,15 @@ def main():
     copy_test_parser.add_argument("--week", type=int, required=True)
     copy_test_parser.add_argument("--day", type=int, required=True)
     copy_test_parser.add_argument("--force", action="store_true")
-    copy_test_parser.add_argument("--legacy-week2-order", action="store_true")
     copy_test_parser.set_defaults(copy_test_parser=True)
     test_parser = subparsers.add_parser("test")
     test_parser.add_argument("--week", type=int, required=False)
     test_parser.add_argument("--day", type=int, required=False)
-    test_parser.add_argument("--legacy-week2-order", action="store_true")
     test_parser.add_argument("remainders", nargs="*")
     test_parser.set_defaults(test_parser=True)
     test_refsol_parser = subparsers.add_parser("test-refsol")
     test_refsol_parser.add_argument("--week", type=int, required=False)
     test_refsol_parser.add_argument("--day", type=int, required=False)
-    test_refsol_parser.add_argument("--legacy-week2-order", action="store_true")
     test_refsol_parser.add_argument("remainders", nargs="*")
     test_refsol_parser.set_defaults(test_refsol_parser=True)
     args = parser.parse_args()
