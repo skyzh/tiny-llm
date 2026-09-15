@@ -273,7 +273,7 @@ and writes the configuration beside the result:
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --variant week1 --variant week2-kv-cache \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day1-cache.json
+  --json-output week2-day1-cache.json
 ```
 
 Keep this JSON as Day 2's baseline. Do not carry the speedup to another model,
