@@ -114,11 +114,12 @@ and Day 6 bookmarks now redirect to the corresponding canonical lessons.
 
 ## What the Gates Check
 
-The required gates observe public behavior: checkpoint and workload identity,
+Most required gates check public behavior: checkpoint and workload identity,
 operator results, fallbacks, synchronized output, and the decision-record
-schema. You may organize the internals differently; the gates do not require
-exact private function names, Metal symbols, or file routes. They also do not
-grade device timings or require the optional `gpudebug` tooling.
+schema. You may organize most internals differently. Course-ownership and
+extension-integration witnesses intentionally preserve explicit source and
+header seams. The gates do not grade device timings or require the optional
+`gpudebug` tooling.
 
 Read the checked example as one machine's optimization story, not a portable
 speed claim. Its absolute measurements come from one M4 Pro running macOS 27
