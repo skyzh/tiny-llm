@@ -1,7 +1,7 @@
 # 🚧 Week 2 Day 1: KV Cache
 
-You arrive with the Week 1 Qwen model and full-prefix generation loop still
-working. Day 1 leaves them unchanged and completes the separate Week 2 shells:
+Your Week 1 Qwen model already generates by rerunning the full prefix. Day 1
+keeps that path intact while you complete four separate Week 2 shells:
 
 - `src/tiny_llm/kv_cache.py::TinyKvFullCache` stores one layer's dense K/V;
 - `src/tiny_llm/qwen3_week2.py::Qwen3ModelWeek2` threads cache state and
@@ -9,30 +9,32 @@ working. Day 1 leaves them unchanged and completes the separate Week 2 shells:
 - `Qwen3ModelWeek2.create_kv_cache` creates one cache per layer and request;
 - `src/tiny_llm/generate.py` prefills once, then sends only the new token.
 
-Those four pieces are your work. The starter already supplies the Week 1
-operators and the model-loading boundary. Your first useful feedback is the
-focused learner gate:
+Together, these pieces make prefill populate the cache and make decode send
+only the new token. The starter already supplies the Week 1 operators and the
+model-loading boundary. Start with the focused learner gate:
 
 ```bash
 pdm run test --week 2 --day 1
 ```
 
 When it passes, run the `kv-cache` checkpoint shown in Task 4. That live call
-is where the cache becomes part of generation rather than an isolated data
-structure.
+puts the cache into the generation loop instead of exercising it only as an
+isolated data structure.
 
-The cache lets each attention layer reuse the keys and values from previous
-tokens instead of recomputing the entire prefix at every step.
+Each attention layer can then reuse the keys and values from previous tokens
+instead of recomputing the entire prefix at every step.
 
-This is the foundation of Week 2 decode optimization, not a serving-only Week 3
-feature. Without it, every generated token reruns all model layers over an
-ever-growing prefix, overwhelming the gains from faster individual kernels.
+This is the foundation of Week 2 decode optimization. Week 3 will change how
+the cache is stored and shared, but the reuse starts here. Without it, every
+generated token reruns all model layers over an ever-growing prefix and can
+overwhelm gains from faster individual kernels.
 
 **📚 Readings**
 
 - [KV Caching Explained: Optimizing Transformer Inference Efficiency](https://huggingface.co/blog/not-lain/kv-caching)
 
-Recall how Week 1 repeatedly supplied the full sequence to the model:
+First, make the repeated work concrete. Week 1 supplied the full sequence to
+the model on every step:
 
 ```plain
 tokenized_prompt: [1, 2, 3, 4, 5, 6]
@@ -84,10 +86,10 @@ Q        x  K^T       =
 4 4 4 4     1 2 3 4      4x1  4x2  4x3  4x4
 ```
 
-The leading `3 x 3` block of `QK^T` is identical in both steps. A causal mask
-also prevents earlier queries from attending to the new token, so their outputs
-do not change. Recomputing those rows, their softmax values, and their products
-with `V` is wasted work. Only the new query row contributes a new output.
+The leading `3 x 3` block of `QK^T` is identical in both steps. The causal mask
+prevents earlier queries from attending to the new token, so those outputs do
+not change either. Only the new query row can produce a new output; recomputing
+the earlier rows, softmax values, and products with `V` is wasted work.
 
 Instead, cache the previous keys and values and compute only the projections for
 incoming tokens:
@@ -121,15 +123,14 @@ Q        x  K^T       =
 src/tiny_llm/kv_cache.py
 ```
 
-Each Transformer layer maintains its own key-value cache. The cache exposes one
-method, `update_and_fetch`, which:
+Each Transformer layer owns a key-value cache. Its `update_and_fetch` method:
 
 1. Accepts the newly computed `K` and `V` for the incoming tokens.
 2. Appends them along the sequence dimension.
 3. Returns the complete cached `K` and `V`, the updated offset, and the mask.
 
-In this chapter, the cache passes `mask` through unchanged and does not use
-`mask_length`. Those parameters become important in Week 3 for batching.
+For now, pass `mask` through unchanged and leave `mask_length` unused. Week 3
+will use both when requests share a batch.
 
 You may implement this in `kv_cache.py` as `TinyKvFullCache`:
 
@@ -156,14 +157,12 @@ key, value = self.key_values  # B, H, offset, D
 return key, value, self.offset, mask
 ```
 
-This is deliberately a simple dense baseline, not a production KV cache.
-`mx.concat` allocates a larger buffer and copies the previous K/V contents on
-every growth step. Over a token-by-token decode of length `S`, those copies add
-up to `O(S²)` bytes even though caching avoids `O(S²)` prefix recomputation.
-The reference cache records this traffic as `growth_copy_bytes` so the profiler
-can keep it separate from attention. Week 3 replaces this baseline with
-preallocated pages; do not copy the repeated-concatenation design into a
-serving cache.
+Keep this first cache deliberately simple and dense. Each `mx.concat` allocates
+a larger buffer and copies the previous K/V contents. Across a token-by-token
+decode of length `S`, those copies add up to `O(S²)` bytes even though the cache
+avoids `O(S²)` prefix recomputation. The reference cache records that traffic
+as `growth_copy_bytes` so the profiler can separate it from attention. Week 3
+replaces repeated concatenation with preallocated pages for serving.
 
 ## Task 2: Build the Cached Week 2 Model
 
@@ -172,11 +171,11 @@ src/tiny_llm/qwen3_week2.py
 ```
 
 Keep the Week 1 Python model and its full-prefix generation loop unchanged.
-Start a separate `qwen3_week2.py` model with the same dense weights and the
-Week 1 `mlx.core` RMSNorm, RoPE, SwiGLU, and attention equations. Change only the state flow in
-this chapter: the Week 2 model accepts a cache and an offset while Week 1 keeps
-recomputing the full prefix. This produces the baseline that every later Week 2
-chapter will optimize.
+Build the separate `qwen3_week2.py` model with the same dense weights and the
+Week 1 `mlx.core` RMSNorm, RoPE, SwiGLU, and attention equations. Change only
+the state flow: the Week 2 model accepts a cache and an offset, while Week 1
+continues to recompute the full prefix. Every later Week 2 chapter starts from
+this baseline.
 
 - Give each layer its own cache.
 - Add an `offset` argument to the model. It is the number of tokens already in
@@ -210,9 +209,9 @@ is the query length, while `S` is the key/value source length. During
 single-token decoding, `L = 1` and `S` grows by one on each call.
 
 The linear layers, RMSNorm, RoPE, SwiGLU, and attention remain the Week 1
-Python implementations at this checkpoint. Do not introduce packed weights or fast
-kernels yet: measuring one algorithmic change makes the gain attributable.
-The model still uses BF16 storage; "Week 1 Python" describes the
+Python implementations at this checkpoint. Save packed weights and fast
+kernels for later checkpoints so this measurement isolates one algorithmic
+change. The model still uses BF16 storage; "Week 1 Python" describes the
 implementation style, not a return to an FP32 model.
 
 ## Task 3: Create Request-Scoped Caches
@@ -221,9 +220,9 @@ implementation style, not a return to an FP32 model.
 src/tiny_llm/qwen3_week2.py
 ```
 
-Implement `create_kv_cache` so every request gets one cache handle per
-Transformer layer. Pass the matching layer cache through every block and keep
-the caller's offset consistent with the cache's logical length.
+Implement `create_kv_cache` so each request receives one cache handle per
+Transformer layer. Pass the matching cache through each block, and keep the
+caller's offset equal to the cache's logical length.
 
 The Day 1 test checks this request-scoped lifecycle together with the cache and
 model work from the earlier tasks.
@@ -234,10 +233,10 @@ model work from the earlier tasks.
 src/tiny_llm/generate.py
 ```
 
-The first model call prefills the cache with the complete prompt. Each later
-call passes only the token produced by the preceding step, together with the
-number of tokens already cached. The same lifecycle will be owned by the
-continuous-batching scheduler in Week 3.
+Send the complete prompt on the first model call to prefill the cache. On each
+later call, send only the token produced by the preceding step and the number
+of tokens already cached. Week 3 moves this same lifecycle into the
+continuous-batching scheduler.
 
 For example:
 
@@ -265,7 +264,7 @@ pdm run main --solution tiny_llm_ref --loader week2 \
 
 ## Integrate and Measure
 
-Close Day 1 with a matched Week 1 versus cached Week 2 observation. The runner
+Finish Day 1 with a matched Week 1 versus cached Week 2 observation. The runner
 uses fresh processes, applies the same Qwen3-4B 128×129 workload to both rows,
 and writes the configuration beside the result:
 
@@ -276,14 +275,14 @@ pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --json-output week2-day1-cache.json
 ```
 
-Keep this JSON as Day 2's baseline. Do not carry the speedup to another model,
-prompt length, output length, or device: the useful result is the matched
-observation and its recorded workload identity.
+Keep this JSON as Day 2's baseline. Its useful result is the matched observation
+and recorded workload identity, not a speedup claim for another model, prompt
+length, output length, or device.
 
-Day 1 is an algorithmic checkpoint, so it does not invent a shader-level
-limiter from a GPU trace. The checkpoint removes full-prefix recomputation;
-use the end-to-end benchmark to measure that algorithmic change. Day 2 teaches
-you to attribute this exact cached workload and choose a falsifiable next
-change. Day 3 begins only after that evidence names dense projections.
+Day 1 changes the generation algorithm by removing full-prefix recomputation,
+so measure it with the end-to-end benchmark rather than inventing a
+shader-level limiter from a GPU trace. On Day 2, attribute this exact cached
+workload and turn the observation into a falsifiable next change. Begin Day 3
+only after that evidence names dense projections.
 
 {{#include copyright.md}}
