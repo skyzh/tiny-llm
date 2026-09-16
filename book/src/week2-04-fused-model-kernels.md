@@ -10,9 +10,10 @@ src/extensions/src/week2_kernels.cpp
 src/extensions/src/week2_kernels.metal
 ```
 
-Implement and integrate RMSNorm first, then RoPE, then SwiGLU. Each operator
-task has a focused test and a live cumulative checkpoint, so you can attribute
-a failure or regression before composing all three:
+Work in checkpoint order: implement and integrate RMSNorm, then RoPE, then
+SwiGLU. After each operator, run its focused test and the live cumulative
+checkpoint. This keeps a local operator failure separate from an integration
+regression before all three are active:
 
 ```bash
 pdm run build-ext
@@ -21,9 +22,9 @@ pdm run test --week 2 --day 4 -- -k rope
 pdm run test --week 2 --day 4 -- -k swiglu
 ```
 
-RMSNorm, RoPE, and SwiGLU recur around the projections in every transformer
-layer. Week 1 expresses them as Python `mlx.core` equations; your Week 2 path
-places the same interfaces over purpose-built Metal kernels.
+RMSNorm, RoPE, and SwiGLU surround the projections in every transformer layer.
+Week 1 gives you readable Python `mlx.core` equations; your Week 2 path keeps
+their interfaces and supplies purpose-built Metal kernels.
 
 Your solution still uses MLX arrays and its extension API. MLX schedules the
 graph node, owns its buffers, and dispatches the Metal function, but your
@@ -33,9 +34,9 @@ solution owns the arithmetic inside that function. Your solution does not call
 
 ## Why Fusion Helps
 
-Week 1's Python `mlx.core` equations already run as native GPU kernels inside
-the lazy graph. The important difference is how many operations and memory
-passes the graph describes.
+Week 1's Python `mlx.core` equations already become native GPU work inside the
+lazy graph. Here, the useful question is how many operations, launches, and
+memory passes that graph still describes.
 
 For example, RMSNorm expressed as `mlx.core` operations casts, squares,
 reduces, takes a reciprocal square root, multiplies, casts again, and applies a
@@ -51,17 +52,18 @@ A single fused Metal kernel gives you explicit control over the whole operator:
 - inputs are read once when practical, and only the final tensor is written;
 - the grid matches decode shapes instead of a generic tensor operation.
 
-The useful comparison is not "Metal versus Python arithmetic," but one
-purpose-built kernel versus a graph of several general-purpose kernels.
+So compare one purpose-built kernel with a graph of several general-purpose
+kernels. The source language is not the point; the resulting work is.
 
 ## Task 1: RMSNorm
 
-Modify `tiny_llm_ext::rms_norm`, `Week2RMSNorm::eval_cpu`, and
-`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the
-`week2_rms_norm` function in `src/extensions/src/week2_kernels.metal`, and
-`FastRMSNorm.__call__` in `src/tiny_llm/week2_kernels.py`. The starter header,
-binding, C++/Metal files, and CMake registration already exist for this
-checkpoint; replace the fail-closed bodies instead of adding parallel APIs.
+Start by replacing the fail-closed RMSNorm bodies: `tiny_llm_ext::rms_norm`,
+`Week2RMSNorm::eval_cpu`, and
+`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the `week2_rms_norm` function in
+`src/extensions/src/week2_kernels.metal`, and `FastRMSNorm.__call__` in
+`src/tiny_llm/week2_kernels.py`. The starter already provides the header,
+binding, C++/Metal files, and CMake registration, so keep that API rather than
+adding a parallel one.
 
 Begin with one SIMD group per input row, then benchmark it. A 2,560-element hidden
 row gives 32 lanes roughly 80 serial elements each; the optimized kernel launches 256
@@ -89,8 +91,8 @@ launches one 256-thread group per row. Compare this two-level reduction with a
 single-SIMD-group control to determine whether the extra parallelism offsets
 the threadgroup reduction on the target machine.
 
-Integrate `FastRMSNorm` into every Week 2 norm immediately, run the RMSNorm
-tests, and record the cumulative model result before writing RoPE:
+Wire `FastRMSNorm` into every Week 2 norm as soon as the kernel works. Then run
+the focused test and record the cumulative model result before touching RoPE:
 
 ```bash
 pdm run build-ext
@@ -101,7 +103,7 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 ## Task 2: RoPE
 
-Modify `tiny_llm_ext::rope`, `Week2RoPE::eval_cpu`, and
+Next replace `tiny_llm_ext::rope`, `Week2RoPE::eval_cpu`, and
 `Week2RoPE::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the
 `week2_rope` function in `src/extensions/src/week2_kernels.metal`, and
 `FastRoPE.__call__` in `src/tiny_llm/week2_kernels.py`.
@@ -131,8 +133,8 @@ optimization. Use Metal's `fast::exp2`, `fast::sin`, and `fast::cos` for the
 BF16 path. Normalize a batch's offsets once in the model call,
 outside the layer loop, instead of rebuilding the same array in every layer.
 
-Replace the Python `mlx.core` RoPE in the already optimized model, then test and measure
-that cumulative checkpoint before implementing SwiGLU:
+Replace the Python `mlx.core` RoPE in the model you have already optimized.
+Test and measure that cumulative checkpoint before moving to SwiGLU:
 
 ```bash
 pdm run test --week 2 --day 4 -- -k rope
@@ -142,10 +144,11 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 ## Task 3: SwiGLU
 
-Modify `tiny_llm_ext::swiglu`, `Week2SwiGLU::eval_cpu`, and
-`Week2SwiGLU::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the
-`week2_swiglu` function in `src/extensions/src/week2_kernels.metal`, and
-`swiglu` in `src/tiny_llm/week2_kernels.py`.
+Finish the operator sequence with `tiny_llm_ext::swiglu`,
+`Week2SwiGLU::eval_cpu`, and `Week2SwiGLU::eval_gpu` in
+`src/extensions/src/week2_kernels.cpp`, the `week2_swiglu` function in
+`src/extensions/src/week2_kernels.metal`, and `swiglu` in
+`src/tiny_llm/week2_kernels.py`.
 
 SwiGLU combines the gate and up branches:
 
@@ -159,7 +162,7 @@ output write. The Week 1 form is easier to inspect, but it describes `abs`,
 `exp`, division, selection, and multiplication as separate array operations.
 The fused kernel removes those intermediate tensors and dispatch boundaries.
 
-Integrate the fused expression immediately and record the third checkpoint:
+Wire the fused expression into the model, then record the third checkpoint:
 
 ```bash
 pdm run test --week 2 --day 4 -- -k swiglu
@@ -169,23 +172,23 @@ pdm run bench --solution tiny_llm --loader week2 \
 
 ## Task 4: Verify the Cumulative Model
 
-Verify the cumulative switches in `Qwen3ModelWeek2.__init__` and the call sites
-in `Qwen3MultiHeadAttention.__call__` and `Qwen3MLP.__call__`. Task 4 should not
-introduce another extension function; it composes the three functions from
-Tasks 1-3.
+Now verify the cumulative switches in `Qwen3ModelWeek2.__init__` and the call
+sites in `Qwen3MultiHeadAttention.__call__` and `Qwen3MLP.__call__`. Task 4 is
+composition work: it uses the three functions from Tasks 1-3 and adds no new
+extension function.
 
-After exposing all three kernels through C++ MLX primitives, run the complete
-test file to verify their composition. Keep `qwen3_week1.py` on its Week 1
-Python operators, and make the Week 2 interfaces reusable by the Week 3 serving model.
+Once all three kernels are exposed through C++ MLX primitives, run the complete
+test file. Keep `qwen3_week1.py` on its Week 1 Python operators, and leave the
+Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 4
 ```
 
-Compare against the Python reference equations with tolerances rather than bit-for-bit
-equality. Test RoPE with scalar and per-batch offsets. Always call `mx.eval`
-inside a timed iteration when measuring these lazy operations.
+Use tolerance-based comparisons with the Python reference equations rather
+than bit-for-bit equality. Cover both scalar and per-batch RoPE offsets. When
+timing these lazy operations, call `mx.eval` inside every measured iteration.
 
 The operator benchmark must also compare the same logical RoPE layout. Your
 RoPE kernel accepts the model-native `B, L, H, D` tensor. `mx.fast.rope`
@@ -196,8 +199,8 @@ timing no longer measures an equivalent operation.
 
 ## Benchmark Analysis: Decide Whether the Fused Kernels Stay
 
-Keep the three cumulative checkpoints separate so a regression cannot hide
-inside their combined gain:
+Measure the three cumulative checkpoints separately so their combined result
+cannot hide a regression:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
@@ -212,8 +215,9 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --json-output week2-day4-attribution.json
 ```
 
-Keep one cumulative result per operator so a regression cannot hide inside the
-combined gain. The complete campaign and reference attribution are in the
+Record one cumulative result per operator, then use the attribution run to
+choose the next bottleneck. The complete campaign and reference attribution
+are in the
 [performance appendix](./appendix-performance.md#day-4-fused-model-kernels).
 
 In the checked M4 Pro example, the fused kernels reduced the attributed
