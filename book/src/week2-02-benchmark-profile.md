@@ -113,7 +113,7 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 The result identifies its source, checkpoint, phase, token count, prompt rule,
 software, host, category medians, and category shares without depending on a
 private function name or Metal symbol. On the checked M4 Pro run, dense
-projections accounted for 83.9% of attributed cached-decode time. That bounded
+projections accounted for 81.5% of attributed cached-decode time. That bounded
 observation selected packed W4 projections for Day 3; another device or shape
 may point somewhere else.
 
