@@ -7,42 +7,42 @@ timing, and cache release. Your job is to freeze one like-for-like workload,
 identify its dominant operator category, and write the short decision that
 chooses the next change.
 
-First verify the benchmark lifecycle:
+Start with the focused benchmark-lifecycle check:
 
 ```bash
 pdm run test --week 2 --day 2
 ```
 
-Then record one matched `tiny_llm`/MLX pair and one attribution result. Those
-portable JSON records and your decision are the Day 2 checkpoint. Metal
-capture is optional and is not a prerequisite or acceptance gate.
+When it passes, record one matched `tiny_llm`/MLX pair and one attribution
+result, then write the short decision that follows from them. Those portable
+JSON records are the Day 2 checkpoint. Metal capture remains optional and
+never gates the next chapter.
 
 ## Benchmark the Cached Model
 
-Optimization starts with a trustworthy comparison. Prefill processes many
-prompt tokens at once; decode usually processes one token per request and is
-dominated by repeatedly reading dense BF16 projection weights at this
-checkpoint. A change can improve one phase while hurting the other, so
-`benches/bench.py` reports both:
+Before changing the model, make the comparison trustworthy. Prefill processes
+many prompt tokens at once, while decode usually processes one token per
+request. At this checkpoint, decode repeatedly reads dense BF16 projection
+weights. Because a change can help one phase while hurting the other,
+`benches/bench.py` reports them separately:
 
 - prefill tokens per second: prompt tokens divided by prefill time;
 - decode tokens per second: generated tokens after the first token divided by
   decode time.
 
-The first generated token belongs to prefill. Excluding it from decode prevents
+The first generated token is part of prefill. Leaving it out of decode keeps
 prompt length from distorting the decode number.
 
-Choose the prefill workload before comparing implementations. Prompt scoring
-needs logits for every position, while serving needs only the final prompt
+Decide what prefill should return before comparing implementations. Prompt
+scoring needs logits for every position; serving needs only the final prompt
 logit. Use `--prefill-logits all` for the former and
-`--prefill-logits last` for the latter. The runner applies the choice to your
-solution and MLX alike. Never compare a final-row run from your solution with an
-all-row MLX run.
+`--prefill-logits last` for the latter. The runner applies one choice to your
+solution and MLX alike, so the two rows do the same work.
 
-Both sides of the Week 2 comparison use a KV cache: prefill the prompt once,
-then pass only the newly generated token on each decode step. Comparing a cached
-MLX baseline with your solution recomputing the full prefix would measure two
-different algorithms and make the next optimization target meaningless.
+Keep the Week 2 generation algorithm matched too. Both sides use a KV cache:
+prefill the prompt once, then pass only the newly generated token on each
+decode step. A cached MLX baseline against a full-prefix solution would compare
+two different algorithms instead of locating the next optimization target.
 
 ### Record a Matched Baseline
 
@@ -75,19 +75,18 @@ pdm run bench-week2-progression --offline --repeats 2 \
   --prefill-logits last --json-output week2-baseline.json
 ```
 
-Benchmark on an otherwise idle machine: stop other CPU- and GPU-intensive
-workloads, keep power mode and ambient conditions fixed, and let the machine
-return to a stable temperature before comparing runs. Run each command several
-times, report the median, and include the hardware, MLX and mlx-lm versions,
-prefill-logit mode, and exact model with the result. A dependency upgrade
-changes the comparison baseline, so remeasure MLX rather than carrying an old
-denominator forward.
+Benchmark on an otherwise idle machine. Stop other CPU- and GPU-intensive
+workloads, keep power mode and ambient conditions fixed, and wait for a stable
+temperature before comparing runs. Repeat each command, report the median, and
+record the hardware, MLX and mlx-lm versions, prefill-logit mode, and exact
+model. After a dependency upgrade, remeasure MLX instead of carrying the old
+baseline forward.
 
 ### Synchronize Lazy Work
 
-MLX builds lazy computation graphs. Timing only the Python call measures graph
-construction, not GPU execution. Every timed iteration must evaluate the
-output:
+MLX builds computation graphs lazily. Timing only the Python call measures
+graph construction instead of GPU execution, so every timed iteration must
+evaluate its output:
 
 ```python
 start = perf_counter()
@@ -97,13 +96,13 @@ elapsed = perf_counter() - start
 ```
 
 The benchmark must also call the cache release hook after warmups and timed
-runs so cache implementations with owned or shared resources can return them;
-the focused Day 2 test checks both the successful and failing paths.
+runs. That lets caches return owned or shared resources even when a run fails;
+the focused Day 2 test covers both paths.
 
 ## Attribute the Cached Model
 
-Now run the maintained cross-platform attribution case on the same learner
-solution, model, decode phase, and 128-token context:
+Next, attribute the same cached-decode workload. Keep the learner solution,
+model, decode phase, and 128-token context fixed:
 
 ```bash
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
@@ -111,14 +110,14 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --json-output week2-day2-attribution.json
 ```
 
-The result records its source, checkpoint, phase, token count, prompt rule,
-software, host, category medians, and category shares. It does not require a
-particular private function name or Metal symbol. On the checked M4 Pro run,
-dense projections accounted for 83.9% of attributed cached-decode time. That
-bounded observation selected packed W4 projections for Day 3; it does not say
-that projections dominate every device or shape.
+The result identifies its source, checkpoint, phase, token count, prompt rule,
+software, host, category medians, and category shares without depending on a
+private function name or Metal symbol. On the checked M4 Pro run, dense
+projections accounted for 81.5% of attributed cached-decode time. That bounded
+observation selected packed W4 projections for Day 3; another device or shape
+may point somewhere else.
 
-Write three sentences beside the result:
+Turn the observation into a decision with three sentences:
 
 1. “Dense projections dominate this exact cached-decode workload.”
 2. “Packing W4 weights and changing only the selected projection path should
@@ -126,16 +125,16 @@ Write three sentences beside the result:
 3. “I will reject or revise the hypothesis if projection time does not fall or
    complete-model decode regresses under the same workload.”
 
-Use your own observed category in place of the checked example. The required
-work ends with this benchmark, attribution, and decision record. The
+Substitute the category you observed for the checked example. Your required
+work ends with the benchmark, attribution, and decision record. The
 [macOS 27 capture lab](./week2-advanced-profiling.md) is optional; no trace,
 `gpudebug` output, screenshot, or device-specific counter gates Day 3.
 
 ## Why Quantize: The Decode Roofline
 
-The decode phase of LLM inference is typically **memory-bandwidth bound**: each
-token requires reading the model's weights but performs relatively little work
-with them. Use the dimensions in the official
+The measurement now has a hardware reason to test. LLM decode is typically
+**memory-bandwidth bound**: each token reads the model's weights while doing
+relatively little work with them. Use the dimensions in the official
 [Qwen3-4B configuration](https://huggingface.co/Qwen/Qwen3-4B/blob/main/config.json)
 to calculate the ideal bound:
 
@@ -161,10 +160,10 @@ Total streamed weights:                    4,022,272,000
 FLOPs per token: 2 × 4,022,272,000 = 8.045 GFLOPs
 ```
 
-The tied embedding matrix is counted once as the vocabulary projection. The
+Count the tied embedding matrix once as the vocabulary projection. The
 single-row embedding lookup, normalization weights, activations, KV reads, and
-attention work are omitted. This makes the result an upper bound for linear
-layers, not a prediction of complete-model throughput. A dense FP16 or BF16
+attention work are omitted, so the result is an upper bound for linear layers
+rather than a prediction of complete-model throughput. A dense FP16 or BF16
 weight occupies two bytes:
 
 ```plain
