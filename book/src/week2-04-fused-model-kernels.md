@@ -58,8 +58,8 @@ kernels. The source language is not the point; the resulting work is.
 ## Task 1: RMSNorm
 
 Start by replacing the fail-closed RMSNorm bodies: `tiny_llm_ext::rms_norm`,
-`Week2RMSNorm::eval_cpu`, and `Week2RMSNorm::eval_gpu` in
-`src/extensions/src/week2_kernels.cpp`, the `week2_rms_norm` function in
+`Week2RMSNorm::eval_cpu`, and
+`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`, the `week2_rms_norm` function in
 `src/extensions/src/week2_kernels.metal`, and `FastRMSNorm.__call__` in
 `src/tiny_llm/week2_kernels.py`. The starter already provides the header,
 binding, C++/Metal files, and CMake registration, so keep that API rather than
