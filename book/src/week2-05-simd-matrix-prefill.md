@@ -17,15 +17,16 @@ fresh-process samples. Your device and crossover may differ.
 
 ## Establish the Same-Workload Baseline
 
-First verify the inherited checkpoint:
+Start from the checkpoint you already have. Build the extension and run the
+focused gate before editing:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 5
 ```
 
-Then record the product and attribution baselines that you will repeat after
-the change:
+Freeze both baselines next. You will repeat these exact commands after the
+kernel change:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
@@ -45,7 +46,7 @@ new prefill kernel at one shape with an old result from another shape.
 
 ## Task 1: Load One Quantized Tile Cooperatively
 
-Work in the existing quantized-matmul extension surface:
+Open the three existing extension files; this task stays inside that surface:
 
 ```plain
 src/extensions/src/cooperative_matrix.h
@@ -53,7 +54,7 @@ src/extensions/src/quantized_matmul.metal
 src/extensions/src/quantized_matmul.cpp
 ```
 
-The output remains
+Keep the operation fixed while you change its schedule:
 
 $$
 C = A W^T,
@@ -100,7 +101,8 @@ performance claim and not the separate `--solution mlx` model.
 
 ## Task 3: Check Correctness in the Product
 
-Run the focused day gate before drawing a timing conclusion:
+Once the new path is connected, get focused feedback before asking the full
+model to exercise the checkpoint:
 
 ```bash
 pdm run build-ext
@@ -117,7 +119,8 @@ model output—not a private symbol or source-file layout.
 
 ## Task 4: Re-profile and Decide
 
-Rerun the exact commands from the baseline section. Record three sentences:
+Now repeat the exact baseline commands, then close the loop in three
+sentences:
 
 1. which operator category dominated the baseline prefill;
 2. whether the candidate changed that category and the matched product phase;
