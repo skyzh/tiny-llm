@@ -99,6 +99,19 @@ def supports_fused_gate_up(
     )
 
 
+def supports_prefill_fused_gate_up(
+    x: mx.array,
+    w_gate: mx.array | QuantizedWeights,
+    w_up: mx.array | QuantizedWeights,
+) -> bool:
+    if not supports_fused_gate_up(x, w_gate, w_up):
+        return False
+    rows = 1
+    for size in x.shape[:-1]:
+        rows *= size
+    return 32 <= rows <= 2048
+
+
 def quantized_gate_up_swiglu(
     x: mx.array,
     w_gate: mx.array | QuantizedWeights,

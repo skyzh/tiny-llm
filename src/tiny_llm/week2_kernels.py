@@ -37,6 +37,14 @@ def supports_fused_gate_up(
     pass
 
 
+def supports_prefill_fused_gate_up(
+    x: mx.array,
+    w_gate: mx.array | QuantizedWeights,
+    w_up: mx.array | QuantizedWeights,
+) -> bool:
+    pass
+
+
 def quantized_gate_up_swiglu(
     x: mx.array,
     w_gate: mx.array | QuantizedWeights,

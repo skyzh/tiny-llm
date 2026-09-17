@@ -4,20 +4,28 @@ import mlx.core as mx
 import pytest
 
 from .tiny_llm_base import (
-    LONG_CONTEXT_ATTENTION_MAX_CONTEXT,
     Qwen3ModelWeek2,
     Qwen3MultiHeadAttention,
     WEEK2_CHECKPOINT_FEATURES,
     long_context_attention,
     scaled_dot_product_attention,
     scaled_dot_product_attention_grouped,
-    should_use_long_context_attention,
     tiny_llm_ext,
 )
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
 HAS_PHASE_2_EXTENSION = hasattr(tiny_llm_ext, "long_context_attention")
+model_module = __import__(Qwen3ModelWeek2.__module__, fromlist=["unused"])
+should_use_context_selected_attention = (
+    model_module.should_use_context_selected_attention
+)
+CONTEXT_SELECTED_ATTENTION_MIN_CONTEXT = (
+    model_module.CONTEXT_SELECTED_ATTENTION_MIN_CONTEXT
+)
+CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT = (
+    model_module.CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT
+)
 
 
 def _qwen_attention_fixture(
@@ -28,61 +36,92 @@ def _qwen_attention_fixture(
     return query, key, mx.zeros_like(key)
 
 
-def test_long_context_checkpoint_is_independent_and_legacy_name_is_explicit():
-    features = WEEK2_CHECKPOINT_FEATURES["long-context-attention"]
-    assert features.long_context_attention
+def test_context_selected_checkpoint_is_independent_and_legacy_name_is_explicit():
+    features = WEEK2_CHECKPOINT_FEATURES["context-selected-attention"]
+    assert features.context_selected_attention
     assert features.simdgroup_matmul
-    assert not features.fused_gate_up
+    assert not features.prefill_fused_gate_up
 
-    with pytest.raises(ValueError, match="replaced by 'long-context-attention'"):
-        Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
+    with pytest.raises(ValueError, match="replaced by 'context-selected-attention'"):
+        Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="long-context-attention")
 
 
 @pytest.mark.parametrize("query_length", (1, 2))
-@pytest.mark.parametrize("context_length", (1, 128, 512, 2048, 8192))
-def test_long_context_selector_accepts_qwen_decode_shapes(query_length, context_length):
+@pytest.mark.parametrize("context_length", (8192, 8193, 32768))
+def test_context_selected_selector_accepts_bounded_decode_shapes(
+    query_length, context_length
+):
     query, key, value = _qwen_attention_fixture(
         query_length=query_length, context_length=context_length
     )
-    assert should_use_long_context_attention(query, key, value, "causal", enabled=True)
-    assert LONG_CONTEXT_ATTENTION_MAX_CONTEXT == 32768
+    assert should_use_context_selected_attention(
+        query, key, value, "causal", enabled=True
+    )
+    assert CONTEXT_SELECTED_ATTENTION_MIN_CONTEXT == 8192
+    assert CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT == 32768
 
 
-def test_long_context_selector_falls_back_for_nearest_unsupported_cases():
-    query, key, value = _qwen_attention_fixture()
-    explicit_mask = mx.zeros((1, 1, 1, 128), dtype=mx.float32)
-    assert not should_use_long_context_attention(query, key, value, None, enabled=False)
-    assert not should_use_long_context_attention(
+def test_context_selected_selector_falls_back_below_threshold_and_when_disabled():
+    below_query, below_key, below_value = _qwen_attention_fixture(context_length=8191)
+    edge_query, edge_key, edge_value = _qwen_attention_fixture(context_length=8192)
+    assert not should_use_context_selected_attention(
+        below_query, below_key, below_value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        edge_query, edge_key, edge_value, None, enabled=False
+    )
+    assert should_use_context_selected_attention(
+        edge_query, edge_key, edge_value, None, enabled=True
+    )
+
+
+def test_context_selected_selector_rejects_mask_dtype_head_layout_and_tail():
+    query, key, value = _qwen_attention_fixture(context_length=8192)
+    explicit_mask = mx.zeros((1, 1, 1, 8192), dtype=mx.float32)
+    assert not should_use_context_selected_attention(
         query, key, value, explicit_mask, enabled=True
     )
 
-    long_query, key, value = _qwen_attention_fixture(query_length=3)
-    assert not should_use_long_context_attention(
+    long_query, key, value = _qwen_attention_fixture(
+        query_length=3, context_length=8192
+    )
+    assert not should_use_context_selected_attention(
         long_query, key, value, "causal", enabled=True
     )
 
-    fp32_query, fp32_key, fp32_value = _qwen_attention_fixture(dtype=mx.float32)
-    assert not should_use_long_context_attention(
+    fp32_query, fp32_key, fp32_value = _qwen_attention_fixture(
+        context_length=8192, dtype=mx.float32
+    )
+    assert not should_use_context_selected_attention(
         fp32_query, fp32_key, fp32_value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        query[:, :16], key, value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        query.transpose(0, 2, 1, 3), key, value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        query, key, value[:, :, :-1], None, enabled=True
     )
 
 
 def test_disable_control_and_counters_are_learner_visible():
     enabled = Qwen3ModelWeek2(
-        tiny_qwen3_mlx_model(), checkpoint="long-context-attention"
+        tiny_qwen3_mlx_model(), checkpoint="context-selected-attention"
     )
     disabled = Qwen3ModelWeek2(
         tiny_qwen3_mlx_model(),
-        checkpoint="long-context-attention",
-        disable_long_context_attention=True,
+        checkpoint="context-selected-attention",
+        disable_context_selected_attention=True,
     )
 
-    assert enabled.layers_inner[0].self_attn.use_long_context_attention
-    assert not disabled.layers_inner[0].self_attn.use_long_context_attention
+    assert enabled.layers_inner[0].self_attn.use_context_selected_attention
+    assert not disabled.layers_inner[0].self_attn.use_context_selected_attention
     assert enabled.dispatch_counters() == {
-        "long_context_attention": 0,
+        "context_selected_attention": 0,
         "readable_attention": 0,
-        "fused_gate_up": 0,
+        "prefill_fused_gate_up": 0,
         "separate_gate_up": 0,
     }
 
@@ -130,7 +169,7 @@ def test_attention_dispatch_records_candidate_fallback_and_offset(monkeypatch):
 
     class Cache:
         def __init__(self):
-            self.key = mx.zeros((1, 8, 513, 128), dtype=mx.bfloat16)
+            self.key = mx.zeros((1, 8, 8192, 128), dtype=mx.bfloat16)
             self.value = mx.zeros_like(self.key)
 
         def update_and_fetch(self, key, value, *, mask_length, mask):
@@ -139,17 +178,20 @@ def test_attention_dispatch_records_candidate_fallback_and_offset(monkeypatch):
             return self.key, self.value, 0, mask
 
     hidden = mx.zeros((1, 1, 4096), dtype=mx.bfloat16)
-    attention(hidden, 512, Cache())
-    explicit_mask = mx.zeros((1, 1, 1, 513), dtype=mx.float32)
-    attention(hidden, 512, Cache(), explicit_mask)
+    attention(hidden, 8191, Cache())
+    explicit_mask = mx.zeros((1, 1, 1, 8192), dtype=mx.float32)
+    attention(hidden, 8191, Cache(), explicit_mask)
+    attention.use_context_selected_attention = False
+    attention(hidden, 8191, Cache())
 
     assert calls == [
-        ("candidate", 513, False),
-        ("readable", 513, True),
+        ("candidate", 8192, False),
+        ("readable", 8192, True),
+        ("readable", 8192, False),
     ]
-    assert offsets == [512, 512, 512, 512]
-    assert attention.long_context_attention_dispatches == 1
-    assert attention.readable_attention_dispatches == 1
+    assert offsets == [8191, 8191, 8191, 8191, 8191, 8191]
+    assert attention.context_selected_attention_dispatches == 1
+    assert attention.readable_attention_dispatches == 2
 
 
 def test_readable_fallback_handles_explicit_masks_and_finite_extremes():
@@ -188,14 +230,13 @@ def test_long_context_wrapper_rejects_masks_and_arbitrary_shapes_before_dispatch
     not HAS_PHASE_2_EXTENSION,
     reason="Phase 2 extension build requires the optional Xcode Metal Toolchain",
 )
-def test_long_context_extension_matches_readable_qwen_decode_gpu():
+@pytest.mark.parametrize("mask", (None, "causal"))
+def test_long_context_extension_matches_readable_selected_decode_gpu(mask):
     query = mx.random.normal((1, 32, 2, 128)).astype(mx.bfloat16)
-    key = mx.random.normal((1, 8, 129, 128)).astype(mx.bfloat16)
+    key = mx.random.normal((1, 8, 8193, 128)).astype(mx.bfloat16)
     value = mx.random.normal(key.shape).astype(mx.bfloat16)
-    result = long_context_attention(query, key, value, 128**-0.5, "causal")
-    expected = scaled_dot_product_attention_grouped(
-        query, key, value, 128**-0.5, "causal"
-    )
+    result = long_context_attention(query, key, value, 128**-0.5, mask)
+    expected = scaled_dot_product_attention_grouped(query, key, value, 128**-0.5, mask)
     assert result.shape == query.shape
     assert result.dtype == mx.bfloat16
     assert_allclose(result, expected, mx.bfloat16, atol=3e-2, rtol=3e-2)

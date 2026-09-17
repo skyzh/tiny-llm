@@ -22,8 +22,8 @@ class Week2CheckpointFeatures:
     fast_rope: bool = False
     fast_swiglu: bool = False
     simdgroup_matmul: bool = False
-    long_context_attention: bool = False
-    fused_gate_up: bool = False
+    context_selected_attention: bool = False
+    prefill_fused_gate_up: bool = False
 
 
 WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
@@ -47,40 +47,45 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
             fast_swiglu=True,
             simdgroup_matmul=True,
         ),
-        "long-context-attention": Week2CheckpointFeatures(
+        "context-selected-attention": Week2CheckpointFeatures(
             quantized_weights=True,
             fast_rms_norm=True,
             fast_rope=True,
             fast_swiglu=True,
             simdgroup_matmul=True,
-            long_context_attention=True,
+            context_selected_attention=True,
         ),
-        "fused-gate-up": Week2CheckpointFeatures(
+        "prefill-fused-gate-up": Week2CheckpointFeatures(
             quantized_weights=True,
             fast_rms_norm=True,
             fast_rope=True,
             fast_swiglu=True,
             simdgroup_matmul=True,
-            fused_gate_up=True,
+            prefill_fused_gate_up=True,
         ),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
 
-LONG_CONTEXT_ATTENTION_MAX_CONTEXT = 32768
-LONG_CONTEXT_ATTENTION_MAX_QUERY = 2
-DECODE_ATTENTION_MAX_CONTEXT = LONG_CONTEXT_ATTENTION_MAX_CONTEXT
-DECODE_ATTENTION_MAX_QUERY = LONG_CONTEXT_ATTENTION_MAX_QUERY
+CONTEXT_SELECTED_ATTENTION_MIN_CONTEXT = 8192
+CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT = 32768
+CONTEXT_SELECTED_ATTENTION_MAX_QUERY = 2
+LONG_CONTEXT_ATTENTION_MAX_CONTEXT = CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT
+LONG_CONTEXT_ATTENTION_MAX_QUERY = CONTEXT_SELECTED_ATTENTION_MAX_QUERY
+DECODE_ATTENTION_MAX_CONTEXT = CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT
+DECODE_ATTENTION_MAX_QUERY = CONTEXT_SELECTED_ATTENTION_MAX_QUERY
 
 LEGACY_CHECKPOINT_REPLACEMENTS = MappingProxyType(
     {
-        "decode-attention": "long-context-attention",
-        "split-k": "fused-gate-up",
+        "decode-attention": "context-selected-attention",
+        "long-context-attention": "context-selected-attention",
+        "split-k": "prefill-fused-gate-up",
+        "fused-gate-up": "prefill-fused-gate-up",
     }
 )
 
 
-def should_use_long_context_attention(
+def should_use_context_selected_attention(
     query: mx.array,
     key: mx.array,
     value: mx.array,
@@ -89,6 +94,11 @@ def should_use_long_context_attention(
     enabled: bool,
 ) -> bool:
     pass
+
+
+# Internal compatibility alias; the learner-owned policy is the
+# context-selected function above.
+should_use_long_context_attention = should_use_context_selected_attention
 
 
 class Qwen3MultiHeadAttention:
@@ -109,7 +119,7 @@ class Qwen3MultiHeadAttention:
         rms_norm_eps: float = 1e-5,
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
-        use_long_context_attention: bool = True,
+        use_context_selected_attention: bool = True,
     ):
         pass
 
@@ -132,7 +142,7 @@ class Qwen3MLP:
         w_up: mx.array | QuantizedWeights,
         w_down: mx.array | QuantizedWeights,
         use_fast_swiglu: bool = True,
-        use_fused_gate_up: bool = False,
+        use_prefill_fused_gate_up: bool = False,
     ):
         pass
 
@@ -165,8 +175,8 @@ class Qwen3TransformerBlock:
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
         use_fast_swiglu: bool = True,
-        use_long_context_attention: bool = True,
-        use_fused_gate_up: bool = False,
+        use_context_selected_attention: bool = True,
+        use_prefill_fused_gate_up: bool = False,
     ):
         pass
 
@@ -184,10 +194,10 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "fused-gate-up",
+        checkpoint: str = "prefill-fused-gate-up",
         use_mlx_quantized_linear: bool = False,
-        disable_long_context_attention: bool = False,
-        disable_fused_gate_up: bool = False,
+        disable_context_selected_attention: bool = False,
+        disable_prefill_fused_gate_up: bool = False,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
