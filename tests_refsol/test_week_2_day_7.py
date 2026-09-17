@@ -3,22 +3,19 @@
 import mlx.core as mx
 import pytest
 
-from extensions_ref import tiny_llm_ext_ref
-
-from tiny_llm_ref.quantize import QuantizedWeights
-from tiny_llm_ref.qwen3_week2 import (
+from .tiny_llm_base import (
     Qwen3MLP,
     Qwen3ModelWeek2,
+    QuantizedWeights,
     WEEK2_CHECKPOINT_FEATURES,
-)
-from tiny_llm_ref.week2_kernels import (
     quantized_gate_up_swiglu,
     supports_fused_gate_up,
+    tiny_llm_ext,
 )
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-HAS_PHASE_2_EXTENSION = hasattr(tiny_llm_ext_ref, "quantized_gate_up_swiglu")
+HAS_PHASE_2_EXTENSION = hasattr(tiny_llm_ext, "quantized_gate_up_swiglu")
 
 
 def _quantized_weights(output_dim: int = 136, input_dim: int = 128):

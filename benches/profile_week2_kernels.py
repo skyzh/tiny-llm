@@ -126,7 +126,10 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Replay Week 2 model components at their Qwen shape and dispatch "
             "count as synchronized operator evidence, not production traffic share."
-        )
+        ),
+        epilog=(
+            "Emitted component categories: " + ", ".join(COMPONENT_CATEGORIES) + "."
+        ),
     )
     parser.add_argument("--model", default="qwen3-4b")
     parser.add_argument(

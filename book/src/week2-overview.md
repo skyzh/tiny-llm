@@ -162,26 +162,13 @@ and disable-control evidence stay distinct from the still-pending performance
 decision. The retired `decode-attention` and `split-k` checkpoint names now
 produce migration errors instead of silently selecting a current checkpoint.
 
-## Verification Status
+<a id="verification-status"></a>
 
-Most required gates check public behavior: checkpoint and workload identity,
-operator results, fallbacks, synchronized output, selection counters, disable
-controls, and the decision-record schema. You may organize most internals
-differently. Course-ownership and extension-integration witnesses intentionally
-preserve explicit source and header seams. The gates do not grade an absolute
-device timing or require the optional `gpudebug` tooling.
+## Make the Decision
 
-The two final performance gates are deliberately pending:
-
-- Day 6 needs at least 5% lower median TPOT at 8K, the same direction in three
-  of four matched context pairs, no more than 2% regression at 128 and 512, and
-  removal of the gain when the selector is disabled.
-- Day 7 needs at least 5% targeted-phase improvement at 512 or 2K rows, the same
-  direction in three of four matched pairs, no more than 2% regression at 8K
-  or decode, and removal of the gain when the selector is disabled.
-
-Passing correctness does not imply either performance decision. Measure your
-implementation and record the result.
+Use the matched criteria beside the Day 6 and Day 7 experiments. Passing their
+correctness checks makes an implementation measurable; it does not show that
+the implementation is faster.
 
 ## Continue to Week 3
 

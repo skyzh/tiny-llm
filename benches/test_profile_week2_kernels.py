@@ -441,3 +441,5 @@ def test_profile_help_states_operator_evidence_boundary(monkeypatch, capsys):
     assert exited.value.code == 0
     assert "synchronized operator evidence" in help_text
     assert "not production traffic share" in help_text
+    for category in profile.COMPONENT_CATEGORIES:
+        assert category in help_text

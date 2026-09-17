@@ -6,6 +6,35 @@ import argparse
 import mlx_lm.sample_utils
 from model_names import shortcut_name_to_full_name
 
+WEEK2_CHECKPOINTS = (
+    "kv-cache",
+    "quantized-matvec",
+    "rmsnorm",
+    "rope",
+    "swiglu",
+    "simd-matmul",
+    "long-context-attention",
+    "fused-gate-up",
+)
+LEGACY_WEEK2_CHECKPOINTS = {
+    "decode-attention": "long-context-attention",
+    "split-k": "fused-gate-up",
+}
+
+
+def parse_week2_checkpoint(value: str) -> str:
+    replacement = LEGACY_WEEK2_CHECKPOINTS.get(value)
+    if replacement is not None:
+        raise argparse.ArgumentTypeError(
+            f"Week 2 checkpoint {value!r} was replaced by {replacement!r}"
+        )
+    if value not in WEEK2_CHECKPOINTS:
+        raise argparse.ArgumentTypeError(
+            f"unknown Week 2 checkpoint {value!r}; choose one of {WEEK2_CHECKPOINTS}"
+        )
+    return value
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="qwen3-0.6b")
 parser.add_argument("--draft-model", type=str, default=None)
@@ -34,16 +63,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--week2-checkpoint",
-    choices=(
-        "kv-cache",
-        "quantized-matvec",
-        "rmsnorm",
-        "rope",
-        "swiglu",
-        "simd-matmul",
-        "decode-attention",
-        "split-k",
-    ),
+    type=parse_week2_checkpoint,
+    metavar="{" + ",".join(WEEK2_CHECKPOINTS) + "}",
     help="run one cumulative Week 2 model checkpoint",
 )
 

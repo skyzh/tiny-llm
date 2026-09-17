@@ -3,24 +3,21 @@
 import mlx.core as mx
 import pytest
 
-from extensions_ref import tiny_llm_ext_ref
-from tiny_llm_ref.attention import scaled_dot_product_attention_grouped
-
-from tiny_llm_ref.qwen3_week2 import (
+from .tiny_llm_base import (
     LONG_CONTEXT_ATTENTION_MAX_CONTEXT,
     Qwen3ModelWeek2,
     Qwen3MultiHeadAttention,
     WEEK2_CHECKPOINT_FEATURES,
-    should_use_long_context_attention,
-)
-from tiny_llm_ref.week2_kernels import (
     long_context_attention,
     scaled_dot_product_attention,
+    scaled_dot_product_attention_grouped,
+    should_use_long_context_attention,
+    tiny_llm_ext,
 )
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-HAS_PHASE_2_EXTENSION = hasattr(tiny_llm_ext_ref, "long_context_attention")
+HAS_PHASE_2_EXTENSION = hasattr(tiny_llm_ext, "long_context_attention")
 
 
 def _qwen_attention_fixture(

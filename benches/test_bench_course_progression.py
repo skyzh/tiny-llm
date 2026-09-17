@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import sys
 import unicodedata
 from pathlib import Path
@@ -679,3 +680,38 @@ def test_matrix_help_names_metrics_and_native_ceiling(monkeypatch, capsys):
     assert "32640-token prompt plus 128" in help_text
     assert "native 32768-token ceiling" in help_text
     assert "matched two-variant Week 2" in help_text
+
+
+def test_public_main_help_lists_only_current_week2_checkpoints():
+    result = subprocess.run(
+        [sys.executable, "main.py", "--help"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "long-context-attention" in result.stdout
+    assert "fused-gate-up" in result.stdout
+    assert "decode-attention" not in result.stdout
+    assert "split-k" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("legacy", "replacement"),
+    (
+        ("decode-attention", "long-context-attention"),
+        ("split-k", "fused-gate-up"),
+    ),
+)
+def test_public_main_legacy_checkpoint_reports_migration(legacy, replacement):
+    result = subprocess.run(
+        [sys.executable, "main.py", "--week2-checkpoint", legacy],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert f"{legacy!r} was replaced by {replacement!r}" in result.stderr
