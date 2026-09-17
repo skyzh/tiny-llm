@@ -5,13 +5,13 @@ are sufficient for every required Week 2 checkpoint. This page is an optional
 deeper look at the same evidence loop for learners with macOS 27 and
 `/usr/bin/gpudebug`. It is never an acceptance gate.
 
-The checked example used Qwen3-4B on an Apple M4 Pro at source commit
+The archived capture example used Qwen3-4B on an Apple M4 Pro at source commit
 `add389b747793e910f0506f5720dd0aac373d126`, macOS 27 build `26A428`,
-`gpudebug` 1.0, MLX 0.32.0, and mlx-lm 0.31.3. Its product control used a
-128-token prompt, 129 output tokens, final-row prefill logits, seed 0, two
-warmups, and two balanced fresh-process samples. Its attribution cases used
-four warmups and twelve synchronized iterations. These identities bound the
-example; they are not a portable timing baseline.
+`gpudebug` 1.0, MLX 0.32.0, and mlx-lm 0.31.3. It predates the current
+128/512/2K/8K/32,640 product matrix, so use it only to learn the capture
+mechanics. Its attribution cases used four warmups and twelve synchronized
+iterations. These identities bound the example; they are not current product
+evidence or a portable timing baseline.
 
 ## 1. Prove Correctness First
 
@@ -74,8 +74,8 @@ If you did not collect command queries, omit `--commands-jsonl`. Missing
 timeline, shader, command, or counter trees must remain explicitly unavailable;
 do not replace them with zero and do not infer occupancy. In the checked
 pre-SIMD 128-token prefill capture, the replay exposed timeline counters but
-no shader ranking. In the checked 32-token Split-K capture, only static
-dispatch presence was available and no occupancy conclusion was drawn.
+no shader ranking. In another short-shape capture, only static dispatch
+presence was available and no occupancy conclusion was drawn.
 
 ## 4. Write a Bounded Decision
 
@@ -85,10 +85,10 @@ Use three sentences:
 2. name the next bounded change and the same-workload result that would support it;
 3. state the result that would falsify the hypothesis or make you revert it.
 
-For example: “At `swiglu:decode:128`, packed projections dominate this M4 Pro
-capture and the portable attribution. I will change only the selected
-projection schedule and rerun the identical workload. I will revert or choose
-another category if projection time does not fall or the complete-model phase
+For example: “At `swiglu:decode:128`, the MLP component is the selected target
+in this M4 Pro capture and portable replay. I will change only its bounded
+schedule and rerun the identical workload. I will revert or choose another
+component if targeted time does not fall or the complete-model phase
 regresses.” This is a reasoning record, not a claim that another device has
 the same bottleneck.
 

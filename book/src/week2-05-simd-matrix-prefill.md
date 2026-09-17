@@ -1,19 +1,19 @@
 # 🚧 Week 2 Day 5: SIMD-Matrix Prefill
 
-Day 4 ends with a decision, not a predetermined kernel. Re-profile the fixed
-128-token prefill and name the dominant category before changing code. On the
-checked M4 Pro run, projections accounted for 99.1% of attributed prefill time.
-That observation selects the matrix-shaped projection path for this chapter.
+Day 4 ends with a decision, not a predetermined kernel. Re-profile prefill and
+separate QKV/output attention projections from MLP gate/up/down projections
+before changing code. The bounded Day 5 question is whether the packed-W4
+projection path needs a matrix-shaped schedule once the activation has more
+than eight rows.
 
 The `swiglu` checkpoint still uses Day 3's correctness-first vanilla W4 matrix
 kernel when the activation has more than eight rows. You will replace that
 schedule with a cooperative BF16 SIMD-matrix kernel while preserving the same
 quantized-linear interface and the last-row-logits product boundary.
 
-The checked numbers in this chapter are one example, not a performance gate.
-They come from Qwen3-4B on one 20-core M4 Pro running macOS 27 and MLX 0.32.0,
-with a 128-token prompt, 129 output tokens, two warmups, and two balanced
-fresh-process samples. Your device and crossover may differ.
+Use the full 128/512/2K/8K/32,640 prompt matrix from the Week 2 overview for
+product evidence. A 128-token prompt remains a useful matched regression
+control, not the whole product story. Your device and crossover may differ.
 
 ## Establish the Same-Workload Baseline
 
@@ -31,7 +31,7 @@ kernel change:
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --variant week2-swiglu --variant week2-simd-matmul --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --model qwen3-4b --input-len 128 --output-len 128 --warmup 2 \
   --prefill-logits last --json-output week2-day5-product.json
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
@@ -91,8 +91,8 @@ The supplied starter dispatch is `QuantizedMatmul::eval_gpu` in
 the public dispatch while choosing a different internal kernel name.
 
 The checkpoint feature name is `simd-matmul`. It includes packed W4
-projections and the three fused Day 4 operators. It does not include the
-optional decode-attention branch from Day 6.
+projections and the three fused Day 4 operators. It is the unchanged control
+for both replacement chapters and includes neither Day 6 nor Day 7 candidate.
 
 If you want to continue without writing this custom schedule, preserve the
 course's `quantized_linear` interface and route the matrix-shaped projection
@@ -122,18 +122,16 @@ model output—not a private symbol or source-file layout.
 Now repeat the exact baseline commands, then close the loop in three
 sentences:
 
-1. which operator category dominated the baseline prefill;
+1. which model component dominated the baseline prefill;
 2. whether the candidate changed that category and the matched product phase;
 3. what result would make you revert the candidate or test another schedule.
 
-In the checked run, the SIMD schedule reduced attributed projection time by
-86.4% and raised fixed-workload prefill from 106.44 to 721.60 tokens/s. Those
-large effects justify keeping it for that source tree and workload. They do
-not establish the same multiplier on another model, Apple GPU, prompt length,
-or software version.
+Retain the schedule only when its targeted phase improves and the full-request
+matrix does not reveal a contradictory regression. One prompt length cannot
+establish the same crossover on another model, Apple GPU, or software version.
 
-Day 6 is an optional workload-conditioned operator lab. You may take that
-branch to study bounded decode attention, or continue directly to Day 7. Day
+Day 6 is an optional long-context dense-attention experiment. You may take that
+branch or continue directly to Day 7's fused gate+up and SwiGLU candidate. Day
 7 starts from this `simd-matmul` checkpoint either way.
 
 {{#include copyright.md}}

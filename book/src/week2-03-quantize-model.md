@@ -657,7 +657,7 @@ Measure that same learner solution:
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint quantized-matvec --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+  --min-output-len 128 --max-output-len 128 --warmup 2
 ```
 
 Run the same command with `--solution tiny_llm_ref` to compare it with the
@@ -685,7 +685,7 @@ Measure the cumulative model and the real projection shapes:
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --variant week2-kv-cache --variant week2-quantized-matvec --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --model qwen3-4b --input-len 128 --output-len 128 --warmup 2 \
   --prefill-logits last
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
@@ -695,13 +695,12 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 ```
 
 Keep one cumulative model row and one representative real-shape projection
-comparison. In the checked M4 Pro example, packed W4 reduced attributed
-projection time by 69.0% and fixed-workload decode rose from 24.38 to 58.90
-tokens/s. The re-profile then exposed normalization, position, and activation
-at 33.5% of attributed time, selecting Day 4. These are bounded observations
-from one machine and two product samples, not portable timing thresholds. The
-complete campaign and attribution are in the
-[performance appendix](./appendix-performance.md#day-3-keep-weights-packed).
+comparison. A reduction in the isolated packed-W4 target supports the mechanism
+only when matched full-request decode moves in the same direction. Re-profile
+normalization, position, activation, attention, and MLP responsibilities before
+choosing Day 4; do not carry the old combined-projections percentage forward.
+The component boundaries and full prompt matrix are in the
+[performance appendix](./appendix-performance.md#component-attribution).
 
 If you need to continue without the custom Day 3 kernels, implement the same
 `quantized_linear` interface with `mx.quantized_matmul` and leave the rest of
