@@ -1,42 +1,67 @@
-# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab
+# 🚧 Week 2 Day 6 (Optional): Long-Context Dense-KV Decode Attention
 
-Day 5 restores the matrix-shaped projection path selected by the fixed
-128-token prefill profile. Day 6 asks a different question: can a secondary
-operator earn a place for one named workload?
+Day 5 improves packed projections, but the whole-model sweep shows a different
+cost growing with context. From a 128-token prompt to 32,640 tokens, the
+full-MLX baseline's decode rate falls from 88.52 to 25.71 tokens/s while TPOT
+rises from 11.298 to 38.888 ms. In normalized isolated decode replays, QKV and
+output projections plus the attention core rise from 36.24% to 62.14%.
 
-The supplied worked branch is bounded decode attention. It is useful practice
-with online softmax, but the checked fixed workload did not identify attention
-as the next dominant category. Treat this chapter as an optional experiment,
-not a prerequisite for Day 7 and not evidence of a universal bottleneck.
+This optional chapter tests one bounded response: a memory-efficient
+online-softmax kernel for one- or two-row decode against a contiguous dense KV
+cache. It does not add paging, chunking, or paged attention. Those mechanisms
+belong to Week 3.
 
-A successful pass ends with a bounded decision, even when the numbers do not
-support keeping the branch.
+The goal is a correct path, a safe fallback, and a matched decision. Do not
+assume the candidate passes its performance gate.
 
-## Choose the Workload Before the Operator
+## Why the Short Control Is Not Enough
 
-Write down the model, checkpoint, phase, prompt or context length, warmups,
-iterations, and comparison rule before editing code. Start from the Day 5
-`simd-matmul` checkpoint and record the same workload for the candidate:
+The retired Day 6 experiment dispatched its custom attention path only through
+context 256. That made the 128-token result useful for correctness but unable
+to test the long-context cost that selected this chapter.
 
-```bash
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:decode:128 --case decode-attention:decode:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day6-attribution.json
+Materializing a full prefill score tensor also stops being viable near the
+native endpoint. For 32 query heads and a 32,640-token prompt, a naive FP32
+score tensor would occupy approximately
+
+```text
+32 * 32,640 * 32,640 * 4 bytes = 127.002 GiB
 ```
 
-The supplied branch uses `decode-attention`. An equivalent experiment on a
-different measurement-selected secondary category is valid if it preserves the
-public checkpoint and decision-record contract. The course grades observable
-behavior and reasoning, not a private file path, exact Metal symbol, device
-duration, or schedule choice.
+That is a lower-bound argument for memory-efficient attention, not a claim that
+the Day 6 decode kernel solves long-prompt prefill. Day 6 keeps only one or two
+query rows in flight and walks dense K/V blocks without storing the complete
+score row.
 
-## Task 1: Preserve Bounded Decode-Attention Semantics
+## Freeze the Workload
 
-Use the supplied branch to make that decision concrete. The readable
-grouped-attention path materializes score and probability rows; for one query
-row, online softmax can combine the reduction and value-weighted sum without
-storing the full score row:
+Use Qwen3-4B's model shape:
+
+- 32 query heads, 8 KV heads, and head dimension 128;
+- query rows 1 and 2;
+- context lengths 128, 512, 2,048, and 8,192;
+- BF16 query, key, value, and output with FP32 online-softmax state;
+- contiguous dense K/V, the model scale, tails, and causal or no-mask
+  semantics; arbitrary explicit masks use the readable fallback.
+
+Generate exactly 128 output tokens for the product comparison. The first token
+belongs to prefill/TTFT; calculate TPOT over the remaining 127 decode
+intervals. Run the same contexts, order, warmups, and samples for the Day 5
+control and candidate.
+
+The canonical selector is `long-context-attention`. Its matrix command is
+integration-pending: do not run or document results until your checkout exposes
+the selector and matrix options in public `--help`. The focused learner gate
+remains:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 6
+```
+
+## Task 1: Preserve Grouped Attention Semantics
+
+Implement online softmax without materializing the full score row:
 
 ```plain
 m = -infinity
@@ -56,65 +81,49 @@ for each key/value block:
 return o / l
 ```
 
-Preserve grouped-query head mapping, dense-cache offsets, BF16 inputs and
-outputs, FP32 online-softmax state, scale, and the existing mask adapter. Keep
-an exact fallback for shapes outside the tested guard. Do not turn a
-short-context experiment into a claim about long-context or paged attention.
+Map every group of four query heads to one KV head. Preserve scale, dense-cache
+offsets, tail blocks, and causal or no-mask semantics. Route an arbitrary
+explicit mask unchanged through the readable fallback. Accumulate maxima,
+denominators, and value-weighted sums in FP32 before returning BF16.
 
-## Task 2: Implement and Verify the Branch
+## Task 2: Own the Candidate and Fallback
 
-Implement the smallest complete branch: replace only the existing fail-closed
-Day 6 learner surfaces. Keep the public
-attention interface stable so Week 3 can reuse it.
+Wire the smallest complete learner-owned path for
+`long-context-attention`. The public attention call remains stable; your
+candidate may use any internal helper or Metal symbol that preserves its
+behavior.
 
-The supplied C++ surface is `tiny_llm_ext::decode_attention`, implemented by
-`Week2DecodeAttention::eval_cpu` and `Week2DecodeAttention::eval_gpu` in
-`src/extensions/src/week2_kernels.cpp`; its Metal entry is
-`week2_decode_attention` in `src/extensions/src/week2_kernels.metal`. The
-product calls it from `Qwen3MultiHeadAttention.__call__` through
-`decode_attention_custom`. Equivalent internal organization is valid when it
-preserves this public behavior and fallback.
+The dispatcher must:
 
-Build as soon as the branch is wired; run the focused check before the product
-path:
+- select the candidate only for the declared one- and two-row shapes;
+- count candidate selections so the product run proves that it executed;
+- expose a disable-only control that always chooses the readable dense path;
+- fail safely to that path for unsupported dtype, shape, mask, head mapping,
+  layout, or context;
+- return the same public result and cache behavior as the control.
 
-```bash
-pdm run build-ext
-pdm run test --week 2 --day 6
+Test supported shapes, odd tail lengths, grouped heads, scale, causal/no-mask
+behavior, explicit-mask fallback, offsets, and each remaining fallback boundary
+before timing. A selection counter proves routing; it does not prove a speedup.
 
-pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint decode-attention --model qwen3-4b
-```
+## Task 3: Run the Matched Decision Gate
 
-Test supported shapes, grouped heads, offsets, and the exact fallback. A valid
-solution may use different helper names and internal organization; it must
-produce the same public attention behavior and preserve the fallback.
+Compare Day 5 and `long-context-attention` at all four context lengths. Record
+the complete workload identity and, for every pair, TTFT, TPOT, throughput,
+selection count, and whether the disable control removes the change.
 
-If you completed the old Week 2 Day 5 attention exercise before the course was
-reordered, keep that work. Complete the current Day 5 SIMD checkpoint first,
-then use this canonical optional Day 6 chapter and its commands to verify your
-retained attention implementation.
+Keep the candidate only if all of these conditions hold:
 
-## Task 3: Re-measure and Decide
+1. median TPOT at 8K is at least 5% lower;
+2. TPOT moves in the same favorable direction in at least three of the four
+   context pairs;
+3. neither the 128 nor 512 control regresses by more than 2%;
+4. disabling the selector removes the measured gain.
 
-A passing branch establishes correctness. The final decision comes from
-rerunning the same comparison:
+Otherwise record `reject` or `inconclusive` and keep the readable dense fallback.
+Correctness is required regardless of the performance decision.
 
-Repeat the frozen workload and compare `simd-matmul` with
-`decode-attention`. Record:
-
-- the dominant category before the change;
-- the category and product effect you actually observed;
-- the exact context range and fallback you tested;
-- `keep`, `reject`, or `inconclusive`, plus the next falsifying experiment.
-
-The checked M4 Pro result was equivocal: attributed attention changed from
-0.837 ms to 0.831 ms (-0.75%), total attributed time rose 0.97%, and the
-separate two-sample product control showed decode rising from 74.34 to 76.50
-tokens/s (+2.91%). That supports an `inconclusive` worked example, not a
-portable speedup claim. Your decision should follow your matched measurement.
-
-Continue to [Day 7](./week2-07-split-k-prefill.md) from `simd-matmul`. The
-`split-k` checkpoint intentionally excludes this optional attention branch.
+Continue to [Day 7](./week2-07-split-k-prefill.md) from Day 5. The Day 7
+checkpoint does not inherit this optional branch.
 
 {{#include copyright.md}}
