@@ -4,9 +4,9 @@ Day 5 leaves a reusable 32×32×32 SIMD-matrix projection and an exact unsplit
 fallback. Day 6 is an optional branch and is not inherited here: the `split-k`
 checkpoint contains the Day 5 SIMD path plus Split-K, without decode attention.
 
-This chapter begins with an under-filled short shape. It ends by returning to
-the fixed 128×129 product workload. You keep Split-K only for shapes where the
-same-workload evidence supports it.
+Begin with an under-filled short shape, then return to the fixed 128×129
+product workload. Keep Split-K only for shapes where the same-workload evidence
+supports it.
 
 ## Why Split the Reduction Dimension?
 
@@ -16,9 +16,9 @@ $$
 C = A W^T,
 $$
 
-the Day 5 grid parallelizes output rows and columns. When `M` is small and the
-Qwen projection width is narrow, that grid may not expose enough independent
-threadgroups to occupy the GPU. Split-K adds parallel work along the reduction
+the Day 5 grid spreads work across output rows and columns. When `M` is small
+and the Qwen projection width is narrow, it may launch too few independent
+threadgroups to fill the GPU. Split-K creates parallel work along the reduction
 dimension:
 
 ```plain
@@ -32,12 +32,13 @@ Each split must align to the W4 group size, write to a disjoint partial plane,
 and accumulate its local dot product in FP32. A second kernel reduces the
 partial planes in FP32 and casts the final output to BF16.
 
-Split-K also adds a dispatch, a temporary buffer, and another memory pass. It
-is therefore a shape-conditioned schedule, not an automatic upgrade.
+That extra parallelism also adds a dispatch, a temporary buffer, and another
+memory pass. Split-K is therefore a shape-conditioned schedule, not an
+automatic upgrade.
 
 ## Task 1: Freeze a Short-Shape Control
 
-Verify the inherited Day 5 path and record a 32-token attribution pair:
+First verify the inherited Day 5 path and record a 32-token attribution pair:
 
 ```bash
 pdm run build-ext
@@ -49,7 +50,7 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --json-output week2-day7-short-attribution.json
 ```
 
-Record the exact source, model, phase, token count, prompt rule, software, and
+Capture the exact source, model, phase, token count, prompt rule, software, and
 device. Do not substitute a 128-token baseline for the 32-token candidate.
 
 ## Task 2: Reuse the Day 5 Tile for Each Partition
@@ -88,20 +89,21 @@ not an unconditional custom-kernel win.
 
 ## Task 4: Re-profile the Short Shape
 
-Rerun the exact 32-token attribution command from Task 1. In the checked M4 Pro
-example, Split-K reduced total attributed time by 4.87% and projection time by
+Rerun the exact 32-token attribution command from Task 1 so the baseline and
+candidate differ only in schedule. In the checked M4 Pro example, Split-K
+reduced total attributed time by 4.87% and projection time by
 5.01%. Its trace exposed only static Split-K and reduction dispatches; no
 timeline or counter tree materialized, so no occupancy improvement was
 inferred.
 
-Record `keep`, `reject`, or `inconclusive` for the 32-token shape and state the
+Write `keep`, `reject`, or `inconclusive` for the 32-token shape, then name the
 result that would reverse your decision. A sub-percent difference is not a
 strong conclusion without a larger sample.
 
 ## Task 5: Close Week 2 at the Fixed Workload
 
-Finally, compare the Day 5 unsplit checkpoint and Day 7 at the same Qwen3-4B
-128×129 product control used throughout the week:
+Return to the Day 5 unsplit checkpoint and compare it with Day 7 at the same
+Qwen3-4B 128×129 product control used throughout the week:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
@@ -131,7 +133,7 @@ Finish with the week's decision ledger:
 | Optional operator lab | Explicit secondary workload | Before/after/fallback record | `keep`, `reject`, `inconclusive`, or skipped |
 | Split-K | Under-filled 32-token projection | Short control plus fixed 128×129 control | One decision per shape |
 
-The final artifact should tell a causal story: what dominated, what changed,
-what the identical remeasurement showed, and what you chose not to claim.
+Close the week with the causal story: what dominated, what changed, what the
+identical remeasurement showed, and what you chose not to claim.
 
 {{#include copyright.md}}
