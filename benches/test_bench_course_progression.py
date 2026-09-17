@@ -140,10 +140,10 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Kernels",
         "week2-05-simd-matrix-prefill.md": "# 🚧 Week 2 Day 5: SIMD-Matrix Prefill",
         "week2-06-operator-lab.md": (
-            "# 🚧 Week 2 Day 6 (Optional): Long-Context Dense-KV Decode Attention"
+            "# 🚧 Week 2 Day 6 (Optional): Context-Selected Dense Decode Attention"
         ),
         "week2-07-split-k-prefill.md": (
-            "# 🚧 Week 2 Day 7: Fused Packed-W4 Gate+Up and SwiGLU"
+            "# 🚧 Week 2 Day 7: Prefill-Only Fused Packed-W4 Gate+Up/SwiGLU"
         ),
     }
     for filename, expected_heading in chapter_headings.items():
@@ -209,7 +209,6 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
             3: "week2-03-quantize-model.md",
             4: "week2-04-fused-model-kernels.md",
             5: "week2-05-simd-matrix-prefill.md",
-            6: "week2-06-operator-lab.md",
         }.items()
     }
 
@@ -217,11 +216,6 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
         3: ("kv-cache:decode:128", "quantized-matvec:decode:128"),
         4: ("quantized-matvec:decode:128", "swiglu:decode:128"),
         5: ("swiglu:prefill:128", "simd-matmul:prefill:128"),
-        6: (
-            "simd-matmul:decode:128",
-            "long-context-attention:decode:128",
-            "long-context-attention:decode:8192",
-        ),
     }
     local_capture_tokens = (
         "Xcode GPU capture",
@@ -240,7 +234,13 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
     assert "The re-profile then exposed normalization" in days[3]
     assert "Re-profiling then placed" in days[4]
     assert "Rerun the exact commands from the baseline section" in days[5]
-    assert "Continue to [Day 7]" in days[6]
+    day6 = (ROOT / "book/src/week2-06-operator-lab.md").read_text()
+    assert "pdm run bench-week2-progression" in day6
+    assert "--variant week2-context-selected-attention" in day6
+    assert "--disable-week2-context-selected-attention" in day6
+    assert "long-context-attention:decode:" not in day6
+    assert not any(token in day6 for token in local_capture_tokens)
+    assert "Continue to [Day 7]" in day6
 
 
 @pytest.mark.parametrize(
