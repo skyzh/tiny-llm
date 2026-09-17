@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from benches import bench
 from benches import bench_course_progression as progression
 
 
@@ -715,3 +716,63 @@ def test_public_main_legacy_checkpoint_reports_migration(legacy, replacement):
 
     assert result.returncode == 2
     assert f"{legacy!r} was replaced by {replacement!r}" in result.stderr
+
+
+def test_public_bench_help_lists_only_current_week2_checkpoints(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["bench.py", "--help"])
+    with pytest.raises(SystemExit) as exited:
+        bench.parse_args()
+    help_text = capsys.readouterr().out
+
+    assert exited.value.code == 0
+    assert "long-context-attention" in help_text
+    assert "fused-gate-up" in help_text
+    assert "decode-attention" not in help_text
+    assert "split-k" not in help_text
+
+
+@pytest.mark.parametrize(
+    ("legacy", "replacement"),
+    (
+        ("decode-attention", "long-context-attention"),
+        ("split-k", "fused-gate-up"),
+    ),
+)
+def test_public_bench_legacy_checkpoint_reports_migration(legacy, replacement):
+    result = subprocess.run(
+        [sys.executable, "-m", "benches.bench", "--week2-checkpoint", legacy],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert f"{legacy!r} was replaced by {replacement!r}" in result.stderr
+
+
+def test_public_bench_accepts_current_checkpoint(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bench.py", "--week2-checkpoint", "long-context-attention"],
+    )
+
+    assert bench.parse_args().week2_checkpoint == "long-context-attention"
+
+
+def test_public_bench_unknown_checkpoint_lists_only_current_values():
+    result = subprocess.run(
+        [sys.executable, "-m", "benches.bench", "--week2-checkpoint", "unknown"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "unknown Week 2 checkpoint 'unknown'" in result.stderr
+    assert "long-context-attention" in result.stderr
+    assert "fused-gate-up" in result.stderr
+    assert "decode-attention" not in result.stderr
+    assert "split-k" not in result.stderr

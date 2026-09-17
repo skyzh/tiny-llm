@@ -24,6 +24,30 @@ def _quantized_weights(output_dim: int = 136, input_dim: int = 128):
     return QuantizedWeights(scales, biases, 128, 4, packed), source
 
 
+def _fused_gate_up_oracle(
+    x: mx.array, gate: QuantizedWeights, up: QuantizedWeights
+) -> mx.array:
+    """Mirror the fused kernel's BF16 weights and FP32 accumulation contract."""
+    gate_weight = mx.dequantize(
+        gate.weight,
+        gate.scales,
+        gate.biases,
+        group_size=gate.group_size,
+        bits=gate.bits,
+    ).astype(mx.bfloat16)
+    up_weight = mx.dequantize(
+        up.weight,
+        up.scales,
+        up.biases,
+        group_size=up.group_size,
+        bits=up.bits,
+    ).astype(mx.bfloat16)
+    x_fp32 = x.astype(mx.float32)
+    gate_result = mx.matmul(x_fp32, gate_weight.astype(mx.float32).T)
+    up_result = mx.matmul(x_fp32, up_weight.astype(mx.float32).T)
+    return (mx.sigmoid(gate_result) * gate_result * up_result).astype(mx.bfloat16)
+
+
 def test_fused_gate_up_checkpoint_is_independent_and_legacy_name_is_explicit():
     features = WEEK2_CHECKPOINT_FEATURES["fused-gate-up"]
     assert features.fused_gate_up
@@ -118,29 +142,12 @@ def test_fused_wrapper_rejects_unsupported_metadata_before_dispatch():
 )
 @pytest.mark.parametrize("rows", (1, 32, 128, 512, 2048))
 def test_fused_gate_up_matches_separate_quantized_projections_gpu(rows):
+    mx.random.seed(2)
     gate, _ = _quantized_weights()
     up, _ = _quantized_weights()
     x = mx.random.normal((rows, 128)).astype(mx.bfloat16)
     result = quantized_gate_up_swiglu(x, gate, up)
-    gate_result = mx.quantized_matmul(
-        x,
-        gate.weight,
-        gate.scales,
-        gate.biases,
-        transpose=True,
-        group_size=128,
-        bits=4,
-    )
-    up_result = mx.quantized_matmul(
-        x,
-        up.weight,
-        up.scales,
-        up.biases,
-        transpose=True,
-        group_size=128,
-        bits=4,
-    )
-    expected = (mx.sigmoid(gate_result) * gate_result * up_result).astype(mx.bfloat16)
+    expected = _fused_gate_up_oracle(x, gate, up)
     assert result.shape == (rows, 136)
     assert result.dtype == mx.bfloat16
-    assert_allclose(result, expected, mx.bfloat16, atol=1.5, rtol=2e-2)
+    assert_allclose(result, expected, mx.bfloat16, atol=1e-2, rtol=1e-3)

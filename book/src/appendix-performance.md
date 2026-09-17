@@ -1,7 +1,7 @@
 # 🚧 Appendix: Performance Evidence Ledger
 
 > **Status: Experimental, single-machine evidence.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) before
+> [Week 2 decision guidance](./week2-overview.md#verification-status) before
 > treating a correctness, integration, or performance result as broader proof.
 
 This appendix records the measurements that determined the course order. The
