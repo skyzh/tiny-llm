@@ -10,10 +10,11 @@ you will rerun a matched workload, find where time now goes, and use that
 evidence to choose what to change next. Instead of collecting unrelated
 kernels, you will build an optimization story you can explain.
 
-Days 1–5 build the cache and projection path. Day 6 is an optional long-context
-dense-attention experiment. Day 7 fuses the two packed W4 MLP projections that
-share the same input. Both final chapters begin with a hypothesis and end with a
-keep-or-reject gate; neither promises that a new kernel must win.
+Days 1–5 build the cache and projection path. Optional Day 6 selects dense
+online-softmax attention only where the measured context boundary justifies it.
+Day 7 selects fused packed-W4 gate/up/SwiGLU only for prefill rows where the
+primitive helped, never for row-1 decode. Both final chapters end with a fixed
+keep-or-reject gate; neither promises that a correct kernel must win.
 
 Begin with [Day 1: KV Cache](./week2-01-kv-cache.md), where you will stop
 recomputing the entire prefix for every generated token.
@@ -47,9 +48,12 @@ a regression control, not the whole product story:
 | 32,640 | 370.73 tok/s | 25.71 tok/s | 88.044 s | 38.888 ms |
 
 The 32,640-token prompt plus 128 generated tokens reaches the model's native
-32,768-token endpoint exactly. A 32,768-token prompt leaves no room to generate
-and is therefore a prefill-only point. Treat 65K or 131K as YaRN-qualified or
-synthetic stress, not as the native product workload.
+32,768-token endpoint exactly. That row is full-MLX baseline evidence; the
+Week 2 readable course prefill cannot run it because its FP32 score tensor alone
+would exceed 127 GiB. Day 6 records the course row as unavailable and hands the
+memory-bounded prefill mechanism to Week 3. A 32,768-token prompt leaves no room
+to generate and is therefore a prefill-only point. Treat 65K or 131K as
+YaRN-qualified or synthetic stress, not as the native product workload.
 
 Use the same four-part loop at each checkpoint:
 
@@ -106,12 +110,12 @@ endpoint. That observation motivates different experiments on Days 6 and 7.
    Keep each change only after a matched measurement.
 5. **SIMD-matrix prefill:** use a cooperative schedule for matrix-shaped packed
    W4 projections while retaining the short-row path.
-6. **Long-context dense-KV attention (optional):** test an online-softmax
-   attention path at 128, 512, 2K, and 8K context, with the readable dense path
-   as the exact fallback.
-7. **Fused gate+up and SwiGLU:** fuse the two packed W4 MLP projections that read
-   the same activation, keep the down projection unchanged, and decide from a
-   matched row sweep and product controls.
+6. **Context-selected dense decode attention (optional):** use online softmax
+   only for one- or two-row BF16 decode at 8K–32K context; keep shorter contexts,
+   explicit masks, and other shapes on the readable dense fallback.
+7. **Prefill-only fused gate+up/SwiGLU:** fuse the two packed-W4 projections for
+   rows 32–2K, while row-1 decode, 8K prefill, and the down projection remain on
+   their Day 5 routes.
 
 ## What Is Supplied and What You Own
 
@@ -147,8 +151,9 @@ When a command runs a model, benchmark, profile, capture, or reducer, pass
 otherwise default to the completed reference, so omitting it may measure code
 you did not write.
 
-The public selectors are `long-context-attention` and `fused-gate-up`. Confirm
-the runnable surfaces before starting either experiment:
+The public selectors are `context-selected-attention` and
+`prefill-fused-gate-up`. Confirm the runnable surfaces before starting either
+experiment:
 
 ```bash
 pdm run bench --help
@@ -159,8 +164,10 @@ pdm run bench-week2-operators --help
 The Day 6 and Day 7 chapters give the exact matched commands. The matrix JSON
 preserves each sample's dispatch counters, so correctness, candidate selection,
 and disable-control evidence stay distinct from the still-pending performance
-decision. The retired `decode-attention` and `split-k` checkpoint names now
-produce migration errors instead of silently selecting a current checkpoint.
+decisions. The rejected `long-context-attention` and `fused-gate-up` checkpoint
+names remain migration/history labels rather than aliases for the current
+policies; the still older `decode-attention` and `split-k` names likewise do not
+silently select a current checkpoint.
 
 <a id="verification-status"></a>
 
@@ -175,9 +182,11 @@ the implementation is faster.
 By the end of Week 2, your model decodes one token at a time from a dense KV
 cache, chooses separate prefill and decode projection schedules, and keeps its
 weights quantized. Week 3 keeps these model, cache, precision, and operator
-interfaces while adding paging and batching. Day 6 deliberately stops at
-contiguous dense K/V; paged KV, chunking, and paged attention belong to Week 3.
-Day 7 starts from Day 5 and does not depend on the optional Day 6 branch.
+interfaces while adding paging and batching. Day 6 deliberately stops after
+context-selected decode over contiguous dense K/V. Week 3 Day 3 owns pages,
+Day 4 direct page walking, and Day 5 tiled online-softmax long-prefill
+attention. Day 7 starts from Day 5 and does not depend on the optional Day 6
+branch.
 
 The [performance evidence ledger](./appendix-performance.md) records the
 checked baselines, isolated component shares, decision gates, and limits.

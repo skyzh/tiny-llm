@@ -18,6 +18,8 @@ baseline generates exactly 128 tokens at five prompt lengths:
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
   --variant week2-simd-matmul --variant mlx --repeats 2 \
+  --prompt-length 128 --prompt-length 512 \
+  --prompt-length 2048 --prompt-length 8192 \
   --model qwen3-4b --output-len 128 --warmup 2 \
   --prefill-logits last --json-output week2-product-matrix.json
 
@@ -29,7 +31,10 @@ pdm run bench-serving-progression --offline --repeats 4 \
   --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
 ```
 
-`--prefill-logits last` is a generation-serving workload: both the reference
+The Week 2 course matrix stops at 8K because its readable prefill cannot run the
+32,640-token row. The checked full-MLX baseline below records that native
+endpoint separately. `--prefill-logits last` is a generation-serving workload:
+both the reference
 solution and MLX project only the last prompt row into vocabulary logits. Use
 `--prefill-logits all` for prompt scoring, but never compare the two modes.
 Token 1 is selected during prefill and belongs to TTFT. Decode throughput and
@@ -73,9 +78,9 @@ below contain the measurements.
 | RMSNorm | BF16 I/O with the sum of squares accumulated in FP32 | Fuse reduction, normalization, and weight multiply into one dispatch | Retained at Qwen hidden dimensions after both operator and decode gains; unknown dimensions require remeasurement | Python `mlx.core` RMSNorm and the Day 3 checkpoint remain selectable | Adding isolated microseconds as if checkpoint gains were independent |
 | RoPE | One valid offset per batch row; even rotated dimension; tail values preserved | Fuse angle generation and pair rotation without intermediate graphs | Retained for Qwen decode rows; head-count and rotated-dimension changes require remeasurement | Python `mlx.core` RoPE and the RMSNorm-only checkpoint remain selectable | Benchmarking a cached or precomputed angle path against fresh angle construction |
 | SwiGLU | Gate and up tensors have identical shape and dtype | Fuse SiLU and the gate/up product into one elementwise dispatch | Retained for Qwen MLP shapes; tiny tensors and other dtypes are not a performance claim | The Python `mlx.core` SiLU-product and the RoPE checkpoint remain selectable | Accepting an operator win without a repeated complete-model gain |
-| Long-context dense-KV attention (optional) | 1–2 query rows, 32 query heads / 8 KV heads / D=128, BF16 I/O, FP32 online-softmax state, tails, scale, and causal/explicit masks | Avoid full score rows while walking contiguous K/V as decode context grows | Decision pending: require ≥5% lower 8K median TPOT, favorable direction in 3/4 context pairs, and ≤2% regression at 128/512 | Readable dense grouped attention is the unsupported-shape and disable-only control | Extrapolating the retired context-256 dispatch, claiming prefill or paging, or omitting the selection witness |
+| Context-selected dense decode attention (optional) | 1–2 query rows, 32 query heads / 8 KV heads / D=128, BF16 I/O, FP32 online-softmax state, tails, scale, and causal/no mask | Retain the measured 8K decode gain without routing shorter contexts through the rejected policy | Decision pending: select only at 8K–32K, require ≥5% lower 8K median TPOT, and allow no >2% 128/512/2K TTFT or TPOT regression | Readable dense grouped attention is the unsupported-shape, short-context, explicit-mask, and disable control | Treating decode selection as a solution for the unavailable 32,640-token prefill or omitting the dispatch witness |
 | SIMD-matrix prefill | W4/group-128 layout, BF16 storage, FP32 tile accumulation, and correct partial tiles | Reuse activation and dequantized-weight tiles across prompt rows | Required path for `M > 8`; partial and new model shapes need both correctness and timing sweeps | The Python `mlx.core` matmul is the correctness oracle; Day 3 matvec remains the short-row dispatch and vanilla Metal is a bring-up control | Comparing all-logit course prefill with last-logit MLX serving |
-| Fused packed-W4 gate+up + SwiGLU | Gate/up share one activation; W4 group 128, BF16 I/O, FP32 accumulation, correct tails; down stays separate | Reuse shared-input work and remove the intermediate gate/up-to-SwiGLU dispatch | Decision pending: require ≥5% targeted-phase gain at 512 or 2K, favorable direction in 3/4 row pairs, and ≤2% regression at 8K/decode | Day 5's separate gate, up, and SwiGLU path is the unsupported-shape and disable-only control | Turning a normalized isolated MLP share into a product win or allowing down-projection work into the comparison |
+| Prefill-only fused packed-W4 gate+up/SwiGLU | Gate/up share one activation; W4 group 128, BF16 storage and output, FP32 projections/SwiGLU, correct tails; down stays separate | Reuse shared-input work only for the 32–2K row range where the primitive helped | Decision pending: require the operator gate plus ≥5% TTFT gain at 512 or 2K, zero row-1 fused dispatch, and no >2% decode or 8K-fallback regression | Day 5's separate gate, up, and SwiGLU path is the row-1, 8K+, unsupported-shape, and disable control | Turning the isolated MLP win into a decode claim or allowing down-projection work into the comparison |
 
 This is a retention ledger, not a portability certificate. A new GPU, MLX
 release, model shape, dtype, or workload reopens the corresponding row.
@@ -244,41 +249,46 @@ Keep the causal order, but re-profile by component and context after each
 change. A kernel that shrinks one isolated operator can reveal a different
 component without improving every request shape.
 
-### Day 6: Long-Context Dense-KV Attention
+### Day 6: Context-Selected Dense Decode Attention
 
-The retired attention branch stopped dispatching after context 256, so its
-128-token observation cannot answer the new long-context question. The
-replacement selector, `long-context-attention`, covers one- and two-row GQA at
-contexts 128, 512, 2K, and 8K with FP32 online-softmax state, masks, tails, a
-selection counter, and a disable-only control.
+The rejected `long-context-attention` policy improved the 8K decode point but
+did not move in the favorable direction in three of four context pairs. The
+replacement selector, `context-selected-attention`, preserves the FP32
+online-softmax dense-GQA primitive while limiting it to one- or two-row BF16
+decode at contexts 8,192–32,768. Shorter contexts, explicit masks, and every
+other unsupported shape use readable grouped attention.
 
-The decision is pending. Retain the candidate only with at least 5% lower 8K
-median TPOT, the same favorable direction in three of four context pairs, no
-more than 2% regression at 128 or 512, and disappearance of the gain when the
-selector is disabled. It remains dense and contiguous; it does not claim paged
-KV, chunking, paged attention, or full-prefill coverage.
+The decision remains pending. The selected counter must be zero below 8K and
+nonzero for every eligible 8K decode. Retain the policy only with at least 5%
+lower 8K median TPOT, no 128/512/2K TTFT or TPOT regression above 2%, and
+disappearance of the 8K gain when the selector is disabled.
 
-At the native-endpoint prompt, a naive FP32 prefill score tensor for 32 query
-heads is about 127.002 GiB. That establishes the need for memory-efficient
-prefill before a native-endpoint course run; it does not turn the Day 6 decode
-candidate into that solution.
+The 32,640+128 Week 2 product row is unavailable: readable prefill alone would
+materialize 136,367,308,800 bytes, or 127.001953 GiB, of FP32 scores for 32
+query heads. That missing prefill is not a zero-valued measurement. Week 3 Day
+3 owns pages, Day 4 direct page walking, and Day 5 tiled online-softmax
+long-prefill attention.
 
-### Day 7: Fused Packed-W4 Gate+Up and SwiGLU
+### Day 7: Prefill-Only Fused Packed-W4 Gate+Up/SwiGLU
 
-Day 7 starts from Day 5 and is independent of optional Day 6. The
-`fused-gate-up` candidate reads one activation for the two group-128 packed-W4
-gate/up projections, applies SwiGLU, and leaves the down projection unchanged.
-Its operator sweep uses rows 1, 32, 128, 512, and 2K, with an 8K full-request
-and decode safety control.
+Day 7 starts from Day 5 and is independent of optional Day 6. The rejected
+`fused-gate-up` policy recorded 84.10–88.91% isolated improvements from 32
+through 2K rows but lost decisively at row 1. The replacement selector,
+`prefill-fused-gate-up`, therefore uses the existing fused primitive only for
+matching BF16 packed-W4 group-128 rows 32–2K. Row 1 decode, rows outside that
+range, unsupported metadata, and 8K prefill use separate gate/up/SwiGLU. The
+down projection remains separate.
 
-The decision is also pending. Retain the candidate only with at least 5%
-targeted-phase improvement at 512 or 2K, the same favorable direction in three
-of four 32/128/512/2K pairs, no more than 2% regression at 8K or decode, and
-disappearance of the gain when the selector is disabled.
+The decision remains pending. Retain the policy only if the operator improves
+by at least 5% at 512 or 2K and favors at least three of four 32/128/512/2K
+pairs, median TTFT improves by at least 5% at 512 or 2K, fused row-1 dispatch is
+zero, no 128/512/2K/8K TPOT median regresses above 2%, 8K prefill takes the
+fallback without a TTFT regression above 2%, and disabling removes the
+eligible-prefill gain.
 
 The earlier Split-K candidate improved one isolated 32-token projection by
-about 5% but did not improve the fixed 128-token product control. That is why it
-is no longer the final Week 2 mechanism.
+about 5% but did not improve the fixed 128-token product control. It remains a
+historical result rather than the final Week 2 mechanism.
 
 ### Optional Capture Boundary
 
