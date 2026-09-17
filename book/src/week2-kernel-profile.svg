@@ -151,7 +151,7 @@
   </g>
 
   <g class="narrow-layout">
-    <text class="narrow-heading" x="20" y="28">Week 2 checkpoints · chronological</text>
+    <text class="narrow-heading" x="20" y="36">Week 2 checkpoints · chronological</text>
 
     <g aria-label="Legend">
       <rect class="projection" x="20" y="46" width="22" height="22" rx="3" />
@@ -164,6 +164,7 @@
       <text class="narrow-legend" x="697" y="101">KV growth</text>
     </g>
 
+    <g transform="translate(0 -6)">
     <g aria-label="Day 2 cached decode: projections 81.5 percent, attention 2.1 percent, pointwise 15.6 percent, KV growth 0.8 percent">
       <text class="narrow-label" x="20" y="140">Day 2 · cached decode</text>
       <text class="narrow-detail" x="500" y="140" text-anchor="end">41.3 ms</text>
@@ -270,5 +271,6 @@
     <text class="narrow-note" x="530" y="591">Qwen3-4B · Apple M4 Pro</text>
     <text class="narrow-note" x="530" y="627">20-core GPU · MLX 0.32.0</text>
     <text class="narrow-note" x="530" y="663">median of 12 after 4 warmups.</text>
+    </g>
   </g>
 </svg>
