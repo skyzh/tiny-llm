@@ -93,10 +93,20 @@ def parse_args() -> argparse.Namespace:
             "rope",
             "swiglu",
             "simd-matmul",
-            "decode-attention",
-            "split-k",
+            "long-context-attention",
+            "fused-gate-up",
         ),
         help="run one cumulative Week 2 end-to-end checkpoint",
+    )
+    parser.add_argument(
+        "--disable-week2-long-context-attention",
+        action="store_true",
+        help="disable only the Week 2 long-context attention candidate",
+    )
+    parser.add_argument(
+        "--disable-week2-fused-gate-up",
+        action="store_true",
+        help="disable only the Week 2 fused gate+up candidate",
     )
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)
@@ -160,6 +170,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--batch-decode requires --num-seqs >= --batch-size")
     if args.week2_checkpoint is not None and args.loader != "week2":
         raise ValueError("--week2-checkpoint requires --loader week2")
+    if (
+        args.disable_week2_long_context_attention or args.disable_week2_fused_gate_up
+    ) and args.loader != "week2":
+        raise ValueError("Week 2 disable controls require --loader week2")
     if (
         args.solution != "mlx"
         and args.device != "gpu"
@@ -659,8 +673,15 @@ def main() -> None:
                 dispatch_kwargs[
                     "use_mlx_quantized_linear"
                 ] = not args.week3_inherit_course_projections
-            elif args.loader == "week2" and args.week2_checkpoint is not None:
-                dispatch_kwargs["checkpoint"] = args.week2_checkpoint
+            elif args.loader == "week2":
+                if args.week2_checkpoint is not None:
+                    dispatch_kwargs["checkpoint"] = args.week2_checkpoint
+                dispatch_kwargs["disable_long_context_attention"] = (
+                    args.disable_week2_long_context_attention
+                )
+                dispatch_kwargs["disable_fused_gate_up"] = (
+                    args.disable_week2_fused_gate_up
+                )
             if (
                 args.loader == "week2"
                 and args.batch_decode
@@ -868,7 +889,14 @@ def main() -> None:
                 "device": args.device,
                 "prefill_logits": effective_prefill_logits,
                 "seed": args.seed,
+                "disable_week2_long_context_attention": (
+                    args.disable_week2_long_context_attention
+                ),
+                "disable_week2_fused_gate_up": args.disable_week2_fused_gate_up,
             },
+            "dispatch_counters": (
+                model.dispatch_counters() if hasattr(model, "dispatch_counters") else {}
+            ),
             "request_trace": [
                 {
                     "request_id": request_id,

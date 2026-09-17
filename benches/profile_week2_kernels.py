@@ -29,9 +29,10 @@ DEFAULT_CASES = (
     "swiglu:decode:128",
     "simd-matmul:prefill:128",
     "simd-matmul:prefill:32",
-    "decode-attention:decode:128",
-    "decode-attention:prefill:128",
-    "split-k:prefill:32",
+    "long-context-attention:decode:128",
+    "long-context-attention:decode:8192",
+    "fused-gate-up:prefill:32",
+    "fused-gate-up:prefill:128",
 )
 PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"
@@ -100,7 +101,7 @@ def load_implementation(name: str) -> KernelImplementation:
         linear=basics.linear,
         silu=basics.silu,
         quantized_linear=quantize.quantized_linear,
-        decode_attention=kernels.decode_attention_custom,
+        decode_attention=kernels.long_context_attention,
         swiglu=kernels.swiglu,
         decode_attention_max_query=getattr(model, "DECODE_ATTENTION_MAX_QUERY", 0),
         decode_attention_max_context=getattr(model, "DECODE_ATTENTION_MAX_CONTEXT", 0),

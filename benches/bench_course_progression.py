@@ -93,18 +93,18 @@ WEEK2_VARIANTS = (
         ("--week2-checkpoint", "simd-matmul"),
     ),
     Variant(
-        "week2-decode-attention",
-        "2.6 Optional decode attention",
+        "week2-long-context-attention",
+        "2.6 Long-context decode attention",
         "ref",
         "week2",
-        ("--week2-checkpoint", "decode-attention"),
+        ("--week2-checkpoint", "long-context-attention"),
     ),
     Variant(
-        "week2-split-k",
-        "2.7 Split-K prefill",
+        "week2-fused-gate-up",
+        "2.7 Fused gate+up SwiGLU",
         "ref",
         "week2",
-        ("--week2-checkpoint", "split-k"),
+        ("--week2-checkpoint", "fused-gate-up"),
     ),
     MLX_VARIANT,
 )
@@ -114,8 +114,10 @@ VARIANTS_BY_KEY = {
 METRIC_PATTERN = re.compile(
     r"(Prefill|Decode|Output) throughput: ([0-9]+(?:\.[0-9]+)?) tok/s"
 )
-MATRIX_PROMPT_LENGTHS = (128, 512, 2048, 8192, 32768)
+MATRIX_PROMPT_LENGTHS = (128, 512, 2048, 8192, 32640)
 MATRIX_DEFAULT_VARIANTS = ("week2-simd-matmul", "mlx")
+MATRIX_OUTPUT_TOKENS = 128
+NATIVE_CONTEXT_TOKENS = 32768
 
 
 def parse_args() -> argparse.Namespace:
@@ -146,13 +148,14 @@ def parse_args() -> argparse.Namespace:
         help="execution device; the progression includes course-owned Metal kernels",
     )
     parser.add_argument("--input-len", type=int, default=128)
-    parser.add_argument("--output-len", type=int, default=65)
+    parser.add_argument("--output-len", type=int)
     parser.add_argument(
         "--matrix",
         action="store_true",
         help=(
             "run a matched Week 2 checkpoint/MLX prompt-length matrix; defaults "
-            "to 128, 512, 2048, 8192, and the native 32768-token ceiling"
+            "to 128, 512, 2048, 8192, and a 32640-token prompt plus 128 "
+            "generated tokens at the native 32768-token ceiling"
         ),
     )
     parser.add_argument(
@@ -162,8 +165,18 @@ def parse_args() -> argparse.Namespace:
         choices=MATRIX_PROMPT_LENGTHS,
         help=(
             "matrix prompt length; repeat to select a subset of the supported "
-            "128/512/2048/8192/32768 points"
+            "128/512/2048/8192/32640 product points"
         ),
+    )
+    parser.add_argument(
+        "--disable-week2-long-context-attention",
+        action="store_true",
+        help="disable only the Week 2 long-context attention candidate",
+    )
+    parser.add_argument(
+        "--disable-week2-fused-gate-up",
+        action="store_true",
+        help="disable only the Week 2 fused gate+up candidate",
     )
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument(
@@ -205,6 +218,8 @@ def parse_args() -> argparse.Namespace:
         help="optionally save configuration, samples, and medians as JSON",
     )
     args = parser.parse_args()
+    if args.output_len is None:
+        args.output_len = MATRIX_OUTPUT_TOKENS if args.matrix else 65
     if args.input_len <= 0:
         parser.error("--input-len must be positive")
     if args.output_len <= 1:
@@ -225,6 +240,8 @@ def parse_args() -> argparse.Namespace:
         )
     if args.matrix and args.prefill_logits != "last":
         parser.error("--matrix requires --prefill-logits last for product inference")
+    if args.matrix and args.output_len != MATRIX_OUTPUT_TOKENS:
+        parser.error("--matrix requires exactly --output-len 128")
     if args.variant:
         suite_variants = WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS
         suite_keys = {variant.key for variant in suite_variants}
@@ -334,6 +351,18 @@ def run_variant(
             str(args.seed),
             "--json-output",
             str(raw_output),
+            *(
+                ["--disable-week2-long-context-attention"]
+                if getattr(args, "disable_week2_long_context_attention", False)
+                and variant.solution != "mlx"
+                else []
+            ),
+            *(
+                ["--disable-week2-fused-gate-up"]
+                if getattr(args, "disable_week2_fused_gate_up", False)
+                and variant.solution != "mlx"
+                else []
+            ),
             *variant.extra_args,
         ]
         completed = subprocess.run(
@@ -405,8 +434,8 @@ def summarize_product_metrics(
 def prompt_classification(prompt_tokens: int) -> str:
     if prompt_tokens == 128:
         return "micro/regression"
-    if prompt_tokens == 32768:
-        return "native-ceiling"
+    if prompt_tokens == 32640:
+        return "native-product-endpoint"
     return "product-context"
 
 
@@ -574,8 +603,10 @@ def main() -> None:
 
     if args.matrix:
         print(
-            "Matrix points: 128 is a micro/regression point; 32768 is the "
-            "native context ceiling. This matrix makes no 100K+ product claim."
+            "Matrix points: 128 is a micro/regression point; 32640 prompt + "
+            "128 generated tokens reaches the native 32768-token ceiling. A "
+            "32768-token prompt is prefill-only, never a native generation row. "
+            "This matrix makes no 100K+ product claim."
         )
 
     completed_runs = 0
@@ -676,6 +707,12 @@ def main() -> None:
             configuration.update(
                 matrix=True,
                 prompt_lengths=prompt_lengths,
+                disable_week2_long_context_attention=getattr(
+                    args, "disable_week2_long_context_attention", False
+                ),
+                disable_week2_fused_gate_up=getattr(
+                    args, "disable_week2_fused_gate_up", False
+                ),
             )
         payload = {
             "schema_version": 3 if args.matrix else 2,
@@ -691,15 +728,19 @@ def main() -> None:
                 evidence_kind="single_request_product_matrix",
                 process_isolation="fresh_process_per_sample",
                 context_boundary=(
-                    "128 is micro/regression; 32768 is the native ceiling; "
-                    "no 100K+ product claim"
+                    "128 is micro/regression; 32640 prompt + 128 generated "
+                    "tokens reaches the native 32768-token ceiling; a 32768 "
+                    "prompt is prefill-only; no 100K+ product claim"
                 ),
+                generated_tokens=MATRIX_OUTPUT_TOKENS,
+                post_first_decode_intervals=MATRIX_OUTPUT_TOKENS - 1,
+                native_context_tokens=NATIVE_CONTEXT_TOKENS,
                 metric_definitions={
-                    "TTFT_ms": "prefill timer through the first generated token",
+                    "TTFT_ms": "prefill timer through generated token 1 of 128",
                     "prefill_tokens_per_second": "prompt tokens divided by prefill time",
-                    "TPOT_ms": "decode time divided by generated tokens after the first",
+                    "TPOT_ms": "decode time divided by 127 post-first-token intervals",
                     "decode_tokens_per_second": (
-                        "generated tokens after the first divided by decode time"
+                        "127 post-first-token intervals divided by decode time"
                     ),
                     "output_tokens_per_second": (
                         "all generated tokens divided by complete-request elapsed time"

@@ -107,8 +107,8 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-rope": "2.4 + Fast RoPE",
         "week2-swiglu": "2.4 + Fused SwiGLU",
         "week2-simd-matmul": "2.5 SIMD matrix prefill",
-        "week2-decode-attention": "2.6 Optional decode attention",
-        "week2-split-k": "2.7 Split-K prefill",
+        "week2-long-context-attention": "2.6 Long-context decode attention",
+        "week2-fused-gate-up": "2.7 Fused gate+up SwiGLU",
         "mlx": "MLX",
     }
 
@@ -334,7 +334,8 @@ def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
 
     args = progression.parse_args()
 
-    assert args.prompt_length == [128, 512, 2048, 8192, 32768]
+    assert args.prompt_length == [128, 512, 2048, 8192, 32640]
+    assert args.output_len == 128
     assert args.variant == ["week2-simd-matmul", "mlx"]
     assert [
         progression.prompt_classification(value) for value in args.prompt_length
@@ -343,7 +344,7 @@ def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
         "product-context",
         "product-context",
         "product-context",
-        "native-ceiling",
+        "native-product-endpoint",
     ]
 
 
@@ -375,6 +376,18 @@ def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
                 "week2-simd-matmul",
             ),
             "exactly one Week 2 course",
+        ),
+        (
+            (
+                "--suite",
+                "week2",
+                "--matrix",
+                "--prefill-logits",
+                "last",
+                "--output-len",
+                "129",
+            ),
+            "exactly --output-len 128",
         ),
     ),
 )
@@ -451,7 +464,7 @@ def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
         model="qwen3-4b",
         device="gpu",
         input_len=128,
-        output_len=65,
+        output_len=128,
         warmup=2,
         prefill_logits="last",
         seed=0,
@@ -471,8 +484,8 @@ def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
     command, kwargs = observed[0]
     assert command[command.index("--min-input-len") + 1] == "8192"
     assert command[command.index("--max-input-len") + 1] == "8192"
-    assert command[command.index("--min-output-len") + 1] == "65"
-    assert command[command.index("--max-output-len") + 1] == "65"
+    assert command[command.index("--min-output-len") + 1] == "128"
+    assert command[command.index("--max-output-len") + 1] == "128"
     assert command[-2:] == ["--week2-checkpoint", "simd-matmul"]
     assert kwargs["cwd"] == tmp_path
     assert kwargs["env"]["HF_HUB_OFFLINE"] == "1"
@@ -489,7 +502,7 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
         suite="week2",
         device="gpu",
         input_len=128,
-        output_len=17,
+        output_len=128,
         warmup=1,
         repeats=2,
         seed=0,
@@ -497,7 +510,7 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
         offline=True,
         cooldown_seconds=0.0,
         variant=["week2-simd-matmul", "mlx"],
-        prompt_length=[128, 32768],
+        prompt_length=[128, 32640],
         matrix=True,
     )
     calls = []
@@ -530,11 +543,14 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
     assert payload["evidence_kind"] == "single_request_product_matrix"
     assert payload["process_isolation"] == "fresh_process_per_sample"
     assert "no 100K+ product claim" in payload["context_boundary"]
-    assert payload["workload"]["prompt_lengths"] == [128, 32768]
-    assert payload["workload"]["decode_sample_tokens"] == 16
+    assert payload["workload"]["prompt_lengths"] == [128, 32640]
+    assert payload["workload"]["decode_sample_tokens"] == 127
+    assert payload["generated_tokens"] == 128
+    assert payload["post_first_decode_intervals"] == 127
+    assert payload["native_context_tokens"] == 32768
     assert payload["prompt_classification"] == {
         "128": "micro/regression",
-        "32768": "native-ceiling",
+        "32640": "native-product-endpoint",
     }
     assert set(payload["metric_definitions"]) == {
         "TTFT_ms",
@@ -549,8 +565,8 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
     assert calls[:4] == [
         (128, "week2-simd-matmul"),
         (128, "mlx"),
-        (32768, "mlx"),
-        (32768, "week2-simd-matmul"),
+        (32640, "mlx"),
+        (32640, "week2-simd-matmul"),
     ]
 
 
@@ -613,4 +629,5 @@ def test_matrix_help_names_metrics_and_native_ceiling(monkeypatch, capsys):
     assert exited.value.code == 0
     assert "TTFT_ms" in help_text
     assert "TPOT_ms" in help_text
+    assert "32640-token prompt plus 128" in help_text
     assert "native 32768-token ceiling" in help_text

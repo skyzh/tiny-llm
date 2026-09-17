@@ -1,5 +1,7 @@
 #include <metal_stdlib>
+#include <metal_simdgroup_matrix>
 #include "mlx/backend/metal/kernels/utils.h"
+#include "cooperative_matrix.h"
 
 using namespace metal;
 
@@ -114,6 +116,143 @@ template <typename T>
     if (index >= size) return;
     const float g = static_cast<float>(gate[index]);
     out[index] = static_cast<T>((g / (1.0f + exp(-g))) * static_cast<float>(up[index]));
+}
+
+// Gate and up share the same activation tile. Two FP32 matrix accumulators
+// consume independent packed-W4 tiles, then SwiGLU is applied before the
+// single BF16 store. Edge guards cover row and intermediate-size tails.
+template <typename T>
+[[kernel]] void week2_quantized_gate_up_swiglu(
+    device const T* x [[buffer(0)]],
+    device const T* gate_scales [[buffer(1)]],
+    device const T* gate_biases [[buffer(2)]],
+    device const uint32_t* gate_weight [[buffer(3)]],
+    device const T* up_scales [[buffer(4)]],
+    device const T* up_biases [[buffer(5)]],
+    device const uint32_t* up_weight [[buffer(6)]],
+    device T* out [[buffer(7)]],
+    constant const int& rows [[buffer(8)]],
+    constant const int& input_dim [[buffer(9)]],
+    constant const int& output_dim [[buffer(10)]],
+    uint3 group_id [[threadgroup_position_in_grid]],
+    uint thread_index [[thread_index_in_threadgroup]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    constexpr int block = 32;
+    constexpr int reduction = 32;
+    constexpr int padded_reduction = 40;
+    constexpr int group_size = 128;
+    constexpr int values_per_pack = 8;
+    constexpr uint32_t mask = 0xf;
+    const int row_base = group_id.y * block;
+    const int column_base = group_id.x * block;
+    const int packed_cols = input_dim / values_per_pack;
+    const int groups_per_output = input_dim / group_size;
+
+    threadgroup T activation_tile[block * padded_reduction];
+    threadgroup T gate_tile[block * padded_reduction];
+    threadgroup T up_tile[block * padded_reduction];
+    threadgroup T parameters[4 * block];
+    using mma_type = tiny_llm::CooperativeBlockMMA<T, T, padded_reduction>;
+    using activation_loader = tiny_llm::CooperativeTileLoader<
+        T, block, reduction, padded_reduction, 128, false, true>;
+    mma_type gate_mma(simdgroup, lane);
+    mma_type up_mma(simdgroup, lane);
+
+    const int weight_output = thread_index / 4;
+    const int weight_pack = thread_index % 4;
+    const int output_column = column_base + weight_output;
+    const bool valid_output = output_column < output_dim;
+    device const uint32_t* gate_source = valid_output
+        ? gate_weight + output_column * packed_cols + weight_pack
+        : gate_weight;
+    device const uint32_t* up_source = valid_output
+        ? up_weight + output_column * packed_cols + weight_pack
+        : up_weight;
+    threadgroup T* gate_destination =
+        gate_tile + weight_output * padded_reduction + weight_pack * values_per_pack;
+    threadgroup T* up_destination =
+        up_tile + weight_output * padded_reduction + weight_pack * values_per_pack;
+
+    if (thread_index < block) {
+        const int parameter_output = column_base + thread_index;
+        const bool valid_parameter = parameter_output < output_dim;
+        const int parameter_index = parameter_output * groups_per_output;
+        parameters[thread_index] = valid_parameter ? gate_scales[parameter_index] : T(0);
+        parameters[block + thread_index] = valid_parameter ? gate_biases[parameter_index] : T(0);
+        parameters[2 * block + thread_index] = valid_parameter ? up_scales[parameter_index] : T(0);
+        parameters[3 * block + thread_index] = valid_parameter ? up_biases[parameter_index] : T(0);
+    }
+
+    int group_step = 0;
+    for (int reduction_base = 0; reduction_base < input_dim; reduction_base += reduction) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        activation_loader::load(
+            x + row_base * input_dim + reduction_base,
+            input_dim,
+            activation_tile,
+            thread_index,
+            clamp(rows - row_base, 0, block),
+            min(reduction, input_dim - reduction_base));
+
+        const uint32_t gate_packed = valid_output ? *gate_source : 0;
+        const uint32_t up_packed = valid_output ? *up_source : 0;
+        const float gate_scale = static_cast<float>(parameters[weight_output]);
+        const float gate_bias = static_cast<float>(parameters[block + weight_output]);
+        const float up_scale = static_cast<float>(parameters[2 * block + weight_output]);
+        const float up_bias = static_cast<float>(parameters[3 * block + weight_output]);
+        #pragma clang loop unroll(full)
+        for (int value = 0; value < values_per_pack; ++value) {
+            gate_destination[value] = static_cast<T>(
+                static_cast<float>((gate_packed >> (value * 4)) & mask) * gate_scale + gate_bias);
+            up_destination[value] = static_cast<T>(
+                static_cast<float>((up_packed >> (value * 4)) & mask) * up_scale + up_bias);
+        }
+
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        gate_mma.multiply_accumulate(activation_tile, gate_tile);
+        up_mma.multiply_accumulate(activation_tile, up_tile);
+        gate_source += reduction / values_per_pack;
+        up_source += reduction / values_per_pack;
+        group_step += reduction;
+        if (group_step == group_size) {
+            group_step = 0;
+            const int next_reduction = reduction_base + reduction;
+            if (next_reduction < input_dim && thread_index < block) {
+                const int parameter_output = column_base + thread_index;
+                const bool valid_parameter = parameter_output < output_dim;
+                const int parameter_index =
+                    parameter_output * groups_per_output + next_reduction / group_size;
+                parameters[thread_index] = valid_parameter ? gate_scales[parameter_index] : T(0);
+                parameters[block + thread_index] = valid_parameter ? gate_biases[parameter_index] : T(0);
+                parameters[2 * block + thread_index] = valid_parameter ? up_scales[parameter_index] : T(0);
+                parameters[3 * block + thread_index] = valid_parameter ? up_biases[parameter_index] : T(0);
+            }
+        }
+    }
+
+    const int simdgroup_row = simdgroup / 2;
+    const int simdgroup_column = simdgroup % 2;
+    const ushort2 coordinate = tiny_llm::course_matrix_coordinate(lane);
+    #pragma unroll
+    for (int row_fragment = 0; row_fragment < 2; ++row_fragment) {
+        const int row = simdgroup_row * 16 + row_fragment * 8 + coordinate.y;
+        if (row_base + row >= rows) continue;
+        #pragma unroll
+        for (int column_fragment = 0; column_fragment < 2; ++column_fragment) {
+            const int column = simdgroup_column * 16 + column_fragment * 8 + coordinate.x;
+            #pragma unroll
+            for (int element = 0; element < 2; ++element) {
+                if (column_base + column + element >= output_dim) continue;
+                const float gate =
+                    gate_mma.accumulators[row_fragment][column_fragment].thread_elements()[element];
+                const float up =
+                    up_mma.accumulators[row_fragment][column_fragment].thread_elements()[element];
+                out[(row_base + row) * output_dim + column_base + column + element] =
+                    static_cast<T>((gate / (1.0f + fast::exp(-gate))) * up);
+            }
+        }
+    }
 }
 
 template <typename T>
@@ -243,6 +382,7 @@ instantiate_kernel("week2_rope_bf16", week2_rope, bfloat16_t);
 instantiate_kernel("week2_swiglu_f32", week2_swiglu, float);
 instantiate_kernel("week2_swiglu_f16", week2_swiglu, half);
 instantiate_kernel("week2_swiglu_bf16", week2_swiglu, bfloat16_t);
+instantiate_kernel("week2_quantized_gate_up_swiglu_bf16", week2_quantized_gate_up_swiglu, bfloat16_t);
 instantiate_kernel("week2_decode_attention_f32", week2_decode_attention, float);
 instantiate_kernel("week2_decode_attention_f16", week2_decode_attention, half);
 instantiate_kernel("week2_decode_attention_bf16", week2_decode_attention, bfloat16_t);

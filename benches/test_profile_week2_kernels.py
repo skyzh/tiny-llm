@@ -127,7 +127,7 @@ def test_student_and_reference_profiles_share_the_production_guard():
     for name in ("tiny_llm", "tiny_llm_ref"):
         implementation = profile.load_implementation(name)
         assert implementation.decode_attention_max_query == 2
-        assert implementation.decode_attention_max_context == 256
+        assert implementation.decode_attention_max_context == 32768
 
 
 def test_decision_requires_exact_source_solution_model_and_workload_identity():
@@ -215,8 +215,10 @@ def test_profile_workload_identity_covers_every_workload_field(monkeypatch):
 def test_default_attribution_and_model_expose_only_canonical_checkpoints():
     cases = [profile.parse_case(value) for value in profile.DEFAULT_CASES]
     checkpoints = [case.checkpoint for case in cases]
-    assert checkpoints.index("simd-matmul") < checkpoints.index("decode-attention")
-    assert checkpoints[-1] == "split-k"
+    assert checkpoints.index("simd-matmul") < checkpoints.index(
+        "long-context-attention"
+    )
+    assert checkpoints[-1] == "fused-gate-up"
 
     for implementation_name in ("tiny_llm", "tiny_llm_ref"):
         implementation = profile.load_implementation(implementation_name)
@@ -227,8 +229,8 @@ def test_default_attribution_and_model_expose_only_canonical_checkpoints():
             "rope",
             "swiglu",
             "simd-matmul",
-            "decode-attention",
-            "split-k",
+            "long-context-attention",
+            "fused-gate-up",
         )
 
 

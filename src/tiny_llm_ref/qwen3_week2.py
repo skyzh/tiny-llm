@@ -14,7 +14,9 @@ from .quantize import QuantizedWeights, dequantize_linear, quantized_linear
 from .week2_kernels import (
     FastRMSNorm,
     FastRoPE,
-    decode_attention_custom,
+    long_context_attention,
+    quantized_gate_up_swiglu,
+    supports_fused_gate_up,
     swiglu,
 )
 
@@ -26,8 +28,8 @@ class Week2CheckpointFeatures:
     fast_rope: bool = False
     fast_swiglu: bool = False
     simdgroup_matmul: bool = False
-    decode_attention: bool = False
-    split_k_matmul: bool = False
+    long_context_attention: bool = False
+    fused_gate_up: bool = False
 
 
 WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
@@ -51,28 +53,81 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
             fast_swiglu=True,
             simdgroup_matmul=True,
         ),
-        "decode-attention": Week2CheckpointFeatures(
+        "long-context-attention": Week2CheckpointFeatures(
             quantized_weights=True,
             fast_rms_norm=True,
             fast_rope=True,
             fast_swiglu=True,
             simdgroup_matmul=True,
-            decode_attention=True,
+            long_context_attention=True,
         ),
-        "split-k": Week2CheckpointFeatures(
+        "fused-gate-up": Week2CheckpointFeatures(
             quantized_weights=True,
             fast_rms_norm=True,
             fast_rope=True,
             fast_swiglu=True,
             simdgroup_matmul=True,
-            split_k_matmul=True,
+            fused_gate_up=True,
         ),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
 
-DECODE_ATTENTION_MAX_CONTEXT = 256
-DECODE_ATTENTION_MAX_QUERY = 2
+LONG_CONTEXT_ATTENTION_MAX_CONTEXT = 32768
+LONG_CONTEXT_ATTENTION_MAX_QUERY = 2
+# These aliases keep profiler integrations source-compatible while the public
+# checkpoint names move to the replacement candidates.
+DECODE_ATTENTION_MAX_CONTEXT = LONG_CONTEXT_ATTENTION_MAX_CONTEXT
+DECODE_ATTENTION_MAX_QUERY = LONG_CONTEXT_ATTENTION_MAX_QUERY
+
+LEGACY_CHECKPOINT_REPLACEMENTS = MappingProxyType(
+    {
+        "decode-attention": "long-context-attention",
+        "split-k": "fused-gate-up",
+    }
+)
+
+
+def _validate_checkpoint(checkpoint: str) -> None:
+    replacement = LEGACY_CHECKPOINT_REPLACEMENTS.get(checkpoint)
+    if replacement is not None:
+        raise ValueError(
+            f"Week 2 checkpoint {checkpoint!r} was replaced by {replacement!r}"
+        )
+    if checkpoint not in WEEK2_CHECKPOINTS:
+        raise ValueError(
+            f"unknown Week 2 checkpoint {checkpoint!r}; choose one of "
+            f"{WEEK2_CHECKPOINTS}"
+        )
+
+
+def should_use_long_context_attention(
+    query: mx.array,
+    key: mx.array,
+    value: mx.array,
+    mask: mx.array | str | None,
+    *,
+    enabled: bool,
+) -> bool:
+    if not enabled or isinstance(mask, mx.array):
+        return False
+    if isinstance(mask, str) and mask != "causal":
+        return False
+    return (
+        query.dtype == mx.bfloat16
+        and key.dtype == mx.bfloat16
+        and value.dtype == mx.bfloat16
+        and query.ndim == 4
+        and key.ndim == 4
+        and key.shape == value.shape
+        and query.shape[0] == key.shape[0]
+        and query.shape[1] == 32
+        and key.shape[1] == 8
+        and query.shape[-1] == 128
+        and key.shape[-1] == 128
+        and query.shape[-2] in (1, 2)
+        and 0 < key.shape[-2] <= LONG_CONTEXT_ATTENTION_MAX_CONTEXT
+    )
 
 
 def _linear(x: mx.array, weight: mx.array | QuantizedWeights) -> mx.array:
@@ -112,7 +167,7 @@ class Qwen3MultiHeadAttention:
         rms_norm_eps: float = 1e-5,
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
-        use_decode_attention: bool = True,
+        use_long_context_attention: bool = True,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -130,7 +185,10 @@ class Qwen3MultiHeadAttention:
         self.wv = wv
         self.wo = wo
         self.use_fast_rope = use_fast_rope
-        self.use_decode_attention = use_decode_attention
+        self.use_long_context_attention = use_long_context_attention
+        self.use_decode_attention = use_long_context_attention
+        self.long_context_attention_dispatches = 0
+        self.readable_attention_dispatches = 0
         rope_cls = FastRoPE if use_fast_rope else RoPE
         norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
         self.rope = rope_cls(self.head_dim, max_seq_len, theta)
@@ -165,13 +223,15 @@ class Qwen3MultiHeadAttention:
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        if (
-            self.use_decode_attention
-            and L <= DECODE_ATTENTION_MAX_QUERY
-            and projection_k.shape[-2] <= DECODE_ATTENTION_MAX_CONTEXT
-            and not isinstance(mask, mx.array)
+        if should_use_long_context_attention(
+            projection_q,
+            projection_k,
+            projection_v,
+            mask,
+            enabled=self.use_long_context_attention,
         ):
-            x = decode_attention_custom(
+            self.long_context_attention_dispatches += 1
+            x = long_context_attention(
                 projection_q,
                 projection_k,
                 projection_v,
@@ -179,6 +239,7 @@ class Qwen3MultiHeadAttention:
                 mask=mask,
             )
         else:
+            self.readable_attention_dispatches += 1
             x = scaled_dot_product_attention_grouped(
                 projection_q.astype(mx.float32),
                 projection_k.astype(mx.float32),
@@ -199,6 +260,7 @@ class Qwen3MLP:
         w_up: mx.array | QuantizedWeights,
         w_down: mx.array | QuantizedWeights,
         use_fast_swiglu: bool = True,
+        use_fused_gate_up: bool = False,
     ):
         self.dim = dim
         self.hidden_dim = hidden_dim
@@ -206,11 +268,19 @@ class Qwen3MLP:
         self.w_up = w_up
         self.w_down = w_down
         self.use_fast_swiglu = use_fast_swiglu
+        self.use_fused_gate_up = use_fused_gate_up
+        self.fused_gate_up_dispatches = 0
+        self.separate_gate_up_dispatches = 0
 
     def __call__(self, x: mx.array) -> mx.array:
-        gate = _linear(x, self.w_gate)
-        up = _linear(x, self.w_up)
-        hidden = swiglu(gate, up) if self.use_fast_swiglu else silu(gate) * up
+        if self.use_fused_gate_up and supports_fused_gate_up(x, self.w_gate, self.w_up):
+            self.fused_gate_up_dispatches += 1
+            hidden = quantized_gate_up_swiglu(x, self.w_gate, self.w_up)
+        else:
+            self.separate_gate_up_dispatches += 1
+            gate = _linear(x, self.w_gate)
+            up = _linear(x, self.w_up)
+            hidden = swiglu(gate, up) if self.use_fast_swiglu else silu(gate) * up
         return _linear(hidden, self.w_down)
 
 
@@ -239,7 +309,8 @@ class Qwen3TransformerBlock:
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
         use_fast_swiglu: bool = True,
-        use_decode_attention: bool = True,
+        use_long_context_attention: bool = True,
+        use_fused_gate_up: bool = False,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
@@ -250,6 +321,7 @@ class Qwen3TransformerBlock:
             w_up,
             w_down,
             use_fast_swiglu=use_fast_swiglu,
+            use_fused_gate_up=use_fused_gate_up,
         )
         norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
         self.input_layernorm = norm_cls(
@@ -274,7 +346,7 @@ class Qwen3TransformerBlock:
             rms_norm_eps=rms_norm_eps,
             use_fast_rms_norm=use_fast_rms_norm,
             use_fast_rope=use_fast_rope,
-            use_decode_attention=use_decode_attention,
+            use_long_context_attention=use_long_context_attention,
         )
 
     def __call__(
@@ -295,23 +367,23 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "split-k",
+        checkpoint: str = "fused-gate-up",
         use_mlx_quantized_linear: bool = False,
+        disable_long_context_attention: bool = False,
+        disable_fused_gate_up: bool = False,
     ):
-        if checkpoint not in WEEK2_CHECKPOINTS:
-            raise ValueError(
-                f"unknown Week 2 checkpoint {checkpoint!r}; "
-                f"choose one of {WEEK2_CHECKPOINTS}"
-            )
+        _validate_checkpoint(checkpoint)
         self.checkpoint = checkpoint
         features = WEEK2_CHECKPOINT_FEATURES[checkpoint]
         use_quantized_weights = features.quantized_weights
         use_fast_rms_norm = features.fast_rms_norm
         use_fast_rope = features.fast_rope
         use_fast_swiglu = features.fast_swiglu
-        use_decode_attention = features.decode_attention
+        use_long_context_attention = (
+            features.long_context_attention and not disable_long_context_attention
+        )
+        use_fused_gate_up = features.fused_gate_up and not disable_fused_gate_up
         use_simdgroup_matmul = features.simdgroup_matmul
-        use_split_k_matmul = features.split_k_matmul
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.use_fast_rope = use_fast_rope
         self.hidden_size = mlx_model.args.hidden_size
@@ -324,7 +396,6 @@ class Qwen3ModelWeek2:
                 return QuantizedWeights.from_mlx_layer(
                     layer,
                     use_simdgroup_matmul=use_simdgroup_matmul,
-                    use_split_k_matmul=use_split_k_matmul,
                     use_mlx_quantized_linear=use_mlx_quantized_linear,
                 )
             return dequantize_linear(layer).astype(mx.bfloat16)
@@ -378,7 +449,8 @@ class Qwen3ModelWeek2:
                 use_fast_rms_norm=use_fast_rms_norm,
                 use_fast_rope=use_fast_rope,
                 use_fast_swiglu=use_fast_swiglu,
-                use_decode_attention=use_decode_attention,
+                use_long_context_attention=use_long_context_attention,
+                use_fused_gate_up=use_fused_gate_up,
             )
             self.layers_inner.append(layer)
         norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
@@ -392,6 +464,24 @@ class Qwen3ModelWeek2:
         else:
             self.w_lm_head = None
         self.mlx_model = mlx_model
+
+    def dispatch_counters(self) -> dict[str, int]:
+        return {
+            "long_context_attention": sum(
+                layer.self_attn.long_context_attention_dispatches
+                for layer in self.layers_inner
+            ),
+            "readable_attention": sum(
+                layer.self_attn.readable_attention_dispatches
+                for layer in self.layers_inner
+            ),
+            "fused_gate_up": sum(
+                layer.mlp.fused_gate_up_dispatches for layer in self.layers_inner
+            ),
+            "separate_gate_up": sum(
+                layer.mlp.separate_gate_up_dispatches for layer in self.layers_inner
+            ),
+        }
 
     def create_kv_cache(self) -> list[TinyKvCache]:
         from .kv_cache import TinyKvFullCache

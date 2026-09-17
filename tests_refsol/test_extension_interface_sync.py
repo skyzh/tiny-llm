@@ -15,6 +15,8 @@ INTERFACES = {
     "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
     "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
     "decode_attention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "long_context_attention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "quantized_gate_up_swiglu": ("Week 2, Day 7", "week2_kernels.cpp"),
     "paged_cache_update": ("Week 3, Day 3", "paged_attention.cpp"),
     "quantized_embedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "paged_attention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -26,6 +28,7 @@ PRIMITIVE_CLASSES = {
     "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2DecodeAttention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "Week2QuantizedGateUpSwiGLU": ("Week 2, Day 7", "week2_kernels.cpp"),
     "PagedCacheUpdate": ("Week 3, Day 3", "paged_attention.cpp"),
     "QuantizedEmbedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "PagedAttention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -45,6 +48,7 @@ METAL_CHECKPOINTS = {
         "week2_rope": "Week 2, Day 4",
         "week2_swiglu": "Week 2, Day 4",
         "week2_decode_attention": "Week 2, Day 6",
+        "week2_quantized_gate_up_swiglu": "Week 2, Day 7",
     },
     "paged_attention.metal": {
         "paged_cache_update_kernel": "Week 3, Day 3",
@@ -581,6 +585,20 @@ def test_built_starter_extension_fails_closed_for_every_public_operation(monkeyp
         "swiglu": lambda: extension.swiglu(scalar, scalar),
         "decode_attention": lambda: extension.decode_attention(
             scalar, scalar, scalar, scalar, 1.0, False, False, 1, 1
+        ),
+        "long_context_attention": lambda: extension.long_context_attention(
+            scalar, scalar, scalar, scalar, 1.0, False, 1, 1
+        ),
+        "quantized_gate_up_swiglu": lambda: extension.quantized_gate_up_swiglu(
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            128,
+            4,
         ),
         "paged_cache_update": lambda: extension.paged_cache_update(
             scalar, scalar, 0, 0
