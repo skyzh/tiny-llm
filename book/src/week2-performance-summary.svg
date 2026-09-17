@@ -167,6 +167,6 @@
       <text class="narrow-chip-label" x="691" y="777">REJECT</text>
     </g>
 
-    <text class="narrow-subtitle" x="24" y="814" textLength="792" lengthAdjust="spacingAndGlyphs">Different denominators: do not add these changes. See the performance appendix for methods and limits.</text>
+    <text class="narrow-subtitle" x="24" y="810" textLength="792" lengthAdjust="spacingAndGlyphs">Different denominators: do not add these changes. See the performance appendix for methods and limits.</text>
   </g>
 </svg>
