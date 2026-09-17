@@ -37,10 +37,21 @@
     .attention { fill: var(--attention); }
     .pointwise { fill: var(--pointwise); }
     .cache { fill: var(--cache); }
+    .narrow-layout { display: none; }
+    .narrow-heading { fill: var(--foreground); font: 700 34px system-ui, sans-serif; }
+    .narrow-label { fill: var(--foreground); font: 600 30px system-ui, sans-serif; }
+    .narrow-detail { fill: var(--muted); font: 26px system-ui, sans-serif; }
+    .narrow-legend { fill: var(--foreground); font: 500 28px system-ui, sans-serif; }
+    .narrow-note { fill: var(--muted); font: 24px system-ui, sans-serif; }
+    @media (max-width: 700px) {
+      .wide-layout { display: none; }
+      .narrow-layout { display: inline; }
+    }
   </style>
 
   <rect class="background" width="1040" height="667" />
 
+  <g class="wide-layout">
   <g aria-label="Legend">
     <rect class="projection" x="220" y="24" width="16" height="16" rx="2" />
     <text class="label" x="244" y="37">Projections</text>
@@ -137,4 +148,126 @@
 
   <text class="detail" x="220" y="570">Bar width is normalized within each checkpoint. Totals are synchronized kernel-group replay time, not trace-instrumented throughput.</text>
   <text class="detail" x="220" y="591">Qwen3-4B, Apple M4 Pro 20-core GPU, MLX 0.32.0; median of 12 after 4 warmups.</text>
+  </g>
+
+  <g class="narrow-layout">
+    <text class="narrow-heading" x="20" y="28">Week 2 checkpoints · chronological</text>
+
+    <g aria-label="Legend">
+      <rect class="projection" x="20" y="46" width="22" height="22" rx="3" />
+      <text class="narrow-legend" x="52" y="65">Projections</text>
+      <rect class="attention" x="305" y="46" width="22" height="22" rx="3" />
+      <text class="narrow-legend" x="337" y="65">Attention</text>
+      <rect class="pointwise" x="20" y="82" width="22" height="22" rx="3" />
+      <text class="narrow-legend" x="52" y="101">Norm + position + activation</text>
+      <rect class="cache" x="665" y="82" width="22" height="22" rx="3" />
+      <text class="narrow-legend" x="697" y="101">KV growth</text>
+    </g>
+
+    <g aria-label="Day 2 cached decode: projections 81.5 percent, attention 2.1 percent, pointwise 15.6 percent, KV growth 0.8 percent">
+      <text class="narrow-label" x="20" y="140">Day 2 · cached decode</text>
+      <text class="narrow-detail" x="500" y="140" text-anchor="end">41.3 ms</text>
+      <g transform="translate(-153.1148 53) scale(0.786885 1)">
+        <rect class="projection" x="220" y="96" width="497.3" height="22" />
+        <rect class="attention" x="717.3" y="96" width="12.5" height="22" />
+        <rect class="pointwise" x="729.8" y="96" width="95.3" height="22" />
+        <rect class="cache" x="825.1" y="96" width="4.9" height="22" />
+      </g>
+      <text class="narrow-detail" x="20" y="184">Projections 81.5% · attention 2.1%</text>
+      <text class="narrow-detail" x="20" y="217">Pointwise 15.6% · KV growth 0.8%</text>
+    </g>
+
+    <g aria-label="Day 3 packed W4 decode: projections 57.9 percent, attention 4.5 percent, pointwise 35.8 percent, KV growth 1.8 percent">
+      <text class="narrow-label" x="530" y="140">Day 3 · packed W4 decode</text>
+      <text class="narrow-detail" x="1020" y="140" text-anchor="end">17.9 ms</text>
+      <g transform="translate(356.8852 -4) scale(0.786885 1)">
+        <rect class="projection" x="220" y="153" width="353.2" height="22" />
+        <rect class="attention" x="573.2" y="153" width="27.6" height="22" />
+        <rect class="pointwise" x="600.8" y="153" width="218.1" height="22" />
+        <rect class="cache" x="818.9" y="153" width="11.1" height="22" />
+      </g>
+      <text class="narrow-detail" x="530" y="184">Projections 57.9% · attention 4.5%</text>
+      <text class="narrow-detail" x="530" y="217">Pointwise 35.8% · KV growth 1.8%</text>
+    </g>
+
+    <g aria-label="Day 4 fused model kernels: projections 80.5 percent, attention 6.4 percent, pointwise 10.5 percent, KV growth 2.6 percent">
+      <text class="narrow-label" x="20" y="260">Day 4 · fused model kernels</text>
+      <text class="narrow-detail" x="500" y="260" text-anchor="end">12.9 ms</text>
+      <g transform="translate(-153.1148 59) scale(0.786885 1)">
+        <rect class="projection" x="220" y="210" width="491.2" height="22" />
+        <rect class="attention" x="711.2" y="210" width="38.8" height="22" />
+        <rect class="pointwise" x="750.0" y="210" width="64.2" height="22" />
+        <rect class="cache" x="814.2" y="210" width="15.8" height="22" />
+      </g>
+      <text class="narrow-detail" x="20" y="304">Projections 80.5% · attention 6.4%</text>
+      <text class="narrow-detail" x="20" y="337">Pointwise 10.5% · KV growth 2.6%</text>
+    </g>
+
+    <g aria-label="Pre-SIMD 128-token control before Day 5: projections 99.0 percent, attention 0.5 percent, pointwise 0.5 percent">
+      <text class="narrow-label" x="530" y="260">Pre-SIMD · 128-token control</text>
+      <g transform="translate(356.8852 2) scale(0.786885 1)">
+        <rect class="projection" x="220" y="267" width="603.7" height="22" />
+        <rect class="attention" x="823.7" y="267" width="3.1" height="22" />
+        <rect class="pointwise" x="826.8" y="267" width="3.2" height="22" />
+      </g>
+      <text class="narrow-detail" x="530" y="304">Projections 99.0% · attention 0.5%</text>
+      <text class="narrow-detail" x="530" y="337">Pointwise 0.5%</text>
+      <text class="narrow-detail" x="1020" y="337" text-anchor="end">1,208.8 ms</text>
+    </g>
+
+    <g aria-label="Day 5 SIMD prefill at 128 tokens: projections 92.7 percent, attention 3.6 percent, pointwise 3.7 percent">
+      <text class="narrow-label" x="20" y="380">Day 5 · SIMD · 128 tokens</text>
+      <text class="narrow-detail" x="500" y="380" text-anchor="end">159.2 ms</text>
+      <g transform="translate(-153.1148 65) scale(0.786885 1)">
+        <rect class="projection" x="220" y="324" width="565.7" height="22" />
+        <rect class="attention" x="785.7" y="324" width="21.8" height="22" />
+        <rect class="pointwise" x="807.5" y="324" width="22.5" height="22" />
+      </g>
+      <text class="narrow-detail" x="20" y="424">Projections 92.7% · attention 3.6%</text>
+      <text class="narrow-detail" x="20" y="457">Pointwise 3.7%</text>
+    </g>
+
+    <g aria-label="Day 5 SIMD prefill at 32 tokens: projections 91.6 percent, attention 3.9 percent, pointwise 4.5 percent">
+      <text class="narrow-label" x="530" y="380">Day 5 · SIMD · 32 tokens</text>
+      <text class="narrow-detail" x="1020" y="380" text-anchor="end">47.9 ms</text>
+      <g transform="translate(356.8852 8) scale(0.786885 1)">
+        <rect class="projection" x="220" y="381" width="558.7" height="22" />
+        <rect class="attention" x="778.7" y="381" width="23.8" height="22" />
+        <rect class="pointwise" x="802.5" y="381" width="27.5" height="22" />
+      </g>
+      <text class="narrow-detail" x="530" y="424">Projections 91.6% · attention 3.9%</text>
+      <text class="narrow-detail" x="530" y="457">Pointwise 4.5%</text>
+    </g>
+
+    <g aria-label="Day 6 optional decode-attention lab: projections 81.1 percent, attention 6.2 percent, pointwise 10.3 percent, KV growth 2.4 percent">
+      <text class="narrow-label" x="20" y="494">Day 6 · optional attention</text>
+      <text class="narrow-detail" x="500" y="494" text-anchor="end">12.7 ms</text>
+      <g transform="translate(-153.1148 65) scale(0.786885 1)">
+        <rect class="projection" x="220" y="438" width="494.7" height="22" />
+        <rect class="attention" x="714.7" y="438" width="37.9" height="22" />
+        <rect class="pointwise" x="752.6" y="438" width="62.6" height="22" />
+        <rect class="cache" x="815.2" y="438" width="14.8" height="22" />
+      </g>
+      <text class="narrow-detail" x="20" y="538">Projections 81.1% · attention 6.2%</text>
+      <text class="narrow-detail" x="20" y="571">Pointwise 10.3% · KV growth 2.4%</text>
+    </g>
+
+    <g aria-label="Day 7 Split-K prefill at 32 tokens: projections 91.3 percent, attention 4.0 percent, pointwise 4.7 percent">
+      <text class="narrow-label" x="530" y="494">Day 7 · Split-K · 32 tokens</text>
+      <text class="narrow-detail" x="1020" y="494" text-anchor="end">46.1 ms</text>
+      <g transform="translate(356.8852 8) scale(0.786885 1)">
+        <rect class="projection" x="220" y="495" width="556.8" height="22" />
+        <rect class="attention" x="776.8" y="495" width="24.7" height="22" />
+        <rect class="pointwise" x="801.5" y="495" width="28.5" height="22" />
+      </g>
+      <text class="narrow-detail" x="530" y="538">Projections 91.3% · attention 4.0%</text>
+      <text class="narrow-detail" x="530" y="571">Pointwise 4.7%</text>
+    </g>
+
+    <text class="narrow-note" x="20" y="604">Bar width is normalized within each checkpoint.</text>
+    <text class="narrow-note" x="20" y="634">Totals are synchronized kernel-group replay time,</text>
+    <text class="narrow-note" x="20" y="664">not trace-instrumented throughput.</text>
+    <text class="narrow-note" x="610" y="604">Qwen3-4B · Apple M4 Pro 20-core GPU</text>
+    <text class="narrow-note" x="610" y="634">MLX 0.32.0 · median of 12 after 4 warmups.</text>
+  </g>
 </svg>
