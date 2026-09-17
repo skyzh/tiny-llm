@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 667" role="img" aria-labelledby="title description">
   <title id="title">Week 2 Qwen3-4B kernel-time attribution by checkpoint</title>
-  <desc id="description">Eight stacked bars follow the canonical Week 2 order: cached decode on Day 2, packed W4 on Day 3, fused model kernels on Day 4, the optional decode-attention lab on Day 6, the pre-SIMD control and SIMD prefill rows on Day 5, and Split-K on Day 7. Each bar normalizes synchronized kernel-group time across projections, attention, normalization position and activation kernels, and KV growth.</desc>
+  <desc id="description">Eight stacked bars follow the chronological Week 2 order: cached decode on Day 2, packed W4 on Day 3, fused model kernels on Day 4, the pre-SIMD control immediately before the SIMD prefill rows on Day 5, the optional decode-attention lab on Day 6, and Split-K on Day 7. Each bar normalizes synchronized kernel-group time across projections, attention, normalization position and activation kernels, and KV growth.</desc>
   <style>
     :root {
       color-scheme: light dark;
@@ -52,7 +52,7 @@
     <text class="label" x="759" y="37">KV growth</text>
   </g>
 
-  <text class="heading" x="0" y="76">Decode at a 128-token context</text>
+  <text class="heading" x="0" y="76">Week 2 checkpoints in chronological order</text>
   <line class="axis" x1="220" y1="84" x2="830" y2="84" />
 
   <g aria-label="Day 2 cached decode: projections 81.5 percent, attention 2.1 percent, pointwise 15.6 percent, KV growth 0.8 percent">
@@ -88,56 +88,53 @@
     <text class="detail" x="846" y="231">12.9 ms attributed</text>
   </g>
 
-  <g aria-label="Day 6 optional decode-attention lab: projections 81.1 percent, attention 6.2 percent, pointwise 10.3 percent, KV growth 2.4 percent">
-    <text class="label" x="0" y="290">Day 6 · optional attention</text>
-    <rect class="projection" x="220" y="267" width="494.7" height="34" />
-    <rect class="attention" x="714.7" y="267" width="37.9" height="34" />
-    <rect class="pointwise" x="752.6" y="267" width="62.6" height="34" />
-    <rect class="cache" x="815.2" y="267" width="14.8" height="34" />
-    <text class="inside" x="230" y="289">projections 81.1%</text>
-    <text class="inside" x="758" y="289">10.3%</text>
-    <text class="detail" x="846" y="288">12.7 ms attributed</text>
-  </g>
-
-  <text class="heading" x="0" y="359">Prefill</text>
-  <line class="axis" x1="220" y1="367" x2="830" y2="367" />
-
   <g aria-label="Pre-SIMD 128-token control before Day 5: projections 99.0 percent, attention 0.5 percent, pointwise 0.5 percent">
-    <text class="label" x="0" y="402">Pre-SIMD · 128-token control</text>
-    <rect class="projection" x="220" y="379" width="603.7" height="34" />
-    <rect class="attention" x="823.7" y="379" width="3.1" height="34" />
-    <rect class="pointwise" x="826.8" y="379" width="3.2" height="34" />
-    <text class="inside" x="230" y="401">projections 99.0%</text>
-    <text class="detail" x="846" y="400">1,208.8 ms attributed</text>
+    <text class="label" x="0" y="290">Pre-SIMD · 128-token control</text>
+    <rect class="projection" x="220" y="267" width="603.7" height="34" />
+    <rect class="attention" x="823.7" y="267" width="3.1" height="34" />
+    <rect class="pointwise" x="826.8" y="267" width="3.2" height="34" />
+    <text class="inside" x="230" y="289">projections 99.0%</text>
+    <text class="detail" x="846" y="288">1,208.8 ms attributed</text>
   </g>
 
   <g aria-label="Day 5 SIMD prefill at 128 tokens: projections 92.7 percent, attention 3.6 percent, pointwise 3.7 percent">
-    <text class="label" x="0" y="459">Day 5 · SIMD · 128 tokens</text>
-    <rect class="projection" x="220" y="436" width="565.7" height="34" />
-    <rect class="attention" x="785.7" y="436" width="21.8" height="34" />
-    <rect class="pointwise" x="807.5" y="436" width="22.5" height="34" />
-    <text class="inside" x="230" y="458">projections 92.7%</text>
-    <text class="detail" x="846" y="457">159.2 ms attributed</text>
+    <text class="label" x="0" y="347">Day 5 · SIMD · 128 tokens</text>
+    <rect class="projection" x="220" y="324" width="565.7" height="34" />
+    <rect class="attention" x="785.7" y="324" width="21.8" height="34" />
+    <rect class="pointwise" x="807.5" y="324" width="22.5" height="34" />
+    <text class="inside" x="230" y="346">projections 92.7%</text>
+    <text class="detail" x="846" y="345">159.2 ms attributed</text>
   </g>
 
   <g aria-label="Day 5 SIMD prefill at 32 tokens: projections 91.6 percent, attention 3.9 percent, pointwise 4.5 percent">
-    <text class="label" x="0" y="516">Day 5 · SIMD · 32 tokens</text>
-    <rect class="projection" x="220" y="493" width="558.7" height="34" />
-    <rect class="attention" x="778.7" y="493" width="23.8" height="34" />
-    <rect class="pointwise" x="802.5" y="493" width="27.5" height="34" />
-    <text class="inside" x="230" y="515">projections 91.6%</text>
-    <text class="detail" x="846" y="514">47.9 ms attributed</text>
+    <text class="label" x="0" y="404">Day 5 · SIMD · 32 tokens</text>
+    <rect class="projection" x="220" y="381" width="558.7" height="34" />
+    <rect class="attention" x="778.7" y="381" width="23.8" height="34" />
+    <rect class="pointwise" x="802.5" y="381" width="27.5" height="34" />
+    <text class="inside" x="230" y="403">projections 91.6%</text>
+    <text class="detail" x="846" y="402">47.9 ms attributed</text>
+  </g>
+
+  <g aria-label="Day 6 optional decode-attention lab: projections 81.1 percent, attention 6.2 percent, pointwise 10.3 percent, KV growth 2.4 percent">
+    <text class="label" x="0" y="461">Day 6 · optional attention</text>
+    <rect class="projection" x="220" y="438" width="494.7" height="34" />
+    <rect class="attention" x="714.7" y="438" width="37.9" height="34" />
+    <rect class="pointwise" x="752.6" y="438" width="62.6" height="34" />
+    <rect class="cache" x="815.2" y="438" width="14.8" height="34" />
+    <text class="inside" x="230" y="460">projections 81.1%</text>
+    <text class="inside" x="758" y="460">10.3%</text>
+    <text class="detail" x="846" y="459">12.7 ms attributed</text>
   </g>
 
   <g aria-label="Day 7 Split-K prefill at 32 tokens: projections 91.3 percent, attention 4.0 percent, pointwise 4.7 percent">
-    <text class="label" x="0" y="573">Day 7 · Split-K · 32 tokens</text>
-    <rect class="projection" x="220" y="550" width="556.8" height="34" />
-    <rect class="attention" x="776.8" y="550" width="24.7" height="34" />
-    <rect class="pointwise" x="801.5" y="550" width="28.5" height="34" />
-    <text class="inside" x="230" y="572">projections 91.3%</text>
-    <text class="detail" x="846" y="571">46.1 ms attributed</text>
+    <text class="label" x="0" y="518">Day 7 · Split-K · 32 tokens</text>
+    <rect class="projection" x="220" y="495" width="556.8" height="34" />
+    <rect class="attention" x="776.8" y="495" width="24.7" height="34" />
+    <rect class="pointwise" x="801.5" y="495" width="28.5" height="34" />
+    <text class="inside" x="230" y="517">projections 91.3%</text>
+    <text class="detail" x="846" y="516">46.1 ms attributed</text>
   </g>
 
-  <text class="detail" x="220" y="622">Bar width is normalized within each checkpoint. Totals are synchronized kernel-group replay time, not trace-instrumented throughput.</text>
-  <text class="detail" x="220" y="643">Qwen3-4B, Apple M4 Pro 20-core GPU, MLX 0.32.0; median of 12 after 4 warmups.</text>
+  <text class="detail" x="220" y="570">Bar width is normalized within each checkpoint. Totals are synchronized kernel-group replay time, not trace-instrumented throughput.</text>
+  <text class="detail" x="220" y="591">Qwen3-4B, Apple M4 Pro 20-core GPU, MLX 0.32.0; median of 12 after 4 warmups.</text>
 </svg>

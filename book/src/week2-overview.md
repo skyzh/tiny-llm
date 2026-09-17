@@ -48,7 +48,7 @@ model kernels leave projections as the next target; and the SIMD schedule
 shrinks prefill projection time. Split-K helps the measured 32-token shape but
 does not improve the fixed 128-token product control.
 
-![Stacked attribution bars for the checked Week 2 checkpoints: cached decode on Day 2, packed W4 on Day 3, fused model kernels on Day 4, the optional decode-attention lab on Day 6, the pre-SIMD control and SIMD rows on Day 5, and Split-K on Day 7.](./week2-kernel-profile.svg)
+![Stacked attribution bars for the checked Week 2 checkpoints in chronological order: cached decode on Day 2, packed W4 on Day 3, fused model kernels on Day 4, the pre-SIMD control immediately before the SIMD rows on Day 5, the optional decode-attention lab on Day 6, and Split-K on Day 7.](./week2-kernel-profile.svg)
 
 The decisions below use different metrics and denominators, so read each card
 as a bounded comparison rather than adding the percentages together. Packed
