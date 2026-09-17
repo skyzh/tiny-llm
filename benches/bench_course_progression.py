@@ -116,6 +116,7 @@ METRIC_PATTERN = re.compile(
     r"(Prefill|Decode|Output) throughput: ([0-9]+(?:\.[0-9]+)?) tok/s"
 )
 MATRIX_PROMPT_LENGTHS = (128, 512, 2048, 8192, 32640)
+MATRIX_DEFAULT_PROMPT_LENGTHS = (128, 512, 2048, 8192)
 MATRIX_DEFAULT_VARIANTS = ("week2-simd-matmul", "mlx")
 MATRIX_OUTPUT_TOKENS = 128
 NATIVE_CONTEXT_TOKENS = 32768
@@ -154,9 +155,9 @@ def parse_args() -> argparse.Namespace:
         "--matrix",
         action="store_true",
         help=(
-            "run a matched two-variant Week 2 prompt-length matrix; defaults to "
-            "the Day 5/MLX pair at 128, 512, 2048, 8192, and a 32640-token "
-            "prompt plus 128 generated tokens at the native 32768-token ceiling"
+            "run a Week 2 prompt-length matrix; paired Day 5/MLX defaults are "
+            "128, 512, 2048, and 8192. 32640 is available only with --variant "
+            "mlx at the native 32768-token ceiling"
         ),
     )
     parser.add_argument(
@@ -166,7 +167,7 @@ def parse_args() -> argparse.Namespace:
         choices=MATRIX_PROMPT_LENGTHS,
         help=(
             "matrix prompt length; repeat to select a subset of the supported "
-            "128/512/2048/8192/32640 product points"
+            "128/512/2048/8192 paired points or the MLX-only 32640 endpoint"
         ),
     )
     parser.add_argument(
@@ -273,14 +274,26 @@ def parse_args() -> argparse.Namespace:
     ):
         parser.error("--prefill-logits last requires variants that exclude Week 1")
     if args.matrix:
-        if len(selected_variants) != 2:
+        args.prompt_length = list(
+            dict.fromkeys(args.prompt_length or MATRIX_DEFAULT_PROMPT_LENGTHS)
+        )
+        has_native_endpoint = 32640 in args.prompt_length
+        if has_native_endpoint and any(
+            variant.key != "mlx" for variant in selected_variants
+        ):
+            parser.error(
+                "matrix prompt length 32640 is available only for MLX; "
+                "select only --variant mlx"
+            )
+        is_mlx_only_endpoint = has_native_endpoint and [
+            variant.key for variant in selected_variants
+        ] == ["mlx"]
+        if len(selected_variants) != 2 and not is_mlx_only_endpoint:
             parser.error(
                 "--matrix requires exactly two Week 2 variants: a course/MLX "
-                "baseline pair or two course checkpoints"
+                "baseline pair or two course checkpoints; the sole exception "
+                "is --variant mlx with --prompt-length 32640"
             )
-        args.prompt_length = list(
-            dict.fromkeys(args.prompt_length or MATRIX_PROMPT_LENGTHS)
-        )
     else:
         args.prompt_length = [args.input_len]
     args.variant = [variant.key for variant in selected_variants]
@@ -608,10 +621,11 @@ def main() -> None:
 
     if args.matrix:
         print(
-            "Matrix points: 128 is a micro/regression point; 32640 prompt + "
-            "128 generated tokens reaches the native 32768-token ceiling. A "
-            "32768-token prompt is prefill-only, never a native generation row. "
-            "This matrix makes no 100K+ product claim."
+            "Matrix points: 128 is a micro/regression point; paired course/MLX "
+            "rows stop at 8192. The MLX-only 32640 prompt + 128 generated tokens "
+            "reaches the native 32768-token ceiling. A 32768-token prompt is "
+            "prefill-only, never a native generation row. This matrix makes no "
+            "100K+ product claim."
         )
 
     completed_runs = 0
@@ -733,9 +747,10 @@ def main() -> None:
                 evidence_kind="single_request_product_matrix",
                 process_isolation="fresh_process_per_sample",
                 context_boundary=(
-                    "128 is micro/regression; 32640 prompt + 128 generated "
-                    "tokens reaches the native 32768-token ceiling; a 32768 "
-                    "prompt is prefill-only; no 100K+ product claim"
+                    "128 is micro/regression; paired course/MLX rows stop at "
+                    "8192; the MLX-only 32640 prompt + 128 generated tokens "
+                    "reaches the native 32768-token ceiling; a 32768 prompt is "
+                    "prefill-only; no 100K+ product claim"
                 ),
                 generated_tokens=MATRIX_OUTPUT_TOKENS,
                 post_first_decode_intervals=MATRIX_OUTPUT_TOKENS - 1,

@@ -325,7 +325,7 @@ def test_historical_week2_artifact_keeps_original_labels():
     }
 
 
-def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
+def test_matrix_defaults_cover_runnable_paired_context_points(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
@@ -343,7 +343,7 @@ def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
 
     args = progression.parse_args()
 
-    assert args.prompt_length == [128, 512, 2048, 8192, 32640]
+    assert args.prompt_length == [128, 512, 2048, 8192]
     assert args.output_len == 128
     assert args.variant == ["week2-simd-matmul", "mlx"]
     assert [
@@ -353,8 +353,65 @@ def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
         "product-context",
         "product-context",
         "product-context",
-        "native-product-endpoint",
     ]
+
+
+def test_matrix_accepts_explicit_mlx_only_native_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+            "--variant",
+            "mlx",
+            "--prompt-length",
+            "32640",
+        ],
+    )
+
+    args = progression.parse_args()
+
+    assert args.prompt_length == [32640]
+    assert args.variant == ["mlx"]
+    assert progression.prompt_classification(32640) == "native-product-endpoint"
+
+
+def test_matrix_rejects_course_variant_at_native_endpoint_before_work(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+            "--prompt-length",
+            "32640",
+        ],
+    )
+    monkeypatch.setattr(
+        progression,
+        "collect_host_metadata",
+        lambda: pytest.fail("host/model/timing work must not begin"),
+    )
+
+    with pytest.raises(SystemExit):
+        progression.main()
+
+    assert "32640 is available only for MLX" in capsys.readouterr().err
 
 
 def test_matrix_accepts_day5_and_candidate_course_pair(monkeypatch):
@@ -553,7 +610,7 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
         offline=True,
         cooldown_seconds=0.0,
         variant=["week2-simd-matmul", "mlx"],
-        prompt_length=[128, 32640],
+        prompt_length=[128, 8192],
         matrix=True,
     )
     calls = []
@@ -587,14 +644,14 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
     assert payload["evidence_kind"] == "single_request_product_matrix"
     assert payload["process_isolation"] == "fresh_process_per_sample"
     assert "no 100K+ product claim" in payload["context_boundary"]
-    assert payload["workload"]["prompt_lengths"] == [128, 32640]
+    assert payload["workload"]["prompt_lengths"] == [128, 8192]
     assert payload["workload"]["decode_sample_tokens"] == 127
     assert payload["generated_tokens"] == 128
     assert payload["post_first_decode_intervals"] == 127
     assert payload["native_context_tokens"] == 32768
     assert payload["prompt_classification"] == {
         "128": "micro/regression",
-        "32640": "native-product-endpoint",
+        "8192": "product-context",
     }
     assert set(payload["metric_definitions"]) == {
         "TTFT_ms",
@@ -614,8 +671,8 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
     assert calls[:4] == [
         (128, "week2-simd-matmul"),
         (128, "mlx"),
-        (32640, "mlx"),
-        (32640, "week2-simd-matmul"),
+        (8192, "mlx"),
+        (8192, "week2-simd-matmul"),
     ]
 
 
@@ -670,17 +727,17 @@ def test_single_point_json_keeps_schema_two_and_legacy_shape(tmp_path, monkeypat
     }
 
 
-def test_matrix_help_names_metrics_and_native_ceiling(monkeypatch, capsys):
+def test_matrix_help_names_runnable_pair_and_mlx_only_endpoint(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["bench_course_progression.py", "--help"])
     with pytest.raises(SystemExit) as exited:
         progression.parse_args()
-    help_text = capsys.readouterr().out
+    help_text = " ".join(capsys.readouterr().out.split())
     assert exited.value.code == 0
     assert "TTFT_ms" in help_text
     assert "TPOT_ms" in help_text
-    assert "32640-token prompt plus 128" in help_text
+    assert "128, 512, 2048, and 8192" in help_text
+    assert "32640 is available only with --variant mlx" in help_text
     assert "native 32768-token ceiling" in help_text
-    assert "matched two-variant Week 2" in help_text
 
 
 def test_public_main_help_lists_only_current_week2_checkpoints():
