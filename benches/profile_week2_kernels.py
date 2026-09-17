@@ -35,6 +35,24 @@ DEFAULT_CASES = (
 )
 PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"
+EVIDENCE_KIND = "synchronized_operator_replay"
+EVIDENCE_BOUNDARY = (
+    "Synchronized operator evidence; category shares are not production traffic share."
+)
+COMPONENT_CATEGORIES = (
+    "attention_q_projection",
+    "attention_k_projection",
+    "attention_v_projection",
+    "attention_o_projection",
+    "attention_core",
+    "mlp_gate_projection",
+    "mlp_up_projection",
+    "mlp_down_projection",
+    "swiglu",
+    "norms_rope_residuals",
+    "vocabulary_head_embedding",
+    "kv_cache_growth",
+)
 
 
 @dataclass(frozen=True)
@@ -105,8 +123,8 @@ def parse_case(value: str) -> ProfileCase:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Attribute Week 2 time by replaying each real kernel group at its "
-            "Qwen model shape and dispatch count."
+            "Replay Week 2 model components at their Qwen shape and dispatch "
+            "count as synchronized operator evidence, not production traffic share."
         )
     )
     parser.add_argument("--model", default="qwen3-4b")
@@ -223,6 +241,8 @@ def build_decision(
         raise ValueError("decision must be keep, reject, or inconclusive")
     return {
         "schema_version": 1,
+        "evidence_kind": EVIDENCE_KIND,
+        "interpretation": EVIDENCE_BOUNDARY,
         "source": baseline["source"],
         "solution": baseline["solution"],
         "model": baseline["model"],
@@ -321,6 +341,12 @@ class KernelReplay:
             self.dtype
         )
         self.up = mx.random.normal(self.gate.shape).astype(self.dtype)
+        self.attention_rows = mx.random.normal(
+            (1, self.rows, self.num_heads * self.head_dim)
+        ).astype(self.dtype)
+        self.intermediate = mx.random.normal(
+            (1, self.rows, self.intermediate_size)
+        ).astype(self.dtype)
         self.tokens = mx.zeros((1, self.rows), dtype=mx.int32)
         evaluate(
             [
@@ -332,32 +358,61 @@ class KernelReplay:
                 self.key_rows,
                 self.gate,
                 self.up,
+                self.attention_rows,
+                self.intermediate,
                 self.tokens,
             ]
         )
 
-    def projections(self) -> list[mx.array]:
-        outputs = []
-        hidden = self.hidden
-        for layer in self.model.layers_inner:
-            attention = layer.self_attn
-            query = project(self.implementation, hidden, attention.wq)
-            key = project(self.implementation, hidden, attention.wk)
-            value = project(self.implementation, hidden, attention.wv)
-            attention_input = mx.concatenate(
-                (key, value, query[..., key.shape[-1] + value.shape[-1] :]),
-                axis=-1,
+    def attention_q_projection(self) -> list[mx.array]:
+        return [
+            project(self.implementation, self.hidden, layer.self_attn.wq)
+            for layer in self.model.layers_inner
+        ]
+
+    def attention_k_projection(self) -> list[mx.array]:
+        return [
+            project(self.implementation, self.hidden, layer.self_attn.wk)
+            for layer in self.model.layers_inner
+        ]
+
+    def attention_v_projection(self) -> list[mx.array]:
+        return [
+            project(self.implementation, self.hidden, layer.self_attn.wv)
+            for layer in self.model.layers_inner
+        ]
+
+    def attention_o_projection(self) -> list[mx.array]:
+        return [
+            project(
+                self.implementation,
+                self.attention_rows,
+                layer.self_attn.wo,
             )
-            attention_output = project(
-                self.implementation, attention_input, attention.wo
-            )
-            mlp_input = hidden + attention_output
-            gate = project(self.implementation, mlp_input, layer.mlp.w_gate)
-            up = project(self.implementation, mlp_input, layer.mlp.w_up)
-            mlp_output = project(self.implementation, gate + up, layer.mlp.w_down)
-            hidden = mlp_input + mlp_output
-            outputs.extend((key, value))
-        final_hidden = hidden[:, -1:, :]
+            for layer in self.model.layers_inner
+        ]
+
+    def mlp_gate_projection(self) -> list[mx.array]:
+        return [
+            project(self.implementation, self.hidden, layer.mlp.w_gate)
+            for layer in self.model.layers_inner
+        ]
+
+    def mlp_up_projection(self) -> list[mx.array]:
+        return [
+            project(self.implementation, self.hidden, layer.mlp.w_up)
+            for layer in self.model.layers_inner
+        ]
+
+    def mlp_down_projection(self) -> list[mx.array]:
+        return [
+            project(self.implementation, self.intermediate, layer.mlp.w_down)
+            for layer in self.model.layers_inner
+        ]
+
+    def vocabulary_head_embedding(self) -> list[mx.array]:
+        outputs = [self.model.embedding(self.tokens)]
+        final_hidden = self.hidden[:, -1:, :]
         if self.model.w_lm_head is not None:
             outputs.append(
                 project(self.implementation, final_hidden, self.model.w_lm_head)
@@ -366,7 +421,27 @@ class KernelReplay:
             outputs.append(self.model.embedding.as_linear(final_hidden))
         return outputs
 
+    def projections(self) -> list[mx.array]:
+        """Backward-compatible aggregate for callers outside the component schema."""
+        outputs = []
+        for build in (
+            self.attention_q_projection,
+            self.attention_k_projection,
+            self.attention_v_projection,
+            self.attention_o_projection,
+            self.mlp_gate_projection,
+            self.mlp_up_projection,
+            self.mlp_down_projection,
+            self.vocabulary_head_embedding,
+        ):
+            outputs.extend(build())
+        return outputs
+
     def attention(self) -> list[mx.array]:
+        """Backward-compatible name for the attention-core component."""
+        return self.attention_core()
+
+    def attention_core(self) -> list[mx.array]:
         outputs = []
         mask = "causal" if self.phase == "prefill" else None
         for layer in self.model.layers_inner:
@@ -396,8 +471,17 @@ class KernelReplay:
             outputs.append(output)
         return outputs
 
-    def pointwise(self) -> list[mx.array]:
-        outputs = [self.model.embedding(self.tokens)]
+    def swiglu(self) -> list[mx.array]:
+        outputs = []
+        for layer in self.model.layers_inner:
+            if layer.mlp.use_fast_swiglu:
+                outputs.append(self.implementation.swiglu(self.gate, self.up))
+            else:
+                outputs.append(self.implementation.silu(self.gate) * self.up)
+        return outputs
+
+    def norms_rope_residuals(self) -> list[mx.array]:
+        outputs = []
         for layer in self.model.layers_inner:
             attention = layer.self_attn
             outputs.extend(
@@ -415,17 +499,25 @@ class KernelReplay:
                     attention.rope(self.key_rows, offset=rope_offset),
                 )
             )
-            if layer.mlp.use_fast_swiglu:
-                outputs.append(self.implementation.swiglu(self.gate, self.up))
-            else:
-                outputs.append(self.implementation.silu(self.gate) * self.up)
             outputs.extend((self.hidden + self.hidden, self.hidden + self.hidden))
         outputs.append(self.model.norm(self.hidden[:, -1:, :]))
         return outputs
 
-    def cache(self) -> list[mx.array]:
+    def pointwise(self) -> list[mx.array]:
+        """Backward-compatible aggregate for pointwise callers."""
+        return [*self.norms_rope_residuals(), *self.swiglu()]
+
+    def kv_cache_growth(self) -> list[mx.array]:
         if self.phase == "prefill":
-            return [self.key, self.value]
+            outputs = []
+            for _ in self.model.layers_inner:
+                outputs.extend(
+                    (
+                        self.key + mx.zeros_like(self.key),
+                        self.value + mx.zeros_like(self.value),
+                    )
+                )
+            return outputs
         previous_key = self.key[:, :, :-1, :]
         previous_value = self.value[:, :, :-1, :]
         new_key = self.key[:, :, -1:, :]
@@ -440,6 +532,10 @@ class KernelReplay:
             )
         return outputs
 
+    def cache(self) -> list[mx.array]:
+        """Backward-compatible name for KV-cache growth."""
+        return self.kv_cache_growth()
+
 
 def profile_case(
     implementation: KernelImplementation,
@@ -452,12 +548,19 @@ def profile_case(
     model = implementation.model_type(mlx_model, checkpoint=case.checkpoint)
     replay = KernelReplay(implementation, model, case.phase, case.tokens)
     builders = (
-        ("projections", replay.projections),
-        ("attention", replay.attention),
-        ("normalization, position, and activation", replay.pointwise),
+        ("attention_q_projection", replay.attention_q_projection),
+        ("attention_k_projection", replay.attention_k_projection),
+        ("attention_v_projection", replay.attention_v_projection),
+        ("attention_o_projection", replay.attention_o_projection),
+        ("attention_core", replay.attention_core),
+        ("mlp_gate_projection", replay.mlp_gate_projection),
+        ("mlp_up_projection", replay.mlp_up_projection),
+        ("mlp_down_projection", replay.mlp_down_projection),
+        ("swiglu", replay.swiglu),
+        ("norms_rope_residuals", replay.norms_rope_residuals),
+        ("vocabulary_head_embedding", replay.vocabulary_head_embedding),
+        ("kv_cache_growth", replay.kv_cache_growth),
     )
-    if case.phase == "decode":
-        builders += (("KV growth", replay.cache),)
     timings = benchmark_groups(builders, warmup, iterations)
     measured = [(name, timings[name]) for name, _ in builders]
     total = sum(value for _, value in measured)
@@ -475,6 +578,10 @@ def profile_case(
         "checkpoint": case.checkpoint,
         "workload": workload,
         "workload_id": canonical_hash(workload),
+        "phase": case.phase,
+        "context_tokens": case.tokens,
+        "evidence_kind": EVIDENCE_KIND,
+        "interpretation": EVIDENCE_BOUNDARY,
         "attributed_us": total,
         "categories": [asdict(category) for category in categories],
     }
@@ -508,10 +615,7 @@ def main() -> None:
         f"MLX={importlib.metadata.version('mlx')} "
         f"mlx-lm={importlib.metadata.version('mlx-lm')}"
     )
-    print(
-        "Median synchronized kernel-group replay; shares are normalized across "
-        "the measured groups."
-    )
+    print("Median synchronized component replay. " + EVIDENCE_BOUNDARY)
     profiles = [
         profile_case(
             implementation,
@@ -546,7 +650,10 @@ def main() -> None:
             iterations=args.iterations,
         )
     result = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "evidence_kind": EVIDENCE_KIND,
+        "interpretation": EVIDENCE_BOUNDARY,
+        "component_categories": list(COMPONENT_CATEGORIES),
         "source": source,
         "solution": implementation.name,
         "model": model_name,

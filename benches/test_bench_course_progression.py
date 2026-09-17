@@ -1,5 +1,6 @@
 import json
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
@@ -313,3 +314,303 @@ def test_historical_week2_artifact_keeps_original_labels():
         "week2-split-k": "2.7 Split-K prefill",
         "mlx": "MLX",
     }
+
+
+def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+        ],
+    )
+
+    args = progression.parse_args()
+
+    assert args.prompt_length == [128, 512, 2048, 8192, 32768]
+    assert args.variant == ["week2-simd-matmul", "mlx"]
+    assert [
+        progression.prompt_classification(value) for value in args.prompt_length
+    ] == [
+        "micro/regression",
+        "product-context",
+        "product-context",
+        "product-context",
+        "native-ceiling",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    (
+        (("--prompt-length", "512"), "requires --matrix"),
+        (("--matrix", "--prefill-logits", "last"), "requires --suite week2"),
+        (
+            (
+                "--suite",
+                "week2",
+                "--matrix",
+                "--prefill-logits",
+                "last",
+                "--prompt-length",
+                "100000",
+            ),
+            "invalid choice",
+        ),
+        (
+            (
+                "--suite",
+                "week2",
+                "--matrix",
+                "--prefill-logits",
+                "last",
+                "--variant",
+                "week2-simd-matmul",
+            ),
+            "exactly one Week 2 course",
+        ),
+    ),
+)
+def test_matrix_selector_negative_cases_fail_closed(
+    monkeypatch, capsys, extra_args, message
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bench_course_progression.py", "--solution", "tiny_llm", *extra_args],
+    )
+
+    with pytest.raises(SystemExit):
+        progression.parse_args()
+
+    assert message in capsys.readouterr().err
+
+
+def test_product_metrics_and_spread_are_explicit_and_deterministic():
+    samples = [
+        progression.product_metrics(
+            progression.Throughput(prefill=512.0, decode=50.0, output=40.0),
+            512,
+        ),
+        progression.product_metrics(
+            progression.Throughput(prefill=256.0, decode=40.0, output=30.0),
+            512,
+        ),
+    ]
+
+    summary = progression.summarize_product_metrics(samples)
+
+    assert samples[0].TTFT_ms == 1000.0
+    assert samples[0].TPOT_ms == 20.0
+    assert summary["TTFT_ms"] == {
+        "median": 1500.0,
+        "minimum": 1000.0,
+        "maximum": 2000.0,
+        "spread": 1000.0,
+    }
+    assert summary["decode_tokens_per_second"]["spread"] == 10.0
+    with pytest.raises(ValueError, match="positive"):
+        progression.product_metrics(
+            progression.Throughput(prefill=0.0, decode=1.0, output=1.0),
+            128,
+        )
+
+
+def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
+    observed = []
+
+    def fake_run(command, **kwargs):
+        observed.append((command, kwargs))
+        raw_output = Path(command[command.index("--json-output") + 1])
+        raw_output.write_text(
+            json.dumps(
+                {
+                    "metrics": {
+                        "output_tokens_per_second": 40.0,
+                        "prefill_tokens_per_second": 512.0,
+                        "decode_tokens_per_second": 50.0,
+                    }
+                }
+            )
+        )
+        return SimpleNamespace(
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    args = SimpleNamespace(
+        solution="tiny_llm",
+        model="qwen3-4b",
+        device="gpu",
+        input_len=128,
+        output_len=65,
+        warmup=2,
+        prefill_logits="last",
+        seed=0,
+        offline=True,
+    )
+    monkeypatch.setattr(progression.subprocess, "run", fake_run)
+
+    result = progression.run_variant(
+        tmp_path,
+        progression.VARIANTS_BY_KEY["week2-simd-matmul"],
+        args,
+        input_len=8192,
+    )
+
+    assert result == progression.Throughput(prefill=512.0, decode=50.0, output=40.0)
+    assert len(observed) == 1
+    command, kwargs = observed[0]
+    assert command[command.index("--min-input-len") + 1] == "8192"
+    assert command[command.index("--max-input-len") + 1] == "8192"
+    assert command[command.index("--min-output-len") + 1] == "65"
+    assert command[command.index("--max-output-len") + 1] == "65"
+    assert command[-2:] == ["--week2-checkpoint", "simd-matmul"]
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["env"]["HF_HUB_OFFLINE"] == "1"
+
+
+def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "matrix.json"
+    args = SimpleNamespace(
+        json_output=output,
+        model="qwen3-4b",
+        solution="tiny_llm",
+        suite="week2",
+        device="gpu",
+        input_len=128,
+        output_len=17,
+        warmup=1,
+        repeats=2,
+        seed=0,
+        prefill_logits="last",
+        offline=True,
+        cooldown_seconds=0.0,
+        variant=["week2-simd-matmul", "mlx"],
+        prompt_length=[128, 32768],
+        matrix=True,
+    )
+    calls = []
+
+    def fake_run(_root, variant, _args, prompt_tokens):
+        calls.append((prompt_tokens, variant.key))
+        return progression.Throughput(
+            prefill=float(prompt_tokens),
+            decode=50.0,
+            output=40.0,
+        )
+
+    monkeypatch.setattr(progression, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        progression,
+        "collect_host_metadata",
+        lambda: {"platform": "test", "machine": "arm64", "mlx_version": "test"},
+    )
+    monkeypatch.setattr(
+        progression,
+        "collect_source_metadata",
+        lambda _root: {"commit": "head", "tree": "tree", "tracked_dirty": False},
+    )
+    monkeypatch.setattr(progression, "run_variant", fake_run)
+
+    progression.main()
+    payload = json.loads(output.read_text())
+
+    assert payload["schema_version"] == 3
+    assert payload["evidence_kind"] == "single_request_product_matrix"
+    assert payload["process_isolation"] == "fresh_process_per_sample"
+    assert "no 100K+ product claim" in payload["context_boundary"]
+    assert payload["workload"]["prompt_lengths"] == [128, 32768]
+    assert payload["workload"]["decode_sample_tokens"] == 16
+    assert payload["prompt_classification"] == {
+        "128": "micro/regression",
+        "32768": "native-ceiling",
+    }
+    assert set(payload["metric_definitions"]) == {
+        "TTFT_ms",
+        "prefill_tokens_per_second",
+        "TPOT_ms",
+        "decode_tokens_per_second",
+        "output_tokens_per_second",
+    }
+    assert len(payload["results"]) == 4
+    assert all(len(result["samples"]) == 2 for result in payload["results"])
+    assert len(calls) == 8
+    assert calls[:4] == [
+        (128, "week2-simd-matmul"),
+        (128, "mlx"),
+        (32768, "mlx"),
+        (32768, "week2-simd-matmul"),
+    ]
+
+
+def test_single_point_json_keeps_schema_two_and_legacy_shape(tmp_path, monkeypatch):
+    output = tmp_path / "single.json"
+    args = SimpleNamespace(
+        json_output=output,
+        model="qwen3-0.6b",
+        solution="tiny_llm",
+        suite="week2",
+        device="gpu",
+        input_len=128,
+        output_len=65,
+        warmup=0,
+        repeats=1,
+        seed=0,
+        prefill_logits="all",
+        offline=True,
+        cooldown_seconds=0.0,
+        variant=["week2-simd-matmul"],
+        prompt_length=[128],
+        matrix=False,
+    )
+    monkeypatch.setattr(progression, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        progression,
+        "collect_host_metadata",
+        lambda: {"platform": "test", "machine": "arm64", "mlx_version": "test"},
+    )
+    monkeypatch.setattr(
+        progression,
+        "collect_source_metadata",
+        lambda _root: {"commit": "head", "tree": "tree", "tracked_dirty": False},
+    )
+    monkeypatch.setattr(
+        progression,
+        "run_variant",
+        lambda *_args: progression.Throughput(10.0, 20.0, 15.0),
+    )
+
+    progression.main()
+    payload = json.loads(output.read_text())
+
+    assert payload["schema_version"] == 2
+    assert "matrix" not in payload["configuration"]
+    assert "prompt_lengths" not in payload["workload"]
+    assert payload["execution_order"] == [["week2-simd-matmul"]]
+    assert payload["results"]["week2-simd-matmul"]["median"] == {
+        "prefill": 10.0,
+        "decode": 20.0,
+        "output": 15.0,
+    }
+
+
+def test_matrix_help_names_metrics_and_native_ceiling(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["bench_course_progression.py", "--help"])
+    with pytest.raises(SystemExit) as exited:
+        progression.parse_args()
+    help_text = capsys.readouterr().out
+    assert exited.value.code == 0
+    assert "TTFT_ms" in help_text
+    assert "TPOT_ms" in help_text
+    assert "native 32768-token ceiling" in help_text
