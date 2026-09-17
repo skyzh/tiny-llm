@@ -20,12 +20,14 @@ WEEK2_CHECKPOINTS = (
     "rope",
     "swiglu",
     "simd-matmul",
-    "long-context-attention",
-    "fused-gate-up",
+    "context-selected-attention",
+    "prefill-fused-gate-up",
 )
 LEGACY_WEEK2_CHECKPOINTS = {
-    "decode-attention": "long-context-attention",
-    "split-k": "fused-gate-up",
+    "decode-attention": "context-selected-attention",
+    "long-context-attention": "context-selected-attention",
+    "split-k": "prefill-fused-gate-up",
+    "fused-gate-up": "prefill-fused-gate-up",
 }
 
 
@@ -119,14 +121,14 @@ def parse_args() -> argparse.Namespace:
         help="run one cumulative Week 2 end-to-end checkpoint",
     )
     parser.add_argument(
-        "--disable-week2-long-context-attention",
+        "--disable-week2-context-selected-attention",
         action="store_true",
-        help="disable only the Week 2 long-context attention candidate",
+        help="disable only the Week 2 context-selected attention candidate",
     )
     parser.add_argument(
-        "--disable-week2-fused-gate-up",
+        "--disable-week2-prefill-fused-gate-up",
         action="store_true",
-        help="disable only the Week 2 fused gate+up candidate",
+        help="disable only the Week 2 prefill fused gate+up candidate",
     )
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)
@@ -191,7 +193,8 @@ def validate_args(args: argparse.Namespace) -> None:
     if args.week2_checkpoint is not None and args.loader != "week2":
         raise ValueError("--week2-checkpoint requires --loader week2")
     if (
-        args.disable_week2_long_context_attention or args.disable_week2_fused_gate_up
+        args.disable_week2_context_selected_attention
+        or args.disable_week2_prefill_fused_gate_up
     ) and args.loader != "week2":
         raise ValueError("Week 2 disable controls require --loader week2")
     if (
@@ -696,11 +699,11 @@ def main() -> None:
             elif args.loader == "week2":
                 if args.week2_checkpoint is not None:
                     dispatch_kwargs["checkpoint"] = args.week2_checkpoint
-                dispatch_kwargs["disable_long_context_attention"] = (
-                    args.disable_week2_long_context_attention
+                dispatch_kwargs["disable_context_selected_attention"] = (
+                    args.disable_week2_context_selected_attention
                 )
-                dispatch_kwargs["disable_fused_gate_up"] = (
-                    args.disable_week2_fused_gate_up
+                dispatch_kwargs["disable_prefill_fused_gate_up"] = (
+                    args.disable_week2_prefill_fused_gate_up
                 )
             if (
                 args.loader == "week2"
@@ -909,10 +912,12 @@ def main() -> None:
                 "device": args.device,
                 "prefill_logits": effective_prefill_logits,
                 "seed": args.seed,
-                "disable_week2_long_context_attention": (
-                    args.disable_week2_long_context_attention
+                "disable_week2_context_selected_attention": (
+                    args.disable_week2_context_selected_attention
                 ),
-                "disable_week2_fused_gate_up": args.disable_week2_fused_gate_up,
+                "disable_week2_prefill_fused_gate_up": (
+                    args.disable_week2_prefill_fused_gate_up
+                ),
             },
             "dispatch_counters": (
                 model.dispatch_counters() if hasattr(model, "dispatch_counters") else {}

@@ -112,8 +112,8 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-rope": "2.4 + Fast RoPE",
         "week2-swiglu": "2.4 + Fused SwiGLU",
         "week2-simd-matmul": "2.5 SIMD matrix prefill",
-        "week2-long-context-attention": "2.6 Long-context decode attention",
-        "week2-fused-gate-up": "2.7 Fused gate+up SwiGLU",
+        "week2-context-selected-attention": "2.6 Context-selected decode attention",
+        "week2-prefill-fused-gate-up": "2.7 Prefill-only fused gate+up SwiGLU",
         "mlx": "MLX",
     }
 
@@ -373,7 +373,7 @@ def test_matrix_accepts_day5_and_candidate_course_pair(monkeypatch):
             "--variant",
             "week2-simd-matmul",
             "--variant",
-            "week2-long-context-attention",
+            "week2-context-selected-attention",
         ],
     )
 
@@ -381,7 +381,7 @@ def test_matrix_accepts_day5_and_candidate_course_pair(monkeypatch):
 
     assert args.variant == [
         "week2-simd-matmul",
-        "week2-long-context-attention",
+        "week2-context-selected-attention",
     ]
 
 
@@ -482,7 +482,7 @@ def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
         raw_output.write_text(
             json.dumps(
                 {
-                    "dispatch_counters": {"long_context_attention": 7},
+                    "dispatch_counters": {"context_selected_attention": 7},
                     "metrics": {
                         "output_tokens_per_second": 40.0,
                         "prefill_tokens_per_second": 512.0,
@@ -521,7 +521,7 @@ def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
         prefill=512.0,
         decode=50.0,
         output=40.0,
-        dispatch_counters={"long_context_attention": 7},
+        dispatch_counters={"context_selected_attention": 7},
     )
     assert len(observed) == 1
     command, kwargs = observed[0]
@@ -564,7 +564,7 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
             prefill=float(prompt_tokens),
             decode=50.0,
             output=40.0,
-            dispatch_counters={"long_context_attention": prompt_tokens},
+            dispatch_counters={"context_selected_attention": prompt_tokens},
         )
 
     monkeypatch.setattr(progression, "parse_args", lambda: args)
@@ -692,17 +692,21 @@ def test_public_main_help_lists_only_current_week2_checkpoints():
         text=True,
     )
 
-    assert "long-context-attention" in result.stdout
-    assert "fused-gate-up" in result.stdout
+    assert "context-selected-attention" in result.stdout
+    assert "prefill-fused-gate-up" in result.stdout
     assert "decode-attention" not in result.stdout
     assert "split-k" not in result.stdout
+    assert "long-context-attention" not in result.stdout
+    assert "fused-gate-up" not in bench.WEEK2_CHECKPOINTS
 
 
 @pytest.mark.parametrize(
     ("legacy", "replacement"),
     (
-        ("decode-attention", "long-context-attention"),
-        ("split-k", "fused-gate-up"),
+        ("decode-attention", "context-selected-attention"),
+        ("long-context-attention", "context-selected-attention"),
+        ("split-k", "prefill-fused-gate-up"),
+        ("fused-gate-up", "prefill-fused-gate-up"),
     ),
 )
 def test_public_main_legacy_checkpoint_reports_migration(legacy, replacement):
@@ -725,17 +729,25 @@ def test_public_bench_help_lists_only_current_week2_checkpoints(monkeypatch, cap
     help_text = capsys.readouterr().out
 
     assert exited.value.code == 0
-    assert "long-context-attention" in help_text
-    assert "fused-gate-up" in help_text
+    assert "context-selected-attention" in help_text
+    assert "prefill-fused-gate-up" in help_text
     assert "decode-attention" not in help_text
     assert "split-k" not in help_text
+    assert "long-context-attention" not in help_text
+    assert "fused-gate-up" not in bench.WEEK2_CHECKPOINTS
+    assert "--disable-week2-context-selected-attention" in help_text
+    assert "--disable-week2-prefill-fused-gate-up" in help_text
+    assert "--disable-week2-long-context-attention" not in help_text
+    assert "--disable-week2-fused-gate-up" not in help_text
 
 
 @pytest.mark.parametrize(
     ("legacy", "replacement"),
     (
-        ("decode-attention", "long-context-attention"),
-        ("split-k", "fused-gate-up"),
+        ("decode-attention", "context-selected-attention"),
+        ("long-context-attention", "context-selected-attention"),
+        ("split-k", "prefill-fused-gate-up"),
+        ("fused-gate-up", "prefill-fused-gate-up"),
     ),
 )
 def test_public_bench_legacy_checkpoint_reports_migration(legacy, replacement):
@@ -751,14 +763,17 @@ def test_public_bench_legacy_checkpoint_reports_migration(legacy, replacement):
     assert f"{legacy!r} was replaced by {replacement!r}" in result.stderr
 
 
-def test_public_bench_accepts_current_checkpoint(monkeypatch):
+@pytest.mark.parametrize(
+    "checkpoint", ("context-selected-attention", "prefill-fused-gate-up")
+)
+def test_public_bench_accepts_current_checkpoint(monkeypatch, checkpoint):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["bench.py", "--week2-checkpoint", "long-context-attention"],
+        ["bench.py", "--week2-checkpoint", checkpoint],
     )
 
-    assert bench.parse_args().week2_checkpoint == "long-context-attention"
+    assert bench.parse_args().week2_checkpoint == checkpoint
 
 
 def test_public_bench_unknown_checkpoint_lists_only_current_values():
@@ -772,7 +787,9 @@ def test_public_bench_unknown_checkpoint_lists_only_current_values():
 
     assert result.returncode == 2
     assert "unknown Week 2 checkpoint 'unknown'" in result.stderr
-    assert "long-context-attention" in result.stderr
-    assert "fused-gate-up" in result.stderr
+    assert "context-selected-attention" in result.stderr
+    assert "prefill-fused-gate-up" in result.stderr
     assert "decode-attention" not in result.stderr
     assert "split-k" not in result.stderr
+    assert "long-context-attention" not in result.stderr
+    assert "fused-gate-up" not in bench.WEEK2_CHECKPOINTS

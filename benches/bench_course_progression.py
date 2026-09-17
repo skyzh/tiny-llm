@@ -94,18 +94,18 @@ WEEK2_VARIANTS = (
         ("--week2-checkpoint", "simd-matmul"),
     ),
     Variant(
-        "week2-long-context-attention",
-        "2.6 Long-context decode attention",
+        "week2-context-selected-attention",
+        "2.6 Context-selected decode attention",
         "ref",
         "week2",
-        ("--week2-checkpoint", "long-context-attention"),
+        ("--week2-checkpoint", "context-selected-attention"),
     ),
     Variant(
-        "week2-fused-gate-up",
-        "2.7 Fused gate+up SwiGLU",
+        "week2-prefill-fused-gate-up",
+        "2.7 Prefill-only fused gate+up SwiGLU",
         "ref",
         "week2",
-        ("--week2-checkpoint", "fused-gate-up"),
+        ("--week2-checkpoint", "prefill-fused-gate-up"),
     ),
     MLX_VARIANT,
 )
@@ -170,14 +170,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--disable-week2-long-context-attention",
+        "--disable-week2-context-selected-attention",
         action="store_true",
-        help="disable only the Week 2 long-context attention candidate",
+        help="disable only the Week 2 context-selected attention candidate",
     )
     parser.add_argument(
-        "--disable-week2-fused-gate-up",
+        "--disable-week2-prefill-fused-gate-up",
         action="store_true",
-        help="disable only the Week 2 fused gate+up candidate",
+        help="disable only the Week 2 prefill fused gate+up candidate",
     )
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument(
@@ -352,14 +352,14 @@ def run_variant(
             "--json-output",
             str(raw_output),
             *(
-                ["--disable-week2-long-context-attention"]
-                if getattr(args, "disable_week2_long_context_attention", False)
+                ["--disable-week2-context-selected-attention"]
+                if getattr(args, "disable_week2_context_selected_attention", False)
                 and variant.solution != "mlx"
                 else []
             ),
             *(
-                ["--disable-week2-fused-gate-up"]
-                if getattr(args, "disable_week2_fused_gate_up", False)
+                ["--disable-week2-prefill-fused-gate-up"]
+                if getattr(args, "disable_week2_prefill_fused_gate_up", False)
                 and variant.solution != "mlx"
                 else []
             ),
@@ -712,11 +712,11 @@ def main() -> None:
             configuration.update(
                 matrix=True,
                 prompt_lengths=prompt_lengths,
-                disable_week2_long_context_attention=getattr(
-                    args, "disable_week2_long_context_attention", False
+                disable_week2_context_selected_attention=getattr(
+                    args, "disable_week2_context_selected_attention", False
                 ),
-                disable_week2_fused_gate_up=getattr(
-                    args, "disable_week2_fused_gate_up", False
+                disable_week2_prefill_fused_gate_up=getattr(
+                    args, "disable_week2_prefill_fused_gate_up", False
                 ),
             )
         payload = {

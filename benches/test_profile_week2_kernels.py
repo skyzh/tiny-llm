@@ -216,9 +216,9 @@ def test_default_attribution_and_model_expose_only_canonical_checkpoints():
     cases = [profile.parse_case(value) for value in profile.DEFAULT_CASES]
     checkpoints = [case.checkpoint for case in cases]
     assert checkpoints.index("simd-matmul") < checkpoints.index(
-        "long-context-attention"
+        "context-selected-attention"
     )
-    assert checkpoints[-1] == "fused-gate-up"
+    assert checkpoints[-1] == "prefill-fused-gate-up"
 
     for implementation_name in ("tiny_llm", "tiny_llm_ref"):
         implementation = profile.load_implementation(implementation_name)
@@ -229,8 +229,8 @@ def test_default_attribution_and_model_expose_only_canonical_checkpoints():
             "rope",
             "swiglu",
             "simd-matmul",
-            "long-context-attention",
-            "fused-gate-up",
+            "context-selected-attention",
+            "prefill-fused-gate-up",
         )
 
 

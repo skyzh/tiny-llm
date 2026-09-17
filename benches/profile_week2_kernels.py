@@ -29,10 +29,10 @@ DEFAULT_CASES = (
     "swiglu:decode:128",
     "simd-matmul:prefill:128",
     "simd-matmul:prefill:32",
-    "long-context-attention:decode:128",
-    "long-context-attention:decode:8192",
-    "fused-gate-up:prefill:32",
-    "fused-gate-up:prefill:128",
+    "context-selected-attention:decode:128",
+    "context-selected-attention:decode:8192",
+    "prefill-fused-gate-up:prefill:32",
+    "prefill-fused-gate-up:prefill:128",
 )
 PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"
