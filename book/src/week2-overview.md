@@ -42,6 +42,22 @@ Use the same four-part loop at each checkpoint:
    then record `keep`, `reject`, or `inconclusive`, along with evidence that
    would change your conclusion.
 
+The checked example makes that loop visible. Cached decode begins with
+projection work dominant; packed W4 exposes the pointwise category; fused
+model kernels leave projections as the next target; and the SIMD schedule
+shrinks prefill projection time. Split-K helps the measured 32-token shape but
+does not improve the fixed 128-token product control.
+
+![Stacked attribution bars for the checked Week 2 checkpoints: cached decode on Day 2, packed W4 on Day 3, fused model kernels on Day 4, the optional decode-attention lab on Day 6, the pre-SIMD control and SIMD rows on Day 5, and Split-K on Day 7.](./week2-kernel-profile.svg)
+
+The decisions below use different metrics and denominators, so read each card
+as a bounded comparison rather than adding the percentages together. Packed
+W4, fused pointwise kernels, and SIMD prefill are kept for their measured
+controls; decode attention stays optional and inconclusive; Split-K is
+conditional at 32 tokens and rejected for the fixed 128-token workload.
+
+![Decision cards for one M4 Pro, macOS 27, Qwen3-4B, MLX 0.32.0 observation: keep packed W4 decode, fused pointwise kernels, and SIMD-matrix prefill; treat decode attention as optional and inconclusive; retain Split-K conditionally at 32 tokens but reject it for the fixed 128-token product workload.](./week2-performance-summary.svg)
+
 You can complete this loop with the synchronized benchmark and portable
 attribution runner. Apple GPU capture and `gpudebug` appear only in the
 [optional macOS 27 lab](./week2-advanced-profiling.md); neither is a
