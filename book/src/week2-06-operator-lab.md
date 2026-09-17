@@ -49,15 +49,34 @@ belongs to prefill/TTFT; calculate TPOT over the remaining 127 decode
 intervals. Run the same contexts, order, warmups, and samples for the Day 5
 control and candidate.
 
-The canonical selector is `long-context-attention`. Its matrix command is
-integration-pending: do not run or document results until your checkout exposes
-the selector and matrix options in public `--help`. The focused learner gate
-remains:
+The canonical selector is `long-context-attention`. First check the learner
+seam, then run the Day 5 control and candidate in balanced fresh processes:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 6
+
+pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
+  --variant week2-simd-matmul \
+  --variant week2-long-context-attention \
+  --prompt-length 128 --prompt-length 512 \
+  --prompt-length 2048 --prompt-length 8192 --prompt-length 32640 \
+  --output-len 128 --warmup 2 --repeats 4 --prefill-logits last \
+  --json-output week2-day6-matrix.json
+
+pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
+  --variant week2-simd-matmul \
+  --variant week2-long-context-attention \
+  --prompt-length 128 --prompt-length 512 \
+  --prompt-length 2048 --prompt-length 8192 --prompt-length 32640 \
+  --output-len 128 --warmup 2 --repeats 4 --prefill-logits last \
+  --disable-week2-long-context-attention \
+  --json-output week2-day6-disabled.json
 ```
+
+The JSON keeps each sample's dispatch counters. A nonzero
+`long_context_attention` count proves only that the candidate ran; the disabled
+record must return that count to zero.
 
 ## Task 1: Preserve Grouped Attention Semantics
 
@@ -89,9 +108,14 @@ denominators, and value-weighted sums in FP32 before returning BF16.
 ## Task 2: Own the Candidate and Fallback
 
 Wire the smallest complete learner-owned path for
-`long-context-attention`. The public attention call remains stable; your
-candidate may use any internal helper or Metal symbol that preserves its
-behavior.
+`long-context-attention`. Fill `long_context_attention` and
+`should_use_long_context_attention`, then connect them in
+`Qwen3MultiHeadAttention.__call__`. Complete
+`tiny_llm_ext::long_context_attention`, `Week2DecodeAttention::eval_cpu`, and
+`Week2DecodeAttention::eval_gpu` in `src/extensions/src/week2_kernels.cpp`.
+Complete the `week2_decode_attention` Metal kernel in
+`src/extensions/src/week2_kernels.metal`. The public attention call remains
+stable; equivalent private helpers are fine.
 
 The dispatcher must:
 
@@ -106,11 +130,26 @@ Test supported shapes, odd tail lengths, grouped heads, scale, causal/no-mask
 behavior, explicit-mask fallback, offsets, and each remaining fallback boundary
 before timing. A selection counter proves routing; it does not prove a speedup.
 
+> **Optional profiling evidence.** A 128/8K component replay can corroborate
+> the attention crossover, but it does not replace the matched product matrix,
+> selection counter, or disable-only control above.
+
+```bash
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case simd-matmul:decode:128 \
+  --case long-context-attention:decode:128 \
+  --case simd-matmul:decode:8192 \
+  --case long-context-attention:decode:8192 \
+  --warmup 4 --iterations 12 \
+  --json-output week2-day6-components.json
+```
+
 ## Task 3: Run the Matched Decision Gate
 
-Compare Day 5 and `long-context-attention` at all four context lengths. Record
-the complete workload identity and, for every pair, TTFT, TPOT, throughput,
-selection count, and whether the disable control removes the change.
+Compare Day 5 and `long-context-attention` at the four declared comparison
+lengths, then use 32,640 as the native-endpoint safety row. Record the complete
+workload identity and, for every pair, TTFT, TPOT, throughput, selection count,
+and whether the disable control removes the change.
 
 Keep the candidate only if all of these conditions hold:
 

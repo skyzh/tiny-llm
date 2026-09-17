@@ -119,7 +119,7 @@ model output—not a private symbol or source-file layout.
 
 ## Task 4: Re-profile and Decide
 
-Now repeat the exact baseline commands, then close the loop in three
+Rerun the exact commands from the baseline section, then close the loop in three
 sentences:
 
 1. which model component dominated the baseline prefill;

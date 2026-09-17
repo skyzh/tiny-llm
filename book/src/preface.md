@@ -139,8 +139,8 @@ every Metal kernel, you can make these explicit local substitutions:
 | Day 3 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
 | Day 4 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
 | Day 5 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing the SIMD-matrix schedule. |
-| Day 6 (optional) | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the supplied bounded decode-attention branch. |
-| Day 7 | The Day 5 unsplit projection fallback and measured dispatch boundary | Keep the unsplit path rather than implementing Split-K where your measurement does not support it. |
+| Day 6 (optional) | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the custom `long-context-attention` branch. |
+| Day 7 | The Day 5 separate gate/up plus SwiGLU fallback and measured dispatch boundary | Keep the separate path rather than implementing `fused-gate-up` where your measurement does not support it. |
 
 Only the quantized-projection seam is already selected by canonical Week 3.
 The Day 4 and optional Day 6 alternatives require you to wire the MLX call at the

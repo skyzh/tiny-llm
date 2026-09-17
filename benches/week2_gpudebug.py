@@ -24,8 +24,8 @@ KNOWN_CHECKPOINTS = (
     "rope",
     "swiglu",
     "simd-matmul",
-    "decode-attention",
-    "split-k",
+    "long-context-attention",
+    "fused-gate-up",
 )
 
 

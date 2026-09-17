@@ -218,7 +218,8 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 Record one cumulative result per operator, then use the attribution run to
 choose the next bottleneck. Separate attention QKV/output projections from MLP
 gate/up/down projections rather than reviving the old combined-projections
-bucket. The component boundaries and context crossover are in the
+bucket. Re-profiling then placed the remaining costs in their current component
+boundaries; the context crossover is in the
 [performance appendix](./appendix-performance.md#component-attribution).
 
 The next core chapter is [SIMD-Matrix Prefill](./week2-05-simd-matrix-prefill.md)

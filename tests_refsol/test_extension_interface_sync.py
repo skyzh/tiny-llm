@@ -87,15 +87,21 @@ DOC_TASK_MARKERS = {
     },
     "book/src/week2-06-operator-lab.md": {
         "Task 2": {
-            "tiny_llm_ext::decode_attention",
+            "tiny_llm_ext::long_context_attention",
             "Week2DecodeAttention::eval_gpu",
             "week2_decode_attention",
             "Qwen3MultiHeadAttention.__call__",
-            "decode_attention_custom",
+            "long_context_attention",
         },
     },
     "book/src/week2-07-split-k-prefill.md": {
-        "Task 3": {"QuantizedMatmul::eval_gpu"},
+        "Task 2": {
+            "supports_fused_gate_up",
+            "tiny_llm_ext::quantized_gate_up_swiglu",
+            "Week2QuantizedGateUpSwiGLU::eval_gpu",
+            "week2_quantized_gate_up_swiglu",
+            "Qwen3MLP.__call__",
+        },
     },
     "book/src/week3-03-paged-attention-part1.md": {
         "Task 1": {
@@ -190,7 +196,7 @@ EXTENSION_TASK_PAIRS = {
         "Task 2": {
             (
                 "src/extensions/src/week2_kernels.cpp",
-                "tiny_llm_ext::decode_attention",
+                "tiny_llm_ext::long_context_attention",
             ),
             (
                 "src/extensions/src/week2_kernels.cpp",

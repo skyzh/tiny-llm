@@ -16,12 +16,10 @@ lazy MLX work inside the timer, and reports the median. The checked Week 2
 baseline generates exactly 128 tokens at five prompt lengths:
 
 ```bash
-for prompt in 128 512 2048 8192 32640; do
-  pdm run bench-week2-progression --offline --solution tiny_llm \
-    --variant mlx --repeats 2 --model qwen3-4b \
-    --input-len "$prompt" --output-len 128 --warmup 2 \
-    --prefill-logits last --json-output "week2-mlx-${prompt}.json"
-done
+pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
+  --variant week2-simd-matmul --variant mlx --repeats 2 \
+  --model qwen3-4b --output-len 128 --warmup 2 \
+  --prefill-logits last --json-output week2-product-matrix.json
 
 pdm run bench-serving-progression --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \

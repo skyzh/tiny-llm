@@ -28,6 +28,7 @@ class Throughput:
     prefill: float
     decode: float
     output: float
+    dispatch_counters: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -153,9 +154,9 @@ def parse_args() -> argparse.Namespace:
         "--matrix",
         action="store_true",
         help=(
-            "run a matched Week 2 checkpoint/MLX prompt-length matrix; defaults "
-            "to 128, 512, 2048, 8192, and a 32640-token prompt plus 128 "
-            "generated tokens at the native 32768-token ceiling"
+            "run a matched two-variant Week 2 prompt-length matrix; defaults to "
+            "the Day 5/MLX pair at 128, 512, 2048, 8192, and a 32640-token "
+            "prompt plus 128 generated tokens at the native 32768-token ceiling"
         ),
     )
     parser.add_argument(
@@ -272,11 +273,10 @@ def parse_args() -> argparse.Namespace:
     ):
         parser.error("--prefill-logits last requires variants that exclude Week 1")
     if args.matrix:
-        keys = {variant.key for variant in selected_variants}
-        course_keys = keys - {"mlx"}
-        if len(selected_variants) != 2 or "mlx" not in keys or len(course_keys) != 1:
+        if len(selected_variants) != 2:
             parser.error(
-                "--matrix requires exactly one Week 2 course --variant and --variant mlx"
+                "--matrix requires exactly two Week 2 variants: a course/MLX "
+                "baseline pair or two course checkpoints"
             )
         args.prompt_length = list(
             dict.fromkeys(args.prompt_length or MATRIX_PROMPT_LENGTHS)
@@ -377,11 +377,16 @@ def run_variant(
             sys.stderr.write(completed.stderr)
             raise subprocess.CalledProcessError(completed.returncode, command)
         try:
-            metrics = json.loads(raw_output.read_text())["metrics"]
+            payload = json.loads(raw_output.read_text())
+            metrics = payload["metrics"]
             return Throughput(
                 prefill=float(metrics["prefill_tokens_per_second"]),
                 decode=float(metrics["decode_tokens_per_second"]),
                 output=float(metrics["output_tokens_per_second"]),
+                dispatch_counters={
+                    str(name): int(count)
+                    for name, count in payload.get("dispatch_counters", {}).items()
+                },
             )
         except (
             FileNotFoundError,
@@ -757,8 +762,18 @@ def main() -> None:
                         "variant": variant.key,
                         "label": variant.label,
                         "samples": [
-                            asdict(sample)
-                            for sample in product_samples[prompt_tokens][variant.key]
+                            {
+                                **asdict(sample),
+                                "dispatch_counters": (
+                                    samples[prompt_tokens][variant.key][
+                                        index
+                                    ].dispatch_counters
+                                    or {}
+                                ),
+                            }
+                            for index, sample in enumerate(
+                                product_samples[prompt_tokens][variant.key]
+                            )
                         ],
                         "summary": summaries[prompt_tokens][variant.key],
                     }
@@ -777,7 +792,13 @@ def main() -> None:
                     "samples": [
                         asdict(sample) for sample in samples[prompt_tokens][variant.key]
                     ],
-                    "median": asdict(medians[prompt_tokens][variant.key]),
+                    "median": {
+                        key: value
+                        for key, value in asdict(
+                            medians[prompt_tokens][variant.key]
+                        ).items()
+                        if key != "dispatch_counters"
+                    },
                 }
                 for variant in variants
             }

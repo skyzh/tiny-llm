@@ -15,7 +15,7 @@ finish with a matched keep-or-reject decision.
 
 ## Task 1: Freeze the MLP Contract
 
-The integration-pending learner-owned seam is:
+The learner-owned seam is:
 
 ```python
 quantized_gate_up_swiglu(x, w_gate, w_up)
@@ -38,21 +38,46 @@ Use rows 1, 32, 128, 512, and 2,048 for operator evidence. The product safety
 controls include decode and an 8K prompt so a local MLP improvement cannot hide
 a larger request regression.
 
-The canonical selector is `fused-gate-up`. Its matched matrix command is
-integration-pending: do not run or report it until the selector and options
-appear in public `--help`. The focused learner gate remains:
+The canonical selector is `fused-gate-up`. Check the implementation, then run
+the targeted row sweep and the Day 5/candidate product matrix:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 7
+
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section fused-gate-up \
+  --context 1 --context 32 --context 128 --context 512 --context 2048 \
+  --context-repeats 2 --warmup 12 --iterations 60 \
+  --json-output week2-day7-operator.json
+
+pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
+  --variant week2-simd-matmul --variant week2-fused-gate-up \
+  --prompt-length 128 --prompt-length 512 \
+  --prompt-length 2048 --prompt-length 8192 --prompt-length 32640 \
+  --output-len 128 --warmup 2 --repeats 4 --prefill-logits last \
+  --json-output week2-day7-matrix.json
+
+pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
+  --variant week2-simd-matmul --variant week2-fused-gate-up \
+  --prompt-length 128 --prompt-length 512 \
+  --prompt-length 2048 --prompt-length 8192 --prompt-length 32640 \
+  --output-len 128 --warmup 2 --repeats 4 --prefill-logits last \
+  --disable-week2-fused-gate-up \
+  --json-output week2-day7-disabled.json
 ```
 
 ## Task 2: Fuse Only the Shared-Input Work
 
 Build one bounded candidate that loads the activation tiles once, evaluates
 gate and up against their respective packed weights, and applies SwiGLU before
-returning the MLP hidden tensor. Do not fold the down projection into this
-operator: it consumes the SwiGLU result and has a different dependency.
+returning the MLP hidden tensor. Fill `supports_fused_gate_up` and
+`quantized_gate_up_swiglu`, then connect them in `Qwen3MLP.__call__`. In the
+extension, complete `tiny_llm_ext::quantized_gate_up_swiglu`,
+`Week2QuantizedGateUpSwiGLU::eval_gpu`, and the
+`week2_quantized_gate_up_swiglu` Metal kernel. Do not fold the down projection
+into this operator: it consumes the SwiGLU result and has a different
+dependency.
 
 The dispatcher must:
 

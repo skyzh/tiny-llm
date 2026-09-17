@@ -15,7 +15,7 @@ pdm run test --week 2 --day 2
 
 When it passes, record one matched `tiny_llm`/MLX pair and one attribution
 result, then write the short decision that follows from them. Those portable
-JSON records are the Day 2 checkpoint. Metal capture remains optional and
+JSON records are the Day 2 checkpoint. Metal capture is optional and
 never gates the next chapter.
 
 ## Benchmark the Cached Model
@@ -113,11 +113,21 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 The result identifies its source, checkpoint, phase, token count, prompt rule,
 software, host, category medians, and category shares without depending on a
 private function name or Metal symbol. The old output combined attention and
-MLP projections into one bucket, so it can verify the replay plumbing but
-cannot explain how those components cross over with context. The replacement
-component matrix is integration-pending; until it appears in public `--help`,
-use the accepted component table in the Week 2 overview and do not invent a
-local component breakdown.
+MLP projections into one bucket, so it could verify the replay plumbing but
+could not explain how those components cross over with context. The current
+runner exposes the separate model components in public `--help`. To compare
+the short control with the 8K point, run:
+
+```bash
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case kv-cache:prefill:128 --case kv-cache:decode:128 \
+  --case kv-cache:prefill:8192 --case kv-cache:decode:8192 \
+  --warmup 4 --iterations 12 \
+  --json-output week2-day2-components.json
+```
+
+These are synchronized isolated shares, not end-to-end or production traffic
+shares. Use the matched full-request matrix for the product decision.
 
 Turn the observation into a decision with three sentences:
 

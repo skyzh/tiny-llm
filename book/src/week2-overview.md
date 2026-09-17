@@ -147,13 +147,20 @@ When a command runs a model, benchmark, profile, capture, or reducer, pass
 otherwise default to the completed reference, so omitting it may measure code
 you did not write.
 
-The replacement selectors `long-context-attention` and `fused-gate-up`, their
-learner-owned interfaces, and their matched matrix runner are
-integration-pending. Until your checkout lists them in public `--help`, use the
-daily test command to track progress and do not substitute the retired
-`decode-attention` or `split-k` checkpoints. The chapters state the intended
-workloads and acceptance rules without inventing output from an interface that
-is not present yet.
+The public selectors are `long-context-attention` and `fused-gate-up`. Confirm
+the runnable surfaces before starting either experiment:
+
+```bash
+pdm run bench --help
+pdm run bench-week2-progression --help
+pdm run bench-week2-operators --help
+```
+
+The Day 6 and Day 7 chapters give the exact matched commands. The matrix JSON
+preserves each sample's dispatch counters, so correctness, candidate selection,
+and disable-control evidence stay distinct from the still-pending performance
+decision. The retired `decode-attention` and `split-k` checkpoint names now
+produce migration errors instead of silently selecting a current checkpoint.
 
 ## Verification Status
 

@@ -696,8 +696,8 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 
 Keep one cumulative model row and one representative real-shape projection
 comparison. A reduction in the isolated packed-W4 target supports the mechanism
-only when matched full-request decode moves in the same direction. Re-profile
-normalization, position, activation, attention, and MLP responsibilities before
+only when matched full-request decode moves in the same direction. The re-profile then exposed normalization,
+position, activation, attention, and MLP responsibilities; use that evidence before
 choosing Day 4; do not carry the old combined-projections percentage forward.
 The component boundaries and full prompt matrix are in the
 [performance appendix](./appendix-performance.md#component-attribution).

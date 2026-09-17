@@ -18,9 +18,9 @@
 - [Benchmarking and Profiling](./week2-02-benchmark-profile.md)
 - [Quantize the Model](./week2-03-quantize-model.md)
 - [Fused Model Kernels](./week2-04-fused-model-kernels.md)
-- [Fused Decode Attention](./week2-05-decode-attention.md)
-- [SIMD-Matrix Prefill](./week2-06-simd-matrix-prefill.md)
-- [Split-K Prefill](./week2-07-split-k-prefill.md)
+- [SIMD-Matrix Prefill](./week2-05-simd-matrix-prefill.md)
+- [Long-Context Dense-KV Decode Attention](./week2-06-operator-lab.md)
+- [Fused Packed-W4 Gate+Up and SwiGLU](./week2-07-split-k-prefill.md)
 - [Flash Attention](./week3-05-flash-attention.md)
 - [Paged Attention](./week3-04-paged-attention-part2.md)
 

@@ -39,6 +39,9 @@ APPROVED_OPTIONAL_EVIDENCE = frozenset(
         "optional profiling evidence a 32 128 row attribution can corroborate the shape "
         "analysis but it does not replace the matched complete model delta projection "
         "controls and dispatch calculation above",
+        "optional profiling evidence a 128 8k component replay can corroborate the "
+        "attention crossover but it does not replace the matched product matrix "
+        "selection counter or disable only control above",
     }
 )
 APPROVED_REQUIRED_TRACE = re.compile(
@@ -118,8 +121,8 @@ def test_week2_live_labels_follow_the_seven_day_book():
     assert "| 2.3 | Quantize the Model |" in readme
     assert "| 2.4 | Fused Model Kernels |" in readme
     assert "| 2.5 | SIMD-Matrix Prefill |" in readme
-    assert "| 2.6 (optional) | Workload-Conditioned Operator Lab |" in readme
-    assert "| 2.7 | Conditional Split-K and Final Decision |" in readme
+    assert "| 2.6 (optional) | Long-Context Dense-KV Decode Attention |" in readme
+    assert "| 2.7 | Fused Packed-W4 Gate+Up and SwiGLU |" in readme
     assert "./week2-02-benchmark-profile.md" in summary
     assert "./week2-03-quantize-model.md" in summary
     assert "./week2-04-fused-model-kernels.md" in summary
@@ -135,10 +138,10 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Kernels",
         "week2-05-simd-matrix-prefill.md": "# 🚧 Week 2 Day 5: SIMD-Matrix Prefill",
         "week2-06-operator-lab.md": (
-            "# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab"
+            "# 🚧 Week 2 Day 6 (Optional): Long-Context Dense-KV Decode Attention"
         ),
         "week2-07-split-k-prefill.md": (
-            "# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision"
+            "# 🚧 Week 2 Day 7: Fused Packed-W4 Gate+Up and SwiGLU"
         ),
     }
     for filename, expected_heading in chapter_headings.items():
@@ -212,7 +215,11 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
         3: ("kv-cache:decode:128", "quantized-matvec:decode:128"),
         4: ("quantized-matvec:decode:128", "swiglu:decode:128"),
         5: ("swiglu:prefill:128", "simd-matmul:prefill:128"),
-        6: ("simd-matmul:decode:128", "decode-attention:decode:128"),
+        6: (
+            "simd-matmul:decode:128",
+            "long-context-attention:decode:128",
+            "long-context-attention:decode:8192",
+        ),
     }
     local_capture_tokens = (
         "Xcode GPU capture",
@@ -348,6 +355,34 @@ def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
     ]
 
 
+def test_matrix_accepts_day5_and_candidate_course_pair(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+            "--variant",
+            "week2-simd-matmul",
+            "--variant",
+            "week2-long-context-attention",
+        ],
+    )
+
+    args = progression.parse_args()
+
+    assert args.variant == [
+        "week2-simd-matmul",
+        "week2-long-context-attention",
+    ]
+
+
 @pytest.mark.parametrize(
     ("extra_args", "message"),
     (
@@ -375,7 +410,7 @@ def test_matrix_defaults_cover_realistic_native_context_points(monkeypatch):
                 "--variant",
                 "week2-simd-matmul",
             ),
-            "exactly one Week 2 course",
+            "exactly two Week 2 variants",
         ),
         (
             (
@@ -445,11 +480,12 @@ def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
         raw_output.write_text(
             json.dumps(
                 {
+                    "dispatch_counters": {"long_context_attention": 7},
                     "metrics": {
                         "output_tokens_per_second": 40.0,
                         "prefill_tokens_per_second": 512.0,
                         "decode_tokens_per_second": 50.0,
-                    }
+                    },
                 }
             )
         )
@@ -479,7 +515,12 @@ def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
         input_len=8192,
     )
 
-    assert result == progression.Throughput(prefill=512.0, decode=50.0, output=40.0)
+    assert result == progression.Throughput(
+        prefill=512.0,
+        decode=50.0,
+        output=40.0,
+        dispatch_counters={"long_context_attention": 7},
+    )
     assert len(observed) == 1
     command, kwargs = observed[0]
     assert command[command.index("--min-input-len") + 1] == "8192"
@@ -521,6 +562,7 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
             prefill=float(prompt_tokens),
             decode=50.0,
             output=40.0,
+            dispatch_counters={"long_context_attention": prompt_tokens},
         )
 
     monkeypatch.setattr(progression, "parse_args", lambda: args)
@@ -561,6 +603,11 @@ def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
     }
     assert len(payload["results"]) == 4
     assert all(len(result["samples"]) == 2 for result in payload["results"])
+    assert all(
+        "dispatch_counters" in sample
+        for result in payload["results"]
+        for sample in result["samples"]
+    )
     assert len(calls) == 8
     assert calls[:4] == [
         (128, "week2-simd-matmul"),
@@ -631,3 +678,4 @@ def test_matrix_help_names_metrics_and_native_ceiling(monkeypatch, capsys):
     assert "TPOT_ms" in help_text
     assert "32640-token prompt plus 128" in help_text
     assert "native 32768-token ceiling" in help_text
+    assert "matched two-variant Week 2" in help_text
