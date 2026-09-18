@@ -265,13 +265,13 @@ pdm run main --solution tiny_llm_ref --loader week2 \
 ## Integrate and Measure
 
 Finish Day 1 with a matched Week 1 versus cached Week 2 observation. The runner
-uses fresh processes, applies the same Qwen3-4B 128×129 workload to both rows,
-and writes the configuration beside the result:
+uses fresh processes, applies the same Qwen3-4B 128-prompt/128-output workload
+to both rows, and writes the configuration beside the result:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --variant week1 --variant week2-kv-cache \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --model qwen3-4b --input-len 128 --output-len 128 --warmup 2 \
   --json-output week2-day1-cache.json
 ```
 
@@ -283,6 +283,6 @@ Day 1 changes the generation algorithm by removing full-prefix recomputation,
 so measure it with the end-to-end benchmark rather than inventing a
 shader-level limiter from a GPU trace. On Day 2, attribute this exact cached
 workload and turn the observation into a falsifiable next change. Begin Day 3
-only after that evidence names dense projections.
+only after that evidence names one bounded model component.
 
 {{#include copyright.md}}

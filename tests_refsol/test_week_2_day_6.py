@@ -1,171 +1,242 @@
-"""Week 2 Day 6 optional decode-attention tests."""
-
-from math import prod
+"""Week 2 Day 6 long-context decode-attention tests."""
 
 import mlx.core as mx
 import pytest
 
-from tiny_llm_ref.attention import scaled_dot_product_attention_grouped
 from .tiny_llm_base import (
-    FastRMSNorm,
-    FastRoPE,
     Qwen3ModelWeek2,
-    decode_attention_custom,
+    Qwen3MultiHeadAttention,
+    WEEK2_CHECKPOINT_FEATURES,
+    long_context_attention,
     scaled_dot_product_attention,
+    scaled_dot_product_attention_grouped,
+    tiny_llm_ext,
 )
-
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def test_model_integrates_decode_attention_after_fast_kernels():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
-    layer = model.layers_inner[0]
+HAS_PHASE_2_EXTENSION = hasattr(tiny_llm_ext, "long_context_attention")
+model_module = __import__(Qwen3ModelWeek2.__module__, fromlist=["unused"])
+should_use_context_selected_attention = (
+    model_module.should_use_context_selected_attention
+)
+CONTEXT_SELECTED_ATTENTION_MIN_CONTEXT = (
+    model_module.CONTEXT_SELECTED_ATTENTION_MIN_CONTEXT
+)
+CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT = (
+    model_module.CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT
+)
 
-    assert layer.self_attn.use_decode_attention
-    assert layer.self_attn.wq.use_simdgroup_matmul
-    assert isinstance(layer.input_layernorm, FastRMSNorm)
-    assert isinstance(layer.self_attn.rope, FastRoPE)
-    assert layer.mlp.use_fast_swiglu
+
+def _qwen_attention_fixture(
+    *, query_length: int = 1, context_length: int = 128, dtype=mx.bfloat16
+):
+    query = mx.zeros((1, 32, query_length, 128), dtype=dtype)
+    key = mx.zeros((1, 8, context_length, 128), dtype=dtype)
+    return query, key, mx.zeros_like(key)
 
 
-def test_model_uses_decode_attention_only_through_measured_context(monkeypatch):
-    module = __import__(Qwen3ModelWeek2.__module__, fromlist=["unused"])
-    readable_attention = module.scaled_dot_product_attention_grouped
-    calls = []
+def test_context_selected_checkpoint_is_independent_and_legacy_name_is_explicit():
+    features = WEEK2_CHECKPOINT_FEATURES["context-selected-attention"]
+    assert features.context_selected_attention
+    assert features.simdgroup_matmul
+    assert not features.prefill_fused_gate_up
 
-    def record_custom(query, key, value, scale, mask):
-        calls.append(("custom", key.shape[-2]))
-        return mx.zeros_like(query)
+    with pytest.raises(ValueError, match="replaced by 'context-selected-attention'"):
+        Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="long-context-attention")
 
-    def record_readable(query, key, value, scale, mask):
-        calls.append(("readable", key.shape[-2]))
-        return readable_attention(query, key, value, scale, mask)
 
-    monkeypatch.setattr(module, "decode_attention_custom", record_custom)
-    monkeypatch.setattr(module, "scaled_dot_product_attention_grouped", record_readable)
-
-    cases = (
-        (0, 1, "custom", 1),
-        (29, 2, "custom", 31),
-        (126, 2, "custom", 128),
-        (254, 2, "custom", 256),
-        (256, 1, "readable", 257),
-        (253, 3, "readable", 256),
-        (248, 8, "readable", 256),
+@pytest.mark.parametrize("query_length", (1, 2))
+@pytest.mark.parametrize("context_length", (8192, 8193, 32768))
+def test_context_selected_selector_accepts_bounded_decode_shapes(
+    query_length, context_length
+):
+    query, key, value = _qwen_attention_fixture(
+        query_length=query_length, context_length=context_length
     )
-    for prefix_length, query_length, expected_path, expected_context in cases:
-        model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
-        attention = model.layers_inner[0].self_attn
-        cache = model.create_kv_cache()[0]
-        hidden = model.hidden_size
-        if prefix_length:
-            mx.eval(
-                attention(
-                    mx.zeros((1, prefix_length, hidden), dtype=model.precision),
-                    0,
-                    cache,
-                )
-            )
-        calls.clear()
-        mx.eval(
-            attention(
-                mx.zeros((1, query_length, hidden), dtype=model.precision),
-                prefix_length,
-                cache,
-            )
+    assert should_use_context_selected_attention(
+        query, key, value, "causal", enabled=True
+    )
+    assert CONTEXT_SELECTED_ATTENTION_MIN_CONTEXT == 8192
+    assert CONTEXT_SELECTED_ATTENTION_MAX_CONTEXT == 32768
+
+
+def test_context_selected_selector_falls_back_below_threshold_and_when_disabled():
+    below_query, below_key, below_value = _qwen_attention_fixture(context_length=8191)
+    edge_query, edge_key, edge_value = _qwen_attention_fixture(context_length=8192)
+    assert not should_use_context_selected_attention(
+        below_query, below_key, below_value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        edge_query, edge_key, edge_value, None, enabled=False
+    )
+    assert should_use_context_selected_attention(
+        edge_query, edge_key, edge_value, None, enabled=True
+    )
+
+
+def test_context_selected_selector_rejects_mask_dtype_head_layout_and_tail():
+    query, key, value = _qwen_attention_fixture(context_length=8192)
+    explicit_mask = mx.zeros((1, 1, 1, 8192), dtype=mx.float32)
+    assert not should_use_context_selected_attention(
+        query, key, value, explicit_mask, enabled=True
+    )
+
+    long_query, key, value = _qwen_attention_fixture(
+        query_length=3, context_length=8192
+    )
+    assert not should_use_context_selected_attention(
+        long_query, key, value, "causal", enabled=True
+    )
+
+    fp32_query, fp32_key, fp32_value = _qwen_attention_fixture(
+        context_length=8192, dtype=mx.float32
+    )
+    assert not should_use_context_selected_attention(
+        fp32_query, fp32_key, fp32_value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        query[:, :16], key, value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        query.transpose(0, 2, 1, 3), key, value, None, enabled=True
+    )
+    assert not should_use_context_selected_attention(
+        query, key, value[:, :, :-1], None, enabled=True
+    )
+
+
+def test_disable_control_and_counters_are_learner_visible():
+    enabled = Qwen3ModelWeek2(
+        tiny_qwen3_mlx_model(), checkpoint="context-selected-attention"
+    )
+    disabled = Qwen3ModelWeek2(
+        tiny_qwen3_mlx_model(),
+        checkpoint="context-selected-attention",
+        disable_context_selected_attention=True,
+    )
+
+    assert enabled.layers_inner[0].self_attn.use_context_selected_attention
+    assert not disabled.layers_inner[0].self_attn.use_context_selected_attention
+    assert enabled.dispatch_counters() == {
+        "context_selected_attention": 0,
+        "readable_attention": 0,
+        "prefill_fused_gate_up": 0,
+        "separate_gate_up": 0,
+    }
+
+
+def test_attention_dispatch_records_candidate_fallback_and_offset(monkeypatch):
+    module = __import__(Qwen3MultiHeadAttention.__module__, fromlist=["unused"])
+    calls = []
+    projections = {
+        "q": mx.zeros((1, 1, 32 * 128), dtype=mx.bfloat16),
+        "k": mx.zeros((1, 1, 8 * 128), dtype=mx.bfloat16),
+        "v": mx.zeros((1, 1, 8 * 128), dtype=mx.bfloat16),
+    }
+
+    def project(x, weight):
+        return projections.get(weight, x)
+
+    def candidate(query, key, value, *, scale, mask):
+        calls.append(("candidate", key.shape[-2], isinstance(mask, mx.array)))
+        return query
+
+    def readable(query, key, value, *, scale, mask):
+        calls.append(("readable", key.shape[-2], isinstance(mask, mx.array)))
+        return query
+
+    monkeypatch.setattr(module, "_linear", project)
+    monkeypatch.setattr(module, "long_context_attention", candidate)
+    monkeypatch.setattr(module, "scaled_dot_product_attention_grouped", readable)
+
+    attention = Qwen3MultiHeadAttention(
+        hidden_size=4096,
+        num_heads=32,
+        num_kv_heads=8,
+        head_dim=128,
+        wq="q",
+        wk="k",
+        wv="v",
+        wo="o",
+        q_norm=mx.ones((128,), dtype=mx.bfloat16),
+        k_norm=mx.ones((128,), dtype=mx.bfloat16),
+    )
+    offsets = []
+    attention.q_norm = lambda value: value
+    attention.k_norm = lambda value: value
+    attention.rope = lambda value, *, offset: offsets.append(offset) or value
+
+    class Cache:
+        def __init__(self):
+            self.key = mx.zeros((1, 8, 8192, 128), dtype=mx.bfloat16)
+            self.value = mx.zeros_like(self.key)
+
+        def update_and_fetch(self, key, value, *, mask_length, mask):
+            assert key.shape == value.shape == (1, 8, 1, 128)
+            assert mask_length == 1
+            return self.key, self.value, 0, mask
+
+    hidden = mx.zeros((1, 1, 4096), dtype=mx.bfloat16)
+    attention(hidden, 8191, Cache())
+    explicit_mask = mx.zeros((1, 1, 1, 8192), dtype=mx.float32)
+    attention(hidden, 8191, Cache(), explicit_mask)
+    attention.use_context_selected_attention = False
+    attention(hidden, 8191, Cache())
+
+    assert calls == [
+        ("candidate", 8192, False),
+        ("readable", 8192, True),
+        ("readable", 8192, False),
+    ]
+    assert offsets == [8191, 8191, 8191, 8191, 8191, 8191]
+    assert attention.context_selected_attention_dispatches == 1
+    assert attention.readable_attention_dispatches == 2
+
+
+def test_readable_fallback_handles_explicit_masks_and_finite_extremes():
+    query = mx.array([[[[80.0, -80.0], [40.0, -40.0]]]], dtype=mx.float32)
+    key = mx.array([[[[1.0, -1.0], [-1.0, 1.0], [0.5, -0.5]]]], dtype=mx.float32)
+    value = mx.array([[[[2.0, 1.0], [4.0, 3.0], [6.0, 5.0]]]], dtype=mx.float32)
+    mask = mx.array([[[[0.0, -mx.inf, 0.0], [0.0, 0.0, -mx.inf]]]])
+
+    result = scaled_dot_product_attention(query, key, value, 2**-0.5, mask)
+    expected = scaled_dot_product_attention_grouped(query, key, value, 2**-0.5, mask)
+    mx.eval(result)
+    assert mx.all(mx.isfinite(result)).item()
+    assert_allclose(result, expected, mx.float32, atol=1e-5, rtol=1e-5)
+
+
+def test_long_context_wrapper_rejects_masks_and_arbitrary_shapes_before_dispatch():
+    query, key, value = _qwen_attention_fixture()
+    with pytest.raises(ValueError, match="does not accept explicit masks"):
+        long_context_attention(
+            query,
+            key,
+            value,
+            128**-0.5,
+            mx.zeros((1, 1, 1, 128), dtype=mx.float32),
         )
-        assert calls == [(expected_path, expected_context)]
+    with pytest.raises(ValueError, match="Qwen3-4B dense GQA"):
+        long_context_attention(
+            mx.zeros((1, 4, 1, 128), dtype=mx.bfloat16),
+            mx.zeros((1, 1, 128, 128), dtype=mx.bfloat16),
+            mx.zeros((1, 1, 128, 128), dtype=mx.bfloat16),
+            128**-0.5,
+        )
 
 
-def test_model_keeps_explicit_masks_on_readable_path(monkeypatch):
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
-    attention = model.layers_inner[0].self_attn
-    cache = model.create_kv_cache()[0]
-    module = __import__(Qwen3ModelWeek2.__module__, fromlist=["unused"])
-    readable_attention = module.scaled_dot_product_attention_grouped
-    calls = []
-
-    def reject_custom(*args, **kwargs):
-        pytest.fail("explicit masks must not use the bounded decode kernel")
-
-    def record_readable(query, key, value, scale, mask):
-        calls.append(key.shape[-2])
-        return readable_attention(query, key, value, scale, mask)
-
-    monkeypatch.setattr(module, "decode_attention_custom", reject_custom)
-    monkeypatch.setattr(module, "scaled_dot_product_attention_grouped", record_readable)
-
-    hidden = mx.zeros((1, 1, model.hidden_size), dtype=model.precision)
-    mask = mx.zeros((1, 1, 1, 1), dtype=mx.float32)
-    mx.eval(attention(hidden, 0, cache, mask))
-
-    assert calls == [1]
-
-
-def test_fast_attention_matches_grouped_attention():
-    query = mx.random.normal((2, 4, 3, 16)).astype(mx.bfloat16)
-    key = mx.random.normal((2, 2, 5, 16)).astype(mx.bfloat16)
-    value = mx.random.normal((2, 2, 5, 16)).astype(mx.bfloat16)
-    mask = mx.broadcast_to(
-        mx.array([0, 0, 0, 0, -mx.inf], dtype=mx.bfloat16), (2, 1, 3, 5)
-    )
-    scale = 16**-0.5
-    result = scaled_dot_product_attention(query, key, value, scale, mask)
-    expected = scaled_dot_product_attention_grouped(query, key, value, scale, mask)
+@pytest.mark.skipif(
+    not HAS_PHASE_2_EXTENSION,
+    reason="Phase 2 extension build requires the optional Xcode Metal Toolchain",
+)
+@pytest.mark.parametrize("mask", (None, "causal"))
+def test_long_context_extension_matches_readable_selected_decode_gpu(mask):
+    query = mx.random.normal((1, 32, 2, 128)).astype(mx.bfloat16)
+    key = mx.random.normal((1, 8, 8193, 128)).astype(mx.bfloat16)
+    value = mx.random.normal(key.shape).astype(mx.bfloat16)
+    result = long_context_attention(query, key, value, 128**-0.5, mask)
+    expected = scaled_dot_product_attention_grouped(query, key, value, 128**-0.5, mask)
     assert result.shape == query.shape
     assert result.dtype == mx.bfloat16
-    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
-
-
-def test_custom_metal_attention_matches_qwen_boundary_sweep():
-    head_dim = 128
-    query_heads = 4
-    shapes = (
-        *((1, context) for context in (1, 31, 32, 127, 128, 129, 255, 256)),
-        *((8, context) for context in (8, 31, 32, 127, 128, 129, 255, 256)),
-    )
-
-    def fixture(shape, phase):
-        values = mx.sin(
-            mx.arange(prod(shape), dtype=mx.float32) * 0.017 + phase
-        ).reshape(shape)
-        return values.astype(mx.bfloat16)
-
-    for query_length, context_length in shapes:
-        for gqa_ratio in (1, 4):
-            kv_heads = query_heads // gqa_ratio
-            query = fixture((1, query_heads, query_length, head_dim), 0.1)
-            key = fixture((1, kv_heads, context_length, head_dim), 0.7)
-            value = fixture(key.shape, 1.3)
-            explicit_mask = mx.where(
-                mx.arange(context_length) % 5 == 0,
-                mx.array(-2.0, dtype=mx.float32),
-                mx.array(0.0, dtype=mx.float32),
-            ).reshape(1, 1, 1, context_length)
-
-            for mask in ("causal", explicit_mask):
-                result = decode_attention_custom(
-                    query, key, value, head_dim**-0.5, mask
-                )
-                expected = scaled_dot_product_attention_grouped(
-                    query, key, value, head_dim**-0.5, mask
-                )
-                assert result.shape == query.shape
-                assert_allclose(
-                    result,
-                    expected,
-                    mx.bfloat16,
-                    atol=3e-2,
-                    rtol=3e-2,
-                    message=(
-                        f"L={query_length}, S={context_length}, "
-                        f"GQA={gqa_ratio}, mask={type(mask).__name__}"
-                    ),
-                )
-
-
-def test_custom_metal_attention_rejects_unknown_string_mask():
-    query = mx.zeros((1, 4, 1, 128), dtype=mx.bfloat16)
-    key = mx.zeros((1, 1, 1, 128), dtype=mx.bfloat16)
-    with pytest.raises(ValueError, match="unsupported attention mask"):
-        decode_attention_custom(query, key, key, 128**-0.5, "sliding")
+    assert_allclose(result, expected, mx.bfloat16, atol=3e-2, rtol=3e-2)

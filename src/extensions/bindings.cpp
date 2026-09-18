@@ -45,10 +45,15 @@ NB_MODULE(_ext, m) {
     m.def("rope", &tiny_llm_ext::rope, "x"_a, "offsets"_a, "dims"_a, "base"_a, "traditional"_a = false,
           "stream"_a = nb::none());
     m.def("swiglu", &tiny_llm_ext::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
+    m.def("quantized_gate_up_swiglu", &tiny_llm_ext::quantized_gate_up_swiglu, "x"_a, "gate_scales"_a, "gate_biases"_a,
+          "gate_weight"_a, "up_scales"_a, "up_biases"_a, "up_weight"_a, "group_size"_a, "bits"_a,
+          "stream"_a = nb::none());
 
     // Week 2, Day 6.
     m.def("decode_attention", &tiny_llm_ext::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
           "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
+    m.def("long_context_attention", &tiny_llm_ext::long_context_attention, "query"_a, "key"_a, "value"_a, "no_mask"_a,
+          "scale"_a, "is_causal"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
 
     // Week 3, Day 3.
     m.def("paged_cache_update", &tiny_llm_ext::paged_cache_update, "pages"_a, "values"_a, "page_id"_a, "start"_a,

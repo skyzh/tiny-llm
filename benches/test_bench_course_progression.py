@@ -1,11 +1,14 @@
 import json
 import re
+import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from benches import bench
 from benches import bench_course_progression as progression
 
 
@@ -38,6 +41,9 @@ APPROVED_OPTIONAL_EVIDENCE = frozenset(
         "optional profiling evidence a 32 128 row attribution can corroborate the shape "
         "analysis but it does not replace the matched complete model delta projection "
         "controls and dispatch calculation above",
+        "optional profiling evidence a 128 8k component replay can corroborate the "
+        "attention crossover but it does not replace the matched product matrix "
+        "selection counter or disable only control above",
     }
 )
 APPROVED_REQUIRED_TRACE = re.compile(
@@ -106,8 +112,8 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-rope": "2.4 + Fast RoPE",
         "week2-swiglu": "2.4 + Fused SwiGLU",
         "week2-simd-matmul": "2.5 SIMD matrix prefill",
-        "week2-decode-attention": "2.6 Optional decode attention",
-        "week2-split-k": "2.7 Split-K prefill",
+        "week2-context-selected-attention": "2.6 Context-selected decode attention",
+        "week2-prefill-fused-gate-up": "2.7 Prefill-only fused gate+up SwiGLU",
         "mlx": "MLX",
     }
 
@@ -117,8 +123,8 @@ def test_week2_live_labels_follow_the_seven_day_book():
     assert "| 2.3 | Quantize the Model |" in readme
     assert "| 2.4 | Fused Model Kernels |" in readme
     assert "| 2.5 | SIMD-Matrix Prefill |" in readme
-    assert "| 2.6 (optional) | Workload-Conditioned Operator Lab |" in readme
-    assert "| 2.7 | Conditional Split-K and Final Decision |" in readme
+    assert "| 2.6 (optional) | Long-Context Dense-KV Decode Attention |" in readme
+    assert "| 2.7 | Fused Packed-W4 Gate+Up and SwiGLU |" in readme
     assert "./week2-02-benchmark-profile.md" in summary
     assert "./week2-03-quantize-model.md" in summary
     assert "./week2-04-fused-model-kernels.md" in summary
@@ -134,10 +140,10 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Kernels",
         "week2-05-simd-matrix-prefill.md": "# 🚧 Week 2 Day 5: SIMD-Matrix Prefill",
         "week2-06-operator-lab.md": (
-            "# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab"
+            "# 🚧 Week 2 Day 6 (Optional): Context-Selected Dense Decode Attention"
         ),
         "week2-07-split-k-prefill.md": (
-            "# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision"
+            "# 🚧 Week 2 Day 7: Prefill-Only Fused Packed-W4 Gate+Up/SwiGLU"
         ),
     }
     for filename, expected_heading in chapter_headings.items():
@@ -203,7 +209,6 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
             3: "week2-03-quantize-model.md",
             4: "week2-04-fused-model-kernels.md",
             5: "week2-05-simd-matrix-prefill.md",
-            6: "week2-06-operator-lab.md",
         }.items()
     }
 
@@ -211,7 +216,6 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
         3: ("kv-cache:decode:128", "quantized-matvec:decode:128"),
         4: ("quantized-matvec:decode:128", "swiglu:decode:128"),
         5: ("swiglu:prefill:128", "simd-matmul:prefill:128"),
-        6: ("simd-matmul:decode:128", "decode-attention:decode:128"),
     }
     local_capture_tokens = (
         "Xcode GPU capture",
@@ -230,7 +234,13 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
     assert "The re-profile then exposed normalization" in days[3]
     assert "Re-profiling then placed" in days[4]
     assert "Rerun the exact commands from the baseline section" in days[5]
-    assert "Continue to [Day 7]" in days[6]
+    day6 = (ROOT / "book/src/week2-06-operator-lab.md").read_text()
+    assert "pdm run bench-week2-progression" in day6
+    assert "--variant week2-context-selected-attention" in day6
+    assert "--disable-week2-context-selected-attention" in day6
+    assert "long-context-attention:decode:" not in day6
+    assert not any(token in day6 for token in local_capture_tokens)
+    assert "Continue to [Day 7]" in day6
 
 
 @pytest.mark.parametrize(
@@ -313,3 +323,530 @@ def test_historical_week2_artifact_keeps_original_labels():
         "week2-split-k": "2.7 Split-K prefill",
         "mlx": "MLX",
     }
+
+
+def test_matrix_defaults_cover_runnable_paired_context_points(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+        ],
+    )
+
+    args = progression.parse_args()
+
+    assert args.prompt_length == [128, 512, 2048, 8192]
+    assert args.output_len == 128
+    assert args.variant == ["week2-simd-matmul", "mlx"]
+    assert [
+        progression.prompt_classification(value) for value in args.prompt_length
+    ] == [
+        "micro/regression",
+        "product-context",
+        "product-context",
+        "product-context",
+    ]
+
+
+def test_matrix_accepts_explicit_mlx_only_native_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+            "--variant",
+            "mlx",
+            "--prompt-length",
+            "32640",
+        ],
+    )
+
+    args = progression.parse_args()
+
+    assert args.prompt_length == [32640]
+    assert args.variant == ["mlx"]
+    assert progression.prompt_classification(32640) == "native-product-endpoint"
+
+
+def test_matrix_rejects_course_variant_at_native_endpoint_before_work(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+            "--prompt-length",
+            "32640",
+        ],
+    )
+    monkeypatch.setattr(
+        progression,
+        "collect_host_metadata",
+        lambda: pytest.fail("host/model/timing work must not begin"),
+    )
+
+    with pytest.raises(SystemExit):
+        progression.main()
+
+    assert "32640 is available only for MLX" in capsys.readouterr().err
+
+
+def test_matrix_accepts_day5_and_candidate_course_pair(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench_course_progression.py",
+            "--solution",
+            "tiny_llm",
+            "--suite",
+            "week2",
+            "--matrix",
+            "--prefill-logits",
+            "last",
+            "--variant",
+            "week2-simd-matmul",
+            "--variant",
+            "week2-context-selected-attention",
+        ],
+    )
+
+    args = progression.parse_args()
+
+    assert args.variant == [
+        "week2-simd-matmul",
+        "week2-context-selected-attention",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    (
+        (("--prompt-length", "512"), "requires --matrix"),
+        (("--matrix", "--prefill-logits", "last"), "requires --suite week2"),
+        (
+            (
+                "--suite",
+                "week2",
+                "--matrix",
+                "--prefill-logits",
+                "last",
+                "--prompt-length",
+                "100000",
+            ),
+            "invalid choice",
+        ),
+        (
+            (
+                "--suite",
+                "week2",
+                "--matrix",
+                "--prefill-logits",
+                "last",
+                "--variant",
+                "week2-simd-matmul",
+            ),
+            "exactly two Week 2 variants",
+        ),
+        (
+            (
+                "--suite",
+                "week2",
+                "--matrix",
+                "--prefill-logits",
+                "last",
+                "--output-len",
+                "129",
+            ),
+            "exactly --output-len 128",
+        ),
+    ),
+)
+def test_matrix_selector_negative_cases_fail_closed(
+    monkeypatch, capsys, extra_args, message
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bench_course_progression.py", "--solution", "tiny_llm", *extra_args],
+    )
+
+    with pytest.raises(SystemExit):
+        progression.parse_args()
+
+    assert message in capsys.readouterr().err
+
+
+def test_product_metrics_and_spread_are_explicit_and_deterministic():
+    samples = [
+        progression.product_metrics(
+            progression.Throughput(prefill=512.0, decode=50.0, output=40.0),
+            512,
+        ),
+        progression.product_metrics(
+            progression.Throughput(prefill=256.0, decode=40.0, output=30.0),
+            512,
+        ),
+    ]
+
+    summary = progression.summarize_product_metrics(samples)
+
+    assert samples[0].TTFT_ms == 1000.0
+    assert samples[0].TPOT_ms == 20.0
+    assert summary["TTFT_ms"] == {
+        "median": 1500.0,
+        "minimum": 1000.0,
+        "maximum": 2000.0,
+        "spread": 1000.0,
+    }
+    assert summary["decode_tokens_per_second"]["spread"] == 10.0
+    with pytest.raises(ValueError, match="positive"):
+        progression.product_metrics(
+            progression.Throughput(prefill=0.0, decode=1.0, output=1.0),
+            128,
+        )
+
+
+def test_matrix_sample_uses_one_fresh_product_subprocess(monkeypatch, tmp_path):
+    observed = []
+
+    def fake_run(command, **kwargs):
+        observed.append((command, kwargs))
+        raw_output = Path(command[command.index("--json-output") + 1])
+        raw_output.write_text(
+            json.dumps(
+                {
+                    "dispatch_counters": {"context_selected_attention": 7},
+                    "metrics": {
+                        "output_tokens_per_second": 40.0,
+                        "prefill_tokens_per_second": 512.0,
+                        "decode_tokens_per_second": 50.0,
+                    },
+                }
+            )
+        )
+        return SimpleNamespace(
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    args = SimpleNamespace(
+        solution="tiny_llm",
+        model="qwen3-4b",
+        device="gpu",
+        input_len=128,
+        output_len=128,
+        warmup=2,
+        prefill_logits="last",
+        seed=0,
+        offline=True,
+    )
+    monkeypatch.setattr(progression.subprocess, "run", fake_run)
+
+    result = progression.run_variant(
+        tmp_path,
+        progression.VARIANTS_BY_KEY["week2-simd-matmul"],
+        args,
+        input_len=8192,
+    )
+
+    assert result == progression.Throughput(
+        prefill=512.0,
+        decode=50.0,
+        output=40.0,
+        dispatch_counters={"context_selected_attention": 7},
+    )
+    assert len(observed) == 1
+    command, kwargs = observed[0]
+    assert command[command.index("--min-input-len") + 1] == "8192"
+    assert command[command.index("--max-input-len") + 1] == "8192"
+    assert command[command.index("--min-output-len") + 1] == "128"
+    assert command[command.index("--max-output-len") + 1] == "128"
+    assert command[-2:] == ["--week2-checkpoint", "simd-matmul"]
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["env"]["HF_HUB_OFFLINE"] == "1"
+
+
+def test_matrix_json_schema_records_phase_metrics_and_fresh_process_order(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "matrix.json"
+    args = SimpleNamespace(
+        json_output=output,
+        model="qwen3-4b",
+        solution="tiny_llm",
+        suite="week2",
+        device="gpu",
+        input_len=128,
+        output_len=128,
+        warmup=1,
+        repeats=2,
+        seed=0,
+        prefill_logits="last",
+        offline=True,
+        cooldown_seconds=0.0,
+        variant=["week2-simd-matmul", "mlx"],
+        prompt_length=[128, 8192],
+        matrix=True,
+    )
+    calls = []
+
+    def fake_run(_root, variant, _args, prompt_tokens):
+        calls.append((prompt_tokens, variant.key))
+        return progression.Throughput(
+            prefill=float(prompt_tokens),
+            decode=50.0,
+            output=40.0,
+            dispatch_counters={"context_selected_attention": prompt_tokens},
+        )
+
+    monkeypatch.setattr(progression, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        progression,
+        "collect_host_metadata",
+        lambda: {"platform": "test", "machine": "arm64", "mlx_version": "test"},
+    )
+    monkeypatch.setattr(
+        progression,
+        "collect_source_metadata",
+        lambda _root: {"commit": "head", "tree": "tree", "tracked_dirty": False},
+    )
+    monkeypatch.setattr(progression, "run_variant", fake_run)
+
+    progression.main()
+    payload = json.loads(output.read_text())
+
+    assert payload["schema_version"] == 3
+    assert payload["evidence_kind"] == "single_request_product_matrix"
+    assert payload["process_isolation"] == "fresh_process_per_sample"
+    assert "no 100K+ product claim" in payload["context_boundary"]
+    assert payload["workload"]["prompt_lengths"] == [128, 8192]
+    assert payload["workload"]["decode_sample_tokens"] == 127
+    assert payload["generated_tokens"] == 128
+    assert payload["post_first_decode_intervals"] == 127
+    assert payload["native_context_tokens"] == 32768
+    assert payload["prompt_classification"] == {
+        "128": "micro/regression",
+        "8192": "product-context",
+    }
+    assert set(payload["metric_definitions"]) == {
+        "TTFT_ms",
+        "prefill_tokens_per_second",
+        "TPOT_ms",
+        "decode_tokens_per_second",
+        "output_tokens_per_second",
+    }
+    assert len(payload["results"]) == 4
+    assert all(len(result["samples"]) == 2 for result in payload["results"])
+    assert all(
+        "dispatch_counters" in sample
+        for result in payload["results"]
+        for sample in result["samples"]
+    )
+    assert len(calls) == 8
+    assert calls[:4] == [
+        (128, "week2-simd-matmul"),
+        (128, "mlx"),
+        (8192, "mlx"),
+        (8192, "week2-simd-matmul"),
+    ]
+
+
+def test_single_point_json_keeps_schema_two_and_legacy_shape(tmp_path, monkeypatch):
+    output = tmp_path / "single.json"
+    args = SimpleNamespace(
+        json_output=output,
+        model="qwen3-0.6b",
+        solution="tiny_llm",
+        suite="week2",
+        device="gpu",
+        input_len=128,
+        output_len=65,
+        warmup=0,
+        repeats=1,
+        seed=0,
+        prefill_logits="all",
+        offline=True,
+        cooldown_seconds=0.0,
+        variant=["week2-simd-matmul"],
+        prompt_length=[128],
+        matrix=False,
+    )
+    monkeypatch.setattr(progression, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        progression,
+        "collect_host_metadata",
+        lambda: {"platform": "test", "machine": "arm64", "mlx_version": "test"},
+    )
+    monkeypatch.setattr(
+        progression,
+        "collect_source_metadata",
+        lambda _root: {"commit": "head", "tree": "tree", "tracked_dirty": False},
+    )
+    monkeypatch.setattr(
+        progression,
+        "run_variant",
+        lambda *_args: progression.Throughput(10.0, 20.0, 15.0),
+    )
+
+    progression.main()
+    payload = json.loads(output.read_text())
+
+    assert payload["schema_version"] == 2
+    assert "matrix" not in payload["configuration"]
+    assert "prompt_lengths" not in payload["workload"]
+    assert payload["execution_order"] == [["week2-simd-matmul"]]
+    assert payload["results"]["week2-simd-matmul"]["median"] == {
+        "prefill": 10.0,
+        "decode": 20.0,
+        "output": 15.0,
+    }
+
+
+def test_matrix_help_names_runnable_pair_and_mlx_only_endpoint(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["bench_course_progression.py", "--help"])
+    with pytest.raises(SystemExit) as exited:
+        progression.parse_args()
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert exited.value.code == 0
+    assert "TTFT_ms" in help_text
+    assert "TPOT_ms" in help_text
+    assert "128, 512, 2048, and 8192" in help_text
+    assert "32640 is available only with --variant mlx" in help_text
+    assert "native 32768-token ceiling" in help_text
+
+
+def test_public_main_help_lists_only_current_week2_checkpoints():
+    result = subprocess.run(
+        [sys.executable, "main.py", "--help"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "context-selected-attention" in result.stdout
+    assert "prefill-fused-gate-up" in result.stdout
+    assert "decode-attention" not in result.stdout
+    assert "split-k" not in result.stdout
+    assert "long-context-attention" not in result.stdout
+    assert "fused-gate-up" not in bench.WEEK2_CHECKPOINTS
+
+
+@pytest.mark.parametrize(
+    ("legacy", "replacement"),
+    (
+        ("decode-attention", "context-selected-attention"),
+        ("long-context-attention", "context-selected-attention"),
+        ("split-k", "prefill-fused-gate-up"),
+        ("fused-gate-up", "prefill-fused-gate-up"),
+    ),
+)
+def test_public_main_legacy_checkpoint_reports_migration(legacy, replacement):
+    result = subprocess.run(
+        [sys.executable, "main.py", "--week2-checkpoint", legacy],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert f"{legacy!r} was replaced by {replacement!r}" in result.stderr
+
+
+def test_public_bench_help_lists_only_current_week2_checkpoints(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["bench.py", "--help"])
+    with pytest.raises(SystemExit) as exited:
+        bench.parse_args()
+    help_text = capsys.readouterr().out
+
+    assert exited.value.code == 0
+    assert "context-selected-attention" in help_text
+    assert "prefill-fused-gate-up" in help_text
+    assert "decode-attention" not in help_text
+    assert "split-k" not in help_text
+    assert "long-context-attention" not in help_text
+    assert "fused-gate-up" not in bench.WEEK2_CHECKPOINTS
+    assert "--disable-week2-context-selected-attention" in help_text
+    assert "--disable-week2-prefill-fused-gate-up" in help_text
+    assert "--disable-week2-long-context-attention" not in help_text
+    assert "--disable-week2-fused-gate-up" not in help_text
+
+
+@pytest.mark.parametrize(
+    ("legacy", "replacement"),
+    (
+        ("decode-attention", "context-selected-attention"),
+        ("long-context-attention", "context-selected-attention"),
+        ("split-k", "prefill-fused-gate-up"),
+        ("fused-gate-up", "prefill-fused-gate-up"),
+    ),
+)
+def test_public_bench_legacy_checkpoint_reports_migration(legacy, replacement):
+    result = subprocess.run(
+        [sys.executable, "-m", "benches.bench", "--week2-checkpoint", legacy],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert f"{legacy!r} was replaced by {replacement!r}" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "checkpoint", ("context-selected-attention", "prefill-fused-gate-up")
+)
+def test_public_bench_accepts_current_checkpoint(monkeypatch, checkpoint):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bench.py", "--week2-checkpoint", checkpoint],
+    )
+
+    assert bench.parse_args().week2_checkpoint == checkpoint
+
+
+def test_public_bench_unknown_checkpoint_lists_only_current_values():
+    result = subprocess.run(
+        [sys.executable, "-m", "benches.bench", "--week2-checkpoint", "unknown"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "unknown Week 2 checkpoint 'unknown'" in result.stderr
+    assert "context-selected-attention" in result.stderr
+    assert "prefill-fused-gate-up" in result.stderr
+    assert "decode-attention" not in result.stderr
+    assert "split-k" not in result.stderr
+    assert "long-context-attention" not in result.stderr
+    assert "fused-gate-up" not in bench.WEEK2_CHECKPOINTS

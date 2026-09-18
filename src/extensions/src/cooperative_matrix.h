@@ -56,16 +56,22 @@ struct CooperativeBlockMMA {
     ushort simdgroup_index;
     ushort lane_index;
 
-    METAL_FUNC CooperativeBlockMMA(ushort simdgroup, ushort lane) : simdgroup_index(simdgroup), lane_index(lane) {
+    METAL_FUNC CooperativeBlockMMA(ushort simdgroup, ushort lane) thread
+        : simdgroup_index(simdgroup), lane_index(lane) {
         // TODO(Week 2 Day 5): initialize every accumulator fragment to zero.
     }
 
-    METAL_FUNC void multiply_accumulate(threadgroup const T *left_tile, threadgroup const T *right_tile) {
+    METAL_FUNC void multiply_accumulate(
+        threadgroup const T *left_tile,
+        threadgroup const T *right_tile) thread {
         // TODO(Week 2 Day 5): load the four reduction fragments and call
         // simdgroup_multiply_accumulate for this SIMD group's 16x16 quadrant.
     }
 
-    METAL_FUNC void store_result_safe(device OutT *output, int output_stride, short2 valid_shape) const {
+    METAL_FUNC void store_result_safe(
+        device OutT *output,
+        int output_stride,
+        short2 valid_shape) const thread {
         // TODO(Week 2 Day 5): store the lane-owned elements with row/column
         // guards and cast once from the FP32 accumulators.
     }

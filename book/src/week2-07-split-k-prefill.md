@@ -1,139 +1,157 @@
-# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision
+# 🚧 Week 2 Day 7: Prefill-Only Fused Packed-W4 Gate+Up/SwiGLU
 
-Day 5 leaves a reusable 32×32×32 SIMD-matrix projection and an exact unsplit
-fallback. Day 6 is an optional branch and is not inherited here: the `split-k`
-checkpoint contains the Day 5 SIMD path plus Split-K, without decode attention.
+Day 5 makes packed-W4 projections efficient for matrix-shaped prefill. Gate
+and up now expose one more piece of shared work: they read the same activation,
+use the same group-of-128 packed layout, and feed SwiGLU immediately. You will
+combine those two projections with SwiGLU for a bounded prefill range while
+leaving decode and the down projection alone.
 
-Begin with an under-filled short shape, then return to the fixed 128×129
-product workload. Keep Split-K only for shapes where the same-workload evidence
-supports it.
+The earlier `fused-gate-up` checkpoint selected its fused primitive for decode
+as well as prefill. Its isolated row sweep recorded 84.10–88.91% improvements
+from 32 through 2,048 rows, but row 1 lost decisively. Routing decode through
+that losing shape made the product policy invalid. The replacement keeps the
+measured prefill range and makes row 1 an explicit fallback.
 
-## Why Split the Reduction Dimension?
+Day 7 begins from Day 5 and is independent of optional Day 6. Its public
+checkpoint is `prefill-fused-gate-up`. The operator benchmark keeps the
+`fused-gate-up` section name because it measures the primitive rather than a
+product dispatch policy.
 
-For
+## Task 1: Fix the Numerical Oracle
 
-$$
-C = A W^T,
-$$
+The learner-owned primitive is:
 
-the Day 5 grid spreads work across output rows and columns. When `M` is small
-and the Qwen projection width is narrow, it may launch too few independent
-threadgroups to fill the GPU. Split-K creates parallel work along the reduction
-dimension:
-
-```plain
-for each split s:
-    partial[s] = A[:, k_start(s):k_end(s)] @ W[:, k_start(s):k_end(s)].T
-
-C = sum(partial, axis=split)
+```python
+quantized_gate_up_swiglu(x, w_gate, w_up)
 ```
 
-Each split must align to the W4 group size, write to a disjoint partial plane,
-and accumulate its local dot product in FP32. A second kernel reduces the
-partial planes in FP32 and casts the final output to BF16.
+It returns one MLP hidden tensor:
 
-That extra parallelism also adds a dispatch, a temporary buffer, and another
-memory pass. Split-K is therefore a shape-conditioned schedule, not an
-automatic upgrade.
+```plain
+gate = fp32_projection(x, bf16_dequantize(w_gate))
+up = fp32_projection(x, bf16_dequantize(w_up))
+hidden = silu(gate) * up
+return bf16(hidden)
+```
 
-## Task 1: Freeze a Short-Shape Control
+Use BF16-dequantized weights, accumulate both projections and SwiGLU in FP32,
+and cast once at the end. Preserve Day 5's packed `uint32` W4 layout, four-bit
+codes, group size 128, transpose convention, scales, biases, and partial output
+tiles. The down projection consumes the returned hidden tensor separately; it
+does not belong in this fusion.
 
-First verify the inherited Day 5 path and record a 32-token attribution pair:
+Complete the learner-owned `quantized_gate_up_swiglu` wrapper, the existing
+`tiny_llm_ext::quantized_gate_up_swiglu` operation and
+`Week2QuantizedGateUpSwiGLU::eval_gpu` body, and the
+`week2_quantized_gate_up_swiglu` Metal kernel. Reuse that operation rather than
+adding another native entry point.
+
+Run the focused checkpoint after the primitive matches the deterministic
+oracle:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 7
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:prefill:32 --case split-k:prefill:32 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day7-short-attribution.json
 ```
 
-Capture the exact source, model, phase, token count, prompt rule, software, and
-device. Do not substitute a 128-token baseline for the 32-token candidate.
+The focused feedback covers the boundary rows 1/31/32/128/512/2,048/2,049,
+metadata and tail fallback, the row-1 route and counters, disable behavior, and
+the unchanged down projection. A passing numerical test does not show that the
+product should select the primitive.
 
-## Task 2: Reuse the Day 5 Tile for Each Partition
+## Task 2: Select Prefill, Never Decode
 
-Extend the existing quantized-matmul primitive rather than adding a parallel
-public operator. Reuse Day 5's loader, W4 dequantization, and matrix fragments
-inside each aligned K partition. Validate that:
+Implement `supports_prefill_fused_gate_up` and connect the policy in
+`Qwen3MLP.__call__`. Select the fused primitive only when all of these
+conditions hold:
 
-- every split begins and ends on a group-of-128 boundary;
-- partial planes are disjoint and cover the full reduction exactly once;
-- edge rows and columns are masked before load or store;
-- accumulation and reduction remain FP32;
-- `split_k <= 1` dispatches exactly to the Day 5 unsplit kernel.
+- the selector is enabled;
+- the flattened activation has `32 <= M <= 2048` rows and BF16 dtype;
+- gate and up have matching packed `uint32` W4 weights;
+- both use four-bit values, group size 128, BF16 scales and biases, and
+  identical input/output metadata; and
+- the output tiles, including a partial final tile, are valid.
 
-The tests grade public results, dtype and shape, valid partitioning, and the
-exact fallback. They do not require a private helper name, Metal symbol, or a
-particular split-count formula.
+Use separate gate, up, and SwiGLU for row 1 decode, rows 2–31, rows above 2K,
+unsupported metadata or layouts, invalid tails, and the disable control. Keep
+fused and separate counters independent. Disabling the checkpoint must restore
+the complete Day 5 route for every shape.
 
-## Task 3: Make Dispatch Explicit
+This policy makes no decode, 8K-or-larger prefill, down-projection, native-edge,
+other-model, or fleet claim.
 
-Expose the `split-k` checkpoint with an immutable feature set: packed W4,
-fused pointwise operators, SIMD prefill, no optional decode-attention branch,
-and Split-K only where its policy selects more than one partition.
+## Task 3: Measure the Operator Boundary
 
-Keep that public policy in `QuantizedMatmul::eval_gpu`; the supplied starter
-surface is `src/extensions/src/quantized_matmul.cpp`. Internal helper and Metal
-kernel names remain implementation choices.
-
-Keep the policy small and inspectable. Static dispatch can demonstrate that a
-Split-K and reduction kernel exist, but it cannot prove higher occupancy or a
-product speedup. Those claims require measured evidence.
-
-If you want to continue without Split-K, preserve `split_k <= 1` and the Day 5
-unsplit result. The chapter's learning outcome is the conditional decision,
-not an unconditional custom-kernel win.
-
-## Task 4: Re-profile the Short Shape
-
-Rerun the exact 32-token attribution command from Task 1 so the baseline and
-candidate differ only in schedule. In the checked M4 Pro example, Split-K
-reduced total attributed time by 4.87% and projection time by
-5.01%. Its trace exposed only static Split-K and reduction dispatches; no
-timeline or counter tree materialized, so no occupancy improvement was
-inferred.
-
-Write `keep`, `reject`, or `inconclusive` for the 32-token shape, then name the
-result that would reverse your decision. A sub-percent difference is not a
-strong conclusion without a larger sample.
-
-## Task 5: Close Week 2 at the Fixed Workload
-
-Return to the Day 5 unsplit checkpoint and compare it with Day 7 at the same
-Qwen3-4B 128×129 product control used throughout the week:
+Compare the fused primitive with Day 5's two `quantized_linear` projections
+plus `swiglu`. Use the same packed weights, inputs, synchronization, and
+execution order:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-simd-matmul --variant week2-split-k --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day7-final.json
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:prefill:128 --case split-k:prefill:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day7-final-attribution.json
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-4b \
+  --section fused-gate-up \
+  --context 32 --context 128 --context 512 --context 2048 \
+  --context-repeats 2 --warmup 12 --iterations 60 \
+  --json-output week2-day7-operator.json
 ```
 
-On the checked two-sample product control, prefill changed from 721.60 to
-718.36 tokens/s (-0.45%) and decode changed by +0.14%. That supports rejecting
-Split-K for this fixed 128-token product workload while conditionally retaining
-the short-shape experiment. It does not establish a portable crossover.
+The primitive passes its operator gate only if it improves by at least 5% at
+512 or 2K rows and moves in the favorable direction in at least three of the
+four 32/128/512/2K pairs. Keep row 1 in the correctness route as the decode
+safety point; do not average it into the prefill claim.
 
-Finish with the week's decision ledger:
+## Task 4: Close the Product Gate
+
+Generate exactly 128 output tokens and compare the full Day 5 and Day 7 models
+in balanced fresh processes. The 8K prompt must use separate gate/up/SwiGLU,
+which makes it a fallback and regression control rather than an eligible win:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
+  --variant week2-simd-matmul \
+  --variant week2-prefill-fused-gate-up \
+  --prompt-length 128 --prompt-length 512 \
+  --prompt-length 2048 --prompt-length 8192 \
+  --output-len 128 --warmup 2 --repeats 4 --prefill-logits last \
+  --json-output week2-day7-matrix.json
+
+pdm run bench-week2-progression --offline --solution tiny_llm --matrix \
+  --variant week2-simd-matmul \
+  --variant week2-prefill-fused-gate-up \
+  --prompt-length 128 --prompt-length 512 \
+  --prompt-length 2048 --prompt-length 8192 \
+  --output-len 128 --warmup 2 --repeats 4 --prefill-logits last \
+  --disable-week2-prefill-fused-gate-up \
+  --json-output week2-day7-disabled.json
+```
+
+Token 1 belongs to TTFT, and TPOT covers the remaining 127 decode intervals.
+Apply the complete fixed gate:
+
+1. the operator gate above passes;
+2. median TTFT improves by at least 5% at 512 or 2K;
+3. fused dispatch is zero for every row-1 decode;
+4. no median TPOT at 128/512/2K/8K regresses by more than 2%;
+5. 8K prefill uses the separate fallback and its median TTFT does not regress
+   by more than 2%; and
+6. disabling the selector removes the eligible-prefill gain.
+
+Keep the policy only if every condition holds. Otherwise record `reject` or
+`inconclusive` and retain Day 5's separate route. Performance for the
+integrated checkpoint is pending until this exact operator and product matrix
+is measured.
+
+Finish the week with a causal ledger:
 
 | Step | Evidence that selected it | Same-workload result | Decision and falsifier |
 |---|---|---|---|
 | KV cache | Full-prefix recomputation | Matched Week 1 versus cache | Your observation |
 | Packed W4 | Cached decode attribution | Repeated decode product and attribution | Your observation |
 | Fused pointwise | Post-W4 re-profile | Repeated decode product and attribution | Your observation |
-| SIMD prefill | Day 4 128-token prefill profile | Repeated prefill product and attribution | Your observation |
-| Optional operator lab | Explicit secondary workload | Before/after/fallback record | `keep`, `reject`, `inconclusive`, or skipped |
-| Split-K | Under-filled 32-token projection | Short control plus fixed 128×129 control | One decision per shape |
+| SIMD prefill | Matrix-shaped packed projections | Repeated prefill product and attribution | Your observation |
+| Context-selected attention | Attention share grows with context | 128/512/2K/8K matrix plus dispatch and disable controls | `keep`, `reject`, `inconclusive`, or skipped |
+| Prefill-fused gate+up | Shared-input MLP cost and losing row 1 | 32/128/512/2K operator pairs plus product controls | `keep`, `reject`, or `inconclusive` |
 
-Close the week with the causal story: what dominated, what changed, what the
-identical remeasurement showed, and what you chose not to claim.
+Close with what dominated at short and long context, what the matched reruns
+showed, and which shapes you deliberately left on the readable route.
 
 {{#include copyright.md}}

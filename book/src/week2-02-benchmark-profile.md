@@ -4,7 +4,7 @@ Day 1 leaves you with a cached BF16 model and a working `kv-cache` checkpoint.
 Day 2 does not add another model operator. The supplied benchmark and portable
 attribution runners own request generation, warmups, synchronization, phase
 timing, and cache release. Your job is to freeze one like-for-like workload,
-identify its dominant operator category, and write the short decision that
+identify its dominant model component, and write the short decision that
 chooses the next change.
 
 Start with the focused benchmark-lifecycle check:
@@ -15,7 +15,7 @@ pdm run test --week 2 --day 2
 
 When it passes, record one matched `tiny_llm`/MLX pair and one attribution
 result, then write the short decision that follows from them. Those portable
-JSON records are the Day 2 checkpoint. Metal capture remains optional and
+JSON records are the Day 2 checkpoint. Metal capture is optional and
 never gates the next chapter.
 
 ## Benchmark the Cached Model
@@ -53,12 +53,12 @@ your solution and MLX:
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint kv-cache --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2 \
+  --min-output-len 128 --max-output-len 128 --warmup 2 \
   --prefill-logits last
 
 pdm run bench --solution mlx --loader week2 --model qwen3-4b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2 \
+  --min-output-len 128 --max-output-len 128 --warmup 2 \
   --prefill-logits last
 ```
 
@@ -71,7 +71,7 @@ Or run the cumulative ladder in fresh processes:
 pdm run bench-week2-progression --offline --repeats 2 \
   --solution tiny_llm \
   --variant week2-kv-cache --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --model qwen3-4b --input-len 128 --output-len 128 --warmup 2 \
   --prefill-logits last --json-output week2-baseline.json
 ```
 
@@ -112,18 +112,30 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 
 The result identifies its source, checkpoint, phase, token count, prompt rule,
 software, host, category medians, and category shares without depending on a
-private function name or Metal symbol. On the checked M4 Pro run, dense
-projections accounted for 81.5% of attributed cached-decode time. That bounded
-observation selected packed W4 projections for Day 3; another device or shape
-may point somewhere else.
+private function name or Metal symbol. The old output combined attention and
+MLP projections into one bucket, so it could verify the replay plumbing but
+could not explain how those components cross over with context. The current
+runner exposes the separate model components in public `--help`. To compare
+the short control with the 8K point, run:
+
+```bash
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case kv-cache:prefill:128 --case kv-cache:decode:128 \
+  --case kv-cache:prefill:8192 --case kv-cache:decode:8192 \
+  --warmup 4 --iterations 12 \
+  --json-output week2-day2-components.json
+```
+
+These are synchronized isolated shares, not end-to-end or production traffic
+shares. Use the matched full-request matrix for the product decision.
 
 Turn the observation into a decision with three sentences:
 
-1. “Dense projections dominate this exact cached-decode workload.”
-2. “Packing W4 weights and changing only the selected projection path should
-   reduce that category and improve matched decode.”
-3. “I will reject or revise the hypothesis if projection time does not fall or
-   complete-model decode regresses under the same workload.”
+1. “This model component dominates this exact phase and context.”
+2. “Changing only its bounded implementation should reduce that component and
+   improve the matched full request.”
+3. “I will reject or revise the hypothesis if targeted time does not fall or
+   the full request regresses under the same workload.”
 
 Substitute the category you observed for the checked example. Your required
 work ends with the benchmark, attribution, and decision record. The
