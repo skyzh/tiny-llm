@@ -104,14 +104,27 @@ def _assert_required_progression_is_profile_free(chapter: str, day: int) -> None
 
 def test_week2_live_labels_follow_the_seven_day_book():
     labels = {variant.key: variant.label for variant in WEEK2_VARIANTS}
+    assert tuple(labels) == (
+        "week1",
+        "week2-kv-cache",
+        "week2-quantized-matvec",
+        "week2-simd-matmul",
+        "week2-rmsnorm",
+        "week2-rope",
+        "week2-swiglu",
+        "week2-shared-input-qkv",
+        "week2-shared-input-gate-up-swiglu",
+        "week2-io-aware-dense-attention",
+        "mlx",
+    )
     assert labels == {
         "week1": "Week 1 readable",
         "week2-kv-cache": "2.1 KV cache",
         "week2-quantized-matvec": "2.3 Quantized matvec",
-        "week2-rmsnorm": "2.4 Fast RMSNorm",
-        "week2-rope": "2.4 + Fast RoPE",
-        "week2-swiglu": "2.4 + Fused SwiGLU",
-        "week2-simd-matmul": "2.5 SIMD matrix prefill",
+        "week2-simd-matmul": "2.4 SIMD matrix prefill",
+        "week2-rmsnorm": "2.5 Fast RMSNorm",
+        "week2-rope": "2.5 + Fast RoPE",
+        "week2-swiglu": "2.5 + Fused SwiGLU",
         "week2-shared-input-qkv": "2.6 Shared-input QKV",
         "week2-shared-input-gate-up-swiglu": "2.6 Shared-input gate+up/SwiGLU",
         "week2-io-aware-dense-attention": "2.7 I/O-aware dense attention",

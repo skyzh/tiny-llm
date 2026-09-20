@@ -16,10 +16,10 @@ from model_names import shortcut_name_to_full_name
 WEEK2_CHECKPOINTS = (
     "kv-cache",
     "quantized-matvec",
+    "simd-matmul",
     "rmsnorm",
     "rope",
     "swiglu",
-    "simd-matmul",
     "shared-input-qkv",
     "shared-input-gate-up-swiglu",
     "io-aware-dense-attention",

@@ -212,10 +212,10 @@ def test_default_attribution_and_model_expose_only_canonical_checkpoints():
         assert implementation.checkpoints == (
             "kv-cache",
             "quantized-matvec",
+            "simd-matmul",
             "rmsnorm",
             "rope",
             "swiglu",
-            "simd-matmul",
             "shared-input-qkv",
             "shared-input-gate-up-swiglu",
             "io-aware-dense-attention",

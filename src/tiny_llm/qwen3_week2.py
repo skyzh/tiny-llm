@@ -38,17 +38,22 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
     {
         "kv-cache": Week2CheckpointFeatures(),
         "quantized-matvec": Week2CheckpointFeatures(quantized_weights=True),
-        "rmsnorm": Week2CheckpointFeatures(quantized_weights=True, fast_rms_norm=True),
-        "rope": Week2CheckpointFeatures(
-            quantized_weights=True, fast_rms_norm=True, fast_rope=True
+        "simd-matmul": Week2CheckpointFeatures(
+            quantized_weights=True,
+            simdgroup_matmul=True,
         ),
-        "swiglu": Week2CheckpointFeatures(
+        "rmsnorm": Week2CheckpointFeatures(
+            quantized_weights=True,
+            fast_rms_norm=True,
+            simdgroup_matmul=True,
+        ),
+        "rope": Week2CheckpointFeatures(
             quantized_weights=True,
             fast_rms_norm=True,
             fast_rope=True,
-            fast_swiglu=True,
+            simdgroup_matmul=True,
         ),
-        "simd-matmul": Week2CheckpointFeatures(
+        "swiglu": Week2CheckpointFeatures(
             quantized_weights=True,
             fast_rms_norm=True,
             fast_rope=True,
