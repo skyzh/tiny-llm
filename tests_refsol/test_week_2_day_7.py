@@ -15,6 +15,8 @@ from .tiny_llm_base import (
     tiny_llm_ext,
 )
 from .utils import assert_allclose, tiny_qwen3_mlx_model
+from tiny_llm_ref.quantize import quantized_linear
+from tiny_llm_ref.week2_kernels import swiglu
 
 
 HAS_REFERENCE_EXTENSION = hasattr(tiny_llm_ext, "quantized_gate_up_swiglu")
@@ -152,7 +154,7 @@ def test_io_aware_wrapper_rejects_rank_dtype_and_mask_before_dispatch():
     not HAS_REFERENCE_EXTENSION,
     reason="Reference extension build requires the optional Xcode Metal Toolchain",
 )
-@pytest.mark.parametrize("rows", (1, 33, 64))
+@pytest.mark.parametrize("rows", (33, 64))
 def test_shared_gate_up_matches_separate_projection_oracle_gpu(rows):
     mx.random.seed(2)
     gate = _quantized_weights()
@@ -162,6 +164,25 @@ def test_shared_gate_up_matches_separate_projection_oracle_gpu(rows):
     expected = _fused_gate_up_oracle(x, gate, up)
     assert result.shape == (rows, 136)
     assert_allclose(result, expected, mx.bfloat16, atol=1e-2, rtol=1e-3)
+
+
+@pytest.mark.skipif(
+    not HAS_REFERENCE_EXTENSION,
+    reason="Reference extension build requires the optional Xcode Metal Toolchain",
+)
+@pytest.mark.parametrize("seed", (2, 7))
+@pytest.mark.parametrize("output_dim", (128, 136))
+def test_shared_gate_up_decode_matches_separate_bf16_schedule_gpu(seed, output_dim):
+    mx.random.seed(seed)
+    gate = _quantized_weights(output_dim)
+    up = _quantized_weights(output_dim)
+    x = mx.random.normal((1, 128)).astype(mx.bfloat16)
+
+    result = quantized_gate_up_swiglu(x, gate, up)
+    expected = swiglu(quantized_linear(x, gate), quantized_linear(x, up))
+
+    assert result.shape == (1, output_dim)
+    assert mx.array_equal(result, expected).item()
 
 
 @pytest.mark.skipif(

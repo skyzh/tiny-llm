@@ -149,6 +149,106 @@ template <typename T>
     const int packed_cols = input_dim / values_per_pack;
     const int groups_per_output = input_dim / group_size;
 
+    // Decode must follow the same BF16 projection schedule as the ordinary
+    // Week 2 matvec path. One SIMD group owns eight adjacent outputs, loads
+    // each 16-value activation slice once, and reuses it for both projections.
+    // This remains one shared-input operation while keeping incremental model
+    // calls compatible with the inherited separate-projection checkpoint.
+    if (rows == 1) {
+        constexpr int packs_per_lane = 2;
+        constexpr int values_per_lane = values_per_pack * packs_per_lane;
+        constexpr int outputs_per_simdgroup = 8;
+        const int decode_column_base =
+            column_base + simdgroup * outputs_per_simdgroup;
+        float gate_sums[outputs_per_simdgroup] = {0.0f};
+        float up_sums[outputs_per_simdgroup] = {0.0f};
+
+        for (int packed_col = lane * packs_per_lane;
+             packed_col < packed_cols;
+             packed_col += 32 * packs_per_lane) {
+            const int group = packed_col / (group_size / values_per_pack);
+            float scaled_activations[values_per_lane];
+            float activation_sum = 0.0f;
+            #pragma clang loop unroll(full)
+            for (int pack = 0; pack < packs_per_lane; ++pack) {
+                const int activation_offset =
+                    (packed_col + pack) * values_per_pack;
+                #pragma clang loop unroll(full)
+                for (int value = 0; value < values_per_pack; ++value) {
+                    const int local = pack * values_per_pack + value;
+                    const float activation =
+                        static_cast<float>(x[activation_offset + value]);
+                    activation_sum += activation;
+                    scaled_activations[local] = activation /
+                        static_cast<float>(1 << ((value & 3) * 4));
+                }
+            }
+
+            #pragma clang loop unroll(full)
+            for (int output = 0; output < outputs_per_simdgroup; ++output) {
+                const int column = decode_column_base + output;
+                if (column >= output_dim) continue;
+                const int parameter_index = column * groups_per_output + group;
+                const float gate_scale =
+                    static_cast<float>(gate_scales[parameter_index]);
+                const float gate_bias =
+                    static_cast<float>(gate_biases[parameter_index]);
+                const float up_scale =
+                    static_cast<float>(up_scales[parameter_index]);
+                const float up_bias =
+                    static_cast<float>(up_biases[parameter_index]);
+                const device uint16_t* gate_packed =
+                    reinterpret_cast<const device uint16_t*>(
+                        gate_weight + column * packed_cols + packed_col);
+                const device uint16_t* up_packed =
+                    reinterpret_cast<const device uint16_t*>(
+                        up_weight + column * packed_cols + packed_col);
+                float gate_dot = 0.0f;
+                float up_dot = 0.0f;
+                #pragma clang loop unroll(full)
+                for (int item = 0; item < values_per_lane / 4; ++item) {
+                    const uint16_t gate_values = gate_packed[item];
+                    const uint16_t up_values = up_packed[item];
+                    const int local = item * 4;
+                    gate_dot +=
+                        scaled_activations[local] * (gate_values & 0x000f) +
+                        scaled_activations[local + 1] * (gate_values & 0x00f0) +
+                        scaled_activations[local + 2] * (gate_values & 0x0f00) +
+                        scaled_activations[local + 3] * (gate_values & 0xf000);
+                    up_dot +=
+                        scaled_activations[local] * (up_values & 0x000f) +
+                        scaled_activations[local + 1] * (up_values & 0x00f0) +
+                        scaled_activations[local + 2] * (up_values & 0x0f00) +
+                        scaled_activations[local + 3] * (up_values & 0xf000);
+                }
+                gate_sums[output] +=
+                    gate_scale * gate_dot + gate_bias * activation_sum;
+                up_sums[output] +=
+                    up_scale * up_dot + up_bias * activation_sum;
+            }
+        }
+
+        #pragma clang loop unroll(full)
+        for (int output = 0; output < outputs_per_simdgroup; ++output) {
+            gate_sums[output] = simd_sum(gate_sums[output]);
+            up_sums[output] = simd_sum(up_sums[output]);
+        }
+        if (lane == 0) {
+            #pragma clang loop unroll(full)
+            for (int output = 0; output < outputs_per_simdgroup; ++output) {
+                const int column = decode_column_base + output;
+                if (column >= output_dim) continue;
+                // The separate path stores each projection in BF16 before
+                // SwiGLU. Reproduce that public numerical boundary here.
+                const float gate = static_cast<float>(T(gate_sums[output]));
+                const float up = static_cast<float>(T(up_sums[output]));
+                out[column] =
+                    static_cast<T>((gate / (1.0f + exp(-gate))) * up);
+            }
+        }
+        return;
+    }
+
     threadgroup T activation_tile[block * padded_reduction];
     threadgroup T gate_tile[block * padded_reduction];
     threadgroup T up_tile[block * padded_reduction];
@@ -408,6 +508,135 @@ template <typename T>
     const int packed_cols = input_dim / values_per_pack;
     const int groups_per_output = input_dim / group_size;
     const int total_dim = q_dim + k_dim + v_dim;
+
+    // Incremental decode uses the ordinary Week 2 matvec accumulation order,
+    // but computes Q, K, and V in one operation from each shared activation
+    // slice. This preserves genuine shared-input dispatch while matching the
+    // inherited separate-projection BF16 checkpoint exactly.
+    if (rows == 1) {
+        constexpr int packs_per_lane = 2;
+        constexpr int values_per_lane = values_per_pack * packs_per_lane;
+        constexpr int outputs_per_simdgroup = 8;
+        const int decode_column_base =
+            column_base + simdgroup * outputs_per_simdgroup;
+        float q_sums[outputs_per_simdgroup] = {0.0f};
+        float k_sums[outputs_per_simdgroup] = {0.0f};
+        float v_sums[outputs_per_simdgroup] = {0.0f};
+
+        for (int packed_col = lane * packs_per_lane;
+             packed_col < packed_cols;
+             packed_col += 32 * packs_per_lane) {
+            const int group = packed_col / (group_size / values_per_pack);
+            float scaled_activations[values_per_lane];
+            float activation_sum = 0.0f;
+            #pragma clang loop unroll(full)
+            for (int pack = 0; pack < packs_per_lane; ++pack) {
+                const int activation_offset =
+                    (packed_col + pack) * values_per_pack;
+                #pragma clang loop unroll(full)
+                for (int value = 0; value < values_per_pack; ++value) {
+                    const int local = pack * values_per_pack + value;
+                    const float activation =
+                        static_cast<float>(x[activation_offset + value]);
+                    activation_sum += activation;
+                    scaled_activations[local] = activation /
+                        static_cast<float>(1 << ((value & 3) * 4));
+                }
+            }
+
+            #pragma clang loop unroll(full)
+            for (int output = 0; output < outputs_per_simdgroup; ++output) {
+                const int column = decode_column_base + output;
+                const bool valid_q = column < q_dim;
+                const bool valid_k = column < k_dim;
+                const bool valid_v = column < v_dim;
+                if (!valid_q && !valid_k && !valid_v) continue;
+
+                float q_dot = 0.0f;
+                float k_dot = 0.0f;
+                float v_dot = 0.0f;
+                const device uint16_t* q_packed = valid_q
+                    ? reinterpret_cast<const device uint16_t*>(
+                        q_weight + column * packed_cols + packed_col)
+                    : nullptr;
+                const device uint16_t* k_packed = valid_k
+                    ? reinterpret_cast<const device uint16_t*>(
+                        k_weight + column * packed_cols + packed_col)
+                    : nullptr;
+                const device uint16_t* v_packed = valid_v
+                    ? reinterpret_cast<const device uint16_t*>(
+                        v_weight + column * packed_cols + packed_col)
+                    : nullptr;
+                #pragma clang loop unroll(full)
+                for (int item = 0; item < values_per_lane / 4; ++item) {
+                    const int local = item * 4;
+                    if (valid_q) {
+                        const uint16_t weights = q_packed[item];
+                        q_dot +=
+                            scaled_activations[local] * (weights & 0x000f) +
+                            scaled_activations[local + 1] * (weights & 0x00f0) +
+                            scaled_activations[local + 2] * (weights & 0x0f00) +
+                            scaled_activations[local + 3] * (weights & 0xf000);
+                    }
+                    if (valid_k) {
+                        const uint16_t weights = k_packed[item];
+                        k_dot +=
+                            scaled_activations[local] * (weights & 0x000f) +
+                            scaled_activations[local + 1] * (weights & 0x00f0) +
+                            scaled_activations[local + 2] * (weights & 0x0f00) +
+                            scaled_activations[local + 3] * (weights & 0xf000);
+                    }
+                    if (valid_v) {
+                        const uint16_t weights = v_packed[item];
+                        v_dot +=
+                            scaled_activations[local] * (weights & 0x000f) +
+                            scaled_activations[local + 1] * (weights & 0x00f0) +
+                            scaled_activations[local + 2] * (weights & 0x0f00) +
+                            scaled_activations[local + 3] * (weights & 0xf000);
+                    }
+                }
+                if (valid_q) {
+                    const int parameter = column * groups_per_output + group;
+                    q_sums[output] +=
+                        static_cast<float>(q_scales[parameter]) * q_dot +
+                        static_cast<float>(q_biases[parameter]) * activation_sum;
+                }
+                if (valid_k) {
+                    const int parameter = column * groups_per_output + group;
+                    k_sums[output] +=
+                        static_cast<float>(k_scales[parameter]) * k_dot +
+                        static_cast<float>(k_biases[parameter]) * activation_sum;
+                }
+                if (valid_v) {
+                    const int parameter = column * groups_per_output + group;
+                    v_sums[output] +=
+                        static_cast<float>(v_scales[parameter]) * v_dot +
+                        static_cast<float>(v_biases[parameter]) * activation_sum;
+                }
+            }
+        }
+
+        #pragma clang loop unroll(full)
+        for (int output = 0; output < outputs_per_simdgroup; ++output) {
+            q_sums[output] = simd_sum(q_sums[output]);
+            k_sums[output] = simd_sum(k_sums[output]);
+            v_sums[output] = simd_sum(v_sums[output]);
+        }
+        if (lane == 0) {
+            #pragma clang loop unroll(full)
+            for (int output = 0; output < outputs_per_simdgroup; ++output) {
+                const int column = decode_column_base + output;
+                if (column < q_dim) out[column] = static_cast<T>(q_sums[output]);
+                if (column < k_dim) {
+                    out[q_dim + column] = static_cast<T>(k_sums[output]);
+                }
+                if (column < v_dim) {
+                    out[q_dim + k_dim + column] = static_cast<T>(v_sums[output]);
+                }
+            }
+        }
+        return;
+    }
 
     threadgroup T activation_tile[block * padded_reduction];
     threadgroup T q_tile[block * padded_reduction];

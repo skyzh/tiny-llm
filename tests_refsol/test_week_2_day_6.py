@@ -13,6 +13,7 @@ from .tiny_llm_base import (
     tiny_llm_ext,
 )
 from .utils import assert_allclose, tiny_qwen3_mlx_model
+from tiny_llm_ref.quantize import quantized_linear
 
 
 HAS_SHARED_INPUT_QKV = hasattr(tiny_llm_ext, "quantized_qkv")
@@ -158,7 +159,7 @@ def test_attention_dispatch_selects_shared_or_separate_projection(monkeypatch):
     not HAS_SHARED_INPUT_QKV,
     reason="Reference extension build requires the optional Xcode Metal Toolchain",
 )
-@pytest.mark.parametrize("rows", (1, 33, 64))
+@pytest.mark.parametrize("rows", (33, 64))
 def test_shared_input_qkv_matches_three_separate_projections_gpu(rows):
     mx.random.seed(7)
     q = _quantized_weights(136)
@@ -177,3 +178,24 @@ def test_shared_input_qkv_matches_three_separate_projections_gpu(rows):
         assert_allclose(result, oracle, mx.bfloat16, atol=1e-2, rtol=1e-3)
     # This catches a projection-order mutation even when all three shapes happen to fit.
     assert not mx.array_equal(actual[1], actual[2][:, :64]).item()
+
+
+@pytest.mark.skipif(
+    not HAS_SHARED_INPUT_QKV,
+    reason="Reference extension build requires the optional Xcode Metal Toolchain",
+)
+@pytest.mark.parametrize("seed", (2, 7))
+@pytest.mark.parametrize("dimensions", ((128, 64, 64), (136, 64, 72)))
+def test_shared_input_qkv_decode_matches_separate_bf16_schedule_gpu(seed, dimensions):
+    mx.random.seed(seed)
+    q, k, v = tuple(_quantized_weights(size) for size in dimensions)
+    x = mx.random.normal((1, 128)).astype(mx.bfloat16)
+
+    actual = quantized_qkv(x, q, k, v)
+    expected = tuple(quantized_linear(x, weight) for weight in (q, k, v))
+
+    assert tuple(item.shape for item in actual) == tuple(
+        (1, size) for size in dimensions
+    )
+    for result, oracle in zip(actual, expected, strict=True):
+        assert mx.array_equal(result, oracle).item()
