@@ -26,6 +26,19 @@ mx::array swiglu(const mx::array &, const mx::array &, mx::StreamOrDevice) {
     checkpoint_todo("swiglu", "Week 2, Day 4");
 }
 
+// Week 2 shared-input fusion.
+mx::array quantized_gate_up_swiglu(const mx::array &, const mx::array &, const mx::array &, const mx::array &,
+                                   const mx::array &, const mx::array &, const mx::array &, int, int,
+                                   mx::StreamOrDevice) {
+    checkpoint_todo("quantized_gate_up_swiglu", "Week 2 shared-input fusion");
+}
+
+mx::array quantized_qkv(const mx::array &, const mx::array &, const mx::array &, const mx::array &, const mx::array &,
+                        const mx::array &, const mx::array &, const mx::array &, const mx::array &, const mx::array &,
+                        int, int, mx::StreamOrDevice) {
+    checkpoint_todo("quantized_qkv", "Week 2 shared-input fusion");
+}
+
 void Week2RMSNorm::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
     checkpoint_todo("Week2RMSNorm::eval_cpu", "Week 2, Day 4");
 }
@@ -50,18 +63,34 @@ void Week2SwiGLU::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array
     checkpoint_todo("Week2SwiGLU::eval_gpu", "Week 2, Day 4");
 }
 
-// Week 2, Day 6.
+void Week2QuantizedGateUpSwiGLU::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    checkpoint_todo("Week2QuantizedGateUpSwiGLU::eval_cpu", "Week 2 shared-input fusion");
+}
+
+void Week2QuantizedGateUpSwiGLU::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    checkpoint_todo("Week2QuantizedGateUpSwiGLU::eval_gpu", "Week 2 shared-input fusion");
+}
+
+void Week2QuantizedQKV::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    checkpoint_todo("Week2QuantizedQKV::eval_cpu", "Week 2 shared-input fusion");
+}
+
+void Week2QuantizedQKV::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    checkpoint_todo("Week2QuantizedQKV::eval_gpu", "Week 2 shared-input fusion");
+}
+
+// Week 2 I/O-aware dense attention.
 mx::array decode_attention(const mx::array &, const mx::array &, const mx::array &, const mx::array &, float, bool,
                            bool, int, int, mx::StreamOrDevice) {
-    checkpoint_todo("decode_attention", "Week 2, Day 6");
+    checkpoint_todo("decode_attention", "Week 2 I/O-aware dense attention");
 }
 
 void Week2DecodeAttention::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
-    checkpoint_todo("Week2DecodeAttention::eval_cpu", "Week 2, Day 6");
+    checkpoint_todo("Week2DecodeAttention::eval_cpu", "Week 2 I/O-aware dense attention");
 }
 
 void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
-    checkpoint_todo("Week2DecodeAttention::eval_gpu", "Week 2, Day 6");
+    checkpoint_todo("Week2DecodeAttention::eval_gpu", "Week 2 I/O-aware dense attention");
 }
 
 }  // namespace tiny_llm_ext

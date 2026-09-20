@@ -54,6 +54,13 @@ mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::S
 mx::array rope(const mx::array &x, const mx::array &offsets, int dims, float base, bool traditional,
                mx::StreamOrDevice s = {});
 mx::array swiglu(const mx::array &gate, const mx::array &up, mx::StreamOrDevice s = {});
+mx::array quantized_gate_up_swiglu(const mx::array &x, const mx::array &gate_scales, const mx::array &gate_biases,
+                                   const mx::array &gate_weight, const mx::array &up_scales, const mx::array &up_biases,
+                                   const mx::array &up_weight, int group_size, int bits, mx::StreamOrDevice s = {});
+mx::array quantized_qkv(const mx::array &x, const mx::array &q_scales, const mx::array &q_biases,
+                        const mx::array &q_weight, const mx::array &k_scales, const mx::array &k_biases,
+                        const mx::array &k_weight, const mx::array &v_scales, const mx::array &v_biases,
+                        const mx::array &v_weight, int group_size, int bits, mx::StreamOrDevice s = {});
 
 class Week2RMSNorm : public mx::Primitive {
 public:
@@ -98,6 +105,31 @@ public:
         throw std::runtime_error("Week2SwiGLU has no vmap implementation.");
     }
     const char *name() const override { return "Week2SwiGLU"; }
+};
+
+// Week 2, Day 7: fuse packed gate/up projection and SwiGLU.
+class Week2QuantizedGateUpSwiGLU : public mx::Primitive {
+public:
+    explicit Week2QuantizedGateUpSwiGLU(mx::Stream stream) : mx::Primitive(stream) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2QuantizedGateUpSwiGLU has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2QuantizedGateUpSwiGLU"; }
+};
+
+class Week2QuantizedQKV : public mx::Primitive {
+public:
+    explicit Week2QuantizedQKV(mx::Stream stream) : mx::Primitive(stream) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2QuantizedQKV has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2QuantizedQKV"; }
 };
 
 // Week 2, Day 6: implement online-softmax decode attention.

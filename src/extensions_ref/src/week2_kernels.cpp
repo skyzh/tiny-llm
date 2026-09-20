@@ -62,6 +62,69 @@ mx::array swiglu(const mx::array &gate, const mx::array &up, mx::StreamOrDevice 
     return mx::array(gate.shape(), gate.dtype(), std::make_shared<Week2SwiGLU>(to_stream(s)), {gate, up});
 }
 
+mx::array quantized_gate_up_swiglu(const mx::array &x, const mx::array &gate_scales, const mx::array &gate_biases,
+                                   const mx::array &gate_weight, const mx::array &up_scales, const mx::array &up_biases,
+                                   const mx::array &up_weight, int group_size, int bits, mx::StreamOrDevice s) {
+    if (x.dtype() != mx::bfloat16 || gate_scales.dtype() != mx::bfloat16 || gate_biases.dtype() != mx::bfloat16 ||
+        up_scales.dtype() != mx::bfloat16 || up_biases.dtype() != mx::bfloat16) {
+        throw std::runtime_error("quantized_gate_up_swiglu: input, scales, and biases must be bfloat16");
+    }
+    if (gate_weight.dtype() != mx::uint32 || up_weight.dtype() != mx::uint32) {
+        throw std::runtime_error("quantized_gate_up_swiglu: packed weights must be uint32");
+    }
+    if (x.ndim() != 2 || gate_weight.ndim() != 2 || up_weight.ndim() != 2 || group_size != 128 || bits != 4) {
+        throw std::runtime_error("quantized_gate_up_swiglu: expected 2D input and 4-bit group-128 weights");
+    }
+    const int rows = x.shape()[0];
+    const int input_dim = x.shape()[1];
+    const int output_dim = gate_weight.shape()[0];
+    if (rows <= 0 || rows > 2048 || output_dim <= 0 || input_dim % group_size != 0 ||
+        gate_weight.shape() != up_weight.shape() || gate_weight.shape()[1] != input_dim / (32 / bits) ||
+        gate_scales.shape() != gate_biases.shape() || up_scales.shape() != up_biases.shape() ||
+        gate_scales.shape() != up_scales.shape() || gate_scales.ndim() != 2 || gate_scales.shape()[0] != output_dim ||
+        gate_scales.shape()[1] != input_dim / group_size) {
+        throw std::runtime_error("quantized_gate_up_swiglu: incompatible input or quantization metadata shapes");
+    }
+    auto output_shape = x.shape();
+    output_shape[1] = output_dim;
+    return mx::array(output_shape, mx::bfloat16, std::make_shared<Week2QuantizedGateUpSwiGLU>(to_stream(s)),
+                     {x, gate_scales, gate_biases, gate_weight, up_scales, up_biases, up_weight});
+}
+
+mx::array quantized_qkv(const mx::array &x, const mx::array &q_scales, const mx::array &q_biases,
+                        const mx::array &q_weight, const mx::array &k_scales, const mx::array &k_biases,
+                        const mx::array &k_weight, const mx::array &v_scales, const mx::array &v_biases,
+                        const mx::array &v_weight, int group_size, int bits, mx::StreamOrDevice s) {
+    if (x.dtype() != mx::bfloat16 || q_scales.dtype() != mx::bfloat16 || q_biases.dtype() != mx::bfloat16 ||
+        k_scales.dtype() != mx::bfloat16 || k_biases.dtype() != mx::bfloat16 || v_scales.dtype() != mx::bfloat16 ||
+        v_biases.dtype() != mx::bfloat16) {
+        throw std::runtime_error("quantized_qkv: input, scales, and biases must be bfloat16");
+    }
+    if (q_weight.dtype() != mx::uint32 || k_weight.dtype() != mx::uint32 || v_weight.dtype() != mx::uint32) {
+        throw std::runtime_error("quantized_qkv: packed weights must be uint32");
+    }
+    if (x.ndim() != 2 || q_weight.ndim() != 2 || k_weight.ndim() != 2 || v_weight.ndim() != 2 || group_size != 128 ||
+        bits != 4) {
+        throw std::runtime_error("quantized_qkv: expected 2D input and 4-bit group-128 weights");
+    }
+    const int rows = x.shape()[0];
+    const int input_dim = x.shape()[1];
+    auto valid_projection = [&](const mx::array &scales, const mx::array &biases, const mx::array &weight) {
+        return weight.shape()[0] > 0 && weight.shape()[1] == input_dim / (32 / bits) &&
+               scales.shape() == biases.shape() && scales.ndim() == 2 && scales.shape()[0] == weight.shape()[0] &&
+               scales.shape()[1] == input_dim / group_size;
+    };
+    if (rows <= 0 || rows > 2048 || input_dim <= 0 || input_dim % group_size != 0 ||
+        !valid_projection(q_scales, q_biases, q_weight) || !valid_projection(k_scales, k_biases, k_weight) ||
+        !valid_projection(v_scales, v_biases, v_weight)) {
+        throw std::runtime_error("quantized_qkv: incompatible input or quantization metadata shapes");
+    }
+    auto output_shape = x.shape();
+    output_shape[1] = q_weight.shape()[0] + k_weight.shape()[0] + v_weight.shape()[0];
+    return mx::array(output_shape, mx::bfloat16, std::make_shared<Week2QuantizedQKV>(to_stream(s)),
+                     {x, q_scales, q_biases, q_weight, k_scales, k_biases, k_weight, v_scales, v_biases, v_weight});
+}
+
 mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
                            float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads,
                            mx::StreamOrDevice s) {
@@ -93,6 +156,14 @@ void Week2RoPE::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::a
 
 void Week2SwiGLU::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
     throw std::runtime_error("swiglu: the course extension is GPU-only");
+}
+
+void Week2QuantizedGateUpSwiGLU::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("quantized_gate_up_swiglu: the course extension is GPU-only");
+}
+
+void Week2QuantizedQKV::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("quantized_qkv: the course extension is GPU-only");
 }
 
 void Week2DecodeAttention::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -173,6 +244,67 @@ void Week2SwiGLU::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx:
     encoder.dispatch_threads(MTL::Size(out.size(), 1, 1), MTL::Size(threads, 1, 1));
 }
 
+void Week2QuantizedGateUpSwiGLU::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
+    const auto &x = inputs[0];
+    const auto &gate_scales = inputs[1];
+    const auto &gate_biases = inputs[2];
+    const auto &gate_weight = inputs[3];
+    const auto &up_scales = inputs[4];
+    const auto &up_biases = inputs[5];
+    const auto &up_weight = inputs[6];
+    auto &out = outputs[0];
+    out.set_data(mx::allocator::malloc(out.nbytes()));
+    auto &d = mx::metal::device(stream().device);
+    auto kernel = d.get_kernel("week2_quantized_gate_up_swiglu_bf16", d.get_library("tiny_llm_ext_ref"));
+    auto &encoder = mx::metal::get_command_encoder(stream());
+    encoder.set_compute_pipeline_state(kernel);
+    encoder.set_input_array(x, 0);
+    encoder.set_input_array(gate_scales, 1);
+    encoder.set_input_array(gate_biases, 2);
+    encoder.set_input_array(gate_weight, 3);
+    encoder.set_input_array(up_scales, 4);
+    encoder.set_input_array(up_biases, 5);
+    encoder.set_input_array(up_weight, 6);
+    encoder.set_output_array(out, 7);
+    const int rows = x.shape()[0];
+    const int input_dim = x.shape()[1];
+    const int output_dim = out.shape()[1];
+    encoder.set_bytes(rows, 8);
+    encoder.set_bytes(input_dim, 9);
+    encoder.set_bytes(output_dim, 10);
+    constexpr int block = 32;
+    encoder.dispatch_threadgroups(MTL::Size((output_dim + block - 1) / block, (rows + block - 1) / block, 1),
+                                  MTL::Size(128, 1, 1));
+}
+
+void Week2QuantizedQKV::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
+    const auto &x = inputs[0];
+    auto &out = outputs[0];
+    out.set_data(mx::allocator::malloc(out.nbytes()));
+    auto &d = mx::metal::device(stream().device);
+    auto kernel = d.get_kernel("week2_quantized_qkv_bf16", d.get_library("tiny_llm_ext_ref"));
+    auto &encoder = mx::metal::get_command_encoder(stream());
+    encoder.set_compute_pipeline_state(kernel);
+    for (int index = 0; index < 10; ++index) {
+        encoder.set_input_array(inputs[index], index);
+    }
+    encoder.set_output_array(out, 10);
+    const int rows = x.shape()[0];
+    const int input_dim = x.shape()[1];
+    const int q_dim = inputs[3].shape()[0];
+    const int k_dim = inputs[6].shape()[0];
+    const int v_dim = inputs[9].shape()[0];
+    encoder.set_bytes(rows, 11);
+    encoder.set_bytes(input_dim, 12);
+    encoder.set_bytes(q_dim, 13);
+    encoder.set_bytes(k_dim, 14);
+    encoder.set_bytes(v_dim, 15);
+    constexpr int block = 32;
+    const int max_output_dim = std::max({q_dim, k_dim, v_dim});
+    encoder.dispatch_threadgroups(MTL::Size((max_output_dim + block - 1) / block, (rows + block - 1) / block, 1),
+                                  MTL::Size(128, 1, 1));
+}
+
 void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
     const auto &q = inputs[0];
     const auto &k = inputs[1];
@@ -219,6 +351,12 @@ void Week2RoPE::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> 
     throw std::runtime_error("Metal unavailable");
 }
 void Week2SwiGLU::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("Metal unavailable");
+}
+void Week2QuantizedGateUpSwiGLU::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("Metal unavailable");
+}
+void Week2QuantizedQKV::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
     throw std::runtime_error("Metal unavailable");
 }
 void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
