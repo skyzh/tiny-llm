@@ -26,7 +26,7 @@ def test_public_sections_expose_current_candidates_not_retired_split_k(
     assert "include-split-k" not in help_text
 
 
-def test_fused_gate_up_section_compares_separate_fused_and_mlx(monkeypatch):
+def test_shared_input_gate_up_section_compares_separate_fused_and_mlx(monkeypatch):
     class Quantized:
         weight = mx.zeros((4, 1), dtype=mx.uint32)
         scales = mx.ones((4, 1), dtype=mx.bfloat16)
@@ -69,7 +69,7 @@ def test_fused_gate_up_section_compares_separate_fused_and_mlx(monkeypatch):
         quantized_gate_up_swiglu=lambda x, _gate, _up: x,
     )
 
-    result = benchmark.benchmark_fused_gate_up(
+    result = benchmark.benchmark_shared_input_gate_up_swiglu(
         SimpleNamespace(context=32, warmup=2, iterations=6), model, ops
     )
 
