@@ -52,7 +52,7 @@ default, which is another reminder that benchmark lengths are conventions, not
 universal workloads. Always publish the exact prompt and output lengths.
 
 The measured machine below is an Apple M4 Pro with a 20-core GPU and 64 GB of
-memory. The current Week 2 control uses two complete warmups and two balanced
+memory. The archived Week 2 control used two complete warmups and two balanced
 fresh processes; the continuous-serving rows use one warmup and the
 median of four balanced fresh processes.
 
@@ -463,7 +463,7 @@ ownership on measured source `170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac`:
 Full MLX remains 17.83% faster than the dense Day 3 seam on prefill
 (equivalently, the seam is 15.13% below full MLX), because the seam changes
 projections only. These causal percentages explain the ownership decision;
-the task #367 tables above provide current absolute values.
+the task #367 tables above provide source-bound absolute values.
 
 The checked-in final-main corpus contains the complete raw samples, exact
 source commit and tracked-clean flag, host, configuration, execution order,
