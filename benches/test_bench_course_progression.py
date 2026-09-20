@@ -102,7 +102,7 @@ def _assert_required_progression_is_profile_free(chapter: str, day: int) -> None
     assert optional_blocks, f"Day {day} must label its optional evidence"
 
 
-def test_week2_live_labels_follow_the_seven_day_book():
+def test_week2_live_labels_follow_the_executable_book_route():
     labels = {variant.key: variant.label for variant in WEEK2_VARIANTS}
     assert tuple(labels) == (
         "week1",
@@ -131,34 +131,35 @@ def test_week2_live_labels_follow_the_seven_day_book():
         "mlx": "MLX",
     }
 
-    readme = (ROOT / "README.md").read_text()
     summary = (ROOT / "book/src/SUMMARY.md").read_text()
-    assert "| 2.2 | Benchmarking and Profiling |" in readme
-    assert "| 2.3 | Quantize the Model |" in readme
-    assert "| 2.4 | Fused Model Kernels |" in readme
-    assert "| 2.5 | SIMD-Matrix Prefill |" in readme
-    assert "| 2.6 (optional) | Workload-Conditioned Operator Lab |" in readme
-    assert "| 2.7 | Conditional Split-K and Final Decision |" in readme
-    assert "./week2-02-benchmark-profile.md" in summary
-    assert "./week2-03-quantize-model.md" in summary
-    assert "./week2-04-fused-model-kernels.md" in summary
-    assert "./week2-05-simd-matrix-prefill.md" in summary
-    assert "./week2-06-operator-lab.md" in summary
-    assert "./week2-07-split-k-prefill.md" in summary
+    expected_navigation = (
+        "[🚧 Measurement](./week2-02-benchmark-profile.md)",
+        "[🚧 KV Cache](./week2-01-kv-cache.md)",
+        "[🚧 Packed W4 Decode](./week2-03-quantize-model.md)",
+        "[🚧 Matrix Prefill](./week2-05-simd-matrix-prefill.md)",
+        "[🚧 Compact Primitive Lab](./week2-04-fused-model-kernels.md)",
+        "[🚧 Shared-Input Fusion](./week2-06-operator-lab.md)",
+        "[🚧 I/O-Aware Dense Attention](./week2-07-split-k-prefill.md)",
+        "[🚧 Decision Ledger](./week2-decision-ledger.md)",
+    )
+    positions = [summary.index(item) for item in expected_navigation]
+    assert positions == sorted(positions)
 
     chapter_headings = {
-        "week2-02-benchmark-profile.md": (
-            "# 🚧 Week 2 Day 2: Benchmarking and Profiling"
+        "week2-02-benchmark-profile.md": "# 🚧 Measurement: Establish the Comparison",
+        "week2-01-kv-cache.md": "# 🚧 KV Cache: Reuse the Prefix",
+        "week2-03-quantize-model.md": "# 🚧 Packed W4: Read Less for Each Decode Token",
+        "week2-05-simd-matrix-prefill.md": "# 🚧 Matrix Prefill: Reuse a Weight Tile",
+        "week2-04-fused-model-kernels.md": (
+            "# 🚧 Compact Primitive Lab: Finish One Operator at a Time"
         ),
-        "week2-03-quantize-model.md": "# 🚧 Week 2 Day 3: Quantize the Model",
-        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Kernels",
-        "week2-05-simd-matrix-prefill.md": "# 🚧 Week 2 Day 5: SIMD-Matrix Prefill",
         "week2-06-operator-lab.md": (
-            "# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab"
+            "# 🚧 Shared-Input Fusion: Load Once for Several Projections"
         ),
         "week2-07-split-k-prefill.md": (
-            "# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision"
+            "# 🚧 I/O-Aware Dense Attention: Keep Only the State You Need"
         ),
+        "week2-decision-ledger.md": "# 🚧 Week 2 Decision Ledger",
     }
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
@@ -184,17 +185,15 @@ def test_benchmark_refuses_existing_json_before_host_or_model_work(
         progression.main()
 
 
-def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
+def test_week2_capture_boundary_is_optional_and_packed_w4_keeps_portable_attribution():
     day2 = (ROOT / "book/src/week2-02-benchmark-profile.md").read_text()
     day3 = (ROOT / "book/src/week2-03-quantize-model.md").read_text()
     appendix = (ROOT / "book/src/week2-advanced-profiling.md").read_text()
 
-    assert "pdm run bench" in day2
-    assert "capture remains optional" in day2
+    assert "pdm run bench-week2-progression" in day2
     assert "pdm run profile-week2-kernels --solution tiny_llm" in day2
-    assert "macOS 27" in day2
     assert "pdm run test --week 2 --day 3" in day3
-    assert "Week 2 Day 2: Benchmark, Profile, and Quantize" not in day3
+    assert "# 🚧 Packed W4: Read Less for Each Decode Token" in day3
 
     removed_workflow_tokens = ("capture-week2-shader", "MLX_METAL_DEBUG")
     live_week2 = "\n".join(
@@ -212,8 +211,8 @@ def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
     scripts = (ROOT / "pyproject.toml").read_text()
     assert "capture-week2" in scripts
     assert "reduce-week2-gpudebug" in scripts
-    assert "never an acceptance gate" in appendix
-    assert "macOS 27" in appendix
+    assert appendix.startswith("# 🚧 Optional: Inspect a Metal Capture")
+    assert "remain sufficient for the required route" in appendix
 
 
 def test_required_week2_progression_uses_portable_attribution_not_local_capture():
@@ -228,8 +227,8 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
 
     expected_cases = {
         3: ("kv-cache:decode:128", "quantized-matvec:decode:128"),
-        4: ("quantized-matvec:decode:128", "swiglu:decode:128"),
-        5: ("swiglu:prefill:128", "simd-matmul:prefill:128"),
+        4: ("simd-matmul:decode:128", "swiglu:decode:128"),
+        5: ("quantized-matvec:prefill:128", "simd-matmul:prefill:128"),
     }
     local_capture_tokens = (
         "Xcode GPU capture",
@@ -245,15 +244,16 @@ def test_required_week2_progression_uses_portable_attribution_not_local_capture(
         assert all(case in chapter for case in expected_cases[day])
         assert not any(token in chapter for token in local_capture_tokens)
 
-    assert "The re-profile then exposed normalization" in days[3]
-    assert "Re-profiling then placed" in days[4]
-    assert "Now repeat the exact baseline commands" in days[5]
+    assert "earlier checkpoint is the dense control" in days[3]
+    assert "predecessor checkpoint is the fallback control" in days[4]
+    assert "incoming `quantized-matvec` checkpoint as the same-model control" in days[5]
     day6 = (ROOT / "book/src/week2-06-operator-lab.md").read_text()
-    assert "pdm run profile-week2-kernels --solution tiny_llm" in day6
-    assert "simd-matmul:decode:128" in day6
-    assert "decode-attention:decode:128" in day6
+    assert "pdm run bench-week2-operators --solution tiny_llm" in day6
+    assert "pdm run bench-week2-progression --offline --solution tiny_llm" in day6
+    assert "--disable-week2-shared-input-qkv" in day6
+    assert "--disable-week2-shared-input-gate-up-swiglu" in day6
     assert not any(token in day6 for token in local_capture_tokens)
-    assert "Continue to [Day 7]" in day6
+    assert "[dense-attention chapter](./week2-07-split-k-prefill.md)" in day6
 
 
 @pytest.mark.parametrize(

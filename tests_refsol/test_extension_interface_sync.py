@@ -73,31 +73,63 @@ METAL_CHECKPOINTS = {
     },
 }
 
-DOC_TASK_MARKERS = {
+DOC_SECTION_MARKERS = {
     "book/src/week2-03-quantize-model.md": {
-        "Task 1": {"QuantizedWeights.from_mlx_layer", "QuantizedEmbedding.__call__"},
-        "Task 2": {"tiny_llm_ext::quantized_matmul", "QuantizedMatmul::eval_cpu"},
-        "Task 3": {
+        "Keep Both Embedding Uses Packed": {
+            "QuantizedWeights.from_mlx_layer",
+            "QuantizedEmbedding",
+        },
+        "Bring Up the Native Dot Product": {
+            "quantized_matmul",
             "QuantizedMatmul::eval_gpu",
             "quantized_matmul_vanilla_w4a16_g128",
             "quantized_matvec_x4_fast_w4a16_g128",
         },
-        "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MultiHeadAttention.__call__"},
+        "Put It Back into the Cached Model": {
+            "Qwen3ModelWeek2",
+            "quantized-matvec",
+        },
     },
     "book/src/week2-04-fused-model-kernels.md": {
-        "Task 1": {
-            "tiny_llm_ext::rms_norm",
-            "Week2RMSNorm::eval_gpu",
+        "RMSNorm: Keep the Reduction with Its Output": {
+            "FastRMSNorm",
+            "rms_norm",
             "week2_rms_norm",
         },
-        "Task 2": {"tiny_llm_ext::rope", "Week2RoPE::eval_gpu", "week2_rope"},
-        "Task 3": {"tiny_llm_ext::swiglu", "Week2SwiGLU::eval_gpu", "week2_swiglu"},
-        "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MLP.__call__"},
+        "RoPE: Rotate the Right Position": {"FastRoPE", "rope", "week2_rope"},
+        "SwiGLU: Combine Two Existing Tensors": {
+            "swiglu",
+            "week2_swiglu",
+        },
     },
     "book/src/week2-05-simd-matrix-prefill.md": {
-        "Task 2": {
+        "Dispatch by Shape": {
             "QuantizedMatmul::eval_gpu",
             "quantized_matmul_simdgroup_w4a16_g128",
+        },
+    },
+    "book/src/week2-06-operator-lab.md": {
+        "QKV: Share the Load, Preserve Three Results": {
+            "supports_shared_input_qkv",
+            "quantized_qkv",
+            "Qwen3MultiHeadAttention",
+        },
+        "Gate and Up: Keep the Activation Inside the Projection": {
+            "supports_fused_gate_up",
+            "quantized_gate_up_swiglu",
+            "Qwen3MLP",
+        },
+    },
+    "book/src/week2-07-split-k-prefill.md": {
+        "Keep the Mask and Head Mapping Explicit": {
+            "readable fallback",
+            "matching floating dtypes",
+        },
+        "Reach the Final Model Checkpoint": {
+            "Qwen3MultiHeadAttention",
+            "io_aware_dense_attention",
+            "io_aware_dense_attention_dispatches",
+            "readable_attention_dispatches",
         },
     },
     "book/src/week3-03-paged-attention-part1.md": {
@@ -140,55 +172,6 @@ DOC_TASK_MARKERS = {
 }
 
 EXTENSION_TASK_PAIRS = {
-    "book/src/week2-03-quantize-model.md": {
-        "Task 2": {
-            (
-                "src/extensions/src/quantized_matmul.cpp",
-                "tiny_llm_ext::quantized_matmul",
-            ),
-            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_cpu"),
-        },
-        "Task 3": {
-            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matmul_vanilla_w4a16_g128",
-            ),
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matvec_x4_fast_w4a16_g128",
-            ),
-        },
-    },
-    "book/src/week2-04-fused-model-kernels.md": {
-        "Task 1": {
-            ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::rms_norm"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RMSNorm::eval_cpu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RMSNorm::eval_gpu"),
-            ("src/extensions/src/week2_kernels.metal", "week2_rms_norm"),
-        },
-        "Task 2": {
-            ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::rope"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RoPE::eval_cpu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RoPE::eval_gpu"),
-            ("src/extensions/src/week2_kernels.metal", "week2_rope"),
-        },
-        "Task 3": {
-            ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::swiglu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2SwiGLU::eval_cpu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2SwiGLU::eval_gpu"),
-            ("src/extensions/src/week2_kernels.metal", "week2_swiglu"),
-        },
-    },
-    "book/src/week2-05-simd-matrix-prefill.md": {
-        "Task 2": {
-            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matmul_simdgroup_w4a16_g128",
-            ),
-        },
-    },
     "book/src/week3-03-paged-attention-part1.md": {
         "Task 1": {
             (
@@ -364,9 +347,11 @@ def _assert_binding_parity(starter_source: str, reference_source: str) -> None:
         assert starter_arguments == reference_arguments
 
 
-def _task_body(chapter: str, task: str) -> str:
+def _section_body(chapter: str, section: str) -> str:
     match = re.search(
-        rf"^## {task}:.*?(?=^## Task |\Z)", chapter, re.MULTILINE | re.DOTALL
+        rf"^## {re.escape(section)}(?:\s*:[^\n]*)?\s*$.*?(?=^## |\Z)",
+        chapter,
+        re.MULTILINE | re.DOTALL,
     )
     assert match is not None
     return match.group(0)
@@ -393,7 +378,7 @@ def _functions_in_code_tokens(
 
 
 def _assert_task_pairs(chapter: str, task: str, pairs: set[tuple[str, str]]) -> None:
-    body = _task_body(chapter, task)
+    body = _section_body(chapter, task)
     expected_files = {filename for filename, _ in pairs}
     expected_functions = {function for _, function in pairs}
     associations: set[tuple[str, str]] = set()
@@ -505,14 +490,14 @@ def test_starter_metal_stubs_name_each_learner_owned_kernel_and_checkpoint():
         _assert_metal_scaffold_only(source)
 
 
-def test_each_extension_task_names_the_exact_starter_functions_to_modify():
-    assert REFERENCE_ONLY_PREVIEW_CHAPTERS.isdisjoint(DOC_TASK_MARKERS)
+def test_each_learner_section_names_its_concrete_implementation_seams():
+    assert REFERENCE_ONLY_PREVIEW_CHAPTERS.isdisjoint(DOC_SECTION_MARKERS)
     assert REFERENCE_ONLY_PREVIEW_CHAPTERS.isdisjoint(EXTENSION_TASK_PAIRS)
 
-    for path, tasks in DOC_TASK_MARKERS.items():
+    for path, sections in DOC_SECTION_MARKERS.items():
         chapter = _read(path)
-        for task, markers in tasks.items():
-            body = _task_body(chapter, task)
+        for section, markers in sections.items():
+            body = _section_body(chapter, section)
             for marker in markers:
                 assert marker in body
 
@@ -638,11 +623,11 @@ def test_binding_guard_rejects_a_changed_python_default():
 
 
 def test_task_pair_guard_rejects_a_nonexistent_source_path():
-    path = "book/src/week2-04-fused-model-kernels.md"
+    path = "book/src/week3-03-paged-attention-part1.md"
     source = _read(path)
     wrong_path = source.replace(
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`",
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/wrong.cpp`",
+        "in\n`src/extensions/src/paged_attention.cpp`, and implement",
+        "in\n`src/extensions/src/wrong.cpp`, and implement",
         1,
     )
     assert wrong_path != source
@@ -679,7 +664,7 @@ def test_task_pair_guard_rejects_cross_swapped_valid_week_3_day_4_pairs():
     assert cross_swapped != paged_swapped
 
     pairs = EXTENSION_TASK_PAIRS[path]["Task 2"]
-    body = _task_body(cross_swapped, "Task 2")
+    body = _section_body(cross_swapped, "Task 2")
     for filename, function in pairs:
         assert filename in body
         assert function in body
