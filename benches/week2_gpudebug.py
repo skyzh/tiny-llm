@@ -24,8 +24,9 @@ KNOWN_CHECKPOINTS = (
     "rope",
     "swiglu",
     "simd-matmul",
-    "decode-attention",
-    "split-k",
+    "shared-input-qkv",
+    "shared-input-gate-up-swiglu",
+    "io-aware-dense-attention",
 )
 
 

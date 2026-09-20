@@ -10,6 +10,18 @@ from benches import week2_gpudebug as gpu
 ROOT = gpu.ROOT
 
 
+def test_capture_help_exposes_only_current_week2_checkpoint_names():
+    assert gpu.KNOWN_CHECKPOINTS[-3:] == (
+        "shared-input-qkv",
+        "shared-input-gate-up-swiglu",
+        "io-aware-dense-attention",
+    )
+    assert "decode-attention" not in gpu.KNOWN_CHECKPOINTS
+    assert "split-k" not in gpu.KNOWN_CHECKPOINTS
+    assert "long-context-attention" not in gpu.KNOWN_CHECKPOINTS
+    assert "fused-gate-up" not in gpu.KNOWN_CHECKPOINTS
+
+
 def _identity() -> dict:
     workload = gpu.workload_record("swiglu", "decode", 128)
     return {

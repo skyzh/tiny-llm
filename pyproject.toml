@@ -48,7 +48,6 @@ bench-week2-progression.cmd = "python -m benches.bench_course_progression --suit
 bench-serving-progression.cmd = "python -m benches.bench_serving_progression"
 bench-chunked-prefill.cmd = "python -m benches.bench_chunked_prefill"
 bench-week3-attention.cmd = "python -m benches.bench_week3_attention"
-bench-long-context-attention.cmd = "python -m benches.bench_long_context_attention"
 batch-main.cmd = "python batch-main.py"
 agent = { cmd = "python agent.py", env = { PYTHONPATH = "src" } }
 week4-capstone = { cmd = "python week4-capstone.py", env = { PYTHONPATH = "src" } }

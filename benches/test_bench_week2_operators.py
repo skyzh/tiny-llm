@@ -1,8 +1,80 @@
 from itertools import permutations
+import sys
+from types import SimpleNamespace
 
+import mlx.core as mx
 import pytest
 
 from benches import bench_week2_operators as benchmark
+
+
+def test_public_sections_expose_current_candidates_not_retired_split_k(
+    monkeypatch, capsys
+):
+    assert "shared-input-qkv" in benchmark.SECTIONS
+    assert "shared-input-gate-up-swiglu" in benchmark.SECTIONS
+    assert "fused-gate-up" not in benchmark.SECTIONS
+    monkeypatch.setattr(sys, "argv", ["bench_week2_operators.py", "--help"])
+
+    with pytest.raises(SystemExit) as exited:
+        benchmark.parse_args()
+
+    help_text = capsys.readouterr().out
+    assert exited.value.code == 0
+    assert "shared-input-qkv" in help_text
+    assert "shared-input-gate-up-swiglu" in help_text
+    assert "include-split-k" not in help_text
+
+
+def test_fused_gate_up_section_compares_separate_fused_and_mlx(monkeypatch):
+    class Quantized:
+        weight = mx.zeros((4, 1), dtype=mx.uint32)
+        scales = mx.ones((4, 1), dtype=mx.bfloat16)
+        biases = mx.zeros((4, 1), dtype=mx.bfloat16)
+        group_size = 128
+        bits = 4
+
+        @classmethod
+        def from_mlx_layer(cls, _layer):
+            return cls()
+
+    observed = []
+
+    def fake_benchmark(functions, warmup, iterations):
+        observed.extend(name for name, _function in functions)
+        assert warmup == 2
+        assert iterations == 6
+        return benchmark.BenchmarkComparison(
+            medians_us={"separate": 3.0, "fused": 2.0, "mlx": 1.0},
+            samples_us={"separate": [3.0], "fused": [2.0], "mlx": [1.0]},
+            measurement_orders=[["separate", "fused", "mlx"]],
+        )
+
+    monkeypatch.setattr(benchmark, "benchmark_comparison", fake_benchmark)
+    model = SimpleNamespace(
+        args=SimpleNamespace(hidden_size=128),
+        model=SimpleNamespace(
+            embed_tokens=SimpleNamespace(scales=mx.ones((1,), dtype=mx.bfloat16)),
+            layers=[
+                SimpleNamespace(
+                    mlp=SimpleNamespace(gate_proj=object(), up_proj=object())
+                )
+            ],
+        ),
+    )
+    ops = SimpleNamespace(
+        quantized_weights_type=Quantized,
+        swiglu=lambda gate, up: gate * up,
+        quantized_linear=lambda x, _weights: x,
+        quantized_gate_up_swiglu=lambda x, _gate, _up: x,
+    )
+
+    result = benchmark.benchmark_fused_gate_up(
+        SimpleNamespace(context=32, warmup=2, iterations=6), model, ops
+    )
+
+    assert observed == ["separate", "fused", "mlx"]
+    assert result[0]["name"] == "gate+up+SwiGLU"
 
 
 def test_context_execution_order_balances_forward_and_reverse_sweeps():

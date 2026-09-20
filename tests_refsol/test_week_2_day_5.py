@@ -77,12 +77,10 @@ def test_task_2_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
     ("rows", "outputs", "input_dim"),
     [(9, 33, 128), (31, 65, 256), (33, 97, 512)],
 )
-@pytest.mark.parametrize("use_split_k", [False, True])
 def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
     rows: int,
     outputs: int,
     input_dim: int,
-    use_split_k: bool,
 ):
     mx.random.seed(rows + outputs + input_dim)
     with mx.stream(mx.gpu):
@@ -98,7 +96,6 @@ def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
             packed,
             transpose_b=True,
             use_simdgroup=True,
-            use_split_k=use_split_k,
         )
         vanilla = quantized_matmul_vanilla(
             scales, biases, 128, 4, inputs, packed, transpose_b=True
