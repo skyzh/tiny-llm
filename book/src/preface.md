@@ -31,8 +31,8 @@ This course is divided into four weeks. We will serve Qwen3 MLX models, optimize
 small coding agent.
 
 - Week 1: Serve Qwen3 using array and matrix operations written in Python.
-- Week 2: Measure the cached model, implement the selected C++ and Metal
-  kernels, and re-profile after each change.
+- Week 2: Measure a request, add a capacity-backed KV cache, then optimize
+  projections, primitives, shared inputs, and dense attention.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
@@ -63,10 +63,12 @@ all earlier exercises. These are not the same path.
 </style>
 
 <div id="course-roadmap-scroll" class="course-roadmap-scroll" role="region" aria-label="Scrollable Tiny-LLM course roadmap" aria-describedby="course-roadmap-scroll-help" tabindex="0">
-  <img src="./course-roadmap.svg" alt="Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the seven Week 2 days and Week 3 into Week 4. Week 2 Days 3 through 7 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 keeps the course prerequisite of setup plus Weeks 1 through 3, while its deterministic scripted-model tests for Days 1 through 7 can run after setup. Day 8 joins the scripted sequence to the real-model path, and Day 9 continues the Week 4 sequence.">
+  <img src="./course-roadmap.svg" alt="Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the Week 2 test groups and Week 3 into Week 4. Week 2 Days 3 through 7 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 keeps the course prerequisite of setup plus Weeks 1 through 3, while its deterministic scripted-model tests for Days 1 through 7 can run after setup. Day 8 joins the scripted sequence to the real-model path, and Day 9 continues the Week 4 sequence.">
 </div>
 
-<p id="course-roadmap-scroll-help">On a narrow screen, scroll the roadmap
+<p id="course-roadmap-scroll-help">The Week 2 day labels in this overview identify stable test groups, not the
+current chapter order; follow the <a href="./week2-overview.html">Week 2 route</a> for that order.
+On a narrow screen, scroll the roadmap
 horizontally; when the roadmap is focused, the left and right arrow keys move
 through it without changing chapters. Its labels stay at their readable desktop
 size.</p>
@@ -101,11 +103,10 @@ functions in `src/tiny_llm`.
 
 The cumulative dependencies are deliberate:
 
-- **Week 1 → Week 2:** Week 2 starts from the readable Qwen3 model and replaces
-  costs one measured mechanism at a time: first the generation algorithm and
-  KV cache, then quantized and fused kernels. Days 1–2 establish state and a
-  repeatable measurement; Days 3–5 follow the dominant cost, Day 6 is an
-  optional operator lab, and Day 7 closes with a conditional schedule decision.
+- **Week 1 → Week 2:** Start from the readable Qwen3 model and a measured
+  request. Add cache reuse and capacity-backed append, packed W4 decode, matrix
+  prefill, the compact primitive lab, shared-input fusion, and I/O-aware dense
+  attention. Each checkpoint keeps a matched control and ends with a decision.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -133,21 +134,19 @@ Week 2 separates the mechanism you need later from the kernel you are invited
 to optimize. If your goal is to continue into Week 3 rather than implement
 every Metal kernel, you can make these explicit local substitutions:
 
-| Week 2 day | Keep in the course stack | Optional MLX substitution |
+| Week 2 step | Keep in the course stack | Alternative for studying later mechanisms |
 | --- | --- | --- |
-| Days 1–2 | Dense KV-cache state, the Week 2 model boundary, and the matched measurement method | None; these are state and methodology rather than replaceable operators. |
-| Day 3 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
-| Day 4 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
-| Day 5 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing the SIMD-matrix schedule. |
-| Day 6 (optional) | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the supplied bounded decode-attention branch. |
-| Day 7 | The Day 5 unsplit projection fallback and measured dispatch boundary | Keep the unsplit path rather than implementing Split-K where your measurement does not support it. |
+| Measurement and cache | Request lifecycle, logical offsets, capacity-backed storage, and matched measurements | Complete the state contract; this is not an isolated kernel substitution. |
+| Packed W4 and matrix prefill | Packed-weight containers, embedding/model wiring, and the quantized-linear boundary | Wire an MLX quantized projection at the same interface. |
+| Compact primitive lab | Model norm, position, and activation call sites | Wire corresponding MLX operations with matching layouts and offsets. |
+| Shared-input fusion | Projection outputs, checkpoint controls, and model routing | Keep the separate QKV and gate/up paths behind their supplied disable controls. |
+| I/O-aware dense attention | Dense-cache attention shapes, masks, head mapping, and model control | Keep the readable attention fallback behind its supplied disable control. |
 
 Only the quantized-projection seam is already selected by canonical Week 3.
-The Day 4 and optional Day 6 alternatives require you to wire the MLX call at the
-existing course interface; there is no `--use-mlx-for-day` command. These
-off-ramps let you study later mechanisms, but they do not complete the skipped
-day's custom-kernel exercises, implementation-specific tests, or performance
-claims.
+Manual operator substitutions require implementation at the existing boundary;
+the three later disable flags only select their already-implemented fallbacks.
+Neither choice completes the skipped custom-kernel exercises or proves their
+performance. Follow each chapter's supplied tests to complete the full route.
 
 To run a completed checkpoint without solving it first:
 

@@ -1,139 +1,105 @@
-# 🚧 Week 2 Day 5: SIMD-Matrix Prefill
+# 🚧 Matrix Prefill: Reuse a Weight Tile
 
-Day 4 ends with a decision, not a predetermined kernel. Re-profile the fixed
-128-token prefill and name the dominant category before changing code. On the
-checked M4 Pro run, projections accounted for 99.1% of attributed prefill time.
-That observation selects the matrix-shaped projection path for this chapter.
+Your `quantized-matvec` checkpoint keeps weights packed and makes the
+small-row projection runnable. A prompt supplies many activation rows, however.
+Computing each dot product independently can reload the same weight values for
+neighboring rows. You will change the matrix schedule while preserving
+`C = A Wᵀ`, the packed representation, and the public quantized-linear API.
 
-The `swiglu` checkpoint still uses Day 3's correctness-first vanilla W4 matrix
-kernel when the activation has more than eight rows. You will replace that
-schedule with a cooperative BF16 SIMD-matrix kernel while preserving the same
-quantized-linear interface and the last-row-logits product boundary.
-
-The checked numbers in this chapter are one example, not a performance gate.
-They come from Qwen3-4B on one 20-core M4 Pro running macOS 27 and MLX 0.32.0,
-with a 128-token prompt, 129 output tokens, two warmups, and two balanced
-fresh-process samples. Your device and crossover may differ.
-
-## Establish the Same-Workload Baseline
-
-Start from the checkpoint you already have. Build the extension and run the
-focused gate before editing:
+Start with the matrix operator gate:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 5 -- -k task_2
 ```
 
-Freeze both baselines next. You will repeat these exact commands after the
-kernel change:
+These tests diagnose the new tile path and its tails. Failures are expected
+before you complete the learner-owned matrix kernel and cooperative loader;
+the whole model checkpoint comes later.
 
-```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-swiglu --variant week2-simd-matmul --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day5-product.json
+## Give the Tile a Useful Job
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case swiglu:prefill:128 --case simd-matmul:prefill:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day5-attribution.json
-```
+The work stays in the existing starter files:
 
-Keep the model, phase, token count, prompt rule, prefill-logit mode, warmups,
-and iteration count identical across the two checkpoints. Do not compare a
-new prefill kernel at one shape with an old result from another shape.
-
-## Task 1: Load One Quantized Tile Cooperatively
-
-Open the three existing extension files; this task stays inside that surface:
-
-```plain
+```text
 src/extensions/src/cooperative_matrix.h
 src/extensions/src/quantized_matmul.metal
 src/extensions/src/quantized_matmul.cpp
 ```
 
-Keep the operation fixed while you change its schedule:
+Build a 32×32 output tile from 8×8 SIMD-group matrix fragments. For each
+32-value slice of the reduction dimension, load an activation tile, unpack the
+corresponding W4 weight values, multiply BF16 fragments with FP32 accumulation,
+and advance. The same loaded values can serve several output elements before
+you fetch the next reduction slice.
 
-$$
-C = A W^T,
-$$
+This schedule makes synchronization part of correctness. A consumer must not
+read shared tile memory before its producers finish, and a producer must not
+overwrite a tile another group still uses. Put barriers at those actual data
+dependencies. Keep the activation and weight strides explicit; a transposed
+weight view does not have the activation tile's indexing.
 
-where `A` is BF16 and `W` is stored as packed W4 codes with one scale and bias
-per group of 128 values. The mathematical operation does not change. Only the
-matrix-shaped schedule changes.
+Rows and columns near an edge need the same care as the center of a matrix.
+Zero-fill invalid tile loads and store only valid output elements. For example,
+a matrix with 10 rows cannot safely read 32 rows merely because the allocation
+following it happens to be accessible. The supplied loader witness places
+nonzero data outside the logical rows, so an unmasked load cannot hide behind
+zero padding. Partial tiles still need FP32 accumulation.
 
-Build a 32×32 output tile from 8×8 `simdgroup_matrix` fragments. SIMD groups
-cooperate on one 32-value slice of the reduction dimension at a time:
+## Dispatch by Shape
 
-1. load a contiguous activation tile;
-2. unpack the matching W4 codes and apply their scale and bias;
-3. multiply the BF16 fragments while accumulating in FP32;
-4. advance through the reduction dimension;
-5. store only in-bounds output elements.
+Complete the matrix branch of `QuantizedMatmul::eval_gpu` and
+`quantized_matmul_simdgroup_w4a16_g128`. Retain the decode matvec for `M <= 8`;
+when matrix dispatch is enabled, larger row counts use the tiled schedule.
+Keep `quantized_matmul_vanilla` callable as an arithmetic control.
 
-Keep the loader and fragment bookkeeping explicit. The course path does not
-call an MLX or Steel quantized-matmul implementation in place of this exercise.
-The existing Python equation remains the correctness oracle.
+`M` is the flattened activation-row count, not the attention context length.
+Attention's `L` query rows and `S` cached source rows will matter in the final
+chapter. Here, row count, reduction width, tile dimensions, and tails are
+substeps of implementing one matrix operator, rather than separate model
+optimizations.
 
-## Task 2: Dispatch by Activation Shape
+The `simd-matmul` checkpoint adds only matrix dispatch to packed-W4 projections.
+RMSNorm, RoPE, and SwiGLU remain readable. Their custom implementations are not
+prerequisites for this checkpoint.
 
-Retain Day 3's SIMD matvec for `M <= 8`. Route larger activation matrices to
-the new tiled kernel and keep the vanilla kernel callable as a bring-up
-control. Validate dtype, contiguity, group size, bit width, and matrix
-dimensions at the extension boundary before encoding the GPU command.
+## Complete and Compare the Product
 
-The supplied starter dispatch is `QuantizedMatmul::eval_gpu` in
-`src/extensions/src/quantized_matmul.cpp`. Its matrix-shaped Metal entry is
-`quantized_matmul_simdgroup_w4a16_g128` in
-`src/extensions/src/quantized_matmul.metal`; an equivalent solution may keep
-the public dispatch while choosing a different internal kernel name.
-
-The checkpoint feature name is `simd-matmul`. It includes packed W4
-projections and the three fused Day 4 operators. It does not include the
-optional decode-attention branch from Day 6.
-
-If you want to continue without writing this custom schedule, preserve the
-course's `quantized_linear` interface and route the matrix-shaped projection
-through `mx.quantized_matmul`. That is a local operator substitution, not a
-performance claim and not the separate `--solution mlx` model.
-
-## Task 3: Check Correctness in the Product
-
-Once the new path is connected, get focused feedback before asking the full
-model to exercise the checkpoint:
+After the tile tests pass, wire the model's quantized weights to the checkpoint
+feature and run the complete gate:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 5
-
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint simd-matmul --model qwen3-4b
+  --week2-checkpoint simd-matmul --model qwen3-0.6b
 ```
 
-An equivalent learner implementation may choose different helper names or a
-different correct tiling. The observable contract is the quantized-linear
-result, dtype and shape, checkpoint behavior, fallback behavior, and complete
-model output—not a private symbol or source-file layout.
+The gate includes a model witness that makes the later custom primitives fail
+if called: reaching this checkpoint must not depend on their future work. It
+also checks matrix results, boundary shapes, and the model's output contract.
 
-## Task 4: Re-profile and Decide
+Use the incoming `quantized-matvec` checkpoint as the same-model control:
 
-Now repeat the exact baseline commands, then close the loop in three
-sentences:
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
+  --variant week2-quantized-matvec --variant week2-simd-matmul \
+  --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last --json-output week2-matrix.json
 
-1. which operator category dominated the baseline prefill;
-2. whether the candidate changed that category and the matched product phase;
-3. what result would make you revert the candidate or test another schedule.
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
+  --case quantized-matvec:prefill:128 --case simd-matmul:prefill:128 \
+  --warmup 4 --iterations 12 --json-output week2-matrix-attribution.json
+```
 
-In the checked run, the SIMD schedule reduced attributed projection time by
-86.4% and raised fixed-workload prefill from 106.44 to 721.60 tokens/s. Those
-large effects justify keeping it for that source tree and workload. They do
-not establish the same multiplier on another model, Apple GPU, prompt length,
-or software version.
+The pair differs in matrix scheduling, while both use packed weights and
+readable primitives. Inspect prefill and decode separately. Then try another
+prompt length with both controls changed together; do not compare a short
+baseline with a long candidate. A tile that helps one shape may leave another
+unchanged or make it slower.
 
-Day 6 is an optional workload-conditioned operator lab. You may take that
-branch to study bounded decode attention, or continue directly to Day 7. Day
-7 starts from this `simd-matmul` checkpoint either way.
+Record the result without inferring occupancy from a timing change. The next
+[primitive lab](./week2-04-fused-model-kernels.md) begins at `simd-matmul` and keeps
+this matrix path as it adds RMSNorm, RoPE, and SwiGLU one at a time.
 
 {{#include copyright.md}}

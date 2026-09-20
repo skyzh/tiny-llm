@@ -1,12 +1,10 @@
 # 🚧 Appendix: Performance Evidence Ledger
 
-> **Status: Experimental, single-machine evidence.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) before
-> treating a correctness, integration, or performance result as broader proof.
-
-This appendix records the measurements that determined the course order. The
-numbers are not additive promises: after one bottleneck shrinks, every other
-operator becomes a larger fraction of model time.
+> **Historical records.** This appendix preserves measurements and commands
+> from the earlier source trees named below. Some selectors have since been
+> retired. These records are not results for the current Week 2 implementation;
+> use the [current decision ledger](./week2-decision-ledger.md) and its chapter
+> commands for the executable learner route.
 
 ## Benchmark Method
 
