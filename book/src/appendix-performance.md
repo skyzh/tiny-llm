@@ -511,21 +511,25 @@ checked result records unavailable trees instead of substituting zeros or
 inferring counters; learners without that toolchain can still complete every
 checkpoint and reason from the portable artifact.
 
-## Optimization Map
+## Historical Optimization Map
 
-| Measured bottleneck | Retained change | Chapter |
+This table records the earlier course sequence; its chapter labels refer to
+that version.
+
+| Measured bottleneck | Change retained at the time | Historical chapter |
 |---|---|---|
 | Full-prefix decode recomputation | Dense request KV cache | Week 2 Day 1 |
 | Dense projection weight traffic | Packed W4A16 x4 SIMD matvec | Week 2 Day 3 |
 | Repeated small graph dispatches | RMSNorm, RoPE, SwiGLU kernels | Week 2 Day 4 |
 | Scalar/strided prefill projection loads | Cooperative 32×32×32 quantized matmul | Week 2 Day 5 |
-| Explicit secondary workload | Optional online-softmax decode lab or equivalent bounded experiment | Week 2 Day 6 |
-| Under-filled short-prefill result grid | Conditional measured split-K dispatch with Day 5 fallback | Week 2 Day 7 |
+| Explicit secondary workload | Optional online-softmax decode lab or equivalent bounded experiment | Week 2 Day 6 (retired) |
+| Under-filled short-prefill result grid | Conditional measured split-K dispatch with Day 5 fallback | Week 2 Day 7 (retired) |
 | Functional whole-cache page updates | Aliasing page-slice write primitive | Week 3 Day 3 |
 | Scalar paged final reduction | Compact D=128 SIMD reduction | Week 3 Day 4 |
 | Scalar contiguous-page K/V tile loads | Cooperative paged FlashAttention loads | Week 3 Day 5 |
 
-This is the course progression: optimize one measured cost, benchmark again,
-then let the evidence choose the next chapter.
+That progression targeted one measured cost at a time, with another benchmark
+to guide the next step. For the current Week 2 route, use the
+[current decision ledger](./week2-decision-ledger.md) and its linked chapters.
 
 {{#include copyright.md}}
