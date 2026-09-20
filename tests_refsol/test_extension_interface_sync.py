@@ -1,3 +1,4 @@
+import ast
 import importlib
 import re
 import sys
@@ -239,6 +240,23 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text()
 
 
+def _literal_assignment(path: str, name: str) -> object:
+    module = ast.parse(_read(path))
+    for node in module.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"missing literal assignment {name} in {path}")
+
+
+def _source_comments(path: str) -> str:
+    source = _read(path)
+    line_comments = re.findall(r"//[^\n]*", source)
+    block_comments = re.findall(r"/\*.*?\*/", source, flags=re.DOTALL)
+    return "\n".join([*line_comments, *block_comments])
+
+
 def _strip_comments(source: str) -> str:
     source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
     return re.sub(r"//[^\n]*", "", source)
@@ -440,6 +458,47 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         _read("src/extensions/bindings.cpp"),
         _read("src/extensions_ref/bindings.cpp"),
     )
+
+
+def test_starter_smoke_map_covers_the_current_native_learning_seams():
+    smoke_map = _literal_assignment(
+        "src/extensions/test.py", "LEARNER_EXTENSION_INTERFACES"
+    )
+    assert smoke_map == {
+        "quantized_matmul": "Week 2, Day 3",
+        "rms_norm": "Week 2, Day 4",
+        "rope": "Week 2, Day 4",
+        "swiglu": "Week 2, Day 4",
+        "quantized_qkv": "Week 2, Day 6",
+        "quantized_gate_up_swiglu": "Week 2, Day 7",
+        "decode_attention": "Week 2, Day 7",
+        "paged_cache_update": "Week 3, Day 3",
+        "quantized_embedding": "Week 3, Day 4",
+        "paged_attention": "Week 3, Day 4",
+    }
+
+
+def test_starter_comments_name_current_native_ownership_without_retired_split_k():
+    comments = {
+        path: _source_comments(path)
+        for path in (
+            "src/extensions/src/tiny_llm_ext.h",
+            "src/extensions/bindings.cpp",
+            "src/extensions/src/quantized_matmul.cpp",
+            "src/extensions/src/quantized_matmul.metal",
+        )
+    }
+    combined = "\n".join(comments.values())
+
+    assert "Week 2, Day 5: add SIMD-matrix prefill" in combined
+    assert "Week 2, Day 6: implement shared-input QKV" in combined
+    assert "Week 2, Day 7: implement shared-input gate/up" in combined
+    assert "Week 2, Day 7: implement I/O-aware dense attention" in combined
+
+    assert "quantized_matmul_simdgroup_splitk_w4a16_g128" not in combined
+    assert "quantized_matmul_splitk_reduce" not in combined
+    assert "Days 6-7" not in combined
+    assert "Day 6: implement online-softmax decode attention" not in combined
 
 
 def test_starter_cpp_stubs_are_registered_and_checkpoint_labeled():

@@ -32,7 +32,7 @@ NB_MODULE(_ext, m) {
             array: ``alpha * x + beta * y``
       )");
 
-    // Week 2, Day 3. Days 6-7 extend the schedule behind this stable binding.
+    // Week 2, Day 3. Day 5 adds SIMD-matrix prefill behind this stable binding.
     m.def("quantized_matmul", &tiny_llm_ext::quantized_matmul, "scales"_a, "biases"_a, "group_size"_a, "bits"_a, "a"_a,
           "b"_a, "transpose_b"_a = false, "use_simdgroup"_a = true, "use_split_k"_a = false, "stream"_a = nb::none());
 
@@ -45,14 +45,16 @@ NB_MODULE(_ext, m) {
     m.def("rope", &tiny_llm_ext::rope, "x"_a, "offsets"_a, "dims"_a, "base"_a, "traditional"_a = false,
           "stream"_a = nb::none());
     m.def("swiglu", &tiny_llm_ext::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
+    // Week 2, Day 7: shared-input gate/up and SwiGLU.
     m.def("quantized_gate_up_swiglu", &tiny_llm_ext::quantized_gate_up_swiglu, "x"_a, "gate_scales"_a, "gate_biases"_a,
           "gate_weight"_a, "up_scales"_a, "up_biases"_a, "up_weight"_a, "group_size"_a, "bits"_a,
           "stream"_a = nb::none());
+    // Week 2, Day 6: shared-input QKV.
     m.def("quantized_qkv", &tiny_llm_ext::quantized_qkv, "x"_a, "q_scales"_a, "q_biases"_a, "q_weight"_a,
           "k_scales"_a, "k_biases"_a, "k_weight"_a, "v_scales"_a, "v_biases"_a, "v_weight"_a, "group_size"_a, "bits"_a,
           "stream"_a = nb::none());
 
-    // Week 2, Day 6.
+    // Week 2, Day 7: I/O-aware dense attention.
     m.def("decode_attention", &tiny_llm_ext::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
           "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
 
