@@ -10,7 +10,7 @@ namespace tiny_llm_ext {
 void load_library(const char *path);
 
 // Week 2, Day 3: implement the wrapper and the initial vanilla/matvec paths.
-// Week 2, Days 6-7: extend the same interface with SIMD-matrix and Split-K scheduling.
+// Week 2, Day 5: add SIMD-matrix prefill behind the same stable interface.
 mx::array quantized_matmul(const mx::array &scales, const mx::array &biases, const int group_size, const int bits,
                            const mx::array &a, const mx::array &b, const bool transpose_b,
                            const bool use_simdgroup = true, const bool use_split_k = false, mx::StreamOrDevice s = {});
@@ -54,6 +54,15 @@ mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::S
 mx::array rope(const mx::array &x, const mx::array &offsets, int dims, float base, bool traditional,
                mx::StreamOrDevice s = {});
 mx::array swiglu(const mx::array &gate, const mx::array &up, mx::StreamOrDevice s = {});
+// Week 2, Day 7: implement shared-input gate/up and fused SwiGLU.
+mx::array quantized_gate_up_swiglu(const mx::array &x, const mx::array &gate_scales, const mx::array &gate_biases,
+                                   const mx::array &gate_weight, const mx::array &up_scales, const mx::array &up_biases,
+                                   const mx::array &up_weight, int group_size, int bits, mx::StreamOrDevice s = {});
+// Week 2, Day 6: implement shared-input QKV.
+mx::array quantized_qkv(const mx::array &x, const mx::array &q_scales, const mx::array &q_biases,
+                        const mx::array &q_weight, const mx::array &k_scales, const mx::array &k_biases,
+                        const mx::array &k_weight, const mx::array &v_scales, const mx::array &v_biases,
+                        const mx::array &v_weight, int group_size, int bits, mx::StreamOrDevice s = {});
 
 class Week2RMSNorm : public mx::Primitive {
 public:
@@ -100,7 +109,33 @@ public:
     const char *name() const override { return "Week2SwiGLU"; }
 };
 
-// Week 2, Day 6: implement online-softmax decode attention.
+// Week 2, Day 7: fuse packed gate/up projection and SwiGLU.
+class Week2QuantizedGateUpSwiGLU : public mx::Primitive {
+public:
+    explicit Week2QuantizedGateUpSwiGLU(mx::Stream stream) : mx::Primitive(stream) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2QuantizedGateUpSwiGLU has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2QuantizedGateUpSwiGLU"; }
+};
+
+// Week 2, Day 6: fuse packed Q/K/V projections with their shared input.
+class Week2QuantizedQKV : public mx::Primitive {
+public:
+    explicit Week2QuantizedQKV(mx::Stream stream) : mx::Primitive(stream) {}
+    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2QuantizedQKV has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2QuantizedQKV"; }
+};
+
+// Week 2, Day 7: implement I/O-aware dense attention with online softmax.
 mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
                            float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads,
                            mx::StreamOrDevice s = {});

@@ -4,6 +4,7 @@ import mlx.core as mx
 import argparse
 
 import mlx_lm.sample_utils
+from benches.bench import WEEK2_CHECKPOINTS, parse_week2_checkpoint
 from model_names import shortcut_name_to_full_name
 
 parser = argparse.ArgumentParser()
@@ -34,16 +35,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--week2-checkpoint",
-    choices=(
-        "kv-cache",
-        "quantized-matvec",
-        "rmsnorm",
-        "rope",
-        "swiglu",
-        "simd-matmul",
-        "decode-attention",
-        "split-k",
-    ),
+    type=parse_week2_checkpoint,
+    metavar="{" + ",".join(WEEK2_CHECKPOINTS) + "}",
     help="run one cumulative Week 2 model checkpoint",
 )
 

@@ -13,6 +13,39 @@ from tqdm.auto import tqdm
 
 from model_names import shortcut_name_to_full_name
 
+WEEK2_CHECKPOINTS = (
+    "kv-cache",
+    "quantized-matvec",
+    "simd-matmul",
+    "rmsnorm",
+    "rope",
+    "swiglu",
+    "shared-input-qkv",
+    "shared-input-gate-up-swiglu",
+    "io-aware-dense-attention",
+)
+LEGACY_WEEK2_CHECKPOINTS = {
+    "decode-attention": "io-aware-dense-attention",
+    "long-context-attention": "io-aware-dense-attention",
+    "context-selected-attention": "io-aware-dense-attention",
+    "split-k": "shared-input-gate-up-swiglu",
+    "fused-gate-up": "shared-input-gate-up-swiglu",
+    "prefill-fused-gate-up": "shared-input-gate-up-swiglu",
+}
+
+
+def parse_week2_checkpoint(value: str) -> str:
+    replacement = LEGACY_WEEK2_CHECKPOINTS.get(value)
+    if replacement is not None:
+        raise argparse.ArgumentTypeError(
+            f"Week 2 checkpoint {value!r} was replaced by {replacement!r}"
+        )
+    if value not in WEEK2_CHECKPOINTS:
+        raise argparse.ArgumentTypeError(
+            f"unknown Week 2 checkpoint {value!r}; choose one of {WEEK2_CHECKPOINTS}"
+        )
+    return value
+
 
 @dataclass
 class BenchRequest:
@@ -86,17 +119,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--week2-checkpoint",
-        choices=(
-            "kv-cache",
-            "quantized-matvec",
-            "rmsnorm",
-            "rope",
-            "swiglu",
-            "simd-matmul",
-            "decode-attention",
-            "split-k",
-        ),
+        type=parse_week2_checkpoint,
+        metavar="{" + ",".join(WEEK2_CHECKPOINTS) + "}",
         help="run one cumulative Week 2 end-to-end checkpoint",
+    )
+    parser.add_argument(
+        "--disable-week2-shared-input-qkv",
+        action="store_true",
+        help="disable only the Week 2 shared-input QKV checkpoint",
+    )
+    parser.add_argument(
+        "--disable-week2-io-aware-dense-attention",
+        action="store_true",
+        help="disable only the Week 2 I/O-aware dense-attention checkpoint",
+    )
+    parser.add_argument(
+        "--disable-week2-shared-input-gate-up-swiglu",
+        action="store_true",
+        help="disable only the Week 2 shared-input gate+up/SwiGLU checkpoint",
     )
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)
@@ -160,6 +200,12 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--batch-decode requires --num-seqs >= --batch-size")
     if args.week2_checkpoint is not None and args.loader != "week2":
         raise ValueError("--week2-checkpoint requires --loader week2")
+    if (
+        args.disable_week2_shared_input_qkv
+        or args.disable_week2_io_aware_dense_attention
+        or args.disable_week2_shared_input_gate_up_swiglu
+    ) and args.loader != "week2":
+        raise ValueError("Week 2 disable controls require --loader week2")
     if (
         args.solution != "mlx"
         and args.device != "gpu"
@@ -659,8 +705,18 @@ def main() -> None:
                 dispatch_kwargs[
                     "use_mlx_quantized_linear"
                 ] = not args.week3_inherit_course_projections
-            elif args.loader == "week2" and args.week2_checkpoint is not None:
-                dispatch_kwargs["checkpoint"] = args.week2_checkpoint
+            elif args.loader == "week2":
+                if args.week2_checkpoint is not None:
+                    dispatch_kwargs["checkpoint"] = args.week2_checkpoint
+                dispatch_kwargs["disable_shared_input_qkv"] = (
+                    args.disable_week2_shared_input_qkv
+                )
+                dispatch_kwargs["disable_io_aware_dense_attention"] = (
+                    args.disable_week2_io_aware_dense_attention
+                )
+                dispatch_kwargs["disable_shared_input_gate_up_swiglu"] = (
+                    args.disable_week2_shared_input_gate_up_swiglu
+                )
             if (
                 args.loader == "week2"
                 and args.batch_decode
@@ -868,7 +924,17 @@ def main() -> None:
                 "device": args.device,
                 "prefill_logits": effective_prefill_logits,
                 "seed": args.seed,
+                "disable_week2_shared_input_qkv": (args.disable_week2_shared_input_qkv),
+                "disable_week2_io_aware_dense_attention": (
+                    args.disable_week2_io_aware_dense_attention
+                ),
+                "disable_week2_shared_input_gate_up_swiglu": (
+                    args.disable_week2_shared_input_gate_up_swiglu
+                ),
             },
+            "dispatch_counters": (
+                model.dispatch_counters() if hasattr(model, "dispatch_counters") else {}
+            ),
             "request_trace": [
                 {
                     "request_id": request_id,

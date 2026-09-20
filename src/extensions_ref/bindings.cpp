@@ -37,6 +37,12 @@ NB_MODULE(_ext, m) {
     m.def("rope", &tiny_llm_ext_ref::rope, "x"_a, "offsets"_a, "dims"_a, "base"_a, "traditional"_a = false,
           "stream"_a = nb::none());
     m.def("swiglu", &tiny_llm_ext_ref::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
+    m.def("quantized_gate_up_swiglu", &tiny_llm_ext_ref::quantized_gate_up_swiglu, "x"_a, "gate_scales"_a,
+          "gate_biases"_a, "gate_weight"_a, "up_scales"_a, "up_biases"_a, "up_weight"_a, "group_size"_a, "bits"_a,
+          "stream"_a = nb::none());
+    m.def("quantized_qkv", &tiny_llm_ext_ref::quantized_qkv, "x"_a, "q_scales"_a, "q_biases"_a, "q_weight"_a,
+          "k_scales"_a, "k_biases"_a, "k_weight"_a, "v_scales"_a, "v_biases"_a, "v_weight"_a, "group_size"_a, "bits"_a,
+          "stream"_a = nb::none());
     m.def("decode_attention", &tiny_llm_ext_ref::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
           "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
 

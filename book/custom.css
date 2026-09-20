@@ -89,3 +89,22 @@ pre {
     overflow-x: auto;
     max-width: 100%;
 }
+
+/* The two Week 2 diagrams scale with the page and follow its selected theme. */
+img[src$="week2-kernel-profile.svg"],
+img[src$="week2-performance-summary.svg"] {
+    display: block;
+    width: 100%;
+    max-width: 36rem;
+    height: auto;
+    margin: 1.5rem auto;
+    color-scheme: light;
+}
+html.coal img[src$="week2-kernel-profile.svg"],
+html.coal img[src$="week2-performance-summary.svg"],
+html.navy img[src$="week2-kernel-profile.svg"],
+html.navy img[src$="week2-performance-summary.svg"],
+html.ayu img[src$="week2-kernel-profile.svg"],
+html.ayu img[src$="week2-performance-summary.svg"] {
+    color-scheme: dark;
+}

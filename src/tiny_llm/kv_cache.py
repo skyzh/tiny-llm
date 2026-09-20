@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import mlx.core as mx
+
+if TYPE_CHECKING:
+    from .paged_kv_cache import PagedKvMetadata
 
 
 class TinyKvCache(ABC):
@@ -82,6 +85,10 @@ class TinyKvFullCache(TinyKvCache):
     def __init__(self):
         self.key_values = None
         self.offset = 0
+        self.capacity = 0
+        self._key_storage = None
+        self._value_storage = None
+        self.growth_copy_bytes = 0
 
     def update_and_fetch(
         self,

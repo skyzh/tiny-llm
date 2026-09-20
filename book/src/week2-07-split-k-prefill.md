@@ -1,139 +1,166 @@
-# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision
+# 🚧 I/O-Aware Dense Attention: Keep Only the State You Need
 
-Day 5 leaves a reusable 32×32×32 SIMD-matrix projection and an exact unsplit
-fallback. Day 6 is an optional branch and is not inherited here: the `split-k`
-checkpoint contains the Day 5 SIMD path plus Split-K, without decode attention.
+You arrive at `shared-input-gate-up-swiglu` with a dense KV cache, matrix
+prefill, compact primitives, and shared-input projections. Attention still has
+a useful remaining question: must it store every score before multiplying by V?
 
-Begin with an under-filled short shape, then return to the fixed 128×129
-product workload. Keep Split-K only for shapes where the same-workload evidence
-supports it.
+For `L` incoming query rows and `S` cached source rows, a materialized attention
+implementation forms an `L × S` score array per query head, then applies softmax
+and multiplies by V. You will compute the same dense attention while carrying
+small running softmax state through the source positions. “Exact” here means
+the same dense mathematical operation; floating-point schedules are compared
+with tolerances, not bit-for-bit equality.
 
-## Why Split the Reduction Dimension?
+Start with the selector and wrapper boundary:
 
-For
-
-$$
-C = A W^T,
-$$
-
-the Day 5 grid spreads work across output rows and columns. When `M` is small
-and the Qwen projection width is narrow, it may launch too few independent
-threadgroups to fill the GPU. Split-K creates parallel work along the reduction
-dimension:
-
-```plain
-for each split s:
-    partial[s] = A[:, k_start(s):k_end(s)] @ W[:, k_start(s):k_end(s)].T
-
-C = sum(partial, axis=split)
+```bash
+pdm run test --week 2 --day 7 -- -k 'io_aware_selector or io_aware_wrapper'
 ```
 
-Each split must align to the W4 group size, write to a disjoint partial plane,
-and accumulate its local dot product in FP32. A second kernel reduces the
-partial planes in FP32 and casts the final output to BF16.
+These should fail at the sparse attention functions before implementation.
+Complete `should_use_io_aware_dense_attention` in
+`src/tiny_llm/qwen3_week2.py` and `io_aware_dense_attention` in
+`src/tiny_llm/week2_kernels.py`, then the existing native attention primitive in
+`src/extensions/src/week2_kernels.cpp` and `.metal`. The supplied extension
+plumbing uses the name `decode_attention`; the learner-facing wrapper and model
+checkpoint are `io_aware_dense_attention` and `io-aware-dense-attention`.
 
-That extra parallelism also adds a dispatch, a temporary buffer, and another
-memory pass. Split-K is therefore a shape-conditioned schedule, not an
-automatic upgrade.
+## Keep the Mask and Head Mapping Explicit
 
-## Task 1: Freeze a Short-Shape Control
+The wrapper accepts rank-four tensors:
 
-First verify the inherited Day 5 path and record a 32-token attribution pair:
+```text
+Q: B, Hq, L, D
+K: B, Hkv, S, D
+V: B, Hkv, S, D
+output: B, Hq, L, D
+```
+
+K and V shapes must match, `Hq` must be divisible by `Hkv`, and query heads must
+read their corresponding KV head. The supported head dimension is 1 through
+256, with `1 <= L <= S`. Q, K, and V need matching floating dtypes; the course
+model uses BF16. Validate the boundary before dispatch and preserve the
+model's readable fallback when the custom path is disabled or ineligible.
+
+Support no mask, the string `"causal"`, and a broadcastable additive array
+mask. Causality is aligned to the end of the cached prefix. For `L = 3` and
+`S = 7`, the first incoming query can see source positions 0 through 4, the
+second through 5, and the third through 6. Using `source <= query_index` would
+incorrectly hide the existing prefix.
+
+An additive mask contributes to a score before softmax. Preserve its per-row
+and per-head indexing; a tensor with the correct shape but the wrong mask row
+can silently compute a different answer. The supplied GPU witness includes an
+explicit mask whose output differs from the unmasked control.
+
+## Update Softmax Without Saving the Score Row
+
+For one query, let `s` be the next scaled, masked dot product and `v` its value
+vector. Maintain a running maximum `m`, exponential sum `l`, and unnormalized
+weighted value vector `a`. When the maximum changes, rescale the old state:
+
+$$
+\begin{aligned}
+m' &= \max(m,s),\\
+\alpha &= \exp(m-m'),\qquad \beta = \exp(s-m'),\\
+l' &= \alpha l + \beta,\\
+a' &= \alpha a + \beta v.
+\end{aligned}
+$$
+
+After all visible source positions, the output is `a / l`. Handle empty partial
+work explicitly when initializing or merging state. If you forget to rescale
+`a` when a larger score arrives, the denominator and numerator describe
+different softmax distributions.
+
+Parallel workers can cover disjoint source positions and merge their states.
+For partial states `(mj, lj, aj)`, choose the largest partial maximum `m*`,
+rescale every `lj` and `aj` by `exp(mj - m*)`, and sum. Divide only after that
+merge. An average of already-normalized partial outputs gives the partitions
+equal weight even when their softmax masses differ.
+
+Accumulate scores and online state in FP32 and cast the final model output to
+BF16. The kernel avoids materializing the score/probability arrays. It still
+reads dense K/V, and an explicitly supplied mask can itself occupy `L × S`
+space. Avoid describing the whole operation as having no quadratic input or
+storage under every mask representation.
+
+## Reach the Final Model Checkpoint
+
+In `Qwen3MultiHeadAttention`, select the new wrapper only when the feature is
+enabled and its selector accepts the inputs. Otherwise use the readable dense
+attention path. Preserve the cache update, projection results, mask, scale, and
+output shape. Track `io_aware_dense_attention_dispatches` and
+`readable_attention_dispatches` so the chosen route is observable.
+
+Once the native implementation is connected, run its GPU comparison, then the
+complete Day 7 gate, which includes the preceding gate/up checkpoint:
 
 ```bash
 pdm run build-ext
+pdm run test --week 2 --day 7 -- -k io_aware
 pdm run test --week 2 --day 7
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:prefill:32 --case split-k:prefill:32 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day7-short-attribution.json
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint io-aware-dense-attention --model qwen3-0.6b
 ```
 
-Capture the exact source, model, phase, token count, prompt rule, software, and
-device. Do not substitute a 128-token baseline for the 32-token candidate.
+The gate compares results against materialized dense attention and checks mask,
+shape, dtype, selector, and wrapper behavior. The complete prompt call exercises
+the final model route. Keep the earlier shared-input checkpoint runnable as an
+additional control.
 
-## Task 2: Reuse the Day 5 Tile for Each Partition
+## Compare the Same Attention, Then the Same Request
 
-Extend the existing quantized-matmul primitive rather than adding a parallel
-public operator. Reuse Day 5's loader, W4 dequantization, and matrix fragments
-inside each aligned K partition. Validate that:
+The operator runner can vary source length and query length separately:
 
-- every split begins and ends on a group-of-128 boundary;
-- partial planes are disjoint and cover the full reduction exactly once;
-- edge rows and columns are masked before load or store;
-- accumulation and reduction remain FP32;
-- `split_k <= 1` dispatches exactly to the Day 5 unsplit kernel.
+```bash
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-0.6b \
+  --section attention --context 128 --query-length 1 \
+  --attention-mask none --warmup 4 --iterations 60 \
+  --json-output week2-attention-decode.json
 
-The tests grade public results, dtype and shape, valid partitioning, and the
-exact fallback. They do not require a private helper name, Metal symbol, or a
-particular split-count formula.
+pdm run bench-week2-operators --solution tiny_llm --model qwen3-0.6b \
+  --section attention --context 128 --query-length 32 \
+  --attention-mask causal --warmup 4 --iterations 60 \
+  --json-output week2-attention-prefill.json
+```
 
-## Task 3: Make Dispatch Explicit
+Each run contains matched implementation comparisons for that shape. The two
+commands ask different questions; do not subtract their times and call the
+difference a speedup. Use these small shapes first, then vary context and query
+length deliberately.
 
-Expose the `split-k` checkpoint with an immutable feature set: packed W4,
-fused pointwise operators, SIMD prefill, no optional decode-attention branch,
-and Split-K only where its policy selects more than one partition.
-
-Keep that public policy in `QuantizedMatmul::eval_gpu`; the supplied starter
-surface is `src/extensions/src/quantized_matmul.cpp`. Internal helper and Metal
-kernel names remain implementation choices.
-
-Keep the policy small and inspectable. Static dispatch can demonstrate that a
-Split-K and reduction kernel exist, but it cannot prove higher occupancy or a
-product speedup. Those claims require measured evidence.
-
-If you want to continue without Split-K, preserve `split_k <= 1` and the Day 5
-unsplit result. The chapter's learning outcome is the conditional decision,
-not an unconditional custom-kernel win.
-
-## Task 4: Re-profile the Short Shape
-
-Rerun the exact 32-token attribution command from Task 1 so the baseline and
-candidate differ only in schedule. In the checked M4 Pro example, Split-K
-reduced total attributed time by 4.87% and projection time by
-5.01%. Its trace exposed only static Split-K and reduction dispatches; no
-timeline or counter tree materialized, so no occupancy improvement was
-inferred.
-
-Write `keep`, `reject`, or `inconclusive` for the 32-token shape, then name the
-result that would reverse your decision. A sub-percent difference is not a
-strong conclusion without a larger sample.
-
-## Task 5: Close Week 2 at the Fixed Workload
-
-Return to the Day 5 unsplit checkpoint and compare it with Day 7 at the same
-Qwen3-4B 128×129 product control used throughout the week:
+Compare complete requests with only dense attention toggled:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-simd-matmul --variant week2-split-k --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day7-final.json
+  --variant week2-io-aware-dense-attention --model qwen3-0.6b \
+  --input-len 128 --output-len 129 --warmup 2 --prefill-logits last \
+  --json-output week2-attention-on.json
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:prefill:128 --case split-k:prefill:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day7-final-attribution.json
+pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
+  --variant week2-io-aware-dense-attention --model qwen3-0.6b \
+  --input-len 128 --output-len 129 --warmup 2 --prefill-logits last \
+  --disable-week2-io-aware-dense-attention \
+  --json-output week2-attention-off.json
 ```
 
-On the checked two-sample product control, prefill changed from 721.60 to
-718.36 tokens/s (-0.45%) and decode changed by +0.14%. That supports rejecting
-Split-K for this fixed 128-token product workload while conditionally retaining
-the short-shape experiment. It does not establish a portable crossover.
+QKV and gate/up sharing remain enabled on both sides. Confirm dispatch, check
+correctness, and compare prefill and decode independently. Avoid promoting an
+operator result into a complete-request claim when those measurements disagree.
 
-Finish with the week's decision ledger:
+## Finish with Decisions You Can Defend
 
-| Step | Evidence that selected it | Same-workload result | Decision and falsifier |
-|---|---|---|---|
-| KV cache | Full-prefix recomputation | Matched Week 1 versus cache | Your observation |
-| Packed W4 | Cached decode attribution | Repeated decode product and attribution | Your observation |
-| Fused pointwise | Post-W4 re-profile | Repeated decode product and attribution | Your observation |
-| SIMD prefill | Day 4 128-token prefill profile | Repeated prefill product and attribution | Your observation |
-| Optional operator lab | Explicit secondary workload | Before/after/fallback record | `keep`, `reject`, `inconclusive`, or skipped |
-| Split-K | Under-filled 32-token projection | Short control plus fixed 128×129 control | One decision per shape |
+Complete the [decision ledger](./week2-decision-ledger.md) for every change,
+including results you rejected or could not distinguish from noise. An eligible,
+correct custom path is not an obligation to deploy it on every shape. Your
+record should say which workload supports the choice and what would reverse it.
 
-Close the week with the causal story: what dominated, what changed, what the
-identical remeasurement showed, and what you chose not to claim.
+You have now optimized the work inside one request. A growing dense cache still
+belongs to that request, and dense attention still addresses it as a contiguous
+logical sequence. [Week 3](./week3-overview.md) adds scheduling and a paged cache
+layout. Carry forward the cache lifecycle, offsets, grouped-head mapping, and
+mask semantics; do not assume the dense kernel already knows how to follow a
+page table.
 
 {{#include copyright.md}}

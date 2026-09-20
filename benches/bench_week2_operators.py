@@ -30,6 +30,8 @@ SECTIONS = (
     "prefill-projections",
     "model-kernels",
     "attention",
+    "shared-input-qkv",
+    "shared-input-gate-up-swiglu",
 )
 
 
@@ -48,9 +50,11 @@ class OperatorImplementation:
     quantized_matmul_vanilla: Callable[..., mx.array]
     fast_rms_norm_type: Any
     fast_rope_type: Any
-    decode_attention: Callable[..., mx.array]
+    io_aware_dense_attention: Callable[..., mx.array]
     readable_attention: Callable[..., mx.array]
     swiglu: Callable[[mx.array, mx.array], mx.array]
+    quantized_gate_up_swiglu: Callable[..., mx.array]
+    quantized_qkv: Callable[..., tuple[mx.array, mx.array, mx.array]]
 
 
 @dataclass(frozen=True)
@@ -91,9 +95,11 @@ def load_implementation(name: str) -> OperatorImplementation:
         quantized_matmul_vanilla=quantize.quantized_matmul_vanilla,
         fast_rms_norm_type=kernels.FastRMSNorm,
         fast_rope_type=kernels.FastRoPE,
-        decode_attention=kernels.decode_attention_custom,
+        io_aware_dense_attention=kernels.io_aware_dense_attention,
         readable_attention=kernels.scaled_dot_product_attention,
         swiglu=kernels.swiglu,
+        quantized_gate_up_swiglu=kernels.quantized_gate_up_swiglu,
+        quantized_qkv=kernels.quantized_qkv,
     )
 
 
@@ -119,7 +125,10 @@ def parse_args() -> argparse.Namespace:
         dest="contexts",
         type=int,
         action="append",
-        help="context length; repeat to run a balanced context sweep (default: 128)",
+        help=(
+            "context length, or row count for shared-input fusion; repeat to run a "
+            "balanced shape sweep (default: 128)"
+        ),
     )
     parser.add_argument(
         "--context-repeats",
@@ -168,11 +177,6 @@ def parse_args() -> argparse.Namespace:
         action="append",
         choices=("q", "k", "v", "o", "gate", "up", "down"),
         help="prefill projection to benchmark; repeat to select several (default: q)",
-    )
-    parser.add_argument(
-        "--include-split-k",
-        action="store_true",
-        help="also benchmark the Day 7 split-K path",
     )
     parser.add_argument(
         "--json-output",
@@ -281,16 +285,6 @@ def report_progression(
         f"{name:<22} {baseline_label}={baseline_us:>9.1f} us  "
         f"optimized={optimized_us:>9.1f} us  mlx={mlx_us:>9.1f} us  "
         f"speedup={baseline_us / optimized_us:>5.2f}x"
-    )
-
-
-def report_split_k(
-    name: str, simdgroup_us: float, split_k_us: float, mlx_us: float
-) -> None:
-    print(
-        f"{name:<22} simd={simdgroup_us:>9.1f} us  "
-        f"split-k={split_k_us:>9.1f} us  mlx={mlx_us:>9.1f} us  "
-        f"speedup={simdgroup_us / split_k_us:>5.2f}x"
     )
 
 
@@ -451,35 +445,122 @@ def benchmark_prefill_projections(
                 ),
             ),
         ]
-        if args.include_split_k:
-            functions.append(
-                (
-                    "split-k",
-                    lambda: ops.quantized_matmul(
-                        weights.scales,
-                        weights.biases,
-                        weights.group_size,
-                        weights.bits,
-                        x,
-                        weights.weight,
-                        True,
-                        use_simdgroup=True,
-                        use_split_k=True,
-                    ),
-                )
-            )
         timings = benchmark_comparison(
             functions,
             args.warmup,
             args.iterations,
         )
         name = f"prefill {projection} matmul"
-        if args.include_split_k:
-            report_split_k(name, timings["simd"], timings["split-k"], timings["mlx"])
-        else:
-            report(name, timings["simd"], timings["mlx"])
+        report(name, timings["simd"], timings["mlx"])
         results.append(comparison_record(name, timings))
     return results
+
+
+def benchmark_shared_input_qkv(
+    args: argparse.Namespace, model: Any, ops: OperatorImplementation
+) -> list[dict[str, Any]]:
+    layer = model.model.layers[0]
+    precision = model.model.embed_tokens.scales.dtype
+    hidden_size = model.args.hidden_size
+    q = ops.quantized_weights_type.from_mlx_layer(layer.self_attn.q_proj)
+    k = ops.quantized_weights_type.from_mlx_layer(layer.self_attn.k_proj)
+    v = ops.quantized_weights_type.from_mlx_layer(layer.self_attn.v_proj)
+    x = mx.random.normal((args.context, hidden_size)).astype(precision)
+    mx.eval(
+        x,
+        q.weight,
+        q.scales,
+        q.biases,
+        k.weight,
+        k.scales,
+        k.biases,
+        v.weight,
+        v.scales,
+        v.biases,
+    )
+
+    timings = benchmark_comparison(
+        [
+            (
+                "separate",
+                lambda: (
+                    ops.quantized_linear(x, q),
+                    ops.quantized_linear(x, k),
+                    ops.quantized_linear(x, v),
+                ),
+            ),
+            ("shared", lambda: ops.quantized_qkv(x, q, k, v)),
+        ],
+        args.warmup,
+        args.iterations,
+    )
+    report("shared-input QKV", timings["shared"], timings["separate"])
+    return [comparison_record("shared-input QKV", timings)]
+
+
+def benchmark_shared_input_gate_up_swiglu(
+    args: argparse.Namespace, model: Any, ops: OperatorImplementation
+) -> list[dict[str, Any]]:
+    layer = model.model.layers[0]
+    precision = model.model.embed_tokens.scales.dtype
+    hidden_size = model.args.hidden_size
+    gate = ops.quantized_weights_type.from_mlx_layer(layer.mlp.gate_proj)
+    up = ops.quantized_weights_type.from_mlx_layer(layer.mlp.up_proj)
+    x = mx.random.normal((args.context, hidden_size)).astype(precision)
+    mx.eval(
+        x,
+        gate.weight,
+        gate.scales,
+        gate.biases,
+        up.weight,
+        up.scales,
+        up.biases,
+    )
+
+    def separate() -> mx.array:
+        return ops.swiglu(
+            ops.quantized_linear(x, gate),
+            ops.quantized_linear(x, up),
+        )
+
+    def mlx_separate() -> mx.array:
+        gate_result = mx.quantized_matmul(
+            x,
+            gate.weight,
+            gate.scales,
+            gate.biases,
+            transpose=True,
+            group_size=gate.group_size,
+            bits=gate.bits,
+        )
+        up_result = mx.quantized_matmul(
+            x,
+            up.weight,
+            up.scales,
+            up.biases,
+            transpose=True,
+            group_size=up.group_size,
+            bits=up.bits,
+        )
+        return gate_result * mx.sigmoid(gate_result) * up_result
+
+    timings = benchmark_comparison(
+        [
+            ("separate", separate),
+            ("fused", lambda: ops.quantized_gate_up_swiglu(x, gate, up)),
+            ("mlx", mlx_separate),
+        ],
+        args.warmup,
+        args.iterations,
+    )
+    report_progression(
+        "gate+up+SwiGLU",
+        timings["separate"],
+        timings["fused"],
+        timings["mlx"],
+        baseline_label="separate",
+    )
+    return [comparison_record("gate+up+SwiGLU", timings)]
 
 
 def benchmark_model_kernels(
@@ -628,7 +709,7 @@ def benchmark_attention(
             ),
             (
                 "optimized",
-                lambda: ops.decode_attention(query, key, value, scale, mask),
+                lambda: ops.io_aware_dense_attention(query, key, value, scale, mask),
             ),
             (
                 "mlx",
@@ -833,6 +914,8 @@ def main() -> None:
         "prefill-projections": benchmark_prefill_projections,
         "model-kernels": benchmark_model_kernels,
         "attention": benchmark_attention,
+        "shared-input-qkv": benchmark_shared_input_qkv,
+        "shared-input-gate-up-swiglu": benchmark_shared_input_gate_up_swiglu,
     }
     runs = []
     for repeat_index, shape_order in enumerate(shape_orders):
@@ -883,7 +966,6 @@ def main() -> None:
                 "gqa_ratio": args.gqa_ratio,
                 "attention_mask": args.attention_mask,
                 "prefill_projections": args.prefill_projection or ["q"],
-                "include_split_k": args.include_split_k,
             },
             "runs": runs,
             "summary": summary,

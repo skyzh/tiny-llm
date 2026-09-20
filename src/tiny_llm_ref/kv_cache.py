@@ -247,7 +247,40 @@ class TinyKvFullCache(TinyKvCache):
     def __init__(self):
         self.key_values = None
         self.offset = 0
+        self.capacity = 0
+        self._key_storage = None
+        self._value_storage = None
         self.growth_copy_bytes = 0
+
+    @staticmethod
+    def _next_capacity(required: int) -> int:
+        return 1 << (required - 1).bit_length()
+
+    def _reserve(self, key: mx.array, value: mx.array, required: int) -> None:
+        if self._key_storage is not None and required <= self.capacity:
+            return
+
+        B, H, _, D = key.shape
+        capacity = self._next_capacity(required)
+        key_storage = mx.zeros((B, H, capacity, D), dtype=key.dtype)
+        value_storage = mx.zeros((B, H, capacity, D), dtype=value.dtype)
+
+        if self.offset:
+            if self._key_storage is None:
+                assert self.key_values is not None
+                previous_key, previous_value = self.key_values
+            else:
+                previous_key = self._key_storage[:, :, : self.offset, :]
+                previous_value = self._value_storage[:, :, : self.offset, :]
+            assert previous_key.shape == (B, H, self.offset, D)
+            assert previous_value.shape == (B, H, self.offset, D)
+            self.growth_copy_bytes += previous_key.nbytes + previous_value.nbytes
+            key_storage[:, :, : self.offset, :] = previous_key
+            value_storage[:, :, : self.offset, :] = previous_value
+
+        self._key_storage = key_storage
+        self._value_storage = value_storage
+        self.capacity = capacity
 
     def update_and_fetch(
         self,
@@ -256,27 +289,39 @@ class TinyKvFullCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        assert key.ndim == 4
+        assert key.shape == value.shape
+        B, H, S, D = key.shape
+        assert S > 0
         if self.key_values is None:
             assert self.offset == 0
-            self.key_values = (key, value)
-            B, H, S, D = key.shape
-            self.offset = S
-            return key, value, self.offset, mask
         else:
-            B, H, S, D = key.shape
-            assert key.shape == value.shape
-            prev_keys, prev_values = self.key_values
-            assert prev_keys.shape == (B, H, self.offset, D)
-            assert prev_values.shape == (B, H, self.offset, D)
-            self.growth_copy_bytes += prev_keys.nbytes + prev_values.nbytes
-            new_keys = mx.concat([prev_keys, key], axis=2)
-            new_values = mx.concat([prev_values, value], axis=2)
-            self.key_values = (new_keys, new_values)
-            self.offset += S
-            return new_keys, new_values, self.offset, mask
+            previous_key, previous_value = self.key_values
+            assert previous_key.shape == (B, H, self.offset, D)
+            assert previous_value.shape == (B, H, self.offset, D)
+        if self._key_storage is not None:
+            assert self._key_storage.shape[:2] == (B, H)
+            assert self._key_storage.shape[3] == D
+            assert self._value_storage.shape[:2] == (B, H)
+            assert self._value_storage.shape[3] == D
+            assert self._key_storage.dtype == key.dtype
+            assert self._value_storage.dtype == value.dtype
+
+        required = self.offset + S
+        self._reserve(key, value, required)
+        self._key_storage[:, :, self.offset : required, :] = key
+        self._value_storage[:, :, self.offset : required, :] = value
+        self.offset = required
+        self.key_values = (
+            self._key_storage[:, :, : self.offset, :],
+            self._value_storage[:, :, : self.offset, :],
+        )
+        return self.key_values[0], self.key_values[1], self.offset, mask
 
     def materialize(self):
-        if self.key_values is not None:
+        if self._key_storage is not None:
+            mx.eval(self._key_storage, self._value_storage)
+        elif self.key_values is not None:
             mx.eval(*self.key_values)
 
     def rewind(self, n: int):
@@ -287,6 +332,12 @@ class TinyKvFullCache(TinyKvCache):
         self.offset -= n
         if self.offset == 0:
             self.key_values = None
+            return
+        if self._key_storage is not None:
+            self.key_values = (
+                self._key_storage[:, :, : self.offset, :],
+                self._value_storage[:, :, : self.offset, :],
+            )
             return
         self.key_values = (
             self.key_values[0][:, :, : self.offset],

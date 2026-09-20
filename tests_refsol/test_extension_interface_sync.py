@@ -1,3 +1,4 @@
+import ast
 import importlib
 import re
 import sys
@@ -14,18 +15,37 @@ INTERFACES = {
     "rms_norm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
     "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "decode_attention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "quantized_qkv": ("Week 2 shared-input fusion", "week2_kernels.cpp"),
+    "quantized_gate_up_swiglu": (
+        "Week 2 shared-input fusion",
+        "week2_kernels.cpp",
+    ),
+    "decode_attention": (
+        "Week 2 I/O-aware dense attention",
+        "week2_kernels.cpp",
+    ),
     "paged_cache_update": ("Week 3, Day 3", "paged_attention.cpp"),
     "quantized_embedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "paged_attention": ("Week 3, Day 4", "paged_attention.cpp"),
 }
+
+REFERENCE_ONLY_PREVIEW_INTERFACES = set()
+REFERENCE_ONLY_PREVIEW_CHAPTERS = set()
 
 PRIMITIVE_CLASSES = {
     "QuantizedMatmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
     "Week2RMSNorm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2DecodeAttention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "Week2QuantizedQKV": ("Week 2 shared-input fusion", "week2_kernels.cpp"),
+    "Week2QuantizedGateUpSwiGLU": (
+        "Week 2 shared-input fusion",
+        "week2_kernels.cpp",
+    ),
+    "Week2DecodeAttention": (
+        "Week 2 I/O-aware dense attention",
+        "week2_kernels.cpp",
+    ),
     "PagedCacheUpdate": ("Week 3, Day 3", "paged_attention.cpp"),
     "QuantizedEmbedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "PagedAttention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -36,15 +56,15 @@ METAL_CHECKPOINTS = {
         "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 3",
         "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 3",
         "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 5",
-        "quantized_matmul_simdgroup_splitk_w4a16_g128": "Week 2, Day 7",
-        "quantized_matmul_splitk_reduce": "Week 2, Day 7",
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
     },
     "week2_kernels.metal": {
         "week2_rms_norm": "Week 2, Day 4",
         "week2_rope": "Week 2, Day 4",
         "week2_swiglu": "Week 2, Day 4",
-        "week2_decode_attention": "Week 2, Day 6",
+        "week2_quantized_qkv_bf16": "Week 2 shared-input fusion",
+        "week2_quantized_gate_up_swiglu": "Week 2 shared-input fusion",
+        "week2_decode_attention": "Week 2 I/O-aware dense attention",
     },
     "paged_attention.metal": {
         "paged_cache_update_kernel": "Week 3, Day 3",
@@ -54,44 +74,64 @@ METAL_CHECKPOINTS = {
     },
 }
 
-DOC_TASK_MARKERS = {
+DOC_SECTION_MARKERS = {
     "book/src/week2-03-quantize-model.md": {
-        "Task 1": {"QuantizedWeights.from_mlx_layer", "QuantizedEmbedding.__call__"},
-        "Task 2": {"tiny_llm_ext::quantized_matmul", "QuantizedMatmul::eval_cpu"},
-        "Task 3": {
+        "Keep Both Embedding Uses Packed": {
+            "QuantizedWeights.from_mlx_layer",
+            "QuantizedEmbedding",
+        },
+        "Bring Up the Native Dot Product": {
+            "quantized_matmul",
             "QuantizedMatmul::eval_gpu",
             "quantized_matmul_vanilla_w4a16_g128",
             "quantized_matvec_x4_fast_w4a16_g128",
         },
-        "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MultiHeadAttention.__call__"},
+        "Put It Back into the Cached Model": {
+            "Qwen3ModelWeek2",
+            "quantized-matvec",
+        },
     },
     "book/src/week2-04-fused-model-kernels.md": {
-        "Task 1": {
-            "tiny_llm_ext::rms_norm",
-            "Week2RMSNorm::eval_gpu",
+        "RMSNorm: Keep the Reduction with Its Output": {
+            "FastRMSNorm",
+            "rms_norm",
             "week2_rms_norm",
         },
-        "Task 2": {"tiny_llm_ext::rope", "Week2RoPE::eval_gpu", "week2_rope"},
-        "Task 3": {"tiny_llm_ext::swiglu", "Week2SwiGLU::eval_gpu", "week2_swiglu"},
-        "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MLP.__call__"},
+        "RoPE: Rotate the Right Position": {"FastRoPE", "rope", "week2_rope"},
+        "SwiGLU: Combine Two Existing Tensors": {
+            "swiglu",
+            "week2_swiglu",
+        },
     },
     "book/src/week2-05-simd-matrix-prefill.md": {
-        "Task 2": {
+        "Dispatch by Shape": {
             "QuantizedMatmul::eval_gpu",
             "quantized_matmul_simdgroup_w4a16_g128",
         },
     },
     "book/src/week2-06-operator-lab.md": {
-        "Task 2": {
-            "tiny_llm_ext::decode_attention",
-            "Week2DecodeAttention::eval_gpu",
-            "week2_decode_attention",
-            "Qwen3MultiHeadAttention.__call__",
-            "decode_attention_custom",
+        "QKV: Share the Load, Preserve Three Results": {
+            "supports_shared_input_qkv",
+            "quantized_qkv",
+            "Qwen3MultiHeadAttention",
+        },
+        "Gate and Up: Keep the Activation Inside the Projection": {
+            "supports_fused_gate_up",
+            "quantized_gate_up_swiglu",
+            "Qwen3MLP",
         },
     },
     "book/src/week2-07-split-k-prefill.md": {
-        "Task 3": {"QuantizedMatmul::eval_gpu"},
+        "Keep the Mask and Head Mapping Explicit": {
+            "readable fallback",
+            "matching floating dtypes",
+        },
+        "Reach the Final Model Checkpoint": {
+            "Qwen3MultiHeadAttention",
+            "io_aware_dense_attention",
+            "io_aware_dense_attention_dispatches",
+            "readable_attention_dispatches",
+        },
     },
     "book/src/week3-03-paged-attention-part1.md": {
         "Task 1": {
@@ -133,75 +173,6 @@ DOC_TASK_MARKERS = {
 }
 
 EXTENSION_TASK_PAIRS = {
-    "book/src/week2-03-quantize-model.md": {
-        "Task 2": {
-            (
-                "src/extensions/src/quantized_matmul.cpp",
-                "tiny_llm_ext::quantized_matmul",
-            ),
-            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_cpu"),
-        },
-        "Task 3": {
-            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matmul_vanilla_w4a16_g128",
-            ),
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matvec_x4_fast_w4a16_g128",
-            ),
-        },
-    },
-    "book/src/week2-04-fused-model-kernels.md": {
-        "Task 1": {
-            ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::rms_norm"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RMSNorm::eval_cpu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RMSNorm::eval_gpu"),
-            ("src/extensions/src/week2_kernels.metal", "week2_rms_norm"),
-        },
-        "Task 2": {
-            ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::rope"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RoPE::eval_cpu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2RoPE::eval_gpu"),
-            ("src/extensions/src/week2_kernels.metal", "week2_rope"),
-        },
-        "Task 3": {
-            ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::swiglu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2SwiGLU::eval_cpu"),
-            ("src/extensions/src/week2_kernels.cpp", "Week2SwiGLU::eval_gpu"),
-            ("src/extensions/src/week2_kernels.metal", "week2_swiglu"),
-        },
-    },
-    "book/src/week2-05-simd-matrix-prefill.md": {
-        "Task 2": {
-            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matmul_simdgroup_w4a16_g128",
-            ),
-        },
-    },
-    "book/src/week2-06-operator-lab.md": {
-        "Task 2": {
-            (
-                "src/extensions/src/week2_kernels.cpp",
-                "tiny_llm_ext::decode_attention",
-            ),
-            (
-                "src/extensions/src/week2_kernels.cpp",
-                "Week2DecodeAttention::eval_cpu",
-            ),
-            (
-                "src/extensions/src/week2_kernels.cpp",
-                "Week2DecodeAttention::eval_gpu",
-            ),
-            (
-                "src/extensions/src/week2_kernels.metal",
-                "week2_decode_attention",
-            ),
-        },
-    },
     "book/src/week3-03-paged-attention-part1.md": {
         "Task 1": {
             (
@@ -267,6 +238,23 @@ EXTENSION_TASK_PAIRS = {
 
 def _read(path: str) -> str:
     return (ROOT / path).read_text()
+
+
+def _literal_assignment(path: str, name: str) -> object:
+    module = ast.parse(_read(path))
+    for node in module.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"missing literal assignment {name} in {path}")
+
+
+def _source_comments(path: str) -> str:
+    source = _read(path)
+    line_comments = re.findall(r"//[^\n]*", source)
+    block_comments = re.findall(r"/\*.*?\*/", source, flags=re.DOTALL)
+    return "\n".join([*line_comments, *block_comments])
 
 
 def _strip_comments(source: str) -> str:
@@ -377,9 +365,11 @@ def _assert_binding_parity(starter_source: str, reference_source: str) -> None:
         assert starter_arguments == reference_arguments
 
 
-def _task_body(chapter: str, task: str) -> str:
+def _section_body(chapter: str, section: str) -> str:
     match = re.search(
-        rf"^## {task}:.*?(?=^## Task |\Z)", chapter, re.MULTILINE | re.DOTALL
+        rf"^## {re.escape(section)}(?:\s*:[^\n]*)?\s*$.*?(?=^## |\Z)",
+        chapter,
+        re.MULTILINE | re.DOTALL,
     )
     assert match is not None
     return match.group(0)
@@ -406,7 +396,7 @@ def _functions_in_code_tokens(
 
 
 def _assert_task_pairs(chapter: str, task: str, pairs: set[tuple[str, str]]) -> None:
-    body = _task_body(chapter, task)
+    body = _section_body(chapter, task)
     expected_files = {filename for filename, _ in pairs}
     expected_functions = {function for _, function in pairs}
     associations: set[tuple[str, str]] = set()
@@ -444,7 +434,10 @@ def _assert_task_pairs(chapter: str, task: str, pairs: set[tuple[str, str]]) -> 
 
 def test_starter_and_reference_publish_the_same_learner_extension_functions():
     expected = set(INTERFACES)
-    assert _header_functions("src/extensions_ref/src/tiny_llm_ext.h") == expected
+    reference_expected = expected | REFERENCE_ONLY_PREVIEW_INTERFACES
+    assert _header_functions("src/extensions_ref/src/tiny_llm_ext.h") == (
+        reference_expected
+    )
     assert _header_functions("src/extensions/src/tiny_llm_ext.h") == expected
 
     reference_bindings = _binding_functions("src/extensions_ref/bindings.cpp") - {
@@ -454,7 +447,7 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "load_library",
         "axpby",
     }
-    assert reference_bindings == expected
+    assert reference_bindings == reference_expected
     assert starter_bindings == expected
 
     for function in expected:
@@ -465,6 +458,47 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         _read("src/extensions/bindings.cpp"),
         _read("src/extensions_ref/bindings.cpp"),
     )
+
+
+def test_starter_smoke_map_covers_the_current_native_learning_seams():
+    smoke_map = _literal_assignment(
+        "src/extensions/test.py", "LEARNER_EXTENSION_INTERFACES"
+    )
+    assert smoke_map == {
+        "quantized_matmul": "Week 2, Day 3",
+        "rms_norm": "Week 2, Day 4",
+        "rope": "Week 2, Day 4",
+        "swiglu": "Week 2, Day 4",
+        "quantized_qkv": "Week 2, Day 6",
+        "quantized_gate_up_swiglu": "Week 2, Day 7",
+        "decode_attention": "Week 2, Day 7",
+        "paged_cache_update": "Week 3, Day 3",
+        "quantized_embedding": "Week 3, Day 4",
+        "paged_attention": "Week 3, Day 4",
+    }
+
+
+def test_starter_comments_name_current_native_ownership_without_retired_split_k():
+    comments = {
+        path: _source_comments(path)
+        for path in (
+            "src/extensions/src/tiny_llm_ext.h",
+            "src/extensions/bindings.cpp",
+            "src/extensions/src/quantized_matmul.cpp",
+            "src/extensions/src/quantized_matmul.metal",
+        )
+    }
+    combined = "\n".join(comments.values())
+
+    assert "Week 2, Day 5: add SIMD-matrix prefill" in combined
+    assert "Week 2, Day 6: implement shared-input QKV" in combined
+    assert "Week 2, Day 7: implement shared-input gate/up" in combined
+    assert "Week 2, Day 7: implement I/O-aware dense attention" in combined
+
+    assert "quantized_matmul_simdgroup_splitk_w4a16_g128" not in combined
+    assert "quantized_matmul_splitk_reduce" not in combined
+    assert "Days 6-7" not in combined
+    assert "Day 6: implement online-softmax decode attention" not in combined
 
 
 def test_starter_cpp_stubs_are_registered_and_checkpoint_labeled():
@@ -515,11 +549,14 @@ def test_starter_metal_stubs_name_each_learner_owned_kernel_and_checkpoint():
         _assert_metal_scaffold_only(source)
 
 
-def test_each_extension_task_names_the_exact_starter_functions_to_modify():
-    for path, tasks in DOC_TASK_MARKERS.items():
+def test_each_learner_section_names_its_concrete_implementation_seams():
+    assert REFERENCE_ONLY_PREVIEW_CHAPTERS.isdisjoint(DOC_SECTION_MARKERS)
+    assert REFERENCE_ONLY_PREVIEW_CHAPTERS.isdisjoint(EXTENSION_TASK_PAIRS)
+
+    for path, sections in DOC_SECTION_MARKERS.items():
         chapter = _read(path)
-        for task, markers in tasks.items():
-            body = _task_body(chapter, task)
+        for section, markers in sections.items():
+            body = _section_body(chapter, section)
             for marker in markers:
                 assert marker in body
 
@@ -582,6 +619,31 @@ def test_built_starter_extension_fails_closed_for_every_public_operation(monkeyp
         "decode_attention": lambda: extension.decode_attention(
             scalar, scalar, scalar, scalar, 1.0, False, False, 1, 1
         ),
+        "quantized_qkv": lambda: extension.quantized_qkv(
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            128,
+            4,
+        ),
+        "quantized_gate_up_swiglu": lambda: extension.quantized_gate_up_swiglu(
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            scalar,
+            128,
+            4,
+        ),
         "paged_cache_update": lambda: extension.paged_cache_update(
             scalar, scalar, 0, 0
         ),
@@ -620,11 +682,11 @@ def test_binding_guard_rejects_a_changed_python_default():
 
 
 def test_task_pair_guard_rejects_a_nonexistent_source_path():
-    path = "book/src/week2-04-fused-model-kernels.md"
+    path = "book/src/week3-03-paged-attention-part1.md"
     source = _read(path)
     wrong_path = source.replace(
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`",
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/wrong.cpp`",
+        "in\n`src/extensions/src/paged_attention.cpp`, and implement",
+        "in\n`src/extensions/src/wrong.cpp`, and implement",
         1,
     )
     assert wrong_path != source
@@ -661,7 +723,7 @@ def test_task_pair_guard_rejects_cross_swapped_valid_week_3_day_4_pairs():
     assert cross_swapped != paged_swapped
 
     pairs = EXTENSION_TASK_PAIRS[path]["Task 2"]
-    body = _task_body(cross_swapped, "Task 2")
+    body = _section_body(cross_swapped, "Task 2")
     for filename, function in pairs:
         assert filename in body
         assert function in body

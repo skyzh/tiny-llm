@@ -1,31 +1,33 @@
-# 🚧 Appendix: Performance Evidence Ledger
+# 🚧 Appendix: Archived Performance Evidence Ledger
 
-> **Status: Experimental, single-machine evidence.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) before
-> treating a correctness, integration, or performance result as broader proof.
+> **Archived source-bound records.** This appendix preserves measurements from
+> the earlier source trees named below. Its invocation records and retired
+> selectors are deliberately non-runnable on the current checkout. They are not
+> results or progression instructions for the current Week 2 implementation.
+> Use the [current decision ledger](./week2-decision-ledger.md) and its linked
+> chapters for the executable learner route.
 
-This appendix records the measurements that determined the course order. The
-numbers are not additive promises: after one bottleneck shrinks, every other
-operator becomes a larger fraction of model time.
+## Archived Benchmark Method
 
-## Benchmark Method
-
-The progression runner launches every checkpoint in a fresh process,
+The archived progression runner launched every checkpoint in a fresh process,
 alternates their order, performs complete-request warmups, synchronizes lazy
 MLX work inside the timer, and reports the median:
 
-```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last \
-  --json-output benchmark_results/task367-final-main/raw/week2-128-final-main.json
+The exact historical parameters are retained below as a transcript, not a shell
+command. The `ARCHIVED>` prefix is intentional.
 
-pdm run bench-serving-progression --offline --repeats 4 \
-  --model qwen3-4b --num-seqs 16 --batch-size 4 \
-  --min-input-len 128 --max-input-len 1024 \
-  --min-output-len 32 --max-output-len 128 \
-  --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
+```text
+ARCHIVED> pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
+ARCHIVED>   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+ARCHIVED>   --prefill-logits last \
+ARCHIVED>   --json-output benchmark_results/task367-final-main/raw/week2-128-final-main.json
+
+ARCHIVED> pdm run bench-serving-progression --offline --repeats 4 \
+ARCHIVED>   --model qwen3-4b --num-seqs 16 --batch-size 4 \
+ARCHIVED>   --min-input-len 128 --max-input-len 1024 \
+ARCHIVED>   --min-output-len 32 --max-output-len 128 \
+ARCHIVED>   --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
+ARCHIVED>   --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
 ```
 
 `--prefill-logits last` is a generation-serving workload: both the reference
@@ -50,31 +52,35 @@ default, which is another reminder that benchmark lengths are conventions, not
 universal workloads. Always publish the exact prompt and output lengths.
 
 The measured machine below is an Apple M4 Pro with a 20-core GPU and 64 GB of
-memory. The current Week 2 control uses two complete warmups and two balanced
+memory. The archived Week 2 control used two complete warmups and two balanced
 fresh processes; the continuous-serving rows use one warmup and the
 median of four balanced fresh processes.
 
-## Week 2 Checkpoint Retention Ledger
+## Archived Week 2 Checkpoint Retention Ledger
 
 A polished explanation is not evidence that an optimization belongs in the
 course. Before retaining a checkpoint, answer six questions: its invariant,
 why it could be faster, where it wins, where it loses, its fallback, and how the
-benchmark could mislead us. This ledger records the current answers; links
-below contain the measurements.
+benchmark could mislead us. This ledger records how the named historical source
+tree answered those questions; it is not the current course answer.
 
-| Checkpoint | Required invariant | Performance hypothesis | Retained range and losing shapes | Fallback or control | Main benchmark trap |
+| Historical checkpoint | Required invariant | Performance hypothesis | Source-bound result and losing shapes | Fallback or control | Main benchmark trap |
 |---|---|---|---|---|---|
 | Dense KV cache | Caller offset equals every layer cache length; K/V append on the sequence axis | Reuse projected prefix K/V instead of recomputing the full model prefix | Wins incremental decode as the prefix grows; repeated `concat` still copies `O(S²)` bytes | Week 1 full-prefix model remains the semantic control; Week 3 pages replace growth copies | Comparing cached MLX with an uncached course model measures different algorithms |
-| Packed quantized matvec | W4, group size 128, BF16 parameters, contiguous packed layout, and the declared transpose convention | Read packed weights once and share unpack/scale work across SIMD lanes | Retained for `M <= 8`; multi-row prefill exposes poor reuse and motivates Day 5 | The Python `mlx.core` equation is the correctness oracle; vanilla W4 is an inspectable Metal control; named earlier checkpoints preserve the dense control | Lazy execution or timing post-materialized weights can hide weight traffic |
-| RMSNorm | BF16 I/O with the sum of squares accumulated in FP32 | Fuse reduction, normalization, and weight multiply into one dispatch | Retained at Qwen hidden dimensions after both operator and decode gains; unknown dimensions require remeasurement | Python `mlx.core` RMSNorm and the Day 3 checkpoint remain selectable | Adding isolated microseconds as if checkpoint gains were independent |
-| RoPE | One valid offset per batch row; even rotated dimension; tail values preserved | Fuse angle generation and pair rotation without intermediate graphs | Retained for Qwen decode rows; head-count and rotated-dimension changes require remeasurement | Python `mlx.core` RoPE and the RMSNorm-only checkpoint remain selectable | Benchmarking a cached or precomputed angle path against fresh angle construction |
-| SwiGLU | Gate and up tensors have identical shape and dtype | Fuse SiLU and the gate/up product into one elementwise dispatch | Retained for Qwen MLP shapes; tiny tensors and other dtypes are not a performance claim | The Python `mlx.core` SiLU-product and the RoPE checkpoint remain selectable | Accepting an operator win without a repeated complete-model gain |
-| Decode attention (optional lab) | `Hq % Hkv == 0`, `D <= 256`, FP32 online-softmax state, and causal/explicit mask semantics | Avoid score/probability tensors and merge softmax while walking K/V | The checked fixed-workload result is equivocal; retain only for an explicitly measured context and fallback | Python `mlx.core` grouped attention handles unsupported shapes and is the control | Prescribing the lab from chapter order, extrapolating one context, or promoting `n=2` product noise |
-| SIMD-matrix prefill | W4/group-128 layout, BF16 storage, FP32 tile accumulation, and correct partial tiles | Reuse activation and dequantized-weight tiles across prompt rows | Required path for `M > 8`; partial and new model shapes need both correctness and timing sweeps | The Python `mlx.core` matmul is the correctness oracle; Day 3 matvec remains the short-row dispatch and vanilla Metal is a bring-up control | Comparing all-logit course prefill with last-logit MLX serving |
-| Split-K prefill | Partitions align to quantization groups; partial planes are disjoint; final reduction is FP32 | Add independent groups only while the ordinary result grid is under-filled | Conditionally retained at the measured 32-token control; rejected at the fixed 128-token product workload | `split_k <= 1` dispatches exactly to the Day 5 unsplit kernel | Static dispatch does not prove occupancy, and a short-shape replay does not prove a fixed-workload gain |
+| Packed quantized matvec | W4, group size 128, BF16 parameters, contiguous packed layout, and the declared transpose convention | Read packed weights once and share unpack/scale work across SIMD lanes | Recorded for `M <= 8`; multi-row prefill exposed poor reuse and motivated the historical Day 5 work | The Python `mlx.core` equation was the correctness oracle; vanilla W4 was an inspectable Metal control | Lazy execution or timing post-materialized weights can hide weight traffic |
+| RMSNorm | BF16 I/O with the sum of squares accumulated in FP32 | Fuse reduction, normalization, and weight multiply into one dispatch | Recorded at Qwen hidden dimensions after both operator and decode gains; unknown dimensions required remeasurement | Python `mlx.core` RMSNorm and the Day 3 checkpoint were the controls | Adding isolated microseconds as if checkpoint gains were independent |
+| RoPE | One valid offset per batch row; even rotated dimension; tail values preserved | Fuse angle generation and pair rotation without intermediate graphs | Recorded for Qwen decode rows; head-count and rotated-dimension changes required remeasurement | Python `mlx.core` RoPE and the RMSNorm-only checkpoint were the controls | Benchmarking a cached or precomputed angle path against fresh angle construction |
+| SwiGLU | Gate and up tensors have identical shape and dtype | Fuse SiLU and the gate/up product into one elementwise dispatch | Recorded for Qwen MLP shapes; tiny tensors and other dtypes were not a performance claim | The Python `mlx.core` SiLU-product and the RoPE checkpoint were the controls | Accepting an operator win without a repeated complete-model gain |
+| Historical decode-attention lab | `Hq % Hkv == 0`, `D <= 256`, FP32 online-softmax state, and causal/explicit mask semantics | Avoid score/probability tensors and merge softmax while walking K/V | The fixed-workload result was equivocal and supported only an explicitly measured branch | Python `mlx.core` grouped attention handled unsupported shapes and was the control | Prescribing the lab from chapter order, extrapolating one context, or promoting `n=2` product noise |
+| SIMD-matrix prefill | W4/group-128 layout, BF16 storage, FP32 tile accumulation, and correct partial tiles | Reuse activation and dequantized-weight tiles across prompt rows | Recorded for `M > 8`; partial and new model shapes required both correctness and timing sweeps | The Python `mlx.core` matmul was the correctness oracle; Day 3 matvec remained the short-row control | Comparing all-logit course prefill with last-logit MLX serving |
+| Historical Split-K experiment | Partitions align to quantization groups; partial planes are disjoint; final reduction is FP32 | Add independent groups only while the ordinary result grid is under-filled | The source tree recorded a conditional 32-token result and rejected the fixed 128-token workload | `split_k <= 1` dispatched to the source tree's unsplit kernel | Static dispatch does not prove occupancy, and a short-shape replay does not prove a fixed-workload gain |
 
-This is a retention ledger, not a portability certificate. A new GPU, MLX
-release, model shape, dtype, or workload reopens the corresponding row.
+This archived ledger is neither a current retention decision nor a portability
+certificate. The current learner route instead owns shared-input QKV in
+[Day 6](./week2-06-operator-lab.md), then shared-input gate/up and I/O-aware
+dense attention in [Day 7](./week2-07-split-k-prefill.md). Follow those chapters
+and the current decision ledger; do not translate the historical rows into
+current selectors or commands.
 
 ## Long-Context Budget for Week 4
 
@@ -153,11 +159,12 @@ rotation changes full-attention semantics; and KV quantization trades numerical
 precision and sometimes speed for capacity. None makes the first full 300K
 prefill linear-time.
 
-Reproduce the operator sweep with:
+The archived operator sweep used this invocation record. It is not a command for
+the current checkout:
 
-```bash
-pdm run bench-long-context-attention \
-  --json-output benchmark_results/m4-pro-qwen3-4b-long-context-mlx-0.32.0.json
+```text
+ARCHIVED> pdm run bench-long-context-attention \
+ARCHIVED>   --json-output benchmark_results/m4-pro-qwen3-4b-long-context-mlx-0.32.0.json
 ```
 
 ## Dependency Upgrade
@@ -176,11 +183,11 @@ The small differences show why the comparison must record exact dependency
 versions: the MLX denominator is part of the experiment, even when an upgrade
 does not materially change the result.
 
-## Week 2 Performance by Chapter
+## Archived Week 2 Performance by Chapter
 
-This section is a checked example of the course's discover → optimize →
-re-profile loop. It is not a portability certificate or a set of performance
-thresholds.
+This section is a source-bound record of an earlier course tree's discover →
+optimize → re-profile loop. It is not a current progression, portability
+certificate, or set of performance thresholds.
 
 ### Bound Evidence
 
@@ -196,21 +203,21 @@ balanced synchronized iterations. With n=2, product medians can reject a
 large contradiction; they cannot turn a sub-percent change into a portable
 claim.
 
-Learners reproduce the method with their own tiny_llm solution:
+That source tree used the following now-archived invocation record. The retired
+`week2-split-k` and `split-k:prefill:128` labels are preserved only to identify
+the historical evidence; they are not selectors or commands learners can run
+on the current head. Use the current decision ledger and linked Day 6/7 chapters
+instead.
 
-~~~bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-kv-cache --variant week2-quantized-matvec \
-  --variant week2-swiglu --variant week2-simd-matmul \
-  --variant week2-split-k --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-progression.json
+~~~text
+ARCHIVED> progression variants included `week2-kv-cache`,
+ARCHIVED> `week2-quantized-matvec`, `week2-swiglu`, `week2-simd-matmul`,
+ARCHIVED> retired `week2-split-k`, and `mlx`; input/output were 128/129,
+ARCHIVED> with two warmups, two repeats, and last-row prefill logits.
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case kv-cache:decode:128 --case quantized-matvec:decode:128 \
-  --case swiglu:decode:128 --case swiglu:prefill:128 \
-  --case simd-matmul:prefill:128 --case split-k:prefill:128 \
-  --warmup 4 --iterations 12 --json-output week2-attribution.json
+ARCHIVED> attribution cases included cache, quantized matvec, SwiGLU,
+ARCHIVED> SIMD-matrix prefill, and retired `split-k:prefill:128`, with four
+ARCHIVED> warmups and twelve iterations.
 ~~~
 
 The checked compact result is
@@ -218,14 +225,14 @@ benchmark_results/m4-pro-qwen3-4b-week2-gpudebug-macos27-mlx-0.32.0.json.
 It records unavailable evidence explicitly. It contains no raw trace, absolute
 workspace path, screenshot, token output, or portable timing claim.
 
-### Day 1: Cache the Prefix
+### Archived Day 1: Cache the Prefix
 
 Day 1 changes the generation algorithm: prefill once, retain dense K/V state,
 and send only the new token through each decode step. The matched Week 1 versus
 kv-cache product observation measures that algorithmic change before any
 kernel is replaced. A shader trace is not needed to justify the cache.
 
-### Day 2: Discover the First Operator Category
+### Archived Day 2: Discover the First Operator Category
 
 The cached-decode attribution reported 34.527 ms of projection work, or 83.9%
 of the attributed total. Two BF16 GEMV shaders accounted for 93.60% of the
@@ -237,7 +244,7 @@ projection path, and repeat the identical decode workload. A failure to reduce
 projection time, or a regression in matched product decode, would falsify the
 hypothesis.
 
-### Day 3: Keep Weights Packed
+### Archived Day 3: Keep Weights Packed
 
 The packed W4 candidate reduced attributed projection time from 34.527 ms to
 10.700 ms (-69.0%) and reduced total attributed time by 56.8%. On the
@@ -248,7 +255,7 @@ The next re-profile mattered as much as the speedup: normalization, position,
 and activation work now occupied 5.948 ms, or 33.5% of attributed time. That
 newly exposed category selected the fused Day 4 operators.
 
-### Day 4: Fused Model Kernels
+### Archived Day 4: Fused Model Kernels
 
 Fused RMSNorm, RoPE, and SwiGLU reduced the selected category from 5.948 ms to
 1.251 ms (-79.0%) and total attributed time by 27.3%. The product control
@@ -261,20 +268,20 @@ portable attribution put projections at 1,201.306 ms / 99.1%. That prefill
 result—not a predetermined chapter order—selected SIMD-matrix prefill for Day
 5.
 
-### Day 5: Restore Matrix-Shaped Prefill
+### Archived Day 5: Restore Matrix-Shaped Prefill
 
 The cooperative W4 SIMD-matrix schedule reduced attributed 128-token projection
 time to 163.172 ms (-86.4%) and total attributed time by 85.8%. Fixed-workload
 prefill rose from 106.44 to 721.60 tokens/s (+577.9%). The succeeding capture
 ranked the SIMD-group W4 matrix shader at 96.86% of available shader cost.
 
-These effects justify retaining the schedule for this source tree and workload.
-They do not establish the same gain on another Apple GPU, model, prompt length,
-or dependency version.
+These effects justified the schedule in that source tree and workload. They do
+not decide the current course route or establish the same gain on another Apple
+GPU, model, prompt length, or dependency version.
 
-### Day 6: Keep the Secondary Operator Lab Optional
+### Archived Day 6: The Secondary Decode-Attention Lab
 
-After Day 4, the checked decode-attention branch changed attributed attention
+In that source tree, the checked decode-attention branch changed attributed attention
 from 0.837 ms to 0.831 ms (-0.75%), while total attributed time rose 0.97%.
 The separate product control showed a small decode change from 74.34 to 76.50
 tokens/s (+2.91%). Those mixed signals support an inconclusive worked branch,
@@ -285,7 +292,7 @@ The capture did confirm that the custom attention shader ran: it accounted for
 That is useful mechanism evidence, but it does not make the optional branch the
 next dominant optimization.
 
-### Day 7: Split K Only Where the Shape Supports It
+### Archived Day 7: Split-K Shape Experiment
 
 At 32-token prefill, the unsplit SIMD projection replay exposed an under-filled
 schedule. Split-K reduced attributed projection time from 48.433 ms to 46.008
@@ -293,11 +300,12 @@ ms (-5.01%) and total attributed time by 4.87%. Static inspection found both
 Split-K and reduction dispatches, but the replay produced no timeline, shader
 ranking, or counter tree, so no occupancy improvement is inferred.
 
-The fixed 128-token product control rejects a broad claim: prefill changed from
+The fixed 128-token product control rejected a broad claim: prefill changed from
 721.60 to 718.36 tokens/s (-0.45%) and decode changed by +0.14%. The checked
-decision therefore conditionally retains Split-K for the measured short shape
-and rejects it for the fixed 128-token product workload. Another device or
-model needs a fresh crossover measurement.
+source-bound decision recorded Split-K only for the measured short shape and
+rejected it for the fixed 128-token product workload. That historical result is
+not a current checkpoint or selector. Another device or model would require a
+fresh crossover measurement.
 
 ### What the Capture Can and Cannot Add
 
@@ -307,26 +315,26 @@ command ranking. The 32-token Split-K capture exposed only static dispatch.
 Missing trees remain unavailable; they are not recorded as zero and do not
 support inferred counters.
 
-The optional [macOS 27 profiling lab](./week2-advanced-profiling.md) shows how
-to create a trace package, hash its files, reduce gpudebug output, record a
-three-sentence decision, and remove the raw package after preserving compact
-evidence. The portable benchmark and attribution path remains sufficient for
-every required checkpoint.
+The archived source also linked the [macOS 27 profiling
+lab](./week2-advanced-profiling.md) for its trace workflow. For the current
+course, use the current decision ledger and the canonical shared-input QKV,
+shared-input gate/up, and I/O-aware dense-attention chapters; this archived
+section supplies no runnable checkpoint.
 
-## Week 3 Performance by Chapter
+## Archived Week 3 Performance by Chapter
 
 Paging adds indirect K/V reads and is not expected to beat contiguous
 attention for one preallocated static request. Week 3 therefore measures a
 serving workload with request turnover, incremental unknown-size growth,
 chunked admission, dense batch reconstruction, and page reuse:
 
-```bash
-pdm run bench-serving-progression --offline --repeats 4 \
-  --model qwen3-4b --num-seqs 16 --batch-size 4 \
-  --min-input-len 128 --max-input-len 1024 \
-  --min-output-len 32 --max-output-len 128 \
-  --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
+```text
+ARCHIVED> pdm run bench-serving-progression --offline --repeats 4 \
+ARCHIVED>   --model qwen3-4b --num-seqs 16 --batch-size 4 \
+ARCHIVED>   --min-input-len 128 --max-input-len 1024 \
+ARCHIVED>   --min-output-len 32 --max-output-len 128 \
+ARCHIVED>   --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
+ARCHIVED>   --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
 ```
 
 A complete warmup compiles the kernels. The runner then synchronizes and resets
@@ -339,7 +347,7 @@ The projection boundary must be fixed before interpreting any Week 3 table:
 
 | Evidence row | Projections | Cache / attention / paging / scheduler | What it establishes |
 |---|---|---|---|
-| Week 2 SIMD or Split-K | Course-owned zero-Steel W4 kernels, loader, and direct SIMD-matrix helper | Course-owned Week 2 dense cache and operators | Week 2 course implementation versus its explicitly paired full-MLX row. |
+| Historical Week 2 SIMD or Split-K source | Course-owned zero-Steel W4 kernels, loader, and direct SIMD-matrix helper | Course-owned Week 2 dense cache and operators | That archived Week 2 implementation versus its explicitly paired full-MLX row. |
 | Week 3 course row | Explicit MLX quantized-projection seam | Course-owned cache, attention, paging, batching, and scheduling | Representative cumulative Week 3 behavior; it does not isolate the seam. |
 | Full `mlx` row | Full MLX model/operator | Full MLX | External denominator, distinct from the hybrid Week 3 course row. |
 | Task #360 seam versus inherited | MLX quantized projections versus inherited Week 2 course projections | Identical course-owned Week 3 mechanisms | Causal projection-seam effect on one measured source tree. |
@@ -455,7 +463,7 @@ ownership on measured source `170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac`:
 Full MLX remains 17.83% faster than the dense Day 3 seam on prefill
 (equivalently, the seam is 15.13% below full MLX), because the seam changes
 projections only. These causal percentages explain the ownership decision;
-the task #367 tables above provide current absolute values.
+the task #367 tables above provide source-bound absolute values.
 
 The checked-in final-main corpus contains the complete raw samples, exact
 source commit and tracked-clean flag, host, configuration, execution order,
@@ -503,21 +511,25 @@ checked result records unavailable trees instead of substituting zeros or
 inferring counters; learners without that toolchain can still complete every
 checkpoint and reason from the portable artifact.
 
-## Optimization Map
+## Historical Optimization Map
 
-| Measured bottleneck | Retained change | Chapter |
+This table records the earlier course sequence; its chapter labels refer to
+that version.
+
+| Measured bottleneck | Change retained at the time | Historical chapter |
 |---|---|---|
 | Full-prefix decode recomputation | Dense request KV cache | Week 2 Day 1 |
 | Dense projection weight traffic | Packed W4A16 x4 SIMD matvec | Week 2 Day 3 |
 | Repeated small graph dispatches | RMSNorm, RoPE, SwiGLU kernels | Week 2 Day 4 |
 | Scalar/strided prefill projection loads | Cooperative 32×32×32 quantized matmul | Week 2 Day 5 |
-| Explicit secondary workload | Optional online-softmax decode lab or equivalent bounded experiment | Week 2 Day 6 |
-| Under-filled short-prefill result grid | Conditional measured split-K dispatch with Day 5 fallback | Week 2 Day 7 |
+| Explicit secondary workload | Optional online-softmax decode lab or equivalent bounded experiment | Week 2 Day 6 (retired) |
+| Under-filled short-prefill result grid | Conditional measured split-K dispatch with Day 5 fallback | Week 2 Day 7 (retired) |
 | Functional whole-cache page updates | Aliasing page-slice write primitive | Week 3 Day 3 |
 | Scalar paged final reduction | Compact D=128 SIMD reduction | Week 3 Day 4 |
 | Scalar contiguous-page K/V tile loads | Cooperative paged FlashAttention loads | Week 3 Day 5 |
 
-This is the course progression: optimize one measured cost, benchmark again,
-then let the evidence choose the next chapter.
+That progression targeted one measured cost at a time, with another benchmark
+to guide the next step. For the current Week 2 route, use the
+[current decision ledger](./week2-decision-ledger.md) and its linked chapters.
 
 {{#include copyright.md}}

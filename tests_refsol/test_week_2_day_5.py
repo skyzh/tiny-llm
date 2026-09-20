@@ -1,5 +1,6 @@
 """Week 2 Day 5 SIMD-matrix prefill tests."""
 
+import importlib
 from pathlib import Path
 
 import mlx.core as mx
@@ -7,6 +8,7 @@ import pytest
 
 from .tiny_llm_base import (
     Qwen3ModelWeek2,
+    WEEK2_CHECKPOINT_FEATURES,
     quantized_matmul,
     quantized_matmul_vanilla,
 )
@@ -28,6 +30,51 @@ def test_simd_matmul_checkpoint_is_completed_week2_model():
     assert model.embedding.weight.use_simdgroup_matmul
     assert layer.self_attn.wq.use_simdgroup_matmul
     assert not layer.self_attn.use_decode_attention
+    assert type(layer.input_layernorm).__name__ == "RMSNorm"
+    assert not layer.self_attn.use_fast_rope
+    assert not layer.mlp.use_fast_swiglu
+
+
+def test_week2_checkpoint_order_keeps_matrix_prefill_before_compact_primitives():
+    assert tuple(WEEK2_CHECKPOINT_FEATURES) == (
+        "kv-cache",
+        "quantized-matvec",
+        "simd-matmul",
+        "rmsnorm",
+        "rope",
+        "swiglu",
+        "shared-input-qkv",
+        "shared-input-gate-up-swiglu",
+        "io-aware-dense-attention",
+    )
+
+
+def test_simd_matmul_model_runs_without_compact_primitive_wrappers(monkeypatch):
+    module = importlib.import_module(Qwen3ModelWeek2.__module__)
+
+    def unavailable(*_args, **_kwargs):
+        raise AssertionError("compact primitive wrapper ran before its checkpoint")
+
+    monkeypatch.setattr(module, "FastRMSNorm", unavailable)
+    monkeypatch.setattr(module, "FastRoPE", unavailable)
+    monkeypatch.setattr(module, "swiglu", unavailable)
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
+
+    output = model(
+        mx.array([[1, 2]], dtype=mx.int32),
+        0,
+        model.create_kv_cache(),
+    )
+
+    assert output.shape[:2] == (1, 2)
+
+
+@pytest.mark.parametrize("checkpoint", ("rmsnorm", "rope", "swiglu"))
+def test_compact_primitive_checkpoints_preserve_matrix_dispatch(checkpoint):
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint=checkpoint)
+
+    assert model.embedding.weight.use_simdgroup_matmul
+    assert all(layer.self_attn.wq.use_simdgroup_matmul for layer in model.layers_inner)
 
 
 def test_task_2_simdgroup_matmul_matches_vanilla_gpu():
@@ -77,12 +124,10 @@ def test_task_2_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
     ("rows", "outputs", "input_dim"),
     [(9, 33, 128), (31, 65, 256), (33, 97, 512)],
 )
-@pytest.mark.parametrize("use_split_k", [False, True])
 def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
     rows: int,
     outputs: int,
     input_dim: int,
-    use_split_k: bool,
 ):
     mx.random.seed(rows + outputs + input_dim)
     with mx.stream(mx.gpu):
@@ -98,7 +143,6 @@ def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
             packed,
             transpose_b=True,
             use_simdgroup=True,
-            use_split_k=use_split_k,
         )
         vanilla = quantized_matmul_vanilla(
             scales, biases, 128, 4, inputs, packed, transpose_b=True
