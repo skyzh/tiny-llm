@@ -325,6 +325,12 @@ class TinyKvFullCache(TinyKvCache):
         if self.key_values is not None:
             mx.eval(*self.key_values)
 
+    def reset(self):
+        """Reset the logical request while retaining bounded physical storage."""
+        self.offset = 0
+        if not self.uses_capacity:
+            self.key_values = None
+
     def rewind(self, n: int):
         if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= self.offset:
             raise ValueError("rewind length must be between zero and the cache length")

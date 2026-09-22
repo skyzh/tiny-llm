@@ -13,7 +13,7 @@ namespace {
 
 }  // namespace
 
-// Week 2, Day 3. Days 6 and 7 extend the dispatch policy behind this API.
+// Week 2, Day 3. Day 4 adds the matrix-prefill schedule behind this API.
 mx::array quantized_matmul(const mx::array &, const mx::array &, int, int, const mx::array &, const mx::array &, bool,
                            bool, bool, mx::StreamOrDevice) {
     checkpoint_todo("quantized_matmul", "Week 2, Day 3");

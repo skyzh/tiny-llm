@@ -92,13 +92,7 @@ def test_capacity_rewind_reuses_storage_and_overwrites_the_logical_suffix():
     cache = TinyKvFullCache(capacity=4)
     first_key, first_value = _chunk(0, 3)
     cache.update_and_fetch(first_key, first_value)
-    storage_before_rewind = cache.key_values
-
     cache.rewind(2)
-    assert all(
-        current is original
-        for current, original in zip(cache.key_values, storage_before_rewind)
-    )
     replacement_key, replacement_value = _chunk(20, 2)
     cached_key, cached_value, offset, _ = cache.update_and_fetch(
         replacement_key, replacement_value
@@ -107,6 +101,7 @@ def test_capacity_rewind_reuses_storage_and_overwrites_the_logical_suffix():
 
     assert offset == 3
     assert cache.key_values[0].shape == cache.key_values[1].shape == (1, 1, 4, 2)
+    assert cache.physical_growth_copy_bytes == 0
     assert_allclose(
         cached_key,
         mx.concat([first_key[:, :, :1], replacement_key], axis=2),
@@ -119,6 +114,11 @@ def test_capacity_rewind_reuses_storage_and_overwrites_the_logical_suffix():
     )
 
     cache.rewind(3)
+    assert cache.offset == 0
+    assert cache.key_values is not None
+
+    cache.update_and_fetch(replacement_key[:, :, :1], replacement_value[:, :, :1])
+    cache.reset()
     assert cache.offset == 0
     assert cache.key_values is not None
 

@@ -1,6 +1,5 @@
 import mlx.core as mx
 from mlx_lm.tokenizer_utils import TokenizerWrapper
-from .kv_cache import *
 from .qwen3_week1 import Qwen3ModelWeek1
 from .qwen3_week2 import Qwen3ModelWeek2
 from typing import Callable
@@ -69,9 +68,13 @@ def simple_generate_with_kv_cache(
     tokenizer: TokenizerWrapper,
     prompt: str,
     max_tokens: int = 256,
-    use_bounded_kv_capacity: bool = False,
+    use_bounded_kv_capacity: bool | None = None,
 ) -> str:
     _validate_max_tokens(max_tokens)
+    if use_bounded_kv_capacity is not None and not isinstance(
+        use_bounded_kv_capacity, bool
+    ):
+        raise ValueError("use_bounded_kv_capacity must be a bool or None")
     if max_tokens == 0:
         return ""
 
@@ -79,8 +82,7 @@ def simple_generate_with_kv_cache(
         logits = model(y[None], offset, kv_cache, logits_to_keep=1)
         logits = logits[:, -1, :]
         logprobs = logits - mx.logsumexp(logits, keepdims=True)
-        sampler = lambda x: mx.argmax(x, axis=-1).astype(mx.int32)
-        y = sampler(logprobs)
+        y = mx.argmax(logprobs, axis=-1).astype(mx.int32)
         return y, logprobs.squeeze(0)
 
     kv_cache = None
@@ -89,6 +91,10 @@ def simple_generate_with_kv_cache(
         tokens = mx.array(
             tokenizer.encode(prompt, add_special_tokens=False), dtype=mx.int32
         )
+        if use_bounded_kv_capacity is None:
+            use_bounded_kv_capacity = bool(
+                getattr(model, "use_bounded_kv_capacity", False)
+            )
         capacity = int(tokens.size) + max_tokens if use_bounded_kv_capacity else None
         kv_cache = model.create_kv_cache(capacity=capacity)
         detokenizer = tokenizer.detokenizer

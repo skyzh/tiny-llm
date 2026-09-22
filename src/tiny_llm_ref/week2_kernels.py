@@ -15,8 +15,16 @@ class FastRMSNorm:
         self.dim = dim
         self.weight = weight
         self.eps = eps
+        self.dispatch_counts = {
+            "register_cached": 0,
+            "fixed_width_fallback": 0,
+        }
 
     def __call__(self, x: mx.array) -> mx.array:
+        if x.shape[-1] <= 4096:
+            self.dispatch_counts["register_cached"] += 1
+        else:
+            self.dispatch_counts["fixed_width_fallback"] += 1
         return tiny_llm_ext_ref.rms_norm(
             mx.contiguous(x), mx.contiguous(self.weight.astype(x.dtype)), self.eps
         )

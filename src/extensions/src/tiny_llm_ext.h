@@ -10,7 +10,7 @@ namespace tiny_llm_ext {
 void load_library(const char *path);
 
 // Week 2, Day 3: implement the wrapper and the initial vanilla/matvec paths.
-// Week 2, Days 6-7: extend the same interface with SIMD-matrix and Split-K scheduling.
+// Week 2, Day 4: extend the same interface with SIMD-matrix scheduling.
 mx::array quantized_matmul(const mx::array &scales, const mx::array &biases, const int group_size, const int bits,
                            const mx::array &a, const mx::array &b, const bool transpose_b,
                            const bool use_simdgroup = true, const bool use_split_k = false, mx::StreamOrDevice s = {});
@@ -49,7 +49,7 @@ public:
     const char *name() const override { return "QuantizedEmbedding"; }
 };
 
-// Week 2, Day 4: implement the three fused model kernels in checkpoint order.
+// Week 2, Day 5: implement the three fused model kernels in checkpoint order.
 mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::StreamOrDevice s = {});
 mx::array rope(const mx::array &x, const mx::array &offsets, int dims, float base, bool traditional,
                mx::StreamOrDevice s = {});
@@ -100,14 +100,16 @@ public:
     const char *name() const override { return "Week2SwiGLU"; }
 };
 
-// Week 2, Day 6: implement online-softmax decode attention.
-mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
-                           float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads,
-                           mx::StreamOrDevice s = {});
+// Week 2, Day 6: implement BQ32/BK16 tiled prefill with online max/sum.
+// The leading underscore keeps the raw native shape contract private; learners
+// call the checked Python wrapper in tiny_llm.week2_kernels.
+mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
+                                       const mx::array &mask, float scale, bool is_causal, bool has_mask, int num_heads,
+                                       int num_kv_heads, mx::StreamOrDevice s = {});
 
-class Week2DecodeAttention : public mx::Primitive {
+class Week2DensePrefillMMA : public mx::Primitive {
 public:
-    Week2DecodeAttention(mx::Stream stream, float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads)
+    Week2DensePrefillMMA(mx::Stream stream, float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads)
         : mx::Primitive(stream),
           scale_(scale),
           is_causal_(is_causal),
@@ -118,9 +120,9 @@ public:
     void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
     std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
                                                              const std::vector<int> &) override {
-        throw std::runtime_error("Week2DecodeAttention has no vmap implementation.");
+        throw std::runtime_error("Week2DensePrefillMMA has no vmap implementation.");
     }
-    const char *name() const override { return "Week2DecodeAttention"; }
+    const char *name() const override { return "Week2DensePrefillMMA"; }
 
 private:
     float scale_;

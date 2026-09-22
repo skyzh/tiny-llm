@@ -28,6 +28,7 @@ def simple_generate_with_kv_cache(
     tokenizer: TokenizerWrapper,
     prompt: str,
     max_tokens: int = 256,
+    use_bounded_kv_capacity: bool | None = None,
 ) -> str:
     def _step(model, y, offset, kv_cache):
         pass
