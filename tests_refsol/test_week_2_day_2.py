@@ -67,9 +67,21 @@ def test_task_2_rewind_reuses_capacity_and_overflow_is_transactional():
     assert tuple(array.tolist() for array in cache.key_values) == before
     assert cache.offset == 3
 
+    movement_counters = (
+        cache.logical_copy_bytes,
+        cache.physical_growth_copy_bytes,
+        cache.slice_write_bytes,
+        cache.growth_copy_bytes,
+    )
     cache.reset()
     assert cache.offset == 0
     assert cache.key_values is not None
+    assert (
+        cache.logical_copy_bytes,
+        cache.physical_growth_copy_bytes,
+        cache.slice_write_bytes,
+        cache.growth_copy_bytes,
+    ) == movement_counters
 
 
 def test_task_3_capacity_checkpoint_runs_the_week2_engine():

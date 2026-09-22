@@ -332,6 +332,11 @@ def _assert_metal_scaffold_only(source: str) -> None:
     )
 
 
+def _assert_metal_checkpoint_marker(source: str, kernel: str, checkpoint: str) -> None:
+    assert kernel in source
+    assert checkpoint in source
+
+
 def _header_functions(path: str) -> set[str]:
     return set(re.findall(r"mx::array\s+([a-z][a-z0-9_]*)\s*\(", _read(path)))
 
@@ -509,8 +514,7 @@ def test_starter_metal_stubs_name_each_learner_owned_kernel_and_checkpoint():
         source = _read(f"src/extensions/src/{filename}")
         assert f"src/{filename}" in cmake
         for kernel, checkpoint in kernels.items():
-            assert kernel in source
-            assert checkpoint in source
+            _assert_metal_checkpoint_marker(source, kernel, checkpoint)
         _assert_metal_scaffold_only(source)
 
 
@@ -622,20 +626,19 @@ def test_binding_guard_rejects_a_changed_python_default():
         )
 
 
-def test_task_pair_guard_rejects_a_nonexistent_source_path():
-    path = "book/src/week2-04-fused-model-kernels.md"
-    source = _read(path)
-    wrong_path = source.replace(
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`",
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/wrong.cpp`",
+def test_day_4_metal_guard_rejects_a_missing_simd_matmul_kernel():
+    source = _read("src/extensions/src/quantized_matmul.metal")
+    missing_kernel = source.replace(
+        "quantized_matmul_simdgroup_w4a16_g128",
+        "quantized_matmul_removed_w4a16_g128",
         1,
     )
-    assert wrong_path != source
+    assert missing_kernel != source
     with pytest.raises(AssertionError):
-        _assert_task_pairs(
-            wrong_path,
-            "Task 1",
-            EXTENSION_TASK_PAIRS[path]["Task 1"],
+        _assert_metal_checkpoint_marker(
+            missing_kernel,
+            "quantized_matmul_simdgroup_w4a16_g128",
+            "Week 2, Day 4",
         )
 
 
