@@ -39,7 +39,7 @@ NB_MODULE(_ext, m) {
     m.def("swiglu", &tiny_llm_ext_ref::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
     m.def("decode_attention", &tiny_llm_ext_ref::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
           "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
-    m.def("dense_attention_prefill_mma", &tiny_llm_ext_ref::dense_attention_prefill_mma, "query"_a, "key"_a,
+    m.def("_dense_attention_prefill_mma", &tiny_llm_ext_ref::_dense_attention_prefill_mma, "query"_a, "key"_a,
           "value"_a, "mask"_a, "scale"_a, "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a,
           "stream"_a = nb::none());
     m.def("paged_cache_update", &tiny_llm_ext_ref::paged_cache_update, "pages"_a, "values"_a, "page_id"_a, "start"_a,

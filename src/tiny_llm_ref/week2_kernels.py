@@ -1,5 +1,6 @@
 import mlx.core as mx
 from extensions_ref import tiny_llm_ext_ref
+from extensions_ref.tiny_llm_ext_ref import _ext as tiny_llm_ext_ref_private
 
 from .basics import softmax
 
@@ -208,7 +209,7 @@ def dense_prefill_attention_mma(
     query, key, value, mask, is_causal, has_mask = _prepare_dense_attention_inputs(
         query, key, value, mask
     )
-    result = tiny_llm_ext_ref.dense_attention_prefill_mma(
+    result = tiny_llm_ext_ref_private._dense_attention_prefill_mma(
         query,
         key,
         value,

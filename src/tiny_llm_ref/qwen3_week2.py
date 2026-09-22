@@ -12,8 +12,10 @@ from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
 from .quantize import QuantizedWeights, dequantize_linear, quantized_linear
 from .week2_kernels import (
+    DENSE_PREFILL_MIN_QUERY,
     FastRMSNorm,
     FastRoPE,
+    dense_prefill_attention_mma,
     decode_attention_custom,
     swiglu,
 )
@@ -113,6 +115,7 @@ class Qwen3MultiHeadAttention:
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
         use_decode_attention: bool = True,
+        use_tiled_prefill_attention: bool = False,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -131,6 +134,13 @@ class Qwen3MultiHeadAttention:
         self.wo = wo
         self.use_fast_rope = use_fast_rope
         self.use_decode_attention = use_decode_attention
+        self.use_tiled_prefill_attention = use_tiled_prefill_attention
+        self.attention_dispatch_counts = {
+            "tiled_prefill": 0,
+            "tiled_prefill_fallback": 0,
+            "bounded_decode": 0,
+            "readable": 0,
+        }
         rope_cls = FastRoPE if use_fast_rope else RoPE
         norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
         self.rope = rope_cls(self.head_dim, max_seq_len, theta)
@@ -165,12 +175,30 @@ class Qwen3MultiHeadAttention:
         projection_k, projection_v, _, mask = cache.update_and_fetch(
             projection_k, projection_v, mask_length=L, mask=mask
         )
-        if (
+        can_tiled_prefill = (
+            L >= DENSE_PREFILL_MIN_QUERY
+            and projection_q.dtype == mx.bfloat16
+            and self.head_dim == 128
+        )
+        if self.use_tiled_prefill_attention and not can_tiled_prefill:
+            self.attention_dispatch_counts["tiled_prefill_fallback"] += 1
+
+        if self.use_tiled_prefill_attention and can_tiled_prefill:
+            self.attention_dispatch_counts["tiled_prefill"] += 1
+            x = dense_prefill_attention_mma(
+                projection_q,
+                projection_k,
+                projection_v,
+                scale=self.scale,
+                mask=mask,
+            )
+        elif (
             self.use_decode_attention
             and L <= DECODE_ATTENTION_MAX_QUERY
             and projection_k.shape[-2] <= DECODE_ATTENTION_MAX_CONTEXT
             and not isinstance(mask, mx.array)
         ):
+            self.attention_dispatch_counts["bounded_decode"] += 1
             x = decode_attention_custom(
                 projection_q,
                 projection_k,
@@ -179,6 +207,7 @@ class Qwen3MultiHeadAttention:
                 mask=mask,
             )
         else:
+            self.attention_dispatch_counts["readable"] += 1
             x = scaled_dot_product_attention_grouped(
                 projection_q.astype(mx.float32),
                 projection_k.astype(mx.float32),
@@ -240,6 +269,7 @@ class Qwen3TransformerBlock:
         use_fast_rope: bool = True,
         use_fast_swiglu: bool = True,
         use_decode_attention: bool = True,
+        use_tiled_prefill_attention: bool = False,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
@@ -275,6 +305,7 @@ class Qwen3TransformerBlock:
             use_fast_rms_norm=use_fast_rms_norm,
             use_fast_rope=use_fast_rope,
             use_decode_attention=use_decode_attention,
+            use_tiled_prefill_attention=use_tiled_prefill_attention,
         )
 
     def __call__(
@@ -297,6 +328,7 @@ class Qwen3ModelWeek2:
         mlx_model: Any,
         checkpoint: str = "split-k",
         use_mlx_quantized_linear: bool = False,
+        use_tiled_prefill_attention: bool = False,
     ):
         if checkpoint not in WEEK2_CHECKPOINTS:
             raise ValueError(
@@ -379,6 +411,7 @@ class Qwen3ModelWeek2:
                 use_fast_rope=use_fast_rope,
                 use_fast_swiglu=use_fast_swiglu,
                 use_decode_attention=use_decode_attention,
+                use_tiled_prefill_attention=use_tiled_prefill_attention,
             )
             self.layers_inner.append(layer)
         norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm

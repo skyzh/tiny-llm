@@ -62,9 +62,9 @@ mx::array swiglu(const mx::array &gate, const mx::array &up, mx::StreamOrDevice 
 mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
                            float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads,
                            mx::StreamOrDevice s = {});
-mx::array dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
-                                      const mx::array &mask, float scale, bool is_causal, bool has_mask,
-                                      int num_heads, int num_kv_heads, mx::StreamOrDevice s = {});
+mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
+                                       const mx::array &mask, float scale, bool is_causal, bool has_mask,
+                                       int num_heads, int num_kv_heads, mx::StreamOrDevice s = {});
 
 class Week2RMSNorm : public mx::Primitive {
 public:

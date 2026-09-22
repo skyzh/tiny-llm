@@ -83,9 +83,9 @@ mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::arr
         {q, k, v, mask});
 }
 
-mx::array dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
-                                      const mx::array &mask, float scale, bool is_causal, bool has_mask,
-                                      int num_heads, int num_kv_heads, mx::StreamOrDevice s) {
+mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
+                                       const mx::array &mask, float scale, bool is_causal, bool has_mask,
+                                       int num_heads, int num_kv_heads, mx::StreamOrDevice s) {
     if (q.dtype() != mx::bfloat16 || k.dtype() != mx::bfloat16 || v.dtype() != mx::bfloat16 ||
         mask.dtype() != mx::float32) {
         throw std::runtime_error("dense_attention_prefill_mma: expected BF16 q/k/v and float32 mask");
