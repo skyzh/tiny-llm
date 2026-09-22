@@ -1,114 +1,96 @@
-# Optional: Inspect a Week 2 Capture on macOS 27
+# Optional: Read a Week 2 Evidence Package
 
-The synchronized product benchmark and portable operator-attribution runner
-are sufficient for every required Week 2 checkpoint. This page is an optional
-deeper look at the same evidence loop for learners with macOS 27 and
-`/usr/bin/gpudebug`. It is never an acceptance gate.
+The required Week 2 route needs only the supplied correctness gates, public
+checkpoint commands, counters, and your matched product observations. This page
+is an optional method for reading a preserved measurement package without
+turning missing data into a claim.
 
-The checked example used Qwen3-4B on an Apple M4 Pro at source commit
-`add389b747793e910f0506f5720dd0aac373d126`, macOS 27 build `26A428`,
-`gpudebug` 1.0, MLX 0.32.0, and mlx-lm 0.31.3. Its product control used a
-128-token prompt, 129 output tokens, final-row prefill logits, seed 0, two
-warmups, and two balanced fresh-process samples. Its attribution cases used
-four warmups and twelve synchronized iterations. These identities bound the
-example; they are not a portable timing baseline.
+The repository still contains older profiling utilities whose default cases
+predate the frozen successor. They are not the runnable interface for the
+current nine-checkpoint route. Use only the commands printed in the current
+chapters unless a later code revision explicitly updates those utilities.
 
-## 1. Prove Correctness First
+## 1. Bind Identity Before Reading Numbers
 
-Choose one checkpoint, phase, and token count. Run its focused test before
-capturing it. For the Day 4 decode example:
+For any supplied result, record:
 
-```bash
-pdm run build-ext
-pdm run test --week 2 --day 4
+- exact source head and tree;
+- model snapshot and model size;
+- Python, MLX, and mlx-lm versions;
+- device and operating system;
+- prompt/output lengths, seed, warmups, and sample count;
+- baseline, candidate, and whether execution order was balanced;
+- which rows were excluded and why.
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case swiglu:decode:128 --warmup 4 --iterations 12 \
-  --json-output out/swiglu-decode-128.attribution.json
-```
+A timing without those fields is an observation you cannot reproduce or compare
+reliably.
 
-The second command is the portable evidence path. Read its checkpoint,
-workload, dominant category, and category shares before opening a GPU trace.
+## 2. Separate Evidence Categories
 
-## 2. Capture One Synchronized Region
+Ask which question each record answers:
 
-Create `out/` first and choose output names that do not exist. The helper
-refuses to overwrite a trace, metadata file, or manifest.
+| Category | Establishes | Does not establish |
+|---|---|---|
+| Correctness | output is within the declared numerical contract | intended optimized route ran |
+| Dispatch/counter | intended route or copy behavior occurred | latency improved |
+| Component | one operator improved at one shape | complete request improved |
+| Product | whole request changed under a matched control | which operator caused the change by itself |
+| Source geometry | tile sizes, thread counts, static storage | occupancy, bandwidth, cache hit rate |
+| Historical | why an earlier decision was plausible | a fresh result on the current head |
+| Unavailable | measurement was not accepted | zero, regression, or an estimable value |
 
-```bash
-mkdir -p out
+Keep these categories distinct in tables and prose.
 
-MTL_CAPTURE_ENABLED=1 pdm run capture-week2 \
-  --solution tiny_llm --model qwen3-4b \
-  --checkpoint swiglu --phase decode --tokens 128 \
-  --trace out/swiglu-decode-128.gputrace \
-  --metadata out/swiglu-decode-128.capture.json \
-  --manifest out/swiglu-decode-128.trace-manifest.sha256
-```
+## 3. Check the Path Before the Duration
 
-The helper compiles and warms the exact shape outside the capture, then
-captures one synchronized model region. The metadata records source, model,
-checkpoint, phase, token count, prompt rule, software, host, and a canonical
-workload identity. The path-sorted manifest hashes every file inside the
-`.gputrace` package; treat the package and manifest as one evidence object.
+For capacity, inspect logical-copy, physical-growth-copy, and slice-write
+counters. For RMSNorm, inspect register-cached versus fixed-width-fallback
+dispatches. For attention, inspect tiled-prefill, tiled-prefill-fallback, and
+readable dispatches.
 
-## 3. Replay and Reduce
+If the candidate never ran, the duration does not measure the mechanism. If a
+fallback ran, preserve that fact rather than assigning the time to the custom
+kernel.
 
-Run the serialized profile and save the JSON stream. You may also collect
-timeline, shader, or command queries into a second JSON-lines file.
+## 4. Read Interactions Cumulatively
 
-```bash
-gpudebug --json -t out/swiglu-decode-128.gputrace --timeout 1800 \
-  -c 'profile run --gpu-state default --exec serial' \
-  > out/swiglu-decode-128.profile.jsonl
+An independent arm answers “what happens when only this mechanism changes?” A
+cumulative arm answers “what happens after the preceding mechanisms are already
+enabled?” They can disagree because work shifts between phases and operators.
 
-pdm run reduce-week2-gpudebug \
-  --capture-metadata out/swiglu-decode-128.capture.json \
-  --manifest out/swiglu-decode-128.trace-manifest.sha256 \
-  --profile-jsonl out/swiglu-decode-128.profile.jsonl \
-  --commands-jsonl out/swiglu-decode-128.commands.jsonl \
-  --output out/swiglu-decode-128.gpudebug.json
-```
+The accepted successor evidence therefore reports both component results and
+complete-request cumulative results. Do not add the capacity, RMSNorm, and
+tiled-attention percentages: their denominators and scopes differ.
 
-If you did not collect command queries, omit `--commands-jsonl`. Missing
-timeline, shader, command, or counter trees must remain explicitly unavailable;
-do not replace them with zero and do not infer occupancy. In the checked
-pre-SIMD 128-token prefill capture, the replay exposed timeline counters but
-no shader ranking. In the checked 32-token Split-K capture, only static
-dispatch presence was available and no occupancy conclusion was drawn.
+## 5. Preserve Unavailable Rows
 
-## 4. Write a Bounded Decision
+The accepted 2K/512 and 8K/128 product rows were unavailable after environmental
+contamination. A valid ledger leaves them unavailable and records the reason.
+It does not:
 
-Use three sentences:
+- substitute a component result;
+- copy a neighboring prompt/output row;
+- average partial contaminated samples;
+- call the missing value zero;
+- infer a long-context product verdict.
 
-1. identify the dominant category for this exact checkpoint and workload;
-2. name the next bounded change and the same-workload result that would support it;
-3. state the result that would falsify the hypothesis or make you revert it.
+## 6. Write a Bounded Decision
 
-For example: “At `swiglu:decode:128`, packed projections dominate this M4 Pro
-capture and the portable attribution. I will change only the selected
-projection schedule and rerun the identical workload. I will revert or choose
-another category if projection time does not fall or the complete-model phase
-regresses.” This is a reasoning record, not a claim that another device has
-the same bottleneck.
+Use four sentences:
 
-## 5. Preserve the Compact Result, Then Clean Up
+1. identify the exact workload and control;
+2. state the correctness and routing evidence;
+3. report component and product evidence separately;
+4. choose keep, reject, or inconclusive and name the falsifier.
 
-Keep the capture metadata, manifest, portable attribution, and reduced result
-until you have checked their matching workload identity. Raw trace packages
-can be enormous; after preserving the compact evidence you need, remove only
-the exact trace package and raw streams you created:
+For example: “On this fixed 2K-row operator shape, the BF16 D128 tiled prefill
+path matched readable attention and its dispatch counter increased. The supplied
+component median improved by 54.07%. That number is not the complete-request
+gain, and the 2K/512 product row is unavailable. I keep the path only for its
+eligible prefill boundary and would revisit it if a matched product row regressed
+or the fallback/correctness contract failed.”
 
-```bash
-rm -rf -- out/swiglu-decode-128.gputrace
-rm -f -- out/swiglu-decode-128.profile.jsonl \
-  out/swiglu-decode-128.commands.jsonl
-```
-
-The repository includes a compact checked M4 Pro result at
-`benchmark_results/m4-pro-qwen3-4b-week2-gpudebug-macos27-mlx-0.32.0.json`.
-Learners without macOS 27 can use it to practice reading identity,
-availability, dominant categories, and keep/reject decisions. They do not need
-to reproduce its exact kernel names, timings, or Metal schedule.
+Return to the [Week 2 route](./week2-overview.md) or the
+[fresh decision ledger](./appendix-performance.md#fresh-successor-decision-ledger).
 
 {{#include copyright.md}}

@@ -1,6 +1,7 @@
-# 🚧 Week 2 Day 3: Quantize the Model
+# 🚧 Week 2 Day 3: Keep W4 Packed
 
-Day 2 leaves you with a synchronized dense BF16 baseline. The Day 3 starter
+Day 2 leaves you with a request-bounded cache and a readable projection path.
+The Day 3 starter
 already supplies the packed-weight container and its
 `QuantizedWeights.from_mlx_layer` loader, the extension declaration and
 binding, fail-closed C++/Metal stubs, and cumulative model switches. Your work
@@ -206,50 +207,15 @@ This representation reduces projection weight traffic by 3.765×. Treat that
 ratio as a bandwidth ceiling for one-token decode, not as an end-to-end speedup
 promise.
 
-### Theoretical Decode Roofline Across Apple Silicon
+### Use the Roofline as a Hypothesis
 
-Apple publishes unified-memory bandwidth but not a directly comparable BF16
-GPU TFLOPS figure. A bandwidth roofline can therefore be calculated without
-assuming a compute ceiling:
-
-```plain
-ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
-```
-
-The table uses the highest-bandwidth configuration of each named chip. GB is
-decimal, matching Apple's specifications. The results are theoretical ceilings,
-not benchmark measurements.
-
-| Chip | Bandwidth | FP16/BF16 roofline | W4 roofline |
-|---|---:|---:|---:|
-| M1 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s |
-| M1 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
-| M1 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s |
-| M2 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s |
-| M2 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
-| M2 Ultra | 800 GB/s | 99.4 tok/s | 374.4 tok/s |
-| M3 Pro | 150 GB/s | 18.6 tok/s | 70.2 tok/s |
-| M3 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
-| M3 Ultra | 819 GB/s | 101.8 tok/s | 383.3 tok/s |
-| M4 Pro | 273 GB/s | 33.9 tok/s | 127.8 tok/s |
-| M4 Max | 546 GB/s | 67.9 tok/s | 255.5 tok/s |
-
-The advertised bandwidths come from Apple's specifications for
-[M1 Pro and Max](https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/),
-[M1 Ultra](https://www.apple.com/newsroom/2022/03/apple-unveils-m1-ultra-the-worlds-most-powerful-chip-for-a-personal-computer/),
-[M2 Pro and Max](https://www.apple.com/newsroom/2023/01/apple-unveils-m2-pro-and-m2-max-next-generation-chips-for-next-level-workflows/),
-[M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
-[M3 Pro and Max](https://support.apple.com/en-us/117736),
-[M3 Ultra](https://www.apple.com/mac-studio/), and
-[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's current Mac
-Studio pairs M4 Max with M3 Ultra, so there is no M4 Ultra row.
-
-These values assume peak advertised bandwidth, one read of every projection
-weight, and no other traffic or work. A complete model also reads activations
-and KV, launches other operators, and cannot sustain peak bandwidth
-continuously, so actual throughput is lower. The
-[performance appendix](./appendix-performance.md) records measured results
-separately from this theoretical exercise.
+A bandwidth roofline would divide an advertised memory-bandwidth ceiling by
+the streamed bytes above. That calculation deliberately omits activations, K/V,
+other operators, dispatch, and incomplete bandwidth utilization. Use it only to
+form the hypothesis that packed weights may help one-row decode; do not turn it
+into a tokens-per-second promise for a particular chip. The accepted measured
+results in the [performance appendix](./appendix-performance.md) remain the
+course evidence.
 
 This roofline describes one-token decode, where `M = 1` and each streamed
 weight serves one activation row. Prefill reuses each weight tile across many
@@ -477,7 +443,7 @@ dimension. Day 3 uses this explicit dispatch:
 | Activation rows | Kernel | Role at this checkpoint |
 |---:|---|---|
 | `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
-| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 5 replaces it with a cooperative tiled kernel. |
+| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 4 replaces it with a cooperative tiled kernel. |
 
 The cutoff does not extend the SIMD kernel to larger `M`. These are separate
 schedules: Day 3 optimizes vector-shaped decode and leaves matrix-shaped
@@ -496,7 +462,7 @@ control flow mirrors the equation and makes it a useful debugging control. The
 Python `mlx.core` equation remains the correctness oracle for both Metal
 schedules.
 
-Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 5
+Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 4
 revisits that workload with cooperative tiling.
 
 ### Stage 2: SIMD Matvec
@@ -563,7 +529,7 @@ Implement both required layouts in `quantized_matmul.metal`:
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
 - For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
-  SIMD matvec schedule; Day 5 introduces the tiled prefill schedule.
+  SIMD matvec schedule; Day 4 introduces the tiled prefill schedule.
 - The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
@@ -648,20 +614,8 @@ Run the complete gate, then the live model checkpoint:
 pdm run test --week 2 --day 3
 
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b --max-tokens 16
 ```
-
-Measure that same learner solution:
-
-```bash
-pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b \
-  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
-```
-
-Run the same command with `--solution tiny_llm_ref` to compare it with the
-reference solution.
 
 Keep the vanilla matrix product callable as an inspectable Metal control. The
 Python `mlx.core` equation remains the correctness oracle, while decode
@@ -680,28 +634,24 @@ Metal matvec. Matrix-shaped work must route through `quantized_linear` →
 supplied tests validate packed model state and the direct operators. Use the
 live model command to verify that those pieces compose.
 
-Measure the cumulative model and the real projection shapes:
+Use the immediate cumulative predecessor as the fallback and coarse product
+control. Keep the prompt, model, and output bound identical:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-kv-cache --variant week2-quantized-matvec --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case kv-cache:decode:128 --case quantized-matvec:decode:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day3-attribution.json
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint capacity-cache --model qwen3-0.6b --max-tokens 16
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b --max-tokens 16
 ```
 
-Keep one cumulative model row and one representative real-shape projection
-comparison. In the checked M4 Pro example, packed W4 reduced attributed
-projection time by 69.0% and fixed-workload decode rose from 24.38 to 58.90
-tokens/s. The re-profile then exposed normalization, position, and activation
-at 33.5% of attributed time, selecting Day 4. These are bounded observations
-from one machine and two product samples, not portable timing thresholds. The
-complete campaign and attribution are in the
-[performance appendix](./appendix-performance.md#day-3-keep-weights-packed).
+Record whether selected-row lookup, packed model state, GPU arithmetic, and
+the complete checkpoint all pass. The storage calculation in this chapter is
+mechanism evidence, not a throughput prediction. Keep the path when it avoids
+whole-table expansion, preserves packed W4 through the dot product, and passes
+the same-request product check. Treat a noisy coarse timing as inconclusive.
+
+The next [matrix-prefill chapter](./week2-04-fused-model-kernels.md) retains the
+packed representation and changes only the `M > 8` schedule.
 
 If you need to continue without the custom Day 3 kernels, implement the same
 `quantized_linear` interface with `mx.quantized_matmul` and leave the rest of

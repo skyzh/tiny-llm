@@ -1,139 +1,121 @@
-# 🚧 Week 2 Day 5: SIMD-Matrix Prefill
+# 🚧 Week 2 Day 5: Compact Model Primitives
 
-Day 4 ends with a decision, not a predetermined kernel. Re-profile the fixed
-128-token prefill and name the dominant category before changing code. On the
-checked M4 Pro run, projections accounted for 99.1% of attributed prefill time.
-That observation selects the matrix-shaped projection path for this chapter.
+At `simd-matmul`, projections use packed weights and shape-aware schedules, but
+normalization, position rotation, and the MLP activation remain readable MLX
+expressions. Day 5 replaces them one at a time so every change has its own
+cumulative checkpoint and fallback:
 
-The `swiglu` checkpoint still uses Day 3's correctness-first vanilla W4 matrix
-kernel when the activation has more than eight rows. You will replace that
-schedule with a cooperative BF16 SIMD-matrix kernel while preserving the same
-quantized-linear interface and the last-row-logits product boundary.
+`simd-matmul` → `rmsnorm` → `rope` → `swiglu`.
 
-The checked numbers in this chapter are one example, not a performance gate.
-They come from Qwen3-4B on one 20-core M4 Pro running macOS 27 and MLX 0.32.0,
-with a 128-token prompt, 129 output tokens, two warmups, and two balanced
-fresh-process samples. Your device and crossover may differ.
+Your seams are the wrappers in `src/tiny_llm/week2_kernels.py`, the native
+primitive boundary, the Metal kernels, and the corresponding model switches.
 
-## Establish the Same-Workload Baseline
-
-Start from the checkpoint you already have. Build the extension and run the
-focused gate before editing:
+## First Diagnostic: Keep RMSNorm Values in Registers
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 5 -- -k register_cached
 ```
 
-Freeze both baselines next. You will repeat these exact commands after the
-kernel change:
-
-```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-swiglu --variant week2-simd-matmul --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day5-product.json
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case swiglu:prefill:128 --case simd-matmul:prefill:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day5-attribution.json
-```
-
-Keep the model, phase, token count, prompt rule, prefill-logit mode, warmups,
-and iteration count identical across the two checkpoints. Do not compare a
-new prefill kernel at one shape with an old result from another shape.
-
-## Task 1: Load One Quantized Tile Cooperatively
-
-Open the three existing extension files; this task stays inside that surface:
-
-```plain
-src/extensions/src/cooperative_matrix.h
-src/extensions/src/quantized_matmul.metal
-src/extensions/src/quantized_matmul.cpp
-```
-
-Keep the operation fixed while you change its schedule:
+The intended first failure reaches `FastRMSNorm` or its register-cached kernel.
+For a row `x` with learned weight `w`:
 
 $$
-C = A W^T,
+\operatorname{RMSNorm}(x)_i =
+\frac{x_i}{\sqrt{\frac{1}{D}\sum_j x_j^2 + \epsilon}}w_i.
 $$
 
-where `A` is BF16 and `W` is stored as packed W4 codes with one scale and bias
-per group of 128 values. The mathematical operation does not change. Only the
-matrix-shaped schedule changes.
+Accumulate the sum of squares in FP32. For widths through 4096, let each thread
+load up to four values, retain them through the SIMD/threadgroup reduction, and
+write the normalized results without rereading the input row. The accepted
+source geometry uses 256 threads and eight SIMD groups; that is source-derived
+geometry, not a measured occupancy claim.
 
-Build a 32×32 output tile from 8×8 `simdgroup_matrix` fragments. SIMD groups
-cooperate on one 32-value slice of the reduction dimension at a time:
+Keep the existing fixed-width kernel as the fallback for `D > 4096` and count
+both paths in `FastRMSNorm.dispatch_counts`:
 
-1. load a contiguous activation tile;
-2. unpack the matching W4 codes and apply their scale and bias;
-3. multiply the BF16 fragments while accumulating in FP32;
-4. advance through the reduction dimension;
-5. store only in-bounds output elements.
+- `register_cached` for supported widths;
+- `fixed_width_fallback` for larger widths.
 
-Keep the loader and fragment bookkeeping explicit. The course path does not
-call an MLX or Steel quantized-matmul implementation in place of this exercise.
-The existing Python equation remains the correctness oracle.
+The counter proves routing. The readable Python RMSNorm remains the numerical
+control.
 
-## Task 2: Dispatch by Activation Shape
-
-Retain Day 3's SIMD matvec for `M <= 8`. Route larger activation matrices to
-the new tiled kernel and keep the vanilla kernel callable as a bring-up
-control. Validate dtype, contiguity, group size, bit width, and matrix
-dimensions at the extension boundary before encoding the GPU command.
-
-The supplied starter dispatch is `QuantizedMatmul::eval_gpu` in
-`src/extensions/src/quantized_matmul.cpp`. Its matrix-shaped Metal entry is
-`quantized_matmul_simdgroup_w4a16_g128` in
-`src/extensions/src/quantized_matmul.metal`; an equivalent solution may keep
-the public dispatch while choosing a different internal kernel name.
-
-The checkpoint feature name is `simd-matmul`. It includes packed W4
-projections and the three fused Day 4 operators. It does not include the
-optional decode-attention branch from Day 6.
-
-If you want to continue without writing this custom schedule, preserve the
-course's `quantized_linear` interface and route the matrix-shaped projection
-through `mx.quantized_matmul`. That is a local operator substitution, not a
-performance claim and not the separate `--solution mlx` model.
-
-## Task 3: Check Correctness in the Product
-
-Once the new path is connected, get focused feedback before asking the full
-model to exercise the checkpoint:
+Complete the first checkpoint:
 
 ```bash
-pdm run build-ext
-pdm run test --week 2 --day 5
-
+pdm run test --week 2 --day 5 -- -k register_cached
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint simd-matmul --model qwen3-4b
+  --week2-checkpoint rmsnorm --model qwen3-0.6b --max-tokens 16
 ```
 
-An equivalent learner implementation may choose different helper names or a
-different correct tiling. The observable contract is the quantized-linear
-result, dtype and shape, checkpoint behavior, fallback behavior, and complete
-model output—not a private symbol or source-file layout.
+Accepted component evidence reduced the RMSNorm operator by **71.36%** at 2K
+rows and **83.81%** at 8K rows. These are supplied operator measurements, not
+complete-request gains and not fresh results from your checkout.
 
-## Task 4: Re-profile and Decide
+## Preserve RoPE Positions
 
-Now repeat the exact baseline commands, then close the loop in three
-sentences:
+RoPE rotates pairs of Q/K coordinates using the absolute incoming token
+positions. The fast wrapper must accept one scalar offset, one offset per batch
+row, or the model's normalized offset array. Reject an offset vector whose
+length disagrees with the batch.
 
-1. which operator category dominated the baseline prefill;
-2. whether the candidate changed that category and the matched product phase;
-3. what result would make you revert the candidate or test another schedule.
+Preserve the existing base, dimension, sequence limit, and traditional-layout
+contract. The cache offset is the position of the first incoming token; do not
+restart the rotation at zero for every decode call.
 
-In the checked run, the SIMD schedule reduced attributed projection time by
-86.4% and raised fixed-workload prefill from 106.44 to 721.60 tokens/s. Those
-large effects justify keeping it for that source tree and workload. They do
-not establish the same multiplier on another model, Apple GPU, prompt length,
-or software version.
+```bash
+pdm run test --week 2 --day 5 -- -k rope
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint rope --model qwen3-0.6b --max-tokens 16
+```
 
-Day 6 is an optional workload-conditioned operator lab. You may take that
-branch to study bounded decode attention, or continue directly to Day 7. Day
-7 starts from this `simd-matmul` checkpoint either way.
+The `rope` checkpoint inherits register-cached RMSNorm. If the fast rotation is
+ineligible or fails its tolerance, fall back to the readable RoPE expression
+with the same offsets rather than changing cache state.
+
+## Fuse the SwiGLU Elementwise Pass
+
+Qwen's MLP computes:
+
+$$
+\operatorname{SwiGLU}(g,u)=\operatorname{SiLU}(g)\odot u,
+\qquad \operatorname{SiLU}(g)=g\,\sigma(g).
+$$
+
+Fuse the elementwise activation and multiply after the separate packed gate and
+up projections. Keep the down projection outside this primitive. Validate equal
+shapes and matching supported dtypes, perform the internal arithmetic with the
+supplied numerical contract, and return the model-facing dtype.
+
+```bash
+pdm run test --week 2 --day 5 -- -k swiglu
+pdm run test --week 2 --day 5
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint swiglu --model qwen3-0.6b --max-tokens 16
+```
+
+The whole Day 5 gate checks all three primitive results and proves the feature
+sets are cumulative and real. A checkpoint name alone is not enough: the model
+must route through the corresponding implementation.
+
+## Measure and Decide at Each Step
+
+For every addition, time the predecessor and candidate with the identical
+request. For example:
+
+```bash
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint simd-matmul --model qwen3-0.6b --max-tokens 16
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint rmsnorm --model qwen3-0.6b --max-tokens 16
+```
+
+Repeat the pattern for `rmsnorm` versus `rope`, then `rope` versus `swiglu`.
+Record the correctness result, path counter where available, coarse product
+observation, and fallback. A large component gain can be diluted by projection,
+attention, evaluation, and process costs. Keep or reject each primitive on its
+own evidence; do not add unrelated percentages.
+
+Continue to [tiled dense prefill attention](./week2-06-operator-lab.md).
 
 {{#include copyright.md}}

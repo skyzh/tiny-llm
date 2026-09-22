@@ -1,139 +1,129 @@
-# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision
+# 🚧 Week 2 Day 7: Select the Cumulative Path
 
-Day 5 leaves a reusable 32×32×32 SIMD-matrix projection and an exact unsplit
-fallback. Day 6 is an optional branch and is not inherited here: the `split-k`
-checkpoint contains the Day 5 SIMD path plus Split-K, without decode attention.
+Day 7 does not add another kernel. It turns the week's mechanisms into an
+auditable decision: which optimizations belong in the completed model, which
+controls remain readable, and which claims the evidence does not support.
 
-Begin with an under-filled short shape, then return to the fixed 128×129
-product workload. Keep Split-K only for shapes where the same-workload evidence
-supports it.
+The public checkpoint is `selected`. It contains exactly these selected
+mechanisms:
 
-## Why Split the Reduction Dimension?
+1. request-bounded KV capacity;
+2. register-cached RMSNorm;
+3. tiled dense prefill attention.
 
-For
+Packed W4, SIMD matrix prefill, RoPE, and SwiGLU remain in the cumulative path.
+They are required checkpoint work, but the three controls above are the
+independently selectable mechanisms evaluated in the accepted progression.
 
-$$
-C = A W^T,
-$$
-
-the Day 5 grid spreads work across output rows and columns. When `M` is small
-and the Qwen projection width is narrow, it may launch too few independent
-threadgroups to fill the GPU. Split-K creates parallel work along the reduction
-dimension:
-
-```plain
-for each split s:
-    partial[s] = A[:, k_start(s):k_end(s)] @ W[:, k_start(s):k_end(s)].T
-
-C = sum(partial, axis=split)
-```
-
-Each split must align to the W4 group size, write to a disjoint partial plane,
-and accumulate its local dot product in FP32. A second kernel reduces the
-partial planes in FP32 and casts the final output to BF16.
-
-That extra parallelism also adds a dispatch, a temporary buffer, and another
-memory pass. Split-K is therefore a shape-conditioned schedule, not an
-automatic upgrade.
-
-## Task 1: Freeze a Short-Shape Control
-
-First verify the inherited Day 5 path and record a 32-token attribution pair:
+## First Diagnostic: Inspect the Feature Set
 
 ```bash
-pdm run build-ext
+pdm run test --week 2 --day 7 -- -k exactly
+```
+
+The witness checks the immutable checkpoint map rather than timing a model. A
+failure means selection drift: do not patch around it with a special command or
+hidden default.
+
+`Qwen3ModelWeek2` also accepts three constructor controls for focused tests and
+experiments:
+
+```text
+use_bounded_kv_capacity
+use_register_cached_rms_norm
+use_tiled_prefill_attention
+```
+
+Each accepts `True`, `False`, or `None`; `None` inherits the checkpoint feature.
+`mechanism_controls` exposes the resolved state. Low-level mechanisms remain
+independently default-off before their checkpoint, while the completed
+no-argument model defaults to `selected` for compatibility.
+
+## Prove Controls and Defaults
+
+```bash
+pdm run test --week 2 --day 7 -- -k independently
+pdm run test --week 2 --day 7 -- -k default_model
 pdm run test --week 2 --day 7
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:prefill:32 --case split-k:prefill:32 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day7-short-attribution.json
 ```
 
-Capture the exact source, model, phase, token count, prompt rule, software, and
-device. Do not substitute a 128-token baseline for the 32-token candidate.
+The full gate also confirms that older experimental labels are rejected as
+unknown checkpoint names. They are not aliases, current commands, or TODOs.
+Single-query decode continues through the readable attention baseline.
 
-## Task 2: Reuse the Day 5 Tile for Each Partition
-
-Extend the existing quantized-matmul primitive rather than adding a parallel
-public operator. Reuse Day 5's loader, W4 dequantization, and matrix fragments
-inside each aligned K partition. Validate that:
-
-- every split begins and ends on a group-of-128 boundary;
-- partial planes are disjoint and cover the full reduction exactly once;
-- edge rows and columns are masked before load or store;
-- accumulation and reduction remain FP32;
-- `split_k <= 1` dispatches exactly to the Day 5 unsplit kernel.
-
-The tests grade public results, dtype and shape, valid partitioning, and the
-exact fallback. They do not require a private helper name, Metal symbol, or a
-particular split-count formula.
-
-## Task 3: Make Dispatch Explicit
-
-Expose the `split-k` checkpoint with an immutable feature set: packed W4,
-fused pointwise operators, SIMD prefill, no optional decode-attention branch,
-and Split-K only where its policy selects more than one partition.
-
-Keep that public policy in `QuantizedMatmul::eval_gpu`; the supplied starter
-surface is `src/extensions/src/quantized_matmul.cpp`. Internal helper and Metal
-kernel names remain implementation choices.
-
-Keep the policy small and inspectable. Static dispatch can demonstrate that a
-Split-K and reduction kernel exist, but it cannot prove higher occupancy or a
-product speedup. Those claims require measured evidence.
-
-If you want to continue without Split-K, preserve `split_k <= 1` and the Day 5
-unsplit result. The chapter's learning outcome is the conditional decision,
-not an unconditional custom-kernel win.
-
-## Task 4: Re-profile the Short Shape
-
-Rerun the exact 32-token attribution command from Task 1 so the baseline and
-candidate differ only in schedule. In the checked M4 Pro example, Split-K
-reduced total attributed time by 4.87% and projection time by
-5.01%. Its trace exposed only static Split-K and reduction dispatches; no
-timeline or counter tree materialized, so no occupancy improvement was
-inferred.
-
-Write `keep`, `reject`, or `inconclusive` for the 32-token shape, then name the
-result that would reverse your decision. A sub-percent difference is not a
-strong conclusion without a larger sample.
-
-## Task 5: Close Week 2 at the Fixed Workload
-
-Return to the Day 5 unsplit checkpoint and compare it with Day 7 at the same
-Qwen3-4B 128×129 product control used throughout the week:
+## Run the Selected Product
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-simd-matmul --variant week2-split-k --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day7-final.json
-
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:prefill:128 --case split-k:prefill:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day7-final-attribution.json
+pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint selected --model qwen3-0.6b --max-tokens 16
 ```
 
-On the checked two-sample product control, prefill changed from 721.60 to
-718.36 tokens/s (-0.45%) and decode changed by +0.14%. That supports rejecting
-Split-K for this fixed 128-token product workload while conditionally retaining
-the short-shape experiment. It does not establish a portable crossover.
+If a selected mechanism is ineligible, use its documented readable fallback:
+concatenating dense cache before Day 2, fixed-width RMSNorm above dimension
+4096, or readable grouped attention below the tiled prefill boundary. A fallback
+is part of the contract, not a silent failure.
 
-Finish with the week's decision ledger:
+## Read the Accepted Product Evidence
 
-| Step | Evidence that selected it | Same-workload result | Decision and falsifier |
-|---|---|---|---|
-| KV cache | Full-prefix recomputation | Matched Week 1 versus cache | Your observation |
-| Packed W4 | Cached decode attribution | Repeated decode product and attribution | Your observation |
-| Fused pointwise | Post-W4 re-profile | Repeated decode product and attribution | Your observation |
-| SIMD prefill | Day 4 128-token prefill profile | Repeated prefill product and attribution | Your observation |
-| Optional operator lab | Explicit secondary workload | Before/after/fallback record | `keep`, `reject`, `inconclusive`, or skipped |
-| Split-K | Under-filled 32-token projection | Short control plus fixed 128×129 control | One decision per shape |
+The frozen accepted campaign used Qwen3-4B and matched all-off/full-MLX controls.
+Medians below are complete-request results; `MLX ratio` is throughput divided by
+the identical-feed full-MLX denominator.
 
-Close the week with the causal story: what dominated, what changed, what the
-identical remeasurement showed, and what you chose not to claim.
+| Prompt/output | Selected total-latency gain vs all-off | MLX ratio | 80% direction |
+|---:|---:|---:|---|
+| 128/128 | 10.849% | ≈0.806 | met |
+| 512/128 | 10.347% | ≈0.822 | met |
+| 2K/16 | 15.402% | ≈0.828 | met |
+| 2K/128 | 14.126% | ≈0.770 | missed |
+| 2K/512 | unavailable | unavailable | no verdict |
+| 8K/128 | unavailable | unavailable | no verdict |
+
+The two unavailable rows were stopped after environmental contamination. They
+are not zeros, failures, or invitations to fill the cells from component
+benchmarks. The accepted campaign also found RMSNorm improvements of 71.36% at
+2K and 83.81% at 8K, and tiled-prefill improvements of 54.07% at 2K and 54.89%
+at 8K. Those component results explain mechanisms; they do not supply the
+missing product rows.
+
+## Make Your Own Bounded Decision
+
+Compare the immediate product predecessor and the selected checkpoint on one
+identical local request:
+
+```bash
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint tiled-prefill --model qwen3-0.6b --max-tokens 16
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint selected --model qwen3-0.6b --max-tokens 16
+```
+
+These two public checkpoints currently have the same cumulative feature set;
+the comparison verifies the named handoff rather than isolating a new kernel.
+Use the independent constructor controls only in code/tests when you need a
+single-mechanism ablation.
+
+Close your Week 2 ledger with one row per mechanism:
+
+| Field | What to record |
+|---|---|
+| Workload | model, prompt/output bound, device, software, and control |
+| Correctness | focused and completed gate result |
+| Routing | cache or dispatch counters proving the intended path |
+| Component | same-shape operator comparison, or `not measured` |
+| Product | matched complete-request observation, or `unavailable` |
+| Decision | keep, reject, or inconclusive for this workload |
+| Falsifier | the result or shape that would reverse the decision |
+
+Do not add percentages from different denominators. Do not infer hardware
+occupancy from source geometry or elapsed time. Do not convert an unavailable
+row into an estimate.
+
+Week 2 ends with a faster measured path for one request and explicit readable
+controls. It makes no claim about batching, paging, scheduling, or production
+serving policy.
+
+The [performance appendix](./appendix-performance.md) preserves the exact
+accepted evidence categories and starts a fresh decision ledger for this
+successor.
 
 {{#include copyright.md}}

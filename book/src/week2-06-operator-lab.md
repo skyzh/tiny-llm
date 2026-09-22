@@ -1,120 +1,130 @@
-# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab
+# 🚧 Week 2 Day 6: Tiled Dense Prefill Attention
 
-Day 5 restores the matrix-shaped projection path selected by the fixed
-128-token prefill profile. Day 6 asks a different question: can a secondary
-operator earn a place for one named workload?
+The readable attention path materializes scores for `L` incoming query rows and
+`S` cached source positions. Day 6 asks whether prefill can compute the same
+dense attention while keeping only a small online-softmax state.
 
-The supplied worked branch is bounded decode attention. It is useful practice
-with online softmax, but the checked fixed workload did not identify attention
-as the next dominant category. Treat this chapter as an optional experiment,
-not a prerequisite for Day 7 and not evidence of a universal bottleneck.
+This is a **prefill** optimization. One-token decode stays on the readable
+baseline. The new learner-owned seams are `dense_prefill_attention_mma`, its
+private native binding, the BQ32/BK16 Metal kernel, and model selection/counters.
 
-A successful pass ends with a bounded decision, even when the numbers do not
-support keeping the branch.
-
-## Choose the Workload Before the Operator
-
-Write down the model, checkpoint, phase, prompt or context length, warmups,
-iterations, and comparison rule before editing code. Start from the Day 5
-`simd-matmul` checkpoint and record the same workload for the candidate:
+## First Diagnostic: Causal GQA With a Tail
 
 ```bash
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case simd-matmul:decode:128 --case decode-attention:decode:128 \
-  --warmup 4 --iterations 12 \
-  --json-output week2-day6-attribution.json
+pdm run build-ext
+pdm run test --week 2 --day 6 -- -k causal_gqa
 ```
 
-The supplied branch uses `decode-attention`. An equivalent experiment on a
-different measurement-selected secondary category is valid if it preserves the
-public checkpoint and decision-record contract. The course grades observable
-behavior and reasoning, not a private file path, exact Metal symbol, device
-duration, or schedule choice.
+The supplied witness uses BF16, head dimension 128, grouped-query attention,
+and query/source lengths that cross tile boundaries. An initial failure should
+reach the incomplete native tiled path rather than a missing public API.
 
-## Task 1: Preserve Bounded Decode-Attention Semantics
+The wrapper contract is:
 
-Use the supplied branch to make that decision concrete. The readable
-grouped-attention path materializes score and probability rows; for one query
-row, online softmax can combine the reduction and value-weighted sum without
-storing the full score row:
-
-```plain
-m = -infinity
-l = 0
-o = 0
-
-for each key/value block:
-    scores = q @ key_block.T * scale
-    block_max = max(scores)
-    new_m = max(m, block_max)
-    alpha = exp(m - new_m)
-    probabilities = exp(scores - new_m)
-    l = alpha * l + sum(probabilities)
-    o = alpha * o + probabilities @ value_block
-    m = new_m
-
-return o / l
+```text
+Q: B, Hq,  L, D
+K: B, Hkv, S, D
+V: B, Hkv, S, D
+output: B, Hq, L, D
 ```
 
-Preserve grouped-query head mapping, dense-cache offsets, BF16 inputs and
-outputs, FP32 online-softmax state, scale, and the existing mask adapter. Keep
-an exact fallback for shapes outside the tested guard. Do not turn a
-short-context experiment into a claim about long-context or paged attention.
+Require matching K/V shapes, `Hq % Hkv == 0`, BF16 input, `D = 128`, and
+compatible batch/dimensions. Map each query head to its KV head; do not duplicate
+K/V merely to make the head counts equal.
 
-## Task 2: Implement and Verify the Branch
+## Tile Queries and Source Positions
 
-Implement the smallest complete branch: replace only the existing fail-closed
-Day 6 learner surfaces. Keep the public
-attention interface stable so Week 3 can reuse it.
+Use query blocks of **BQ32** rows and source blocks of **BK16** positions. Guard
+both tails: `L` or `S` need not be a multiple of the tile size. The accepted
+source geometry uses 128-thread groups and 12,928 bytes of Q+K/V threadgroup
+storage. These are implementation facts, not occupancy or bandwidth readings.
 
-The supplied C++ surface is `tiny_llm_ext::decode_attention`, implemented by
-`Week2DecodeAttention::eval_cpu` and `Week2DecodeAttention::eval_gpu` in
-`src/extensions/src/week2_kernels.cpp`; its Metal entry is
-`week2_decode_attention` in `src/extensions/src/week2_kernels.metal`. The
-product calls it from `Qwen3MultiHeadAttention.__call__` through
-`decode_attention_custom`. Equivalent internal organization is valid when it
-preserves this public behavior and fallback.
+For each query row, maintain FP32 running maximum `m`, exponential sum `l`, and
+weighted value accumulator `a`. When a block produces maximum `m_b`, sum `l_b`,
+and accumulator `a_b`, merge it with the previous state:
 
-Build as soon as the branch is wired; run the focused check before the product
-path:
+$$
+m' = \max(m,m_b),\qquad
+l' = e^{m-m'}l + e^{m_b-m'}l_b,
+$$
+
+$$
+a' = e^{m-m'}a + e^{m_b-m'}a_b.
+$$
+
+After the final source block, return `a / l` in BF16. Rescaling both numerator
+and denominator is essential when a later tile raises the maximum.
+
+This schedule does not allocate an `L × S` score workspace. It still reads
+dense K/V, and an explicitly supplied additive mask may itself be `L × S`.
+
+## Preserve Mask Semantics
+
+Support:
+
+- no mask;
+- the string `"causal"`;
+- a broadcastable additive array mask.
+
+Causality is aligned to the end of the cached prefix. With `L = 3` and `S = 7`,
+the first incoming query can see source positions 0 through 4, not merely 0.
+Apply an explicit mask before the online-softmax update and preserve its
+batch/head/query indexing.
+
+A fully masked row has no softmax mass. Return a finite all-zero row rather than
+dividing zero by zero or propagating `NaN`:
+
+```bash
+pdm run test --week 2 --day 6 -- -k fully_masked
+```
+
+## Select the Tiled Path and Keep the Fallback
+
+The current selector admits BF16 D128 prefill with `L >= 9`. Shorter queries,
+including decode, use readable grouped attention. Increment:
+
+- `tiled_prefill` when the custom kernel runs;
+- `tiled_prefill_fallback` when the feature is enabled but the shape is below
+  the tiled boundary;
+- `readable` whenever the readable path executes.
+
+The fallback must preserve the same cache update, scale, mask, grouped-head
+mapping, output shape, and dtype. The supplied model witness includes a short
+query and checks both fallback and readable counters.
+
+## Complete the `tiled-prefill` Checkpoint
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 6
-
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint decode-attention --model qwen3-4b
+  --week2-checkpoint tiled-prefill --model qwen3-0.6b --max-tokens 16
 ```
 
-Test supported shapes, grouped heads, offsets, and the exact fallback. A valid
-solution may use different helper names and internal organization; it must
-produce the same public attention behavior and preserve the fallback.
+The whole gate covers a causal GQA tail, a fully masked finite-zero row, the
+complete model checkpoint, and the readable fallback. If the optimized shape is
+ineligible or fails, retain `swiglu` and readable attention.
 
-If you completed the old Week 2 Day 5 attention exercise before the course was
-reordered, keep that work. Complete the current Day 5 SIMD checkpoint first,
-then use this canonical optional Day 6 chapter and its commands to verify your
-retained attention implementation.
+## Measure and Decide
 
-## Task 3: Re-measure and Decide
+Use the incoming cumulative checkpoint as the product control:
 
-A passing branch establishes correctness. The final decision comes from
-rerunning the same comparison:
+```bash
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint swiglu --model qwen3-0.6b --max-tokens 16
+/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
+  --week2-checkpoint tiled-prefill --model qwen3-0.6b --max-tokens 16
+```
 
-Repeat the frozen workload and compare `simd-matmul` with
-`decode-attention`. Record:
+Confirm the dispatch counter before interpreting time. Accepted component
+evidence found tiled prefill **54.07%** faster at 2K and **54.89%** faster at 8K.
+Those are operator results. The complete-request effect is smaller and depends
+on prompt/output shape and interactions with the other mechanisms.
 
-- the dominant category before the change;
-- the category and product effect you actually observed;
-- the exact context range and fallback you tested;
-- `keep`, `reject`, or `inconclusive`, plus the next falsifying experiment.
+Keep the path for supported prefill when its numerical, mask, tail, and product
+evidence hold. Keep readable attention for short/ineligible queries regardless
+of that decision.
 
-The checked M4 Pro result was equivocal: attributed attention changed from
-0.837 ms to 0.831 ms (-0.75%), total attributed time rose 0.97%, and the
-separate two-sample product control showed decode rising from 74.34 to 76.50
-tokens/s (+2.91%). That supports an `inconclusive` worked example, not a
-portable speedup claim. Your decision should follow your matched measurement.
-
-Continue to [Day 7](./week2-07-split-k-prefill.md) from `simd-matmul`. The
-`split-k` checkpoint intentionally excludes this optional attention branch.
+Continue to the [selected checkpoint](./week2-07-split-k-prefill.md).
 
 {{#include copyright.md}}
