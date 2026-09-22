@@ -1,7 +1,64 @@
+#include <metal_simdgroup_matrix>
 #include <metal_stdlib>
 #include "mlx/backend/metal/kernels/utils.h"
+#include "cooperative_matrix.h"
 
 using namespace metal;
+
+namespace {
+
+constant constexpr int DENSE_MMA_SIZE = 8;
+
+template <int N>
+inline float dense_row_max(
+    thread const simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>* matrices) {
+    float value = -INFINITY;
+    for (int fragment_idx = 0; fragment_idx < N; ++fragment_idx) {
+        const auto elements = matrices[fragment_idx].thread_elements();
+        value = max(value, max(elements[0], elements[1]));
+    }
+    value = max(value, simd_shuffle_xor(value, ushort(1)));
+    value = max(value, simd_shuffle_xor(value, ushort(8)));
+    return value;
+}
+
+template <int N>
+inline float dense_row_sum(
+    thread const simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>* matrices) {
+    float value = 0.0f;
+    for (int fragment_idx = 0; fragment_idx < N; ++fragment_idx) {
+        const auto elements = matrices[fragment_idx].thread_elements();
+        value += elements[0] + elements[1];
+    }
+    value += simd_shuffle_xor(value, ushort(1));
+    value += simd_shuffle_xor(value, ushort(8));
+    return value;
+}
+
+inline void dense_clear_matrix(
+    thread simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& matrix) {
+    matrix.thread_elements()[0] = 0.0f;
+    matrix.thread_elements()[1] = 0.0f;
+}
+
+inline void dense_scale_matrix_rows(
+    thread simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& matrix,
+    float scale) {
+    matrix.thread_elements()[0] *= scale;
+    matrix.thread_elements()[1] *= scale;
+}
+
+template <typename T>
+inline void dense_matrix_multiply_accumulate(
+    thread simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& accumulator,
+    thread simdgroup_matrix<T, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& left,
+    thread simdgroup_matrix<T, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& right) {
+    simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE> result;
+    simdgroup_multiply_accumulate(result, left, right, accumulator);
+    accumulator = result;
+}
+
+}  // namespace
 
 template <typename T>
 [[kernel]] void week2_rms_norm(
@@ -231,6 +288,199 @@ template <typename T>
         }
         out[query_index * dim + thread_index] =
             static_cast<T>(value_sum / partial_sums[0]);
+    }
+}
+
+[[kernel, max_total_threads_per_threadgroup(128)]] void week2_dense_prefill_mma_bf16_d128(
+    device const bfloat* q [[buffer(0)]],
+    device const bfloat* k [[buffer(1)]],
+    device const bfloat* v [[buffer(2)]],
+    device const float* mask [[buffer(3)]],
+    device bfloat* out [[buffer(4)]],
+    constant const int& q_rows [[buffer(5)]],
+    constant const int& length [[buffer(6)]],
+    constant const int& context [[buffer(7)]],
+    constant const float& scale [[buffer(8)]],
+    constant const int& is_causal [[buffer(9)]],
+    constant const int& has_mask [[buffer(10)]],
+    constant const int& num_heads [[buffer(11)]],
+    constant const int& num_kv_heads [[buffer(12)]],
+    uint2 group_id [[threadgroup_position_in_grid]],
+    ushort simd_gid [[simdgroup_index_in_threadgroup]],
+    ushort lane [[thread_index_in_simdgroup]]) {
+    constexpr int HEAD_DIM = 128;
+    constexpr int BQ = 32;
+    constexpr int BK = 16;
+    constexpr int SIMD_GROUPS = 4;
+    constexpr int THREADS = SIMD_GROUPS * 32;
+    constexpr int LDQ = HEAD_DIM + 2;
+    constexpr int LDK = BK + 2;
+    constexpr int LDV = HEAD_DIM + 2;
+    constexpr int KV_STORAGE = HEAD_DIM * LDK;
+    constexpr int SCORE_FRAGMENTS = BK / DENSE_MMA_SIZE;
+    constexpr int OUTPUT_FRAGMENTS = HEAD_DIM / DENSE_MMA_SIZE;
+    constexpr float LOG2_E = 1.44269504089f;
+    using QBlockLoader = tiny_llm::CooperativeTileLoader<
+        bfloat, BQ, HEAD_DIM, LDQ, THREADS>;
+    using KBlockLoader = tiny_llm::CooperativeTileLoader<
+        bfloat, BK, HEAD_DIM, LDK, THREADS, true>;
+    using VBlockLoader = tiny_llm::CooperativeTileLoader<
+        bfloat, BK, HEAD_DIM, LDV, THREADS>;
+
+    const int query_block = group_id.x;
+    const int query_row_group = group_id.y;
+    if (query_row_group >= q_rows) return;
+    const int batch = query_row_group / num_heads;
+    const int query_head = query_row_group - batch * num_heads;
+    const int kv_head = query_head / (num_heads / num_kv_heads);
+    const int kv_row = batch * num_kv_heads + kv_head;
+    const int thread_idx = simd_gid * 32 + lane;
+    const ushort2 coordinate = tiny_llm::course_matrix_coordinate(lane);
+    const int query_row_in_block = simd_gid * DENSE_MMA_SIZE + coordinate.y;
+    const int query_position = query_block * BQ + query_row_in_block;
+    const bool query_valid = query_position < length;
+    const int live_queries = clamp(length - query_block * BQ, 0, BQ);
+    const float scale_log2 = scale * LOG2_E;
+
+    threadgroup bfloat q_tile[BQ * LDQ];
+    threadgroup bfloat kv_tile[KV_STORAGE];
+    QBlockLoader::load(
+        q + query_row_group * length * HEAD_DIM + query_block * BQ * HEAD_DIM,
+        HEAD_DIM,
+        q_tile,
+        thread_idx,
+        live_queries,
+        HEAD_DIM);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE> output[OUTPUT_FRAGMENTS];
+    for (int fragment_idx = 0; fragment_idx < OUTPUT_FRAGMENTS; ++fragment_idx) {
+        dense_clear_matrix(output[fragment_idx]);
+    }
+    float running_max = -INFINITY;
+    float running_sum = 0.0f;
+
+    const int total_tiles = (context + BK - 1) / BK;
+    int tile_limit = total_tiles;
+    if (is_causal) {
+        const int last_query = min((query_block + 1) * BQ, length) - 1;
+        const int last_key = last_query + (context - length);
+        tile_limit = clamp((last_key + 1 + BK - 1) / BK, 0, total_tiles);
+    }
+
+    for (int tile = 0; tile < tile_limit; ++tile) {
+        const int tile_start = tile * BK;
+        const int live_keys = clamp(context - tile_start, 0, BK);
+        KBlockLoader::load(
+            k + (kv_row * context + tile_start) * HEAD_DIM,
+            HEAD_DIM,
+            kv_tile,
+            thread_idx,
+            live_keys,
+            HEAD_DIM);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE> scores[SCORE_FRAGMENTS];
+        for (int fragment_idx = 0; fragment_idx < SCORE_FRAGMENTS; ++fragment_idx) {
+            dense_clear_matrix(scores[fragment_idx]);
+        }
+        for (int dim = 0; dim < HEAD_DIM; dim += DENSE_MMA_SIZE) {
+            simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> q_fragment;
+            tiny_llm::course_load_matrix(
+                q_fragment,
+                q_tile + simd_gid * DENSE_MMA_SIZE * LDQ + dim,
+                LDQ,
+                lane);
+            for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; ++key_fragment) {
+                simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> k_fragment;
+                tiny_llm::course_load_matrix(
+                    k_fragment,
+                    kv_tile + dim * LDK + key_fragment * DENSE_MMA_SIZE,
+                    LDK,
+                    lane);
+                dense_matrix_multiply_accumulate(scores[key_fragment], q_fragment, k_fragment);
+            }
+        }
+
+        for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; ++key_fragment) {
+            thread auto& values = scores[key_fragment].thread_elements();
+            for (int element = 0; element < 2; ++element) {
+                const int tile_key = key_fragment * DENSE_MMA_SIZE + coordinate.x + element;
+                const int key_position = tile_start + tile_key;
+                bool valid = query_valid && key_position < context;
+                if (is_causal) {
+                    valid = valid && key_position <= query_position + (context - length);
+                }
+                float score = valid ? values[element] * scale_log2 : -INFINITY;
+                if (valid && has_mask) {
+                    score += mask[(query_row_group * length + query_position) * context + key_position] * LOG2_E;
+                }
+                values[element] = score;
+            }
+        }
+
+        const float tile_max = dense_row_max<SCORE_FRAGMENTS>(scores);
+        const float new_max = max(running_max, tile_max);
+        const bool finite_row = query_valid && new_max != -INFINITY;
+        const float previous_scale = running_max == -INFINITY || !finite_row
+            ? 0.0f
+            : fast::exp2(running_max - new_max);
+        for (int fragment_idx = 0; fragment_idx < SCORE_FRAGMENTS; ++fragment_idx) {
+            thread auto& values = scores[fragment_idx].thread_elements();
+            for (int element = 0; element < 2; ++element) {
+                values[element] = values[element] == -INFINITY || !finite_row
+                    ? 0.0f
+                    : fast::exp2(values[element] - new_max);
+            }
+        }
+        const float tile_sum = dense_row_sum<SCORE_FRAGMENTS>(scores);
+        running_max = new_max;
+        running_sum = previous_scale * running_sum + tile_sum;
+        for (int fragment_idx = 0; fragment_idx < OUTPUT_FRAGMENTS; ++fragment_idx) {
+            dense_scale_matrix_rows(output[fragment_idx], previous_scale);
+        }
+
+        simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> probabilities[SCORE_FRAGMENTS];
+        for (int fragment_idx = 0; fragment_idx < SCORE_FRAGMENTS; ++fragment_idx) {
+            const auto values = scores[fragment_idx].thread_elements();
+            probabilities[fragment_idx].thread_elements()[0] = bfloat(values[0]);
+            probabilities[fragment_idx].thread_elements()[1] = bfloat(values[1]);
+        }
+
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        VBlockLoader::load(
+            v + (kv_row * context + tile_start) * HEAD_DIM,
+            HEAD_DIM,
+            kv_tile,
+            thread_idx,
+            live_keys,
+            HEAD_DIM);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (int output_fragment = 0; output_fragment < OUTPUT_FRAGMENTS; ++output_fragment) {
+            for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; ++key_fragment) {
+                simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> value_fragment;
+                tiny_llm::course_load_matrix(
+                    value_fragment,
+                    kv_tile + key_fragment * DENSE_MMA_SIZE * LDV + output_fragment * DENSE_MMA_SIZE,
+                    LDV,
+                    lane);
+                dense_matrix_multiply_accumulate(
+                    output[output_fragment], probabilities[key_fragment], value_fragment);
+            }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    if (query_valid) {
+        for (int fragment_idx = 0; fragment_idx < OUTPUT_FRAGMENTS; ++fragment_idx) {
+            const auto values = output[fragment_idx].thread_elements();
+            for (int element = 0; element < 2; ++element) {
+                const int dim = fragment_idx * DENSE_MMA_SIZE + coordinate.x + element;
+                out[(query_row_group * length + query_position) * HEAD_DIM + dim] = running_sum == 0.0f
+                    ? bfloat(0.0f)
+                    : bfloat(values[element] / running_sum);
+            }
+        }
     }
 }
 
