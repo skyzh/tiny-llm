@@ -69,11 +69,11 @@ def simple_generate_with_kv_cache(
     tokenizer: TokenizerWrapper,
     prompt: str,
     max_tokens: int = 256,
+    use_bounded_kv_capacity: bool = False,
 ) -> str:
     _validate_max_tokens(max_tokens)
     if max_tokens == 0:
         return ""
-    kv_cache = model.create_kv_cache()
 
     def _step(model, y, offset, kv_cache):
         logits = model(y[None], offset, kv_cache, logits_to_keep=1)
@@ -83,11 +83,14 @@ def simple_generate_with_kv_cache(
         y = sampler(logprobs)
         return y, logprobs.squeeze(0)
 
+    kv_cache = None
     try:
         # prefill with the prompt
         tokens = mx.array(
             tokenizer.encode(prompt, add_special_tokens=False), dtype=mx.int32
         )
+        capacity = int(tokens.size) + max_tokens if use_bounded_kv_capacity else None
+        kv_cache = model.create_kv_cache(capacity=capacity)
         detokenizer = tokenizer.detokenizer
         detokenizer.reset()
         offset = 0
