@@ -1,114 +1,65 @@
-"""Week 2 Day 7 split-K quantized-prefill tests."""
+"""Week 2 Day 7 measured cumulative-selection tests."""
 
 import mlx.core as mx
 
-from .tiny_llm_base import Qwen3ModelWeek2, quantized_matmul
+from .tiny_llm_base import FastRMSNorm, Qwen3ModelWeek2
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def test_split_k_checkpoint_inherits_core_without_optional_attention():
-    day_5 = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
-    day_6 = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="decode-attention")
-    day_7 = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="split-k")
+def test_selected_checkpoint_contains_exactly_the_three_selected_mechanisms():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="selected")
+    layer = model.layers_inner[0]
 
-    assert day_5.layers_inner[0].self_attn.wk.use_simdgroup_matmul
-    assert not day_5.layers_inner[0].self_attn.use_decode_attention
-    assert day_6.layers_inner[0].self_attn.wk.use_simdgroup_matmul
-    assert not day_6.layers_inner[0].self_attn.wk.use_split_k_matmul
-    assert day_6.layers_inner[0].self_attn.use_decode_attention
-    assert day_7.layers_inner[0].self_attn.wk.use_simdgroup_matmul
-    assert day_7.layers_inner[0].self_attn.wk.use_split_k_matmul
-    assert not day_7.layers_inner[0].self_attn.use_decode_attention
+    assert model.use_bounded_kv_capacity
+    assert isinstance(layer.input_layernorm, FastRMSNorm)
+    assert layer.self_attn.use_tiled_prefill_attention
+    assert layer.self_attn.wq.use_simdgroup_matmul
+    assert not layer.self_attn.wq.use_split_k_matmul
+    assert not hasattr(layer.self_attn, "use_decode_attention")
 
-
-def test_split_k_matches_unsplit_qwen_4b_kv_shape_gpu():
-    """The optimized case uses Qwen3-4B's hidden and KV projection sizes."""
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((32, 2560)).astype(mx.bfloat16)
-        weight = mx.random.normal((1024, 2560)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        expected = mx.quantized_matmul(
-            inputs,
-            packed,
-            scales,
-            biases,
-            transpose=True,
-            group_size=128,
-            bits=4,
-        )
-        split = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-            use_split_k=True,
-        )
-        # Each K partition is stored in BF16 before the FP32 reduction. Keep
-        # the tolerance at one output BF16 bin for the extra rounding step.
-        assert_allclose(split, expected, mx.bfloat16, atol=1.5, rtol=2e-2)
+    cache = model.create_kv_cache(capacity=4)
+    output = model(mx.array([[1, 2, 3, 4]], dtype=mx.int32), 0, cache)
+    assert output.dtype == mx.bfloat16
+    assert all(layer_cache.slice_write_bytes > 0 for layer_cache in cache)
 
 
-def test_split_k_handles_partial_output_tiles_gpu():
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((17, 2560)).astype(mx.bfloat16)
-        weight = mx.random.normal((1032, 2560)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        expected = mx.quantized_matmul(
-            inputs,
-            packed,
-            scales,
-            biases,
-            transpose=True,
-            group_size=128,
-            bits=4,
-        )
-        split = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-            use_split_k=True,
-        )
-        # Each K partition is stored in BF16 before the FP32 reduction. Keep
-        # the tolerance at one output BF16 bin for the extra rounding step.
-        assert_allclose(split, expected, mx.bfloat16, atol=1.5, rtol=2e-2)
+def test_selected_mechanisms_remain_independently_controllable():
+    mlx_model = tiny_qwen3_mlx_model()
+    disabled = Qwen3ModelWeek2(
+        mlx_model,
+        checkpoint="selected",
+        use_bounded_kv_capacity=False,
+        use_register_cached_rms_norm=False,
+        use_tiled_prefill_attention=False,
+    )
+    enabled = Qwen3ModelWeek2(
+        mlx_model,
+        checkpoint="selected",
+        use_bounded_kv_capacity=True,
+        use_register_cached_rms_norm=True,
+        use_tiled_prefill_attention=True,
+    )
+
+    assert not disabled.use_bounded_kv_capacity
+    assert not isinstance(disabled.layers_inner[0].input_layernorm, FastRMSNorm)
+    assert not disabled.layers_inner[0].self_attn.use_tiled_prefill_attention
+    assert enabled.use_bounded_kv_capacity
+    assert isinstance(enabled.layers_inner[0].input_layernorm, FastRMSNorm)
+    assert enabled.layers_inner[0].self_attn.use_tiled_prefill_attention
+
+    inputs = mx.array([[1, 2, 3]], dtype=mx.int32)
+    actual = enabled(inputs, 0, enabled.create_kv_cache(capacity=3))
+    expected = disabled(inputs, 0, disabled.create_kv_cache())
+    assert_allclose(actual, expected, mx.bfloat16, atol=3e-2, rtol=3e-2)
 
 
-def test_split_k_request_falls_back_for_larger_prefill_gpu():
-    with mx.stream(mx.gpu):
-        # Four row tiles by 80 output tiles already fill the target grid, so
-        # another K partition would add reduction overhead without useful work.
-        inputs = mx.random.normal((128, 256)).astype(mx.bfloat16)
-        weight = mx.random.normal((2560, 256)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        unsplit = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-        )
-        requested = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-            use_split_k=True,
-        )
-        mx.eval(requested, unsplit)
-        assert mx.array_equal(requested, unsplit).item()
+def test_retired_experiments_are_not_week2_checkpoints():
+    for checkpoint in ("decode-attention", "split-k"):
+        try:
+            Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint=checkpoint)
+        except ValueError as exc:
+            assert "unknown Week 2 checkpoint" in str(exc)
+        else:
+            raise AssertionError(
+                f"retired checkpoint {checkpoint!r} remained selectable"
+            )

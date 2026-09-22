@@ -126,7 +126,6 @@ def _attention(*, tiled_prefill: bool = False) -> Qwen3MultiHeadAttention:
         max_seq_len=2048,
         use_fast_rms_norm=False,
         use_fast_rope=False,
-        use_decode_attention=False,
         use_tiled_prefill_attention=tiled_prefill,
     )
 

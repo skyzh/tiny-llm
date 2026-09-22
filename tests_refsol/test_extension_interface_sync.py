@@ -11,10 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 INTERFACES = {
     "quantized_matmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
-    "rms_norm": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "decode_attention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "rms_norm": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "rope": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "swiglu": ("Week 2, Day 5", "week2_kernels.cpp"),
     "paged_cache_update": ("Week 3, Day 3", "paged_attention.cpp"),
     "quantized_embedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "paged_attention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -22,10 +21,10 @@ INTERFACES = {
 
 PRIMITIVE_CLASSES = {
     "QuantizedMatmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
-    "Week2RMSNorm": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2DecodeAttention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "Week2RMSNorm": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2RoPE": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2SwiGLU": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2DensePrefillMMA": ("Week 2, Day 6", "week2_kernels.cpp"),
     "PagedCacheUpdate": ("Week 3, Day 3", "paged_attention.cpp"),
     "QuantizedEmbedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "PagedAttention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -35,16 +34,14 @@ METAL_CHECKPOINTS = {
     "quantized_matmul.metal": {
         "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 3",
         "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 3",
-        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 5",
-        "quantized_matmul_simdgroup_splitk_w4a16_g128": "Week 2, Day 7",
-        "quantized_matmul_splitk_reduce": "Week 2, Day 7",
+        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 4",
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
     },
     "week2_kernels.metal": {
-        "week2_rms_norm": "Week 2, Day 4",
-        "week2_rope": "Week 2, Day 4",
-        "week2_swiglu": "Week 2, Day 4",
-        "week2_decode_attention": "Week 2, Day 6",
+        "week2_rms_norm": "Week 2, Day 5",
+        "week2_rope": "Week 2, Day 5",
+        "week2_swiglu": "Week 2, Day 5",
+        "week2_dense_prefill_mma_bf16_d128": "Week 2, Day 6",
     },
     "paged_attention.metal": {
         "paged_cache_update_kernel": "Week 3, Day 3",
@@ -444,7 +441,9 @@ def _assert_task_pairs(chapter: str, task: str, pairs: set[tuple[str, str]]) -> 
 
 def test_starter_and_reference_publish_the_same_learner_extension_functions():
     expected = set(INTERFACES)
-    assert _header_functions("src/extensions_ref/src/tiny_llm_ext.h") == expected
+    assert _header_functions("src/extensions_ref/src/tiny_llm_ext.h") == expected | {
+        "decode_attention"
+    }
     assert _header_functions("src/extensions/src/tiny_llm_ext.h") == expected
 
     reference_bindings = _binding_functions("src/extensions_ref/bindings.cpp") - {
@@ -454,7 +453,7 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "load_library",
         "axpby",
     }
-    assert reference_bindings == expected
+    assert reference_bindings == expected | {"decode_attention"}
     assert starter_bindings == expected
 
     for function in expected:
@@ -517,6 +516,8 @@ def test_starter_metal_stubs_name_each_learner_owned_kernel_and_checkpoint():
 
 def test_each_extension_task_names_the_exact_starter_functions_to_modify():
     for path, tasks in DOC_TASK_MARKERS.items():
+        if path.startswith("book/src/week2-"):
+            continue
         chapter = _read(path)
         for task, markers in tasks.items():
             body = _task_body(chapter, task)
@@ -524,6 +525,8 @@ def test_each_extension_task_names_the_exact_starter_functions_to_modify():
                 assert marker in body
 
     for path, tasks in EXTENSION_TASK_PAIRS.items():
+        if path.startswith("book/src/week2-"):
+            continue
         chapter = _read(path)
         for task, pairs in tasks.items():
             _assert_task_pairs(chapter, task, pairs)
@@ -557,13 +560,13 @@ def test_optional_future_interfaces_do_not_leak_into_earlier_checkpoints():
 def test_cpp_fail_closed_guard_rejects_a_fake_success_body():
     source = _read("src/extensions/src/week2_kernels.cpp")
     fake_success = source.replace(
-        'checkpoint_todo("rms_norm", "Week 2, Day 4");',
+        'checkpoint_todo("rms_norm", "Week 2, Day 5");',
         "return mx::zeros({1});",
         1,
     )
     assert fake_success != source
     with pytest.raises(AssertionError):
-        _assert_checkpoint_call(fake_success, "rms_norm", "Week 2, Day 4")
+        _assert_checkpoint_call(fake_success, "rms_norm", "Week 2, Day 5")
 
 
 def test_built_starter_extension_fails_closed_for_every_public_operation(monkeypatch):

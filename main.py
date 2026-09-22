@@ -36,13 +36,14 @@ parser.add_argument(
     "--week2-checkpoint",
     choices=(
         "kv-cache",
+        "capacity-cache",
         "quantized-matvec",
+        "simd-matmul",
         "rmsnorm",
         "rope",
         "swiglu",
-        "simd-matmul",
-        "decode-attention",
-        "split-k",
+        "tiled-prefill",
+        "selected",
     ),
     help="run one cumulative Week 2 model checkpoint",
 )

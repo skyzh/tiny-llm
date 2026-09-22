@@ -35,7 +35,8 @@ def test_tasks_2_and_3_cached_checkpoint_is_runnable_and_readable():
     assert isinstance(model.embedding, Embedding)
     assert isinstance(layer.input_layernorm, RMSNorm)
     assert isinstance(layer.self_attn.rope, RoPE)
-    assert not layer.self_attn.use_decode_attention
+    assert not model.use_bounded_kv_capacity
+    assert not layer.self_attn.use_tiled_prefill_attention
     assert not layer.mlp.use_fast_swiglu
     assert len(model.create_kv_cache()) == model.num_hidden_layers
 

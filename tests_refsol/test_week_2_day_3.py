@@ -70,7 +70,8 @@ def test_task_4_model_integrates_packed_weights_before_fast_kernels():
     assert isinstance(layer.mlp.w_gate, QuantizedWeights)
     assert isinstance(layer.input_layernorm, RMSNorm)
     assert isinstance(layer.self_attn.rope, RoPE)
-    assert not layer.self_attn.use_decode_attention
+    assert model.use_bounded_kv_capacity
+    assert not layer.self_attn.use_tiled_prefill_attention
     assert not layer.mlp.use_fast_swiglu
 
 

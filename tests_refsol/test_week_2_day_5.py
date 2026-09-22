@@ -1,282 +1,56 @@
-"""Week 2 Day 5 SIMD-matrix prefill tests."""
+"""Week 2 Day 5 fused-model primitive tests."""
 
-from pathlib import Path
+import importlib
 
 import mlx.core as mx
-import pytest
 
-from .tiny_llm_base import (
-    Qwen3ModelWeek2,
-    quantized_matmul,
-    quantized_matmul_vanilla,
-)
-from .utils import (
-    assert_allclose,
-    qwen3_0_6b_model_exists,
-    qwen3_1_7b_model_exists,
-    qwen3_4b_model_exists,
-    tiny_qwen3_mlx_model,
-)
-from mlx_lm import load
+from tiny_llm_ref.basics import silu
+from tiny_llm_ref.layer_norm import RMSNorm
+from tiny_llm_ref.positional_encoding import RoPE
+from .tiny_llm_base import FastRMSNorm, FastRoPE, Qwen3ModelWeek2, swiglu
+from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def test_simd_matmul_checkpoint_is_completed_week2_model():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
+def test_task_1_register_cached_rmsnorm_matches_readable_operator():
+    x = mx.random.normal((2, 3, 16)).astype(mx.bfloat16)
+    weight = mx.random.normal((16,)).astype(mx.bfloat16)
+    fast = FastRMSNorm(16, weight, eps=1e-5)
+    result = fast(x)
+    expected = RMSNorm(16, weight, eps=1e-5)(x)
+
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
+    assert fast.dispatch_counts == {"register_cached": 1, "fixed_width_fallback": 0}
+
+
+def test_task_2_rope_and_swiglu_match_readable_operators():
+    x = mx.random.normal((2, 4, 2, 16)).astype(mx.bfloat16)
+    fast_rope = FastRoPE(16, 32, base=10000)
+    readable_rope = RoPE(16, 32, base=10000)
+    actual = fast_rope(x, [3, 7])
+    expected = readable_rope(x, [slice(3, 7), slice(7, 11)])
+    assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
+
+    gate = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
+    up = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
+    assert_allclose(swiglu(gate, up), silu(gate) * up, mx.bfloat16)
+
+
+def test_task_3_primitive_checkpoints_are_cumulative_and_real():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="swiglu")
     layer = model.layers_inner[0]
+    implementation_rope = importlib.import_module(
+        f"{FastRMSNorm.__module__.split('.')[0]}.positional_encoding"
+    )
 
-    assert not model.embedding.use_custom_kernel
-    assert model.embedding.weight.use_simdgroup_matmul
+    assert model.use_bounded_kv_capacity
     assert layer.self_attn.wq.use_simdgroup_matmul
-    assert not layer.self_attn.use_decode_attention
+    assert isinstance(model.norm, FastRMSNorm)
+    assert isinstance(layer.input_layernorm, FastRMSNorm)
+    assert isinstance(layer.self_attn.rope, FastRoPE)
+    assert layer.mlp.use_fast_swiglu
 
-
-def test_task_2_simdgroup_matmul_matches_vanilla_gpu():
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((128, 256)).astype(mx.bfloat16)
-        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, inputs, packed, transpose_b=True
-        )
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=1.0, rtol=2e-2)
-
-
-def test_task_2_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
-    """A non-multiple-of-eight prefill must not accumulate in bfloat16."""
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((10, 256)).astype(mx.bfloat16)
-        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, inputs, packed, transpose_b=True
-        )
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
-
-
-@pytest.mark.parametrize(
-    ("rows", "outputs", "input_dim"),
-    [(9, 33, 128), (31, 65, 256), (33, 97, 512)],
-)
-@pytest.mark.parametrize("use_split_k", [False, True])
-def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
-    rows: int,
-    outputs: int,
-    input_dim: int,
-    use_split_k: bool,
-):
-    mx.random.seed(rows + outputs + input_dim)
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((rows, input_dim)).astype(mx.bfloat16)
-        weight = mx.random.normal((outputs, input_dim)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-            use_split_k=use_split_k,
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, inputs, packed, transpose_b=True
-        )
-        assert tiled.shape == (rows, outputs)
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
-
-
-def test_task_2_course_owned_loader_zero_fills_partial_rows_gpu():
-    """A full-width tile with partial rows must still use the safe path."""
-    extension = (
-        "extensions_ref"
-        if Path(__file__).parent.name == "tests_refsol"
-        else "extensions"
-    )
-    header = (
-        Path(__file__).parents[1] / f"src/{extension}/src/cooperative_matrix.h"
-    ).read_text()
-    source = """
-        threadgroup T tile[32];
-        using Loader = tiny_llm::CooperativeTileLoader<T, 4, 8, 8, 4>;
-        Loader::load(
-            inp, 8, tile, thread_position_in_threadgroup.x, 2, 8);
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (uint index = thread_position_in_threadgroup.x;
-             index < 32;
-             index += 4) {
-            out[index] = tile[index];
-        }
-    """
-    kernel = mx.fast.metal_kernel(
-        name="probe_course_loader_partial_rows",
-        input_names=["inp"],
-        output_names=["out"],
-        source=source,
-        header=header,
-    )
-
-    valid = (mx.arange(16).reshape(2, 8) + 1).astype(mx.bfloat16)
-    sentinel = mx.full((1, 8), 37, dtype=mx.bfloat16)
-    padding = mx.full((1, 8), -11, dtype=mx.bfloat16)
-    loader_source = mx.concatenate([valid, sentinel, padding], axis=0)
-    output = kernel(
-        inputs=[loader_source],
-        template=[("T", mx.bfloat16)],
-        grid=(4, 1, 1),
-        threadgroup=(4, 1, 1),
-        output_shapes=[(4, 8)],
-        output_dtypes=[mx.bfloat16],
-    )[0]
-    mx.eval(output)
-
-    assert output.shape == (4, 8)
-    assert mx.array_equal(output[:2], valid).item()
-    assert mx.array_equal(output[2:], mx.zeros((2, 8), dtype=mx.bfloat16)).item()
-
-
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_utils_qwen3_0_6b():
-    pass
-
-
-@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_utils_qwen3_4b():
-    pass
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_utils_qwen3_1_7b():
-    pass
-
-
-def helper_test_task_5(model_name: str, iters: int = 10):
-    mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
-    assert not model.embedding.use_custom_kernel
-    assert model.embedding.weight.use_simdgroup_matmul
-    assert all(layer.self_attn.wq.use_simdgroup_matmul for layer in model.layers_inner)
-    for iteration in range(iters):
-        cache = model.create_kv_cache()
-        input = (mx.arange(10, dtype=mx.int32) + iteration * 10).reshape(
-            1, 10
-        ) % tokenizer.vocab_size
-        user_output = model(input, 0, cache)
-        ref_output = mlx_model(input)
-        user_output = user_output - mx.logsumexp(user_output, axis=-1, keepdims=True)
-        ref_output = ref_output - mx.logsumexp(ref_output, axis=-1, keepdims=True)
-        assert_allclose(
-            user_output, ref_output, precision=mx.bfloat16, rtol=0.1, atol=2.5
-        )
-
-
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_task_5_qwen3_0_6b():
-    helper_test_task_5("Qwen/Qwen3-0.6B-MLX-4bit", 5)
-
-
-@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_task_5_qwen3_4b():
-    helper_test_task_5("Qwen/Qwen3-4B-MLX-4bit", 1)
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_task_5_qwen3_1_7b():
-    helper_test_task_5("Qwen/Qwen3-1.7B-MLX-4bit", 3)
-
-
-def helper_test_task_5_incremental(
-    model_name: str,
-    seq_len: int,
-    iters: int = 1,
-):
-    mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
-    for _ in range(iters):
-        inputs = mx.random.randint(0, tokenizer.vocab_size, (1, seq_len))
-        ref_outputs = mlx_model(inputs)
-        decode_cache = model.create_kv_cache()
-        for offset in range(seq_len):
-            user_out = model(
-                inputs=inputs[:, offset : offset + 1],
-                offset=offset,
-                cache=decode_cache,
-            )
-            ref_out = ref_outputs[:, offset : offset + 1, :]
-            user_out = user_out - mx.logsumexp(user_out, axis=-1, keepdims=True)
-            ref_out = ref_out - mx.logsumexp(ref_out, axis=-1, keepdims=True)
-            assert_allclose(
-                user_out, ref_out, precision=mx.bfloat16, rtol=0.1, atol=2.5
-            )
-
-
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_task_5_incremental_qwen3_0_6b():
-    helper_test_task_5_incremental("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
-
-
-@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_task_5_incremental_qwen3_4b():
-    helper_test_task_5_incremental(
-        "Qwen/Qwen3-4B-MLX-4bit",
-        seq_len=3,
-    )
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_task_5_incremental_qwen3_1_7b():
-    helper_test_task_5_incremental("Qwen/Qwen3-1.7B-MLX-4bit", seq_len=3)
-
-
-class FakeEmbedding:
-    def __call__(self, inputs):
-        return mx.stack([inputs, inputs + 1], axis=-1).astype(mx.bfloat16)
-
-    def as_linear(self, hidden):
-        return hidden
-
-
-@pytest.mark.parametrize("logits_to_keep,expected_length", [(1, 1), (None, 4)])
-def test_task_5_logits_to_keep_controls_output_length(logits_to_keep, expected_length):
-    model = Qwen3ModelWeek2.__new__(Qwen3ModelWeek2)
-    model.num_hidden_layers = 0
-    model.embedding = FakeEmbedding()
-    model.layers_inner = []
-    model.norm = lambda hidden: hidden
-    model.w_lm_head = None
-    inputs = mx.array([[1, 2, 3, 4]])
-    result = model(inputs, 0, [], logits_to_keep=logits_to_keep)
-    assert result.shape == (1, expected_length, 2)
+    rms_only = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="rmsnorm")
+    rms_layer = rms_only.layers_inner[0]
+    assert isinstance(rms_only.norm, FastRMSNorm)
+    assert type(rms_layer.self_attn.rope) is implementation_rope.RoPE
+    assert not rms_layer.mlp.use_fast_swiglu
