@@ -63,10 +63,10 @@ component, product, control, historical, or unavailable.
 ## What the Accepted Evidence Says
 
 The accepted Qwen3-4B evidence for the frozen successor found cumulative
-complete-request latency improvements of **10.849%** at 128/128, **10.347%** at
-512/128, **15.402%** at 2K/16, and **14.126%** at 2K/128 versus all mechanisms
+complete-request latency improvements of **10.427%** at 128/128, **9.996%** at
+512/128, **15.375%** at 2K/16, and **14.193%** at 2K/128 versus all mechanisms
 off. Throughput relative to the matched full-MLX control was approximately
-0.806, 0.822, 0.828, and 0.770. The 80% direction was met on the first three
+0.804, 0.822, 0.829, and 0.769. The 80% direction was met on the first three
 rows and missed at 2K/128.
 
 Those are supplied accepted measurements, not a command transcript for the

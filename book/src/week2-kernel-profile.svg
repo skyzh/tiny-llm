@@ -52,8 +52,8 @@
     <rect class="card" x="20" y="1252" width="440" height="180" rx="12"/>
     <text class="metric" x="42" y="1290">Tiled + selected</text>
     <text class="detail" x="42" y="1328">2K component: +54.07%</text>
-    <text class="detail" x="42" y="1360">2K/16 product: +15.402%</text>
-    <text class="detail" x="42" y="1392">2K/128 product: +14.126%</text>
+    <text class="detail" x="42" y="1360">2K/16 product: +15.375%</text>
+    <text class="detail" x="42" y="1392">2K/128 product: +14.193%</text>
   </g>
   <text class="detail" x="24" y="1470">2K/512 and 8K/128 product rows</text>
   <text class="detail" x="24" y="1498">unavailable · no imputation</text>

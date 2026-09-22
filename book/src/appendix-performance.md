@@ -78,10 +78,10 @@ denominator.
 
 | Prompt/output | All-off total | Selected total | Δ total | MLX ratio | 80% direction |
 |---:|---:|---:|---:|---:|---|
-| 128/128 | 2.221 s | 1.986 s | +10.849% | ≈0.806 | met |
-| 512/128 | 2.953 s | 2.653 s | +10.347% | ≈0.822 | met |
-| 2K/16 | 3.903 s | 3.312 s | +15.402% | ≈0.828 | met |
-| 2K/128 | 6.563 s | 5.639 s | +14.126% | ≈0.770 | missed |
+| 128/128 | 2.221 s | 1.992 s | +10.427% | ≈0.804 | met |
+| 512/128 | 2.953 s | 2.656 s | +9.996% | ≈0.822 | met |
+| 2K/16 | 3.903 s | 3.308 s | +15.375% | ≈0.829 | met |
+| 2K/128 | 6.563 s | 5.644 s | +14.193% | ≈0.769 | missed |
 | 2K/512 | unavailable | unavailable | unavailable | unavailable | no verdict |
 | 8K/128 | unavailable | unavailable | unavailable | unavailable | no verdict |
 

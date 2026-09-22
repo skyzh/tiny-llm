@@ -71,10 +71,10 @@ the identical-feed full-MLX denominator.
 
 | Prompt/output | Selected total-latency gain vs all-off | MLX ratio | 80% direction |
 |---:|---:|---:|---|
-| 128/128 | 10.849% | ≈0.806 | met |
-| 512/128 | 10.347% | ≈0.822 | met |
-| 2K/16 | 15.402% | ≈0.828 | met |
-| 2K/128 | 14.126% | ≈0.770 | missed |
+| 128/128 | 10.427% | ≈0.804 | met |
+| 512/128 | 9.996% | ≈0.822 | met |
+| 2K/16 | 15.375% | ≈0.829 | met |
+| 2K/128 | 14.193% | ≈0.769 | missed |
 | 2K/512 | unavailable | unavailable | no verdict |
 | 8K/128 | unavailable | unavailable | no verdict |
 
