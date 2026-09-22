@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sys
 from argparse import Namespace
 
 import pytest
@@ -8,6 +9,54 @@ from benches import week2_gpudebug as gpu
 
 
 ROOT = gpu.ROOT
+
+
+def test_capture_parser_exposes_only_current_week2_checkpoints(monkeypatch, capsys):
+    assert gpu.KNOWN_CHECKPOINTS == (
+        "kv-cache",
+        "capacity-cache",
+        "quantized-matvec",
+        "simd-matmul",
+        "rmsnorm",
+        "rope",
+        "swiglu",
+        "tiled-prefill",
+        "selected",
+    )
+
+    def argv(checkpoint):
+        return [
+            "capture-week2",
+            "capture",
+            "--solution",
+            "tiny_llm",
+            "--model",
+            "qwen3-0.6b",
+            "--checkpoint",
+            checkpoint,
+            "--phase",
+            "decode",
+            "--tokens",
+            "1",
+            "--trace",
+            "trace.gputrace",
+            "--metadata",
+            "capture.json",
+            "--manifest",
+            "trace.sha256",
+        ]
+
+    for checkpoint in gpu.KNOWN_CHECKPOINTS:
+        monkeypatch.setattr(sys, "argv", argv(checkpoint))
+        args = gpu.build_parser().parse_args()
+        assert args.checkpoint == checkpoint
+        assert args.handler is gpu.capture
+
+    for retired in ("decode-attention", "split-k"):
+        monkeypatch.setattr(sys, "argv", argv(retired))
+        with pytest.raises(SystemExit):
+            gpu.build_parser().parse_args()
+        capsys.readouterr()
 
 
 def _identity() -> dict:

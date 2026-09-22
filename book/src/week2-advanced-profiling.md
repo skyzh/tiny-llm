@@ -5,10 +5,10 @@ checkpoint commands, counters, and your matched product observations. This page
 is an optional method for reading a preserved measurement package without
 turning missing data into a claim.
 
-The repository still contains older profiling utilities whose default cases
-predate the frozen successor. They are not the runnable interface for the
-current nine-checkpoint route. Use only the commands printed in the current
-chapters unless a later code revision explicitly updates those utilities.
+The public `bench`, `profile-week2-kernels`, and optional `capture-week2`
+utilities use the current nine-checkpoint names. Their output can support a
+bounded evidence record, but the required chapter route does not depend on
+local profiling or capture output.
 
 ## 1. Bind Identity Before Reading Numbers
 

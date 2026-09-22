@@ -27,12 +27,10 @@ The course follows a four-week learning path:
 - **Week 1: From Matmul to Text.** Build a Qwen3 model directly from `mlx.core`
   array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
-- **Week 2: A Step Closer to vLLM.** Add a KV cache, establish a
-  synchronized MLX baseline, and let matched benchmarks choose each
-  optimization. The causal path moves from quantized decode matvec to fused
-  model kernels and SIMD-matrix prefill; decode attention is an optional
-  workload-conditioned lab, and split-K stays only where a measured short
-  shape supports it.
+- **Week 2: A Step Closer to vLLM.** Reuse the prefix, bound KV-cache
+  movement, keep W4 packed, and add SIMD matrix prefill. Then compact the
+  model primitives, tile dense prefill attention, and select the cumulative
+  path with matched evidence.
 - **Week 3: Build a Mini vLLM.** Introduce continuous
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
@@ -109,13 +107,13 @@ one explicit byte range through the existing loop.
 | 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ |
 | 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
 | 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
-| 2.1 | KV Cache | ✅ | ✅ | ✅ | 🚧 |
-| 2.2 | Benchmarking and Profiling | ✅ | ✅ | ✅ | 🚧 |
-| 2.3 | Quantize the Model | ✅ | ✅ | ✅ | 🚧 |
-| 2.4 | Fused Model Kernels | ✅ | ✅ | ✅ | 🚧 |
-| 2.5 | SIMD-Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
-| 2.6 (optional) | Workload-Conditioned Operator Lab | ✅ | ✅ | ✅ | 🚧 |
-| 2.7 | Conditional Split-K and Final Decision | ✅ | ✅ | ✅ | 🚧 |
+| 2.1 | Reuse the Prefix | ✅ | ✅ | ✅ | 🚧 |
+| 2.2 | Bound KV-Cache Movement | ✅ | ✅ | ✅ | 🚧 |
+| 2.3 | Keep W4 Packed | ✅ | ✅ | ✅ | 🚧 |
+| 2.4 | SIMD Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 2.5 | Compact Model Primitives | ✅ | ✅ | ✅ | 🚧 |
+| 2.6 | Tiled Dense Prefill Attention | ✅ | ✅ | ✅ | 🚧 |
+| 2.7 | Select the Cumulative Path | ✅ | ✅ | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |

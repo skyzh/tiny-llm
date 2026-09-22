@@ -19,13 +19,14 @@ PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"
 KNOWN_CHECKPOINTS = (
     "kv-cache",
+    "capacity-cache",
     "quantized-matvec",
+    "simd-matmul",
     "rmsnorm",
     "rope",
     "swiglu",
-    "simd-matmul",
-    "decode-attention",
-    "split-k",
+    "tiled-prefill",
+    "selected",
 )
 
 

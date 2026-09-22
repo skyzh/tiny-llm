@@ -1,11 +1,13 @@
 import json
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from benches import bench as benchmark
 from benches import bench_course_progression as progression
 
 
@@ -136,6 +138,70 @@ def test_week2_live_labels_follow_the_seven_day_book():
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
         assert heading == expected_heading
+
+    readme = (ROOT / "README.md").read_text()
+    week2_overview = readme.split("- **Week 2:", 1)[1].split("- **Week 3:", 1)[0]
+    for title in (
+        "Reuse the Prefix",
+        "Bound KV-Cache Movement",
+        "Keep W4 Packed",
+        "SIMD Matrix Prefill",
+        "Compact Model Primitives",
+        "Tiled Dense Prefill Attention",
+        "Select the Cumulative Path",
+    ):
+        assert title in readme
+    assert "decode attention" not in week2_overview.lower()
+    assert "split-k" not in week2_overview.lower()
+
+    assert "| 2.1 | Reuse the Prefix |" in readme
+    assert "| 2.2 | Bound KV-Cache Movement |" in readme
+    assert "| 2.3 | Keep W4 Packed |" in readme
+    assert "| 2.4 | SIMD Matrix Prefill |" in readme
+    assert "| 2.5 | Compact Model Primitives |" in readme
+    assert "| 2.6 | Tiled Dense Prefill Attention |" in readme
+    assert "| 2.7 | Select the Cumulative Path |" in readme
+
+
+def test_week2_progression_checkpoints_parse_through_public_bench(monkeypatch):
+    checkpoints = tuple(
+        variant.extra_args[1]
+        for variant in WEEK2_VARIANTS
+        if variant.loader == "week2" and variant.extra_args
+    )
+    assert checkpoints == (
+        "kv-cache",
+        "capacity-cache",
+        "quantized-matvec",
+        "simd-matmul",
+        "rmsnorm",
+        "rope",
+        "swiglu",
+        "tiled-prefill",
+        "selected",
+    )
+
+    monkeypatch.setattr(
+        benchmark,
+        "load",
+        lambda *_args, **_kwargs: pytest.fail("model work must not begin"),
+    )
+    for checkpoint in checkpoints:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["bench", "--loader", "week2", "--week2-checkpoint", checkpoint],
+        )
+        assert benchmark.parse_args().week2_checkpoint == checkpoint
+
+    for retired in ("decode-attention", "split-k"):
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["bench", "--loader", "week2", "--week2-checkpoint", retired],
+        )
+        with pytest.raises(SystemExit):
+            benchmark.parse_args()
 
 
 def test_benchmark_refuses_existing_json_before_host_or_model_work(

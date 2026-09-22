@@ -20,10 +20,10 @@ mechanisms using Qwen3-4B-MLX-4bit snapshot
 and MLX-LM 0.31.3. Four product rows completed with six balanced paired fresh
 processes per arm and two excluded warmups. Two declared rows are unavailable.
 
-These are supplied accepted results. Legacy benchmark/profiler defaults in this
-source tree predate the successor and are not learner commands for the route
-above. Current chapters show only commands accepted by the frozen public
-interface.
+These are supplied accepted results. The public benchmark, profiler, and
+optional capture utilities now expose the nine checkpoint names above. Current
+chapters use that same route; labels in preserved historical artifacts remain
+evidence labels, not runnable checkpoint names.
 
 ## Evidence Vocabulary
 
