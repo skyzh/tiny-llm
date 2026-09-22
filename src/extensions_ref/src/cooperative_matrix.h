@@ -149,20 +149,18 @@ struct CooperativeBlockMMA {
     ushort simdgroup_index;
     ushort lane_index;
 
-    METAL_FUNC CooperativeBlockMMA(ushort simdgroup, ushort lane)
-        : simdgroup_index(simdgroup), lane_index(lane) {
-        #pragma unroll
-        for (int row_fragment = 0; row_fragment < 2; ++row_fragment) {
-            #pragma unroll
-            for (int column_fragment = 0; column_fragment < 2; ++column_fragment) {
-                accumulators[row_fragment][column_fragment].thread_elements() = 0.0f;
-            }
-        }
-    }
+    METAL_FUNC CooperativeBlockMMA(ushort simdgroup, ushort lane) thread
+        : accumulators{
+              {make_filled_simdgroup_matrix<float, 8, 8>(0.0f),
+               make_filled_simdgroup_matrix<float, 8, 8>(0.0f)},
+              {make_filled_simdgroup_matrix<float, 8, 8>(0.0f),
+               make_filled_simdgroup_matrix<float, 8, 8>(0.0f)}},
+          simdgroup_index(simdgroup),
+          lane_index(lane) {}
 
     METAL_FUNC void multiply_accumulate(
         threadgroup const T* left_tile,
-        threadgroup const T* right_tile) {
+        threadgroup const T* right_tile) thread {
         const int simdgroup_row = simdgroup_index / 2;
         const int simdgroup_column = simdgroup_index % 2;
 
@@ -212,7 +210,7 @@ struct CooperativeBlockMMA {
     METAL_FUNC void store_result_safe(
         device OutT* output,
         int output_stride,
-        short2 valid_shape) const {
+        short2 valid_shape) const thread {
         const int simdgroup_row = simdgroup_index / 2;
         const int simdgroup_column = simdgroup_index % 2;
         const ushort2 coordinate = course_matrix_coordinate(lane_index);
