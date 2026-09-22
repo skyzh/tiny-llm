@@ -25,7 +25,7 @@ students to relearn its memory schedule around page translation.
 
 This chapter combines four prerequisites:
 
-- The Week 2 decode-attention lab introduced the online-softmax recurrence.
+- The Week 2 tiled-prefill lesson introduced the online-softmax recurrence.
 - The Week 2 SIMD-matrix prefill lesson introduced the cooperative 32×32 tile built from BF16 8×8
   SIMD-matrix fragments.
 - Week 3 Day 3 introduced physical pages and block tables.
