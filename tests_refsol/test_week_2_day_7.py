@@ -63,3 +63,13 @@ def test_retired_experiments_are_not_week2_checkpoints():
             raise AssertionError(
                 f"retired checkpoint {checkpoint!r} remained selectable"
             )
+
+
+def test_default_model_is_the_cumulative_selected_checkpoint():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model())
+    assert model.checkpoint == "selected"
+    assert model.mechanism_controls == {
+        "capacity_cache": True,
+        "register_cached_rmsnorm": True,
+        "tiled_prefill": True,
+    }

@@ -173,7 +173,7 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "kv-cache",
+        checkpoint: str = "selected",
         use_mlx_quantized_linear: bool = False,
         use_bounded_kv_capacity: bool | None = None,
         use_register_cached_rms_norm: bool | None = None,
