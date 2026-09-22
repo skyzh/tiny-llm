@@ -309,7 +309,6 @@ growth, and page reuse. Prefix sharing and speculative decoding require
 separate traces with shared prefixes or cache rewind events and are not claimed
 by this result.
 
-
 ## Week 2 Profiling Boundary
 
 The current learner interface consists of the nine public checkpoints listed at

@@ -65,8 +65,10 @@ themselves establish lower complete-request latency or peak memory.
 `rewind(n)` shortens the logical length and rejects negative or oversized
 rewinds. The next append may reuse the abandoned physical slots, but attention
 must not see values beyond the new offset. `reset()` returns the logical cache
-to empty while retaining its request-bounded allocation and resetting counters
-according to the supplied contract.
+to length zero. It clears storage for the unbounded fallback but retains the
+request-bounded allocation. All four movement counters remain
+lifetime-cumulative across rewind and reset, so measure their deltas when you
+need per-request evidence.
 
 Run the state-transition witness before the product:
 

@@ -103,9 +103,11 @@ The cumulative dependencies are deliberate:
 
 - **Week 1 → Week 2:** Week 2 starts from the readable Qwen3 model and replaces
   costs one measured mechanism at a time: first the generation algorithm and
-  KV cache, then quantized and fused kernels. Days 1–2 establish state and a
-  repeatable measurement; Days 3–5 follow the dominant cost, Day 6 is an
-  optional operator lab, and Day 7 closes with a conditional schedule decision.
+  KV cache, then quantized and fused kernels. The current nine-checkpoint route
+  is `kv-cache` → `capacity-cache` → `quantized-matvec` → `simd-matmul` →
+  `rmsnorm` → `rope` → `swiglu` → `tiled-prefill` → `selected`. Days 1–2
+  establish state and a repeatable measurement, Days 3–6 follow the measured
+  operator costs, and Day 7 tests the cumulative selection.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -137,13 +139,13 @@ every Metal kernel, you can make these explicit local substitutions:
 | --- | --- | --- |
 | Days 1–2 | Dense KV-cache state, the Week 2 model boundary, and the matched measurement method | None; these are state and methodology rather than replaceable operators. |
 | Day 3 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
-| Day 4 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
-| Day 5 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing the SIMD-matrix schedule. |
-| Day 6 (optional) | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the supplied bounded decode-attention branch. |
-| Day 7 | The Day 5 unsplit projection fallback and measured dispatch boundary | Keep the unsplit path rather than implementing Split-K where your measurement does not support it. |
+| Day 4 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing the SIMD-matrix schedule. |
+| Day 5 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
+| Day 6 | The dense-cache prefill-attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of implementing the BQ32/BK16 tiled prefill kernel. |
+| Day 7 | The independently selectable capacity, RMSNorm, and tiled-prefill controls | Keep a readable predecessor checkpoint when the cumulative `selected` path is not supported by your measurements. |
 
 Only the quantized-projection seam is already selected by canonical Week 3.
-The Day 4 and optional Day 6 alternatives require you to wire the MLX call at the
+The Day 5 and Day 6 alternatives require you to wire the MLX call at the
 existing course interface; there is no `--use-mlx-for-day` command. These
 off-ramps let you study later mechanisms, but they do not complete the skipped
 day's custom-kernel exercises, implementation-specific tests, or performance

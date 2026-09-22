@@ -1,57 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 650" role="img" aria-labelledby="week2-flow-title week2-flow-description">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 1520" width="480" height="1520" role="img" aria-labelledby="week2-flow-title week2-flow-description">
   <title id="week2-flow-title">Week 2 executable checkpoint flow and evidence crossover</title>
   <desc id="week2-flow-description">Nine cumulative checkpoints lead from the readable KV cache to the selected path. Capacity is established by copy counters, RMSNorm and tiled prefill have component gains, and the selected complete-request gains are smaller because product timing includes the whole model.</desc>
   <style>
     :root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--muted:#59636e;--line:#8c959f;--card:#f6f8fa}
     @media(prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#f0f6fc;--muted:#9ba7b4;--line:#6e7681;--card:#161b22}}
-    .bg{fill:var(--bg)}.card{fill:var(--card);stroke:var(--line);stroke-width:1.5}.title{fill:var(--fg);font-weight:700;font-size:34px;font-family:system-ui,sans-serif}.label{fill:var(--fg);font-weight:650;font-size:27px;font-family:system-ui,sans-serif}.detail{fill:var(--muted);font-size:23px;font-family:system-ui,sans-serif}.metric{fill:var(--fg);font-weight:650;font-size:26px;font-family:system-ui,sans-serif}
+    .bg{fill:var(--bg)}.card{fill:var(--card);stroke:var(--line);stroke-width:1.5}.title{fill:var(--fg);font-weight:700;font-size:31px;font-family:system-ui,sans-serif}.label{fill:var(--fg);font-weight:650;font-size:25px;font-family:system-ui,sans-serif}.detail{fill:var(--muted);font-size:22px;font-family:system-ui,sans-serif}.metric{fill:var(--fg);font-weight:650;font-size:25px;font-family:system-ui,sans-serif}
   </style>
-  <rect class="bg" width="1040" height="650"/>
-  <text class="title" x="24" y="48">Week 2 executable route</text>
-  <text class="detail" x="24" y="84">Nine cumulative checkpoints · readable fallbacks remain</text>
+  <rect class="bg" width="480" height="1520"/>
+  <text class="title" x="24" y="46">Week 2 executable route</text>
+  <text class="detail" x="24" y="82">Nine cumulative checkpoints</text>
+  <text class="detail" x="24" y="110">Readable fallbacks remain</text>
 
   <g aria-label="Checkpoint route">
-    <rect class="card" x="20" y="112" width="230" height="74" rx="10"/>
-    <text class="label" x="135" y="157" text-anchor="middle">kv-cache</text>
-    <rect class="card" x="270" y="112" width="230" height="74" rx="10"/>
-    <text class="label" x="385" y="157" text-anchor="middle">capacity-cache</text>
-    <rect class="card" x="520" y="112" width="240" height="74" rx="10"/>
-    <text class="label" x="640" y="157" text-anchor="middle">quantized-matvec</text>
-    <rect class="card" x="780" y="112" width="240" height="74" rx="10"/>
-    <text class="label" x="900" y="157" text-anchor="middle">simd-matmul</text>
-    <rect class="card" x="20" y="204" width="184" height="74" rx="10"/>
-    <text class="label" x="112" y="249" text-anchor="middle">rmsnorm</text>
-    <rect class="card" x="224" y="204" width="184" height="74" rx="10"/>
-    <text class="label" x="316" y="249" text-anchor="middle">rope</text>
-    <rect class="card" x="428" y="204" width="184" height="74" rx="10"/>
-    <text class="label" x="520" y="249" text-anchor="middle">swiglu</text>
-    <rect class="card" x="632" y="204" width="184" height="74" rx="10"/>
-    <text class="label" x="724" y="249" text-anchor="middle">tiled-prefill</text>
-    <rect class="card" x="836" y="204" width="184" height="74" rx="10"/>
-    <text class="label" x="928" y="249" text-anchor="middle">selected</text>
+    <rect class="card" x="20" y="136" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="176" text-anchor="middle">kv-cache</text>
+    <rect class="card" x="20" y="210" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="250" text-anchor="middle">capacity-cache</text>
+    <rect class="card" x="20" y="284" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="324" text-anchor="middle">quantized-matvec</text>
+    <rect class="card" x="20" y="358" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="398" text-anchor="middle">simd-matmul</text>
+    <rect class="card" x="20" y="432" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="472" text-anchor="middle">rmsnorm</text>
+    <rect class="card" x="20" y="506" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="546" text-anchor="middle">rope</text>
+    <rect class="card" x="20" y="580" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="620" text-anchor="middle">swiglu</text>
+    <rect class="card" x="20" y="654" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="694" text-anchor="middle">tiled-prefill</text>
+    <rect class="card" x="20" y="728" width="440" height="62" rx="10"/>
+    <text class="label" x="240" y="768" text-anchor="middle">selected</text>
   </g>
 
-  <text class="title" x="24" y="340">Mechanism evidence to product evidence</text>
+  <text class="title" x="24" y="846">Mechanism evidence</text>
+  <text class="title" x="24" y="882">to product evidence</text>
   <g aria-label="Capacity routing evidence">
-    <rect class="card" x="20" y="370" width="315" height="186" rx="12"/>
-    <text class="metric" x="42" y="412">Capacity routing</text>
-    <text class="detail" x="42" y="454">zero prefix-copy bytes</text>
-    <text class="detail" x="42" y="492">bounded slice writes</text>
-    <text class="detail" x="42" y="530">historical +88.0 MiB peak</text>
+    <rect class="card" x="20" y="908" width="440" height="156" rx="12"/>
+    <text class="metric" x="42" y="946">Capacity routing</text>
+    <text class="detail" x="42" y="984">zero prefix-copy bytes</text>
+    <text class="detail" x="42" y="1016">bounded slice writes</text>
+    <text class="detail" x="42" y="1048">historical peak: +88.0 MiB</text>
   </g>
   <g aria-label="RMSNorm component evidence">
-    <rect class="card" x="355" y="370" width="315" height="186" rx="12"/>
-    <text class="metric" x="377" y="412">RMSNorm component</text>
-    <text class="detail" x="377" y="454">+71.36% at 2K</text>
-    <text class="detail" x="377" y="492">+83.81% at 8K</text>
-    <text class="detail" x="377" y="530">not product latency</text>
+    <rect class="card" x="20" y="1080" width="440" height="156" rx="12"/>
+    <text class="metric" x="42" y="1118">RMSNorm component</text>
+    <text class="detail" x="42" y="1156">2K: +71.36%</text>
+    <text class="detail" x="42" y="1188">8K: +83.81%</text>
+    <text class="detail" x="42" y="1220">component, not product latency</text>
   </g>
   <g aria-label="Tiled prefill component and selected product evidence">
-    <rect class="card" x="690" y="370" width="330" height="186" rx="12"/>
-    <text class="metric" x="712" y="412">Tiled + selected</text>
-    <text class="detail" x="712" y="454">component +54.07% at 2K</text>
-    <text class="detail" x="712" y="492">product +15.402% at 2K/16</text>
-    <text class="detail" x="712" y="530">product +14.126% at 2K/128</text>
+    <rect class="card" x="20" y="1252" width="440" height="180" rx="12"/>
+    <text class="metric" x="42" y="1290">Tiled + selected</text>
+    <text class="detail" x="42" y="1328">2K component: +54.07%</text>
+    <text class="detail" x="42" y="1360">2K/16 product: +15.402%</text>
+    <text class="detail" x="42" y="1392">2K/128 product: +14.126%</text>
   </g>
-  <text class="detail" x="24" y="610">2K/512 and 8K/128 product rows unavailable · no imputation</text>
+  <text class="detail" x="24" y="1470">2K/512 and 8K/128 product rows</text>
+  <text class="detail" x="24" y="1498">unavailable · no imputation</text>
 </svg>
