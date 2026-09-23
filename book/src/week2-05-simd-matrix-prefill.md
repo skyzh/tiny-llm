@@ -1,4 +1,11 @@
-# 🚧 Week 2 Day 5: SIMD-Matrix Prefill
+# Historical Week 2: Simd Matrix Prefill
+
+> **Earlier lesson address.** This page preserves the SIMD matrix prefill
+> explanation and its original links. The current Week 2 learner route
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) only.
+> Later checkpoints, day numbers, tests, and commands below belong to an
+> earlier all-days course state; do not use them as gates for this checkout.
+
 
 Day 4 ends with a decision, not a predetermined kernel. Re-profile the fixed
 128-token prefill and name the dominant category before changing code. On the

@@ -1,4 +1,11 @@
-# 🚧 Week 2 Day 7: Conditional Split-K and Final Decision
+# Historical Week 2: Conditional Split-K
+
+> **Earlier lesson address.** This page preserves the conditional Split-K
+> explanation and its original links. The current Week 2 learner route
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) only.
+> Later checkpoints, day numbers, tests, and commands below belong to an
+> earlier all-days course state; do not use them as gates for this checkout.
+
 
 Day 5 leaves a reusable 32×32×32 SIMD-matrix projection and an exact unsplit
 fallback. Day 6 is an optional branch and is not inherited here: the `split-k`

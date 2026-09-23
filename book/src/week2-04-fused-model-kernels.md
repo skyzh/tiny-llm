@@ -1,4 +1,11 @@
-# 🚧 Week 2 Day 4: Fused Model Kernels
+# Historical Week 2: Fused Model Kernels
+
+> **Earlier lesson address.** This page preserves the fused model kernels
+> explanation and its original links. The current Week 2 learner route
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) only.
+> Later checkpoints, day numbers, tests, and commands below belong to an
+> earlier all-days course state; do not use them as gates for this checkout.
+
 
 Day 3 leaves the cached model using packed projections. Day 4 keeps the Week 1
 Python equations as readable oracles and completes three separate extension

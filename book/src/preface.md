@@ -31,8 +31,8 @@ This course is divided into four weeks. We will serve Qwen3 MLX models, optimize
 small coding agent.
 
 - Week 1: Serve Qwen3 using array and matrix operations written in Python.
-- Week 2: Measure the cached model, implement the selected C++ and Metal
-  kernels, and re-profile after each change.
+- Week 2: The current Day 1 route caches a request prefix, bounds its dense
+  storage, and measures matched requests. Later kernel lessons will follow.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
@@ -42,70 +42,31 @@ The course supports two different goals: **implementing** the cumulative
 serving stack, or **studying and running** a later checkpoint without completing
 all earlier exercises. These are not the same path.
 
-<style>
-  .course-roadmap-scroll {
-    max-width: 100%;
-    overflow-x: auto;
-    padding-bottom: 0.25rem;
-    overscroll-behavior-x: contain;
-  }
-  .course-roadmap-scroll:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: 3px;
-  }
-  .course-roadmap-scroll img {
-    display: block;
-    width: 1200px;
-    min-width: 1200px;
-    max-width: none;
-    height: auto;
-  }
-</style>
+The current route runs from Week 1 to [Week 2 Day 1](./week2-01-kv-cache.md):
+first `kv-cache`, then `capacity-cache`. The later Week 2 checkpoints are
+planned, so a Day 1 checkout does not offer a completed Week 2 → Week 3 learner
+path. The [earlier full-course roadmap diagram](./course-roadmap.svg) is
+retained as historical context; its seven-day Week 2 order is not this
+checkout's navigation.
 
-<div id="course-roadmap-scroll" class="course-roadmap-scroll" role="region" aria-label="Scrollable Tiny-LLM course roadmap" aria-describedby="course-roadmap-scroll-help" tabindex="0">
-  <img src="./course-roadmap.svg" alt="Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the seven Week 2 days and Week 3 into Week 4. Week 2 Days 3 through 7 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 keeps the course prerequisite of setup plus Weeks 1 through 3, while its deterministic scripted-model tests for Days 1 through 7 can run after setup. Day 8 joins the scripted sequence to the real-model path, and Day 9 continues the Week 4 sequence.">
-</div>
-
-<p id="course-roadmap-scroll-help">On a narrow screen, scroll the roadmap
-horizontally; when the roadmap is focused, the left and right arrow keys move
-through it without changing chapters. Its labels stay at their readable desktop
-size.</p>
-
-<script>
-  (() => {
-    const roadmap = document.getElementById("course-roadmap-scroll");
-    roadmap.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      event.preventDefault();
-      event.stopPropagation();
-      const distance = Math.max(120, Math.round(roadmap.clientWidth * 0.8));
-      roadmap.scrollLeft += event.key === "ArrowLeft" ? -distance : distance;
-    });
-  })();
-</script>
-
-Solid arrows in the diagram are **interface and state prerequisites**. They do
-not mean that you must hand-write every earlier optimization. A dashed border
-marks a custom operator that you may replace locally with its MLX equivalent
-while keeping the surrounding course interface. The reference and full-MLX
-lanes let you observe a completed system, but they do not fill in unfinished
-functions in `src/tiny_llm`.
+The reference and full-MLX models are useful controls, but they do not fill
+unfinished functions in `src/tiny_llm`. A later custom kernel may have an MLX
+operator substitution at the same interface; Day 1's cache state has no such
+operator shortcut.
 
 | Your goal | Start here | What earlier implementation is required? |
 | --- | --- | --- |
-| Build the whole serving system | Week 1, then follow the solid arrows | Each week uses interfaces and mechanisms established by the previous week. |
-| Skip a Week 2 kernel optimization | Keep that day's course interface and wire the corresponding MLX operator at the seam | The earlier model, state, and interface work still needs to exist. This is a local code choice, not a CLI flag. |
+| Build the currently shipped cache path | Week 1, then Week 2 Day 1 | Implement both cache checkpoints and their matched measurement. |
+| Study a later Week 2 kernel | Read its historical page while waiting for the staged lesson | Its commands and checkpoint are not a Day 1 gate. |
 | Read or experiment with a later week | Open that chapter and use `tiny_llm_ref` | None in your learner tree. Run the supplied reference tests or reference loader. |
 | Compare with the production-library baseline | Use `--solution mlx` | None, but this runs the full MLX model and bypasses the course implementation. |
 | Run the Week 4 Days 1–7 deterministic tests before finishing the serving stack | After setup, run the supplied scripted-model tests | The tests do not need a working serving implementation. The course still assumes setup plus Weeks 1–3 before Week 4; follow the Week 4 days in order, and Day 8's real-model bridge needs the Week 3 model/tokenizer/KV-cache boundary. |
 
 The cumulative dependencies are deliberate:
 
-- **Week 1 → Week 2:** Week 2 starts from the readable Qwen3 model and replaces
-  costs one measured mechanism at a time: first the generation algorithm and
-  KV cache, then quantized and fused kernels. Days 1–2 establish state and a
-  repeatable measurement; Days 3–5 follow the dominant cost, Day 6 is an
-  optional operator lab, and Day 7 closes with a conditional schedule decision.
+- **Week 1 → Week 2:** Day 1 keeps the readable model, adds request-owned
+  dense K/V reuse and bounded storage, and compares the same request at both
+  cache checkpoints. Later packed-weight and custom-kernel work is planned.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -116,7 +77,7 @@ The cumulative dependencies are deliberate:
   harness to the real tokenizer and KV cache, so that checkpoint needs a
   working Week 3 path.
 
-> **Is Week 2 required for Week 3? The Week 2 interfaces are; every Week 2
+> **Is Week 2 required for Week 3? Its interfaces are; every future
 > optimization is not.** The current Week 3 starter reuses the Week 2 model
 > shell, dense-cache contract, packed-weight plumbing, normalization,
 > activation, attention, and matrix-fragment interfaces. You may preserve
@@ -127,27 +88,15 @@ The cumulative dependencies are deliberate:
 > the entire Week 2 implementation would require a supplied hybrid starting
 > checkpoint; that checkpoint does not exist today.
 
-### Week 2 operator off-ramps
+### Later Week 2 operator off-ramps
 
-Week 2 separates the mechanism you need later from the kernel you are invited
-to optimize. If your goal is to continue into Week 3 rather than implement
-every Metal kernel, you can make these explicit local substitutions:
-
-| Week 2 day | Keep in the course stack | Optional MLX substitution |
-| --- | --- | --- |
-| Days 1–2 | Dense KV-cache state, the Week 2 model boundary, and the matched measurement method | None; these are state and methodology rather than replaceable operators. |
-| Day 3 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
-| Day 4 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
-| Day 5 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing the SIMD-matrix schedule. |
-| Day 6 (optional) | The dense-cache attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the supplied bounded decode-attention branch. |
-| Day 7 | The Day 5 unsplit projection fallback and measured dispatch boundary | Keep the unsplit path rather than implementing Split-K where your measurement does not support it. |
-
-Only the quantized-projection seam is already selected by canonical Week 3.
-The Day 4 and optional Day 6 alternatives require you to wire the MLX call at the
-existing course interface; there is no `--use-mlx-for-day` command. These
-off-ramps let you study later mechanisms, but they do not complete the skipped
-day's custom-kernel exercises, implementation-specific tests, or performance
-claims.
+Day 1 requires cache state and matched measurement; it has no replaceable
+custom kernel. The earlier full-course book describes optional MLX substitutions
+for later operators, but those are not shipped Day 1 checkpoints. Their
+mechanisms and old addresses remain in the
+[historical Week 2 pages](./week2-02-benchmark-profile.md). Selecting
+`--solution mlx` runs a separate complete model, not a hybrid that completes
+learner cache TODOs.
 
 To run a completed checkpoint without solving it first:
 
@@ -156,16 +105,16 @@ To run a completed checkpoint without solving it first:
 pdm run build-ext-ref
 
 # Run one supplied reference test group.
-pdm run test-refsol --week 3 --day 1
+pdm run test-refsol --week 2 --day 1
 
 # Run a completed course model.
-pdm run main --solution ref --loader week3
+pdm run main --solution tiny_llm_ref --loader week2 --week2-checkpoint kv-cache
 
 # Run the separate full-MLX baseline.
 pdm run main --solution mlx
 ```
 
-`--solution ref` runs the supplied implementation end to end. `--solution mlx`
+`--solution tiny_llm_ref` runs the supplied implementation end to end. `--solution mlx`
 runs MLX end to end. Neither command composes “earlier weeks from the reference
 or MLX, this week's TODOs from my learner tree.” Per-operator substitution is a
 manual code edit that preserves the course interface; it is not a third
@@ -183,10 +132,10 @@ default batch settings.
 
 | Unified memory | Week 1 | Week 2 | Week 3 | Week 4 |
 | --- | --- | --- | --- | --- |
-| 8 GB | 0.6B / 0.6B | 0.6B / 1.7B[^week2-dense] | 0.6B / 1.7B | 0.6B / 1.7B |
-| 16 GB | 0.6B / 1.7B | 4B / 8B[^week2-dense] | 4B / 8B | 4B / 8B |
-| 18 GB | 0.6B / 1.7B | 4B / 8B[^week2-dense] | 4B / 8B | 4B / 8B |
-| 24 GB | 0.6B / 1.7B | 4B / 8B[^week2-dense] | 4B / 8B | 4B / 8B |
+| 8 GB | 0.6B / 0.6B | 0.6B / 0.6B[^week2-dense] | 0.6B / 1.7B | 0.6B / 1.7B |
+| 16 GB | 0.6B / 1.7B | 0.6B / 1.7B[^week2-dense] | 4B / 8B | 4B / 8B |
+| 18 GB | 0.6B / 1.7B | 0.6B / 1.7B[^week2-dense] | 4B / 8B | 4B / 8B |
+| 24 GB | 0.6B / 1.7B | 0.6B / 1.7B[^week2-dense] | 4B / 8B | 4B / 8B |
 | 32 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
 | 36 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
 | 48 GB | 4B / 8B | 4B / 8B | 4B / 30B-A3B[^moe] | 4B / 30B-A3B[^moe] |
@@ -194,9 +143,9 @@ default batch settings.
 
 Week 1 reads an official 4-bit checkpoint but materializes its linear and embedding weights in BF16. On an 8 GB Mac,
 keep the required path at 0.6B. On a 16–24 GB Mac, use 0.6B for the required work and treat 1.7B as an upper-end experiment.
-Week 2 Days 1–2
-retain that dense BF16 model; Day 3 keeps weights packed for the quantized-matvec checkpoint. Weeks 3
-and 4 inherit that packed path. More memory still helps after reaching the largest
+Week 2 Day 1 retains that dense BF16 model. A later lesson will keep
+weights packed for the quantized-matvec checkpoint; the Week 3 and 4 paths
+expect that later interface. More memory still helps after reaching the largest
 supported model because prompt length, batch size, KV caches, compilation, macOS, and other applications all share the
 same pool. These ceilings are therefore planning guidance, not a guarantee that every workload will avoid memory
 pressure.
@@ -206,8 +155,8 @@ pressure.
     [M4 Mac mini](https://support.apple.com/en-us/121555), and
     [M5 MacBook Air](https://support.apple.com/en-us/126320) specifications. Higher-memory configurations are outside
     this table.
-[^week2-dense]: Week 2 Days 1–2 use the dense Week 1 loader, so keep using the Week 1 recommendation
-    until the packed quantized-matvec path is complete on Day 3. The larger Week 2 entries apply after that checkpoint.
+[^week2-dense]: Week 2 Day 1 uses dense BF16 weights and the same model-size
+    guidance as Week 1. Larger packed-model options belong to a later lesson.
 [^moe]: 30B-A3B requires the optional Week 3 MoE implementation. In Week 4, select the Week 3 loader. Use batch size one
     and a short context when approaching this ceiling; 4B remains the required-course target.
 

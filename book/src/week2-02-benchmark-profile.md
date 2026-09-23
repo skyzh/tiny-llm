@@ -1,4 +1,11 @@
-# 🚧 Week 2 Day 2: Benchmarking and Profiling
+# Historical Week 2: Benchmarking And Profiling
+
+> **Earlier lesson address.** This page preserves the benchmarking and profiling
+> explanation and its original links. The current Week 2 learner route
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) only.
+> Later checkpoints, day numbers, tests, and commands below belong to an
+> earlier all-days course state; do not use them as gates for this checkout.
+
 
 Day 1 leaves you with a cached BF16 model and a working `kv-cache` checkpoint.
 Day 2 does not add another model operator. The supplied benchmark and portable
