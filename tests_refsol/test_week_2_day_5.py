@@ -8,7 +8,6 @@ from .tiny_llm_base import (
     FastRMSNorm,
     Qwen3ModelWeek2,
     dense_prefill_attention_mma,
-    scaled_dot_product_attention,
 )
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
@@ -24,12 +23,12 @@ def test_task_1_tiled_prefill_matches_readable_causal_gqa():
     value = _fixture(key.shape, 1.3)
 
     actual = dense_prefill_attention_mma(query, key, value, 128**-0.5, "causal")
-    expected = scaled_dot_product_attention(
+    expected = mx.fast.scaled_dot_product_attention(
         query.astype(mx.float32),
         key.astype(mx.float32),
         value.astype(mx.float32),
-        128**-0.5,
-        "causal",
+        scale=128**-0.5,
+        mask="causal",
     ).astype(mx.bfloat16)
 
     assert actual.shape == query.shape
