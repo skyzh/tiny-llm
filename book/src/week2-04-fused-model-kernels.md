@@ -1,6 +1,7 @@
 # 🚧 Week 2 Day 4: Fused Model Kernels
 
-Day 3 leaves the cached model using packed projections. Day 4 keeps the Week 1
+Day 3 leaves the cached model using packed projections and a SIMD matrix
+prefill schedule. Day 4 keeps the Week 1
 Python equations as readable oracles and completes three separate extension
 shells already present in the starter:
 
@@ -77,7 +78,11 @@ inverse_rms = rsqrt(sum_sq / hidden_size + epsilon)
 output[i] = input[i] * inverse_rms * weight[i]
 ```
 
-All 256 lanes then normalize and scale their strided elements. This fuses the
+For widths through 4096, each thread retains up to four input values through
+the reduction and writes the result without rereading the row. Wider rows
+retain the fixed-width fallback, and `FastRMSNorm.dispatch_counts` records
+`register_cached` or `fixed_width_fallback`. All 256 lanes then normalize and
+scale their strided elements. This fuses the
 reduction and output pass into one dispatch and avoids materializing the
 squared tensor. Instantiate the required kernel for bfloat16. Keep
 the reduction, normalization, and weight multiplication in float, then cast the
@@ -98,7 +103,9 @@ the focused test and record the cumulative model result before touching RoPE:
 pdm run build-ext
 pdm run test --week 2 --day 4 -- -k rms
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rmsnorm --model qwen3-4b
+  --week2-checkpoint rmsnorm --model qwen3-0.6b --num-seqs 1 \
+  --min-input-len 128 --max-input-len 128 \
+  --min-output-len 16 --max-output-len 16 --warmup 2 --prefill-logits last
 ```
 
 ## Task 2: RoPE
@@ -139,7 +146,9 @@ Test and measure that cumulative checkpoint before moving to SwiGLU:
 ```bash
 pdm run test --week 2 --day 4 -- -k rope
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rope --model qwen3-4b
+  --week2-checkpoint rope --model qwen3-0.6b --num-seqs 1 \
+  --min-input-len 128 --max-input-len 128 \
+  --min-output-len 16 --max-output-len 16 --warmup 2 --prefill-logits last
 ```
 
 ## Task 3: SwiGLU
@@ -167,7 +176,9 @@ Wire the fused expression into the model, then record the third checkpoint:
 ```bash
 pdm run test --week 2 --day 4 -- -k swiglu
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint swiglu --model qwen3-4b
+  --week2-checkpoint swiglu --model qwen3-0.6b --num-seqs 1 \
+  --min-input-len 128 --max-input-len 128 \
+  --min-output-len 16 --max-output-len 16 --warmup 2 --prefill-logits last
 ```
 
 ## Task 4: Verify the Cumulative Model
@@ -203,8 +214,8 @@ Measure the three cumulative checkpoints separately so their combined result
 cannot hide a regression:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-quantized-matvec \
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
+  --variant week2-simd-matmul \
   --variant week2-rmsnorm --variant week2-rope --variant week2-swiglu \
   --variant mlx --model qwen3-4b \
   --input-len 128 --output-len 129 --warmup 2 --prefill-logits last
@@ -218,15 +229,14 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
 Record one cumulative result per operator, then use the attribution run to
 choose the next bottleneck. The complete campaign and reference attribution
 are in the
-[performance appendix](./appendix-performance.md#day-4-fused-model-kernels).
+[performance appendix](./appendix-performance.md).
 
-In the checked M4 Pro example, the fused kernels reduced the attributed
+In the older checked M4 Pro example, the fused kernels reduced the attributed
 normalization/position/activation category by 79.0%. Re-profiling then placed
 projections at 81.4% of decode attribution and 99.1% of 128-token prefill
-attribution. That is why the next core chapter is
-[SIMD-Matrix Prefill](./week2-05-simd-matrix-prefill.md), not a prescribed
-attention kernel. Repeat the same measurement on your machine and record the
-result that would falsify this next-change hypothesis.
+attribution. The current next chapter is [tiled dense prefill attention](./week2-05-tiled-prefill-attention.md).
+The old attribution remains a bounded example; it does not select a new
+operator for this successor.
 
 If you want to continue without writing one of these kernels, keep its public
 course interface and delegate only that operator to the corresponding MLX

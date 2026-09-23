@@ -95,10 +95,11 @@ Larger models remain optional and are not a Day 7 completion gate.
 
 ## Task 2: Prepare for Week 2
 
-Week 2 Days 1 and 2 introduce KV caching in Python, so you can begin them before
-the custom-extension toolchain is ready. Starting on Day 3, the C++ and Metal
-work requires full Xcode, its command-line tools, the Metal compiler, and CMake
-3.27 or newer.
+Day 1's KV-cache implementation is in Python, but its supplied tests import
+the Week 2 native extension when they collect. Prepare and build that extension
+before the first Day 1 test. Day 2 begins packed-W4 Metal work, so the
+toolchain is also needed for the work itself from then on. It requires full
+Xcode, its command-line tools, the Metal compiler, and CMake 3.27 or newer.
 
 1. **Install Xcode:**
 
@@ -178,12 +179,13 @@ the Week 2 or Week 3 checkpoint that implements them; this setup check calls
 only `axpby`.
 
 If you are new to C++ or Metal, try a few small exercises before the custom
-kernel work on Day 3. For example, implement element-wise operations such as
+kernel work on Day 2. For example, implement element-wise operations such as
 `exp`, `sin`, and `cos`, then use them in place of the corresponding MLX
 operations in your model implementation.
 
 That completes Week 1: you now have a single-request Python inference loop that
 loads Qwen3, computes logits, samples tokens, and streams a response. Week 2
-first adds KV caching in Python, then begins the custom Metal kernel path.
+first adds KV caching in Python with the extension built for test collection,
+then begins the custom Metal kernel path on Day 2.
 
 {{#include copyright.md}}

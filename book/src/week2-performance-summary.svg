@@ -1,172 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 820" role="img" aria-labelledby="week2-performance-title week2-performance-description">
-  <title id="week2-performance-title">Week 2 measured performance decisions</title>
-  <desc id="week2-performance-description">Five decision cards summarize one M4 Pro, macOS 27, Qwen3-4B, MLX 0.32.0 observation. Packed W4 decode, fused pointwise kernels, and SIMD-matrix prefill are kept for their measured controls. Decode attention remains optional and inconclusive. Split-K is conditional at the measured 32-token shape and rejected for the fixed 128-token product workload. The metrics use different denominators and are not additive.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 1120" width="480" height="1120" role="img" aria-labelledby="week2-evidence-title week2-evidence-description">
+  <title id="week2-evidence-title">Week 2 evidence ladder</title>
+  <desc id="week2-evidence-description">A five-step ladder moves from correctness to routing, component comparison, complete-request product comparison, and a bounded decision. A separate unavailable lane warns that missing product rows must not be filled by component evidence.</desc>
   <style>
-    :root {
-      color-scheme: light dark;
-      --background: #ffffff;
-      --surface: #f6f8fa;
-      --foreground: #1f2328;
-      --muted: #59636e;
-      --border: #d0d7de;
-      --keep: #1f7a4d;
-      --optional: #8a6116;
-      --conditional: #6957a5;
-      --reject: #b42318;
-      --chip-text: #ffffff;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --background: #0d1117;
-        --surface: #161b22;
-        --foreground: #f0f6fc;
-        --muted: #9ba7b4;
-        --border: #30363d;
-        --keep: #238636;
-        --optional: #9e6a03;
-        --conditional: #8250df;
-        --reject: #da3633;
-        --chip-text: #ffffff;
-      }
-    }
-    .background { fill: var(--background); }
-    .card { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; }
-    .title { fill: var(--foreground); font: 700 26px system-ui, sans-serif; }
-    .subtitle { fill: var(--muted); font: 15px system-ui, sans-serif; }
-    .name { fill: var(--foreground); font: 650 18px system-ui, sans-serif; }
-    .metric { fill: var(--foreground); font: 600 17px system-ui, sans-serif; }
-    .detail { fill: var(--muted); font: 14px system-ui, sans-serif; }
-    .chip { stroke: none; }
-    .chip-label { fill: var(--chip-text); font: 700 13px system-ui, sans-serif; letter-spacing: .6px; }
-    .keep { fill: var(--keep); }
-    .optional { fill: var(--optional); }
-    .conditional { fill: var(--conditional); }
-    .reject { fill: var(--reject); }
-    .narrow-layout { display: none; }
-    .narrow-title { fill: var(--foreground); font: 700 30px system-ui, sans-serif; }
-    .narrow-subtitle { fill: var(--muted); font: 25px system-ui, sans-serif; }
-    .narrow-name { fill: var(--foreground); font: 650 26px system-ui, sans-serif; }
-    .narrow-metric { fill: var(--foreground); font: 600 25px system-ui, sans-serif; }
-    .narrow-detail { fill: var(--muted); font: 25px system-ui, sans-serif; }
-    .narrow-chip-label { fill: var(--chip-text); font: 700 25px system-ui, sans-serif; letter-spacing: .6px; }
-    @media (max-width: 700px) {
-      .wide-layout { display: none; }
-      .narrow-layout { display: inline; }
-    }
+    :root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--muted:#59636e;--line:#8c959f;--card:#f6f8fa;--blue:#0969da;--green:#1a7f37;--amber:#9a6700;--red:#cf222e;--white:#fff}
+    @media(prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#f0f6fc;--muted:#9ba7b4;--line:#6e7681;--card:#161b22;--blue:#58a6ff;--green:#3fb950;--amber:#d29922;--red:#f85149;--white:#0d1117}}
+    .bg{fill:var(--bg)}.card{fill:var(--card);stroke:var(--line);stroke-width:1.5}.title{fill:var(--fg);font-weight:700;font-size:32px;font-family:system-ui,sans-serif}.step{fill:var(--fg);font-weight:700;font-size:27px;font-family:system-ui,sans-serif}.detail{fill:var(--muted);font-size:22px;font-family:system-ui,sans-serif}.num{fill:var(--white);font-weight:700;font-size:25px;font-family:system-ui,sans-serif}.blue{fill:var(--blue)}.green{fill:var(--green)}.amber{fill:var(--amber)}.red{fill:var(--red)}
   </style>
+  <rect class="bg" width="480" height="1120"/>
+  <text class="title" x="24" y="48">Week 2 evidence ladder</text>
+  <text class="detail" x="24" y="84">Prove more before claiming more.</text>
 
-  <rect class="background" width="840" height="820" />
-  <g class="wide-layout">
-  <text class="title" x="32" y="46">Week 2: measure, change, decide</text>
-  <text class="subtitle" x="32" y="72">One M4 Pro · macOS 27 · Qwen3-4B · MLX 0.32.0 observation</text>
+  <g aria-label="Evidence ladder">
+    <rect class="card" x="20" y="112" width="440" height="130" rx="12"/>
+    <circle class="blue" cx="58" cy="152" r="22"/><text class="num" x="58" y="160" text-anchor="middle">1</text>
+    <text class="step" x="94" y="160">Correctness</text>
+    <text class="detail" x="42" y="204">values · masks · tails · state</text>
 
-  <g aria-label="Packed W4 decode. Product decode increased from 24.38 to 58.90 tokens per second, plus 141.6 percent. Decision: keep for the measured control.">
-    <rect class="card" x="28" y="96" width="784" height="112" rx="12" />
-    <text class="name" x="52" y="128">Packed W4 decode</text>
-    <text class="metric" x="52" y="158">24.38 → 58.90 tokens/s · +141.6%</text>
-    <text class="detail" x="52" y="184">Fixed measured product control</text>
-    <rect class="chip keep" x="646" y="126" width="132" height="34" rx="17" />
-    <text class="chip-label" x="685" y="148">KEEP</text>
+    <rect class="card" x="20" y="258" width="440" height="130" rx="12"/>
+    <circle class="blue" cx="58" cy="298" r="22"/><text class="num" x="58" y="306" text-anchor="middle">2</text>
+    <text class="step" x="94" y="306">Routing</text>
+    <text class="detail" x="42" y="350">dispatch and copy counters</text>
+
+    <rect class="card" x="20" y="404" width="440" height="130" rx="12"/>
+    <circle class="green" cx="58" cy="444" r="22"/><text class="num" x="58" y="452" text-anchor="middle">3</text>
+    <text class="step" x="94" y="452">Component</text>
+    <text class="detail" x="42" y="496">same operator · same shape</text>
+
+    <rect class="card" x="20" y="550" width="440" height="130" rx="12"/>
+    <circle class="green" cx="58" cy="590" r="22"/><text class="num" x="58" y="598" text-anchor="middle">4</text>
+    <text class="step" x="94" y="598">Product</text>
+    <text class="detail" x="42" y="642">matched complete request</text>
+
+    <rect class="card" x="20" y="696" width="440" height="130" rx="12"/>
+    <circle class="amber" cx="58" cy="736" r="22"/><text class="num" x="58" y="744" text-anchor="middle">5</text>
+    <text class="step" x="94" y="744">Bounded decision</text>
+    <text class="detail" x="42" y="788">keep · reject · inconclusive</text>
   </g>
 
-  <g aria-label="Fused pointwise category. Attributed category time decreased from 5.948 to 1.251 milliseconds, minus 79.0 percent. Decision: keep. This is attributed category time, not product throughput.">
-    <rect class="card" x="28" y="222" width="784" height="112" rx="12" />
-    <text class="name" x="52" y="254">Fused pointwise category</text>
-    <text class="metric" x="52" y="284">5.948 → 1.251 ms · −79.0%</text>
-    <text class="detail" x="52" y="310">Attributed category time, not product throughput</text>
-    <rect class="chip keep" x="646" y="252" width="132" height="34" rx="17" />
-    <text class="chip-label" x="685" y="274">KEEP</text>
-  </g>
-
-  <g aria-label="SIMD-matrix prefill. Product prefill increased from 106.44 to 721.60 tokens per second, plus 577.9 percent. Decision: keep for the fixed checked workload.">
-    <rect class="card" x="28" y="348" width="784" height="112" rx="12" />
-    <text class="name" x="52" y="380">SIMD-matrix prefill</text>
-    <text class="metric" x="52" y="410">106.44 → 721.60 tokens/s · +577.9%</text>
-    <text class="detail" x="52" y="436">Fixed checked workload</text>
-    <rect class="chip keep" x="646" y="378" width="132" height="34" rx="17" />
-    <text class="chip-label" x="685" y="400">KEEP</text>
-  </g>
-
-  <g aria-label="Optional decode attention. Product decode increased from 74.34 to 76.50 tokens per second, plus 2.91 percent. Attributed attention decreased 0.75 percent while total attributed time increased 0.97 percent. Decision: inconclusive and optional, not a universal win.">
-    <rect class="card" x="28" y="474" width="784" height="128" rx="12" />
-    <text class="name" x="52" y="506">Optional decode attention</text>
-    <text class="metric" x="52" y="536">Product: 74.34 → 76.50 tokens/s · +2.91%</text>
-    <text class="detail" x="52" y="562">Attribution: attention −0.75% · total rose 0.97% · mixed signals</text>
-    <text class="detail" x="52" y="584">Optional experiment; not a universal win</text>
-    <rect class="chip optional" x="586" y="510" width="192" height="34" rx="17" />
-    <text class="chip-label" x="606" y="532">INCONCLUSIVE</text>
-  </g>
-
-  <g aria-label="Split-K. At 32-token prefill, total attributed time decreased 4.87 percent and projection time decreased 5.01 percent, so retain conditionally at that measured short shape. At the fixed 128-token product control, prefill decreased from 721.60 to 718.36 tokens per second, minus 0.45 percent, and decode changed plus 0.14 percent, so reject for that workload.">
-    <rect class="card" x="28" y="616" width="784" height="146" rx="12" />
-    <text class="name" x="52" y="648">Split-K depends on shape</text>
-    <text class="metric" x="52" y="678">32 tokens: total down 4.87% · projection −5.01%</text>
-    <text class="detail" x="52" y="702">Conditional at this measured short shape</text>
-    <rect class="chip conditional" x="598" y="654" width="180" height="34" rx="17" />
-    <text class="chip-label" x="620" y="676">CONDITIONAL</text>
-    <text class="metric" x="52" y="734">128-token control: 721.60 → 718.36 tokens/s · −0.45%</text>
-    <text class="detail" x="52" y="754">Decode +0.14% · reject for this fixed workload</text>
-    <rect class="chip reject" x="646" y="714" width="132" height="34" rx="17" />
-    <text class="chip-label" x="680" y="736">REJECT</text>
-  </g>
-
-  <text class="subtitle" x="32" y="794">Different denominators: do not add these changes. See the performance appendix for methods and limits.</text>
-  </g>
-
-  <g class="narrow-layout">
-    <text class="narrow-title" x="24" y="38">Week 2: measure, change, decide</text>
-    <text class="narrow-subtitle" x="24" y="70">One M4 Pro · macOS 27 · Qwen3-4B · MLX 0.32.0 observation</text>
-
-    <g aria-label="Packed W4 decode. Product decode increased from 24.38 to 58.90 tokens per second, plus 141.6 percent. Decision: keep for the measured control.">
-      <rect class="card" x="20" y="88" width="800" height="116" rx="12" />
-      <text class="narrow-name" x="38" y="120">Packed W4 decode</text>
-      <rect class="chip keep" x="662" y="101" width="134" height="38" rx="19" />
-      <text class="narrow-chip-label" x="696" y="128">KEEP</text>
-      <text class="narrow-metric" x="38" y="158">24.38 → 58.90 tokens/s · +141.6%</text>
-      <text class="narrow-detail" x="38" y="188">Fixed measured product control</text>
-    </g>
-
-    <g aria-label="Fused pointwise category. Attributed category time decreased from 5.948 to 1.251 milliseconds, minus 79.0 percent. Decision: keep. This is attributed category time, not product throughput.">
-      <rect class="card" x="20" y="214" width="800" height="116" rx="12" />
-      <text class="narrow-name" x="38" y="246">Fused pointwise category</text>
-      <rect class="chip keep" x="662" y="227" width="134" height="38" rx="19" />
-      <text class="narrow-chip-label" x="696" y="254">KEEP</text>
-      <text class="narrow-metric" x="38" y="284">5.948 → 1.251 ms · −79.0%</text>
-      <text class="narrow-detail" x="38" y="314">Attributed category time, not product throughput</text>
-    </g>
-
-    <g aria-label="SIMD-matrix prefill. Product prefill increased from 106.44 to 721.60 tokens per second, plus 577.9 percent. Decision: keep for the fixed checked workload.">
-      <rect class="card" x="20" y="340" width="800" height="116" rx="12" />
-      <text class="narrow-name" x="38" y="372">SIMD-matrix prefill</text>
-      <rect class="chip keep" x="662" y="353" width="134" height="38" rx="19" />
-      <text class="narrow-chip-label" x="696" y="380">KEEP</text>
-      <text class="narrow-metric" x="38" y="410">106.44 → 721.60 tokens/s · +577.9%</text>
-      <text class="narrow-detail" x="38" y="440">Fixed checked workload</text>
-    </g>
-
-    <g aria-label="Optional decode attention. Product decode increased from 74.34 to 76.50 tokens per second, plus 2.91 percent. Attributed attention decreased 0.75 percent while total attributed time increased 0.97 percent. Decision: inconclusive and optional, not a universal win.">
-      <rect class="card" x="20" y="466" width="800" height="142" rx="12" />
-      <text class="narrow-name" x="38" y="498">Optional decode attention</text>
-      <rect class="chip optional" x="580" y="479" width="228" height="38" rx="19" />
-      <text class="narrow-chip-label" x="590" y="506">INCONCLUSIVE</text>
-      <text class="narrow-metric" x="38" y="536">Product: 74.34 → 76.50 tokens/s · +2.91%</text>
-      <text class="narrow-detail" x="38" y="566">Attribution: attention −0.75% · total rose 0.97%</text>
-      <text class="narrow-detail" x="38" y="596">Mixed signals · optional experiment, not a universal win</text>
-    </g>
-
-    <g aria-label="Split-K. At 32-token prefill, total attributed time decreased 4.87 percent and projection time decreased 5.01 percent, so retain conditionally at that measured short shape. At the fixed 128-token product control, prefill decreased from 721.60 to 718.36 tokens per second, minus 0.45 percent, and decode changed plus 0.14 percent, so reject for that workload.">
-      <rect class="card" x="20" y="618" width="800" height="168" rx="12" />
-      <text class="narrow-name" x="38" y="650">Split-K depends on shape</text>
-      <text class="narrow-metric" x="38" y="686">32 tokens: total down 4.87% · projection −5.01%</text>
-      <text class="narrow-detail" x="38" y="716">Conditional at this measured short shape</text>
-      <rect class="chip conditional" x="590" y="690" width="206" height="38" rx="19" />
-      <text class="narrow-chip-label" x="608" y="717">CONDITIONAL</text>
-      <text class="narrow-metric" x="38" y="750">128-token control: 721.60 → 718.36 tokens/s · −0.45%</text>
-      <text class="narrow-detail" x="38" y="780">Decode +0.14% · reject for this fixed workload</text>
-      <rect class="chip reject" x="662" y="750" width="134" height="38" rx="19" />
-      <text class="narrow-chip-label" x="691" y="777">REJECT</text>
-    </g>
-
-    <text class="narrow-subtitle" x="24" y="810" textLength="792" lengthAdjust="spacingAndGlyphs">Different denominators: do not add these changes. See the performance appendix for methods and limits.</text>
+  <g aria-label="Unavailable evidence boundary">
+    <rect class="card" x="20" y="842" width="440" height="246" rx="12"/>
+    <circle class="red" cx="58" cy="884" r="24"/><text class="num" x="58" y="892" text-anchor="middle">!</text>
+    <text class="step" x="96" y="892">Unavailable evidence</text>
+    <text class="detail" x="42" y="940">2K/512 and 8K/128 product rows:</text>
+    <text class="detail" x="42" y="976">no zero or neighboring value,</text>
+    <text class="detail" x="42" y="1012">no contaminated average,</text>
+    <text class="detail" x="42" y="1048">no component substitution.</text>
+    <text class="detail" x="42" y="1076">Stop at the highest proven rung.</text>
   </g>
 </svg>

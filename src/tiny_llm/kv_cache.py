@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import mlx.core as mx
+
+if TYPE_CHECKING:
+    from .paged_kv_cache import PagedKvMetadata
 
 
 class TinyKvCache(ABC):
@@ -79,9 +82,26 @@ class BatchingKvCache(TinyKvCache):
 
 
 class TinyKvFullCache(TinyKvCache):
-    def __init__(self):
+    def __init__(self, capacity: int | None = None):
+        if capacity is not None and (
+            not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 0
+        ):
+            raise ValueError("capacity must be a non-negative integer or None")
         self.key_values = None
         self.offset = 0
+        self.capacity = capacity
+        self.logical_copy_bytes = 0
+        self.physical_growth_copy_bytes = 0
+        self.slice_write_bytes = 0
+        self.growth_copy_bytes = 0
+
+    @property
+    def uses_capacity(self) -> bool:
+        return self.capacity is not None
+
+    def _logical_key_values(self) -> tuple[mx.array, mx.array]:
+        """Return only initialized tokens, never the unused physical tail."""
+        pass
 
     def update_and_fetch(
         self,
@@ -93,6 +113,10 @@ class TinyKvFullCache(TinyKvCache):
         pass
 
     def materialize(self):
+        pass
+
+    def reset(self):
+        """Reset logical length while retaining bounded physical storage."""
         pass
 
     def rewind(self, n: int):

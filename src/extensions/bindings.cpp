@@ -32,7 +32,7 @@ NB_MODULE(_ext, m) {
             array: ``alpha * x + beta * y``
       )");
 
-    // Week 2, Day 3. Days 6-7 extend the schedule behind this stable binding.
+    // Week 2, Day 2. Day 3 extends the schedule behind this stable binding.
     m.def("quantized_matmul", &tiny_llm_ext::quantized_matmul, "scales"_a, "biases"_a, "group_size"_a, "bits"_a, "a"_a,
           "b"_a, "transpose_b"_a = false, "use_simdgroup"_a = true, "use_split_k"_a = false, "stream"_a = nb::none());
 
@@ -46,9 +46,8 @@ NB_MODULE(_ext, m) {
           "stream"_a = nb::none());
     m.def("swiglu", &tiny_llm_ext::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
 
-    // Week 2, Day 6.
-    m.def("decode_attention", &tiny_llm_ext::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
-          "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
+    m.def("_dense_attention_prefill_mma", &tiny_llm_ext::_dense_attention_prefill_mma, "query"_a, "key"_a, "value"_a,
+          "mask"_a, "scale"_a, "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
 
     // Week 3, Day 3.
     m.def("paged_cache_update", &tiny_llm_ext::paged_cache_update, "pages"_a, "values"_a, "page_id"_a, "start"_a,

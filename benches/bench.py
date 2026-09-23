@@ -88,13 +88,14 @@ def parse_args() -> argparse.Namespace:
         "--week2-checkpoint",
         choices=(
             "kv-cache",
+            "capacity-cache",
             "quantized-matvec",
+            "simd-matmul",
             "rmsnorm",
             "rope",
             "swiglu",
-            "simd-matmul",
-            "decode-attention",
-            "split-k",
+            "tiled-prefill",
+            "selected",
         ),
         help="run one cumulative Week 2 end-to-end checkpoint",
     )

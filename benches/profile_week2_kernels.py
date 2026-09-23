@@ -25,13 +25,14 @@ if str(SRC_ROOT) not in sys.path:
 
 DEFAULT_CASES = (
     "kv-cache:decode:128",
+    "capacity-cache:decode:128",
     "quantized-matvec:decode:128",
-    "swiglu:decode:128",
     "simd-matmul:prefill:128",
-    "simd-matmul:prefill:32",
-    "decode-attention:decode:128",
-    "decode-attention:prefill:128",
-    "split-k:prefill:32",
+    "rmsnorm:decode:128",
+    "rope:decode:128",
+    "swiglu:decode:128",
+    "tiled-prefill:prefill:128",
+    "selected:prefill:128",
 )
 PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"

@@ -27,12 +27,10 @@ The course follows a four-week learning path:
 - **Week 1: From Matmul to Text.** Build a Qwen3 model directly from `mlx.core`
   array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
-- **Week 2: A Step Closer to vLLM.** Add a KV cache, establish a
-  synchronized MLX baseline, and let matched benchmarks choose each
-  optimization. The causal path moves from quantized decode matvec to fused
-  model kernels and SIMD-matrix prefill; decode attention is an optional
-  workload-conditioned lab, and split-K stays only where a measured short
-  shape supports it.
+- **Week 2: A Faster Single Request.** In five lessons, reuse the prefix,
+  bound request-owned KV storage, measure the same workload, pack W4 weights,
+  add SIMD matrix prefill and fused primitives, then tile dense prefill
+  attention. Run the cumulative `selected` checkpoint inside Day 5.
 - **Week 3: Build a Mini vLLM.** Introduce continuous
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
@@ -109,13 +107,11 @@ one explicit byte range through the existing loop.
 | 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ |
 | 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
 | 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
-| 2.1 | KV Cache | ✅ | ✅ | ✅ | 🚧 |
-| 2.2 | Benchmarking and Profiling | ✅ | ✅ | ✅ | 🚧 |
-| 2.3 | Quantize the Model | ✅ | ✅ | ✅ | 🚧 |
-| 2.4 | Fused Model Kernels | ✅ | ✅ | ✅ | 🚧 |
-| 2.5 | SIMD-Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
-| 2.6 (optional) | Workload-Conditioned Operator Lab | ✅ | ✅ | ✅ | 🚧 |
-| 2.7 | Conditional Split-K and Final Decision | ✅ | ✅ | ✅ | 🚧 |
+| 2.1 | Cache and Measure | ✅ | ✅ | ✅ | 🚧 |
+| 2.2 | Keep W4 Packed | ✅ | ✅ | ✅ | 🚧 |
+| 2.3 | SIMD Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 2.4 | Fused Model Primitives | ✅ | ✅ | ✅ | 🚧 |
+| 2.5 | Tiled Dense Prefill Attention | ✅ | ✅ | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |

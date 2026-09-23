@@ -172,7 +172,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-split-k",
         action="store_true",
-        help="also benchmark the Day 7 split-K path",
+        help="also benchmark the historical Split-K experiment (not a current checkpoint)",
     )
     parser.add_argument(
         "--json-output",

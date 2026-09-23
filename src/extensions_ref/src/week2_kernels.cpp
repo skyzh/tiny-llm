@@ -35,7 +35,8 @@ const char *dtype_suffix(const mx::array &x) {
 
 mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::StreamOrDevice s) {
     require_float_dtype(x, "rms_norm");
-    if (x.dtype() != weight.dtype() || weight.ndim() != 1 || weight.shape()[0] != x.shape().back()) {
+    if (x.ndim() == 0 || x.shape().back() <= 0 || x.dtype() != weight.dtype() || weight.ndim() != 1 ||
+        weight.shape()[0] != x.shape().back()) {
         throw std::runtime_error("rms_norm: weight must match the input dtype and final dimension");
     }
     return mx::array(x.shape(), x.dtype(), std::make_shared<Week2RMSNorm>(to_stream(s), eps), {x, weight});
@@ -83,6 +84,28 @@ mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::arr
         {q, k, v, mask});
 }
 
+mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
+                                       const mx::array &mask, float scale, bool is_causal, bool has_mask, int num_heads,
+                                       int num_kv_heads, mx::StreamOrDevice s) {
+    if (q.dtype() != mx::bfloat16 || k.dtype() != mx::bfloat16 || v.dtype() != mx::bfloat16 ||
+        mask.dtype() != mx::float32) {
+        throw std::runtime_error("dense_attention_prefill_mma: expected BF16 q/k/v and float32 mask");
+    }
+    if (q.ndim() != 3 || k.ndim() != 3 || v.ndim() != 3 || q.shape()[2] != 128 || k.shape()[2] != 128 ||
+        v.shape()[2] != 128 || k.shape() != v.shape() || q.shape()[1] <= 8 || num_heads % num_kv_heads != 0 ||
+        q.shape()[0] % num_heads != 0 || k.shape()[0] * num_heads != q.shape()[0] * num_kv_heads) {
+        throw std::runtime_error("dense_attention_prefill_mma: incompatible BF16/D128 attention shapes");
+    }
+    if (has_mask && (mask.ndim() != 3 || mask.shape()[0] != q.shape()[0] || mask.shape()[1] != q.shape()[1] ||
+                     mask.shape()[2] != k.shape()[1])) {
+        throw std::runtime_error("dense_attention_prefill_mma: mask must have shape [B*Hq,L,S]");
+    }
+    return mx::array(
+        q.shape(), q.dtype(),
+        std::make_shared<Week2DensePrefillMMA>(to_stream(s), scale, is_causal, has_mask, num_heads, num_kv_heads),
+        {q, k, v, mask});
+}
+
 void Week2RMSNorm::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
     throw std::runtime_error("rms_norm: the course extension is GPU-only");
 }
@@ -99,6 +122,10 @@ void Week2DecodeAttention::eval_cpu(const std::vector<mx::array> &inputs, std::v
     throw std::runtime_error("decode_attention: the course extension is GPU-only");
 }
 
+void Week2DensePrefillMMA::eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("dense_attention_prefill_mma: the course extension is GPU-only");
+}
+
 #ifdef _METAL_
 
 void Week2RMSNorm::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -107,20 +134,25 @@ void Week2RMSNorm::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx
     auto &out = outputs[0];
     out.set_data(mx::allocator::malloc(out.nbytes()));
     auto &d = mx::metal::device(stream().device);
-    auto kernel = d.get_kernel(std::string("week2_rms_norm_") + dtype_suffix(out), d.get_library("tiny_llm_ext_ref"));
+    const int dim = x.shape().back();
+    const bool register_cached = dim <= 4096;
+    const auto kernel_name =
+        std::string(register_cached ? "week2_rms_norm_register_cached_" : "week2_rms_norm_") + dtype_suffix(out);
+    auto kernel = d.get_kernel(kernel_name, d.get_library("tiny_llm_ext_ref"));
     auto &encoder = mx::metal::get_command_encoder(stream());
     encoder.set_compute_pipeline_state(kernel);
     encoder.set_input_array(x, 0);
     encoder.set_input_array(weight, 1);
     encoder.set_output_array(out, 2);
     const int rows = x.size() / x.shape().back();
-    const int dim = x.shape().back();
     encoder.set_bytes(rows, 3);
     encoder.set_bytes(dim, 4);
     encoder.set_bytes(eps_, 5);
-    constexpr int threads_per_threadgroup = 256;
-    constexpr int simdgroups_per_threadgroup = threads_per_threadgroup / 32;
-    encoder.set_threadgroup_memory_length(simdgroups_per_threadgroup * sizeof(float), 0);
+    const int values_per_thread = register_cached ? 4 : 1;
+    const int needed_threads = (dim + values_per_thread - 1) / values_per_thread;
+    const int threads_per_threadgroup = register_cached ? ((needed_threads + 31) / 32) * 32 : 256;
+    const int active_simdgroups = threads_per_threadgroup / 32;
+    encoder.set_threadgroup_memory_length(active_simdgroups * sizeof(float), 0);
     encoder.dispatch_threadgroups(MTL::Size(rows, 1, 1), MTL::Size(threads_per_threadgroup, 1, 1));
 }
 
@@ -210,6 +242,41 @@ void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &inputs, std::v
     encoder.dispatch_threadgroups(MTL::Size(q_rows * length, 1, 1), MTL::Size(simdgroups_per_query * 32, 1, 1));
 }
 
+void Week2DensePrefillMMA::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
+    const auto &q = inputs[0];
+    const auto &k = inputs[1];
+    const auto &v = inputs[2];
+    const auto &mask = inputs[3];
+    auto &out = outputs[0];
+    out.set_data(mx::allocator::malloc(out.nbytes()));
+    auto &d = mx::metal::device(stream().device);
+    auto kernel = d.get_kernel("week2_dense_prefill_mma_bf16_d128", d.get_library("tiny_llm_ext_ref"));
+    auto &encoder = mx::metal::get_command_encoder(stream());
+    encoder.set_compute_pipeline_state(kernel);
+    encoder.set_input_array(q, 0);
+    encoder.set_input_array(k, 1);
+    encoder.set_input_array(v, 2);
+    encoder.set_input_array(mask, 3);
+    encoder.set_output_array(out, 4);
+    const int q_rows = q.shape()[0];
+    const int length = q.shape()[1];
+    const int context = k.shape()[1];
+    const int is_causal = is_causal_;
+    const int has_mask = has_mask_;
+    encoder.set_bytes(q_rows, 5);
+    encoder.set_bytes(length, 6);
+    encoder.set_bytes(context, 7);
+    encoder.set_bytes(scale_, 8);
+    encoder.set_bytes(is_causal, 9);
+    encoder.set_bytes(has_mask, 10);
+    encoder.set_bytes(num_heads_, 11);
+    encoder.set_bytes(num_kv_heads_, 12);
+    constexpr int query_block = 32;
+    constexpr int threads = 128;
+    encoder.dispatch_threadgroups(MTL::Size((length + query_block - 1) / query_block, q_rows, 1),
+                                  MTL::Size(threads, 1, 1));
+}
+
 #else
 
 void Week2RMSNorm::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
@@ -224,7 +291,9 @@ void Week2SwiGLU::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array
 void Week2DecodeAttention::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
     throw std::runtime_error("Metal unavailable");
 }
-
+void Week2DensePrefillMMA::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
+    throw std::runtime_error("Metal unavailable");
+}
 #endif
 
 }  // namespace tiny_llm_ext_ref

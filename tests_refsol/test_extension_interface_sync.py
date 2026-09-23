@@ -10,22 +10,21 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 INTERFACES = {
-    "quantized_matmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
+    "quantized_matmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
     "rms_norm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
     "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "decode_attention": ("Week 2, Day 6", "week2_kernels.cpp"),
     "paged_cache_update": ("Week 3, Day 3", "paged_attention.cpp"),
     "quantized_embedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "paged_attention": ("Week 3, Day 4", "paged_attention.cpp"),
 }
 
 PRIMITIVE_CLASSES = {
-    "QuantizedMatmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
+    "QuantizedMatmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
     "Week2RMSNorm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2DecodeAttention": ("Week 2, Day 6", "week2_kernels.cpp"),
+    "Week2DensePrefillMMA": ("Week 2, Day 5", "week2_kernels.cpp"),
     "PagedCacheUpdate": ("Week 3, Day 3", "paged_attention.cpp"),
     "QuantizedEmbedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "PagedAttention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -33,18 +32,16 @@ PRIMITIVE_CLASSES = {
 
 METAL_CHECKPOINTS = {
     "quantized_matmul.metal": {
-        "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 3",
-        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 3",
-        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 5",
-        "quantized_matmul_simdgroup_splitk_w4a16_g128": "Week 2, Day 7",
-        "quantized_matmul_splitk_reduce": "Week 2, Day 7",
+        "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 2",
+        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 2",
+        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 3",
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
     },
     "week2_kernels.metal": {
         "week2_rms_norm": "Week 2, Day 4",
         "week2_rope": "Week 2, Day 4",
         "week2_swiglu": "Week 2, Day 4",
-        "week2_decode_attention": "Week 2, Day 6",
+        "week2_dense_prefill_mma_bf16_d128": "Week 2, Day 5",
     },
     "paged_attention.metal": {
         "paged_cache_update_kernel": "Week 3, Day 3",
@@ -55,7 +52,7 @@ METAL_CHECKPOINTS = {
 }
 
 DOC_TASK_MARKERS = {
-    "book/src/week2-03-quantize-model.md": {
+    "book/src/week2-02-quantize-model.md": {
         "Task 1": {"QuantizedWeights.from_mlx_layer", "QuantizedEmbedding.__call__"},
         "Task 2": {"tiny_llm_ext::quantized_matmul", "QuantizedMatmul::eval_cpu"},
         "Task 3": {
@@ -75,23 +72,11 @@ DOC_TASK_MARKERS = {
         "Task 3": {"tiny_llm_ext::swiglu", "Week2SwiGLU::eval_gpu", "week2_swiglu"},
         "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MLP.__call__"},
     },
-    "book/src/week2-05-simd-matrix-prefill.md": {
+    "book/src/week2-03-simd-matrix-prefill.md": {
         "Task 2": {
             "QuantizedMatmul::eval_gpu",
             "quantized_matmul_simdgroup_w4a16_g128",
         },
-    },
-    "book/src/week2-06-operator-lab.md": {
-        "Task 2": {
-            "tiny_llm_ext::decode_attention",
-            "Week2DecodeAttention::eval_gpu",
-            "week2_decode_attention",
-            "Qwen3MultiHeadAttention.__call__",
-            "decode_attention_custom",
-        },
-    },
-    "book/src/week2-07-split-k-prefill.md": {
-        "Task 3": {"QuantizedMatmul::eval_gpu"},
     },
     "book/src/week3-03-paged-attention-part1.md": {
         "Task 1": {
@@ -133,7 +118,7 @@ DOC_TASK_MARKERS = {
 }
 
 EXTENSION_TASK_PAIRS = {
-    "book/src/week2-03-quantize-model.md": {
+    "book/src/week2-02-quantize-model.md": {
         "Task 2": {
             (
                 "src/extensions/src/quantized_matmul.cpp",
@@ -173,32 +158,12 @@ EXTENSION_TASK_PAIRS = {
             ("src/extensions/src/week2_kernels.metal", "week2_swiglu"),
         },
     },
-    "book/src/week2-05-simd-matrix-prefill.md": {
+    "book/src/week2-03-simd-matrix-prefill.md": {
         "Task 2": {
             ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
             (
                 "src/extensions/src/quantized_matmul.metal",
                 "quantized_matmul_simdgroup_w4a16_g128",
-            ),
-        },
-    },
-    "book/src/week2-06-operator-lab.md": {
-        "Task 2": {
-            (
-                "src/extensions/src/week2_kernels.cpp",
-                "tiny_llm_ext::decode_attention",
-            ),
-            (
-                "src/extensions/src/week2_kernels.cpp",
-                "Week2DecodeAttention::eval_cpu",
-            ),
-            (
-                "src/extensions/src/week2_kernels.cpp",
-                "Week2DecodeAttention::eval_gpu",
-            ),
-            (
-                "src/extensions/src/week2_kernels.metal",
-                "week2_decode_attention",
             ),
         },
     },
@@ -335,6 +300,11 @@ def _assert_metal_scaffold_only(source: str) -> None:
     )
 
 
+def _assert_metal_checkpoint_marker(source: str, kernel: str, checkpoint: str) -> None:
+    assert kernel in source
+    assert checkpoint in source
+
+
 def _header_functions(path: str) -> set[str]:
     return set(re.findall(r"mx::array\s+([a-z][a-z0-9_]*)\s*\(", _read(path)))
 
@@ -444,7 +414,9 @@ def _assert_task_pairs(chapter: str, task: str, pairs: set[tuple[str, str]]) -> 
 
 def test_starter_and_reference_publish_the_same_learner_extension_functions():
     expected = set(INTERFACES)
-    assert _header_functions("src/extensions_ref/src/tiny_llm_ext.h") == expected
+    assert _header_functions("src/extensions_ref/src/tiny_llm_ext.h") == expected | {
+        "decode_attention"
+    }
     assert _header_functions("src/extensions/src/tiny_llm_ext.h") == expected
 
     reference_bindings = _binding_functions("src/extensions_ref/bindings.cpp") - {
@@ -454,7 +426,7 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "load_library",
         "axpby",
     }
-    assert reference_bindings == expected
+    assert reference_bindings == expected | {"decode_attention"}
     assert starter_bindings == expected
 
     for function in expected:
@@ -510,8 +482,7 @@ def test_starter_metal_stubs_name_each_learner_owned_kernel_and_checkpoint():
         source = _read(f"src/extensions/src/{filename}")
         assert f"src/{filename}" in cmake
         for kernel, checkpoint in kernels.items():
-            assert kernel in source
-            assert checkpoint in source
+            _assert_metal_checkpoint_marker(source, kernel, checkpoint)
         _assert_metal_scaffold_only(source)
 
 
@@ -579,9 +550,6 @@ def test_built_starter_extension_fails_closed_for_every_public_operation(monkeyp
         "rms_norm": lambda: extension.rms_norm(scalar, scalar, 1e-5),
         "rope": lambda: extension.rope(scalar, scalar, 1, 10_000.0),
         "swiglu": lambda: extension.swiglu(scalar, scalar),
-        "decode_attention": lambda: extension.decode_attention(
-            scalar, scalar, scalar, scalar, 1.0, False, False, 1, 1
-        ),
         "paged_cache_update": lambda: extension.paged_cache_update(
             scalar, scalar, 0, 0
         ),
@@ -619,20 +587,19 @@ def test_binding_guard_rejects_a_changed_python_default():
         )
 
 
-def test_task_pair_guard_rejects_a_nonexistent_source_path():
-    path = "book/src/week2-04-fused-model-kernels.md"
-    source = _read(path)
-    wrong_path = source.replace(
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/week2_kernels.cpp`",
-        "`Week2RMSNorm::eval_gpu` in `src/extensions/src/wrong.cpp`",
+def test_day_3_metal_guard_rejects_a_missing_simd_matmul_kernel():
+    source = _read("src/extensions/src/quantized_matmul.metal")
+    missing_kernel = source.replace(
+        "quantized_matmul_simdgroup_w4a16_g128",
+        "quantized_matmul_removed_w4a16_g128",
         1,
     )
-    assert wrong_path != source
+    assert missing_kernel != source
     with pytest.raises(AssertionError):
-        _assert_task_pairs(
-            wrong_path,
-            "Task 1",
-            EXTENSION_TASK_PAIRS[path]["Task 1"],
+        _assert_metal_checkpoint_marker(
+            missing_kernel,
+            "quantized_matmul_simdgroup_w4a16_g128",
+            "Week 2, Day 3",
         )
 
 

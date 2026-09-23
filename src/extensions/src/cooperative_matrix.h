@@ -7,7 +7,7 @@ using namespace metal;
 
 namespace tiny_llm {
 
-// Week 2, Day 5 starter: implement this fixed-shape cooperative loader before
+// Week 2, Day 3 starter: implement this fixed-shape cooperative loader before
 // using it from quantized_matmul.metal. Each thread owns one contiguous source
 // chunk. Keep the full-tile path branch-free, zero-fill partial tiles, and use
 // TRANSPOSE_DESTINATION only when the matrix operand needs it.
@@ -24,29 +24,29 @@ struct CooperativeTileLoader {
 
     static METAL_FUNC void load(device const T *source, int source_stride, threadgroup T *destination,
                                 uint thread_index, int valid_rows = ROWS, int valid_columns = COLS) {
-        // TODO(Week 2 Day 5): dispatch to a branch-free full-tile load or an
+        // TODO(Week 2 Day 3): dispatch to a branch-free full-tile load or an
         // edge-safe load that writes zero outside valid_rows/valid_columns.
     }
 };
 
-// Week 2, Day 5 starter: implement the lane-to-fragment mapping and direct
+// Week 2, Day 3 starter: implement the lane-to-fragment mapping and direct
 // simdgroup_matrix loads used by CooperativeBlockMMA. Do not import a hidden
 // matrix-multiply helper; the exercise owns this fragment bookkeeping.
 METAL_FUNC ushort2 course_matrix_coordinate(ushort lane) {
-    // TODO(Week 2 Day 5): map one SIMD lane to its two 8x8 fragment elements.
+    // TODO(Week 2 Day 3): map one SIMD lane to its two 8x8 fragment elements.
     return ushort2(0);
 }
 
 template <typename T>
 METAL_FUNC void course_load_matrix(thread simdgroup_matrix<T, 8, 8> &matrix, threadgroup const T *source,
                                    int row_stride, ushort lane) {
-    // TODO(Week 2 Day 5): load the lane's two row-major fragment elements.
+    // TODO(Week 2 Day 3): load the lane's two row-major fragment elements.
 }
 
 template <typename T>
 METAL_FUNC void course_load_transposed_matrix(thread simdgroup_matrix<T, 8, 8> &matrix, threadgroup const T *source,
                                               int row_stride, ushort lane) {
-    // TODO(Week 2 Day 5): view row-major [output, reduction] storage as the
+    // TODO(Week 2 Day 3): view row-major [output, reduction] storage as the
     // transposed right-hand matrix without materializing another tile.
 }
 
@@ -57,16 +57,16 @@ struct CooperativeBlockMMA {
     ushort lane_index;
 
     METAL_FUNC CooperativeBlockMMA(ushort simdgroup, ushort lane) : simdgroup_index(simdgroup), lane_index(lane) {
-        // TODO(Week 2 Day 5): initialize every accumulator fragment to zero.
+        // TODO(Week 2 Day 3): initialize every accumulator fragment to zero.
     }
 
     METAL_FUNC void multiply_accumulate(threadgroup const T *left_tile, threadgroup const T *right_tile) {
-        // TODO(Week 2 Day 5): load the four reduction fragments and call
+        // TODO(Week 2 Day 3): load the four reduction fragments and call
         // simdgroup_multiply_accumulate for this SIMD group's 16x16 quadrant.
     }
 
     METAL_FUNC void store_result_safe(device OutT *output, int output_stride, short2 valid_shape) const {
-        // TODO(Week 2 Day 5): store the lane-owned elements with row/column
+        // TODO(Week 2 Day 3): store the lane-owned elements with row/column
         // guards and cast once from the FP32 accumulators.
     }
 };

@@ -1,282 +1,138 @@
-"""Week 2 Day 5 SIMD-matrix prefill tests."""
+"""Week 2 Day 5 tiled dense-prefill tests."""
 
-from pathlib import Path
+from math import prod
 
 import mlx.core as mx
-import pytest
 
 from .tiny_llm_base import (
+    FastRMSNorm,
     Qwen3ModelWeek2,
-    quantized_matmul,
-    quantized_matmul_vanilla,
+    dense_prefill_attention_mma,
 )
-from .utils import (
-    assert_allclose,
-    qwen3_0_6b_model_exists,
-    qwen3_1_7b_model_exists,
-    qwen3_4b_model_exists,
-    tiny_qwen3_mlx_model,
-)
-from mlx_lm import load
+from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def test_simd_matmul_checkpoint_is_completed_week2_model():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
+def _fixture(shape: tuple[int, ...], phase: float) -> mx.array:
+    values = mx.sin(mx.arange(prod(shape), dtype=mx.float32) * 0.017 + phase)
+    return values.reshape(shape).astype(mx.bfloat16)
+
+
+def test_task_1_tiled_prefill_matches_readable_causal_gqa():
+    query = _fixture((1, 4, 33, 128), 0.1)
+    key = _fixture((1, 2, 47, 128), 0.7)
+    value = _fixture(key.shape, 1.3)
+
+    actual = dense_prefill_attention_mma(query, key, value, 128**-0.5, "causal")
+    expected = mx.fast.scaled_dot_product_attention(
+        query.astype(mx.float32),
+        key.astype(mx.float32),
+        value.astype(mx.float32),
+        scale=128**-0.5,
+        mask="causal",
+    ).astype(mx.bfloat16)
+
+    assert actual.shape == query.shape
+    assert actual.dtype == mx.bfloat16
+    assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
+
+
+def test_task_2_fully_masked_rows_are_finite_zero():
+    query = _fixture((1, 4, 9, 128), 0.1)
+    key = _fixture((1, 1, 17, 128), 0.7)
+    value = _fixture(key.shape, 1.3)
+    mask = mx.full((1, 1, 9, 17), -mx.inf, dtype=mx.float32)
+
+    actual = dense_prefill_attention_mma(query, key, value, 128**-0.5, mask)
+    mx.eval(actual)
+    assert bool(mx.all(mx.isfinite(actual)).item())
+    assert float(mx.max(mx.abs(actual)).item()) == 0.0
+
+
+def test_task_3_tiled_prefill_checkpoint_runs_the_week2_engine():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="tiled-prefill")
     layer = model.layers_inner[0]
 
-    assert not model.embedding.use_custom_kernel
-    assert model.embedding.weight.use_simdgroup_matmul
+    assert model.use_bounded_kv_capacity
+    assert layer.self_attn.use_tiled_prefill_attention
+    assert not hasattr(layer.self_attn, "use_decode_attention")
+
+    output = model(
+        mx.array([[1, 2, 3]], dtype=mx.int32),
+        0,
+        model.create_kv_cache(capacity=3),
+    )
+    assert output.dtype == mx.bfloat16
+    assert layer.self_attn.attention_dispatch_counts["tiled_prefill_fallback"] == 1
+    assert layer.self_attn.attention_dispatch_counts["readable"] == 1
+
+
+# Final checkpoint: selected cumulative mechanisms.
+
+
+def test_selected_checkpoint_contains_exactly_the_three_selected_mechanisms():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="selected")
+    layer = model.layers_inner[0]
+
+    assert model.use_bounded_kv_capacity
+    assert isinstance(layer.input_layernorm, FastRMSNorm)
+    assert layer.self_attn.use_tiled_prefill_attention
     assert layer.self_attn.wq.use_simdgroup_matmul
-    assert not layer.self_attn.use_decode_attention
+    assert not layer.self_attn.wq.use_split_k_matmul
+    assert not hasattr(layer.self_attn, "use_decode_attention")
+
+    cache = model.create_kv_cache(capacity=4)
+    output = model(mx.array([[1, 2, 3, 4]], dtype=mx.int32), 0, cache)
+    assert output.dtype == mx.bfloat16
+    assert all(layer_cache.slice_write_bytes > 0 for layer_cache in cache)
 
 
-def test_task_2_simdgroup_matmul_matches_vanilla_gpu():
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((128, 256)).astype(mx.bfloat16)
-        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, inputs, packed, transpose_b=True
-        )
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=1.0, rtol=2e-2)
-
-
-def test_task_2_simdgroup_matmul_uses_accurate_partial_tiles_gpu():
-    """A non-multiple-of-eight prefill must not accumulate in bfloat16."""
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((10, 256)).astype(mx.bfloat16)
-        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, inputs, packed, transpose_b=True
-        )
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
-
-
-@pytest.mark.parametrize(
-    ("rows", "outputs", "input_dim"),
-    [(9, 33, 128), (31, 65, 256), (33, 97, 512)],
-)
-@pytest.mark.parametrize("use_split_k", [False, True])
-def test_task_2_course_owned_tiles_cover_matrix_boundaries_gpu(
-    rows: int,
-    outputs: int,
-    input_dim: int,
-    use_split_k: bool,
-):
-    mx.random.seed(rows + outputs + input_dim)
-    with mx.stream(mx.gpu):
-        inputs = mx.random.normal((rows, input_dim)).astype(mx.bfloat16)
-        weight = mx.random.normal((outputs, input_dim)).astype(mx.bfloat16)
-        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        tiled = quantized_matmul(
-            scales,
-            biases,
-            128,
-            4,
-            inputs,
-            packed,
-            transpose_b=True,
-            use_simdgroup=True,
-            use_split_k=use_split_k,
-        )
-        vanilla = quantized_matmul_vanilla(
-            scales, biases, 128, 4, inputs, packed, transpose_b=True
-        )
-        assert tiled.shape == (rows, outputs)
-        assert_allclose(tiled, vanilla, mx.bfloat16, atol=0.25, rtol=1e-2)
-
-
-def test_task_2_course_owned_loader_zero_fills_partial_rows_gpu():
-    """A full-width tile with partial rows must still use the safe path."""
-    extension = (
-        "extensions_ref"
-        if Path(__file__).parent.name == "tests_refsol"
-        else "extensions"
+def test_selected_mechanisms_remain_independently_controllable():
+    mlx_model = tiny_qwen3_mlx_model()
+    disabled = Qwen3ModelWeek2(
+        mlx_model,
+        checkpoint="selected",
+        use_bounded_kv_capacity=False,
+        use_register_cached_rms_norm=False,
+        use_tiled_prefill_attention=False,
     )
-    header = (
-        Path(__file__).parents[1] / f"src/{extension}/src/cooperative_matrix.h"
-    ).read_text()
-    source = """
-        threadgroup T tile[32];
-        using Loader = tiny_llm::CooperativeTileLoader<T, 4, 8, 8, 4>;
-        Loader::load(
-            inp, 8, tile, thread_position_in_threadgroup.x, 2, 8);
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (uint index = thread_position_in_threadgroup.x;
-             index < 32;
-             index += 4) {
-            out[index] = tile[index];
-        }
-    """
-    kernel = mx.fast.metal_kernel(
-        name="probe_course_loader_partial_rows",
-        input_names=["inp"],
-        output_names=["out"],
-        source=source,
-        header=header,
+    enabled = Qwen3ModelWeek2(
+        mlx_model,
+        checkpoint="selected",
+        use_bounded_kv_capacity=True,
+        use_register_cached_rms_norm=True,
+        use_tiled_prefill_attention=True,
     )
 
-    valid = (mx.arange(16).reshape(2, 8) + 1).astype(mx.bfloat16)
-    sentinel = mx.full((1, 8), 37, dtype=mx.bfloat16)
-    padding = mx.full((1, 8), -11, dtype=mx.bfloat16)
-    loader_source = mx.concatenate([valid, sentinel, padding], axis=0)
-    output = kernel(
-        inputs=[loader_source],
-        template=[("T", mx.bfloat16)],
-        grid=(4, 1, 1),
-        threadgroup=(4, 1, 1),
-        output_shapes=[(4, 8)],
-        output_dtypes=[mx.bfloat16],
-    )[0]
-    mx.eval(output)
+    assert not disabled.use_bounded_kv_capacity
+    assert not isinstance(disabled.layers_inner[0].input_layernorm, FastRMSNorm)
+    assert not disabled.layers_inner[0].self_attn.use_tiled_prefill_attention
+    assert enabled.use_bounded_kv_capacity
+    assert isinstance(enabled.layers_inner[0].input_layernorm, FastRMSNorm)
+    assert enabled.layers_inner[0].self_attn.use_tiled_prefill_attention
 
-    assert output.shape == (4, 8)
-    assert mx.array_equal(output[:2], valid).item()
-    assert mx.array_equal(output[2:], mx.zeros((2, 8), dtype=mx.bfloat16)).item()
+    inputs = mx.array([[1, 2, 3]], dtype=mx.int32)
+    actual = enabled(inputs, 0, enabled.create_kv_cache(capacity=3))
+    expected = disabled(inputs, 0, disabled.create_kv_cache())
+    assert_allclose(actual, expected, mx.bfloat16, atol=3e-2, rtol=3e-2)
 
 
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_utils_qwen3_0_6b():
-    pass
-
-
-@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_utils_qwen3_4b():
-    pass
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_utils_qwen3_1_7b():
-    pass
-
-
-def helper_test_task_5(model_name: str, iters: int = 10):
-    mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
-    assert not model.embedding.use_custom_kernel
-    assert model.embedding.weight.use_simdgroup_matmul
-    assert all(layer.self_attn.wq.use_simdgroup_matmul for layer in model.layers_inner)
-    for iteration in range(iters):
-        cache = model.create_kv_cache()
-        input = (mx.arange(10, dtype=mx.int32) + iteration * 10).reshape(
-            1, 10
-        ) % tokenizer.vocab_size
-        user_output = model(input, 0, cache)
-        ref_output = mlx_model(input)
-        user_output = user_output - mx.logsumexp(user_output, axis=-1, keepdims=True)
-        ref_output = ref_output - mx.logsumexp(ref_output, axis=-1, keepdims=True)
-        assert_allclose(
-            user_output, ref_output, precision=mx.bfloat16, rtol=0.1, atol=2.5
-        )
-
-
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_task_5_qwen3_0_6b():
-    helper_test_task_5("Qwen/Qwen3-0.6B-MLX-4bit", 5)
-
-
-@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_task_5_qwen3_4b():
-    helper_test_task_5("Qwen/Qwen3-4B-MLX-4bit", 1)
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_task_5_qwen3_1_7b():
-    helper_test_task_5("Qwen/Qwen3-1.7B-MLX-4bit", 3)
-
-
-def helper_test_task_5_incremental(
-    model_name: str,
-    seq_len: int,
-    iters: int = 1,
-):
-    mlx_model, tokenizer = load(model_name)
-    model = Qwen3ModelWeek2(mlx_model, checkpoint="simd-matmul")
-    for _ in range(iters):
-        inputs = mx.random.randint(0, tokenizer.vocab_size, (1, seq_len))
-        ref_outputs = mlx_model(inputs)
-        decode_cache = model.create_kv_cache()
-        for offset in range(seq_len):
-            user_out = model(
-                inputs=inputs[:, offset : offset + 1],
-                offset=offset,
-                cache=decode_cache,
-            )
-            ref_out = ref_outputs[:, offset : offset + 1, :]
-            user_out = user_out - mx.logsumexp(user_out, axis=-1, keepdims=True)
-            ref_out = ref_out - mx.logsumexp(ref_out, axis=-1, keepdims=True)
-            assert_allclose(
-                user_out, ref_out, precision=mx.bfloat16, rtol=0.1, atol=2.5
+def test_retired_experiments_are_not_week2_checkpoints():
+    for checkpoint in ("decode-attention", "split-k"):
+        try:
+            Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint=checkpoint)
+        except ValueError as exc:
+            assert "unknown Week 2 checkpoint" in str(exc)
+        else:
+            raise AssertionError(
+                f"retired checkpoint {checkpoint!r} remained selectable"
             )
 
 
-@pytest.mark.skipif(
-    not qwen3_0_6b_model_exists(), reason="Qwen3-0.6B-4bit model not found"
-)
-def test_task_5_incremental_qwen3_0_6b():
-    helper_test_task_5_incremental("Qwen/Qwen3-0.6B-MLX-4bit", seq_len=3)
-
-
-@pytest.mark.skipif(not qwen3_4b_model_exists(), reason="Qwen3-4B-4bit model not found")
-def test_task_5_incremental_qwen3_4b():
-    helper_test_task_5_incremental(
-        "Qwen/Qwen3-4B-MLX-4bit",
-        seq_len=3,
-    )
-
-
-@pytest.mark.skipif(
-    not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
-)
-def test_task_5_incremental_qwen3_1_7b():
-    helper_test_task_5_incremental("Qwen/Qwen3-1.7B-MLX-4bit", seq_len=3)
-
-
-class FakeEmbedding:
-    def __call__(self, inputs):
-        return mx.stack([inputs, inputs + 1], axis=-1).astype(mx.bfloat16)
-
-    def as_linear(self, hidden):
-        return hidden
-
-
-@pytest.mark.parametrize("logits_to_keep,expected_length", [(1, 1), (None, 4)])
-def test_task_5_logits_to_keep_controls_output_length(logits_to_keep, expected_length):
-    model = Qwen3ModelWeek2.__new__(Qwen3ModelWeek2)
-    model.num_hidden_layers = 0
-    model.embedding = FakeEmbedding()
-    model.layers_inner = []
-    model.norm = lambda hidden: hidden
-    model.w_lm_head = None
-    inputs = mx.array([[1, 2, 3, 4]])
-    result = model(inputs, 0, [], logits_to_keep=logits_to_keep)
-    assert result.shape == (1, expected_length, 2)
+def test_default_model_is_the_cumulative_selected_checkpoint():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model())
+    assert model.checkpoint == "selected"
+    assert model.mechanism_controls == {
+        "capacity_cache": True,
+        "register_cached_rmsnorm": True,
+        "tiled_prefill": True,
+    }

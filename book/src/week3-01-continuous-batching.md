@@ -115,8 +115,9 @@ src/tiny_llm/qwen3_week2.py::Qwen3ModelWeek2.__init__
 src/tiny_llm/models.py::dispatch_week3_batch_model
 ```
 
-Week 2 ends with a course-owned quantized matmul so you can inspect its loader,
-SIMD-matrix operations, and Split-K policy. Week 3 teaches serving mechanisms,
+Week 2 ends with a measured selection: it keeps the course-owned quantized
+matmul, selects tiled prefill where eligible, and retains readable attention as
+the fallback. Week 3 teaches serving mechanisms,
 so it should not make every cache and scheduler measurement depend on that
 teaching kernel's remaining projection overhead.
 
