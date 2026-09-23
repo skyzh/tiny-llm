@@ -12,15 +12,20 @@ bound the request-owned storage for `capacity-cache`. The four initial shells ar
 
 Together, these pieces make prefill populate the cache and make decode send
 only the new token. The starter already supplies the Week 1 operators and the
-model-loading boundary. Start with the focused learner gate:
+model-loading boundary. Complete the Week 1 Day 7 toolchain setup first. The
+Day 1 tests import the native Week 2 extension even though this first cache
+change is in Python, so build it before running the focused learner gate:
 
 ```bash
-pdm run test --week 2 --day 1
+pdm run build-ext
+pdm run test --week 2 --day 1 -- -k 'not capacity'
 ```
 
-When it passes, run the `kv-cache` checkpoint shown in Task 4. That live call
-puts the cache into the generation loop instead of exercising it only as an
-isolated data structure.
+The three selected tests cover the initial `kv-cache` work, not the later
+capacity checkpoint. They may fail at the learner-owned seams until you finish
+Tasks 1–3. Rerun this focused gate after connecting the serving loop in Task
+4, then run the `kv-cache` product command there. The whole-day gate follows
+the capacity checkpoint below.
 
 Each attention layer can then reuse the keys and values from previous tokens
 instead of recomputing the entire prefix at every step.
