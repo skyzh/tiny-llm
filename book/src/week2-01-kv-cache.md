@@ -263,6 +263,25 @@ pdm run main --solution tiny_llm_ref --loader week2 \
   --week2-checkpoint kv-cache --model qwen3-0.6b --max-tokens 16
 ```
 
+## Measure the First Cache Change
+
+Before adding capacity, compare the Week 1 full-prefix loop with this
+`kv-cache` checkpoint. The progression runner starts each variant in a fresh
+process, uses the same Qwen3-4B 128-token prompt and 129-token output, and
+records the workload and results in JSON:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 \
+  --repeats 2 --variant week1 --variant week2-kv-cache \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits all --json-output week2-day1-cache.json
+```
+
+Keep `week2-day1-cache.json` as the baseline for the capacity checkpoint
+below. Week 1 requires `--prefill-logits all`; this is a matched algorithm
+comparison, not a serving-only prefill measurement. Record the observation
+and workload identity without assuming its speedup holds on another machine.
+
 
 ## Second checkpoint: bound the request cache
 
@@ -377,6 +396,22 @@ it does not alone prove a complete-request speedup. A historical exact-mechanism
 run observed a **+88.0 MiB / +2.276%** temporal 2K/512 peak-memory tradeoff.
 That is historical evidence, not a result from this checkout.
 
+Extend the first JSON baseline with the new capacity checkpoint using the
+same model, lengths, warmups, and `all`-logit workload. Save a second JSON
+file so the original Week 1 versus `kv-cache` observation remains available:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 \
+  --repeats 2 --variant week1 --variant week2-kv-cache \
+  --variant week2-capacity-cache --model qwen3-4b \
+  --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits all --json-output week2-day1-cache-ladder.json
+```
+
+Compare these rows with `week2-day1-cache.json` only when the recorded
+workload and device match. The serving comparisons below use
+`--prefill-logits last`, so keep their results separate from this ladder.
+
 ## Benchmark the Cached Model
 
 Before changing the model, make the comparison trustworthy. Prefill processes
@@ -428,7 +463,7 @@ Or run the cumulative ladder in fresh processes:
 
 ```bash
 pdm run bench-week2-progression --offline --repeats 2 \
-  --solution tiny_llm \
+  --solution tiny_llm --suite week2 \
   --variant week2-capacity-cache --variant mlx \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last --json-output week2-day1-baseline.json

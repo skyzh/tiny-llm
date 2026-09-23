@@ -103,7 +103,9 @@ the focused test and record the cumulative model result before touching RoPE:
 pdm run build-ext
 pdm run test --week 2 --day 5 -- -k rms
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rmsnorm --model qwen3-0.6b --max-tokens 16
+  --week2-checkpoint rmsnorm --model qwen3-0.6b --num-seqs 1 \
+  --min-input-len 128 --max-input-len 128 \
+  --min-output-len 16 --max-output-len 16 --warmup 2 --prefill-logits last
 ```
 
 ## Task 2: RoPE
@@ -144,7 +146,9 @@ Test and measure that cumulative checkpoint before moving to SwiGLU:
 ```bash
 pdm run test --week 2 --day 5 -- -k rope
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint rope --model qwen3-0.6b --max-tokens 16
+  --week2-checkpoint rope --model qwen3-0.6b --num-seqs 1 \
+  --min-input-len 128 --max-input-len 128 \
+  --min-output-len 16 --max-output-len 16 --warmup 2 --prefill-logits last
 ```
 
 ## Task 3: SwiGLU
@@ -172,7 +176,9 @@ Wire the fused expression into the model, then record the third checkpoint:
 ```bash
 pdm run test --week 2 --day 5 -- -k swiglu
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint swiglu --model qwen3-0.6b --max-tokens 16
+  --week2-checkpoint swiglu --model qwen3-0.6b --num-seqs 1 \
+  --min-input-len 128 --max-input-len 128 \
+  --min-output-len 16 --max-output-len 16 --warmup 2 --prefill-logits last
 ```
 
 ## Task 4: Verify the Cumulative Model
@@ -208,7 +214,7 @@ Measure the three cumulative checkpoints separately so their combined result
 cannot hide a regression:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
   --variant week2-simd-matmul \
   --variant week2-rmsnorm --variant week2-rope --variant week2-swiglu \
   --variant mlx --model qwen3-4b \

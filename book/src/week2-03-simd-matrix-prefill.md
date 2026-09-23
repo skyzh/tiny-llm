@@ -27,24 +27,23 @@ pdm run build-ext
 pdm run test --week 2 --day 4
 ```
 
-Freeze both baselines next. You will repeat these exact commands after the
-kernel change:
+Freeze the existing `quantized-matvec` control before the new SIMD matrix
+kernel is implemented. Do not select `week2-simd-matmul` yet:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-quantized-matvec --variant week2-simd-matmul --variant mlx \
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
+  --variant week2-quantized-matvec --variant mlx \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day3-product.json
+  --prefill-logits last --json-output week2-day3-control.json
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case quantized-matvec:prefill:128 --case simd-matmul:prefill:128 \
+  --case quantized-matvec:prefill:128 \
   --warmup 4 --iterations 12 \
-  --json-output week2-day3-attribution.json
+  --json-output week2-day3-control-attribution.json
 ```
 
-Keep the model, phase, token count, prompt rule, prefill-logit mode, warmups,
-and iteration count identical across the two checkpoints. Do not compare a
-new prefill kernel at one shape with an old result from another shape.
+Keep these JSON files for the post-edit comparison. Do not compare a new
+prefill kernel at one shape with an old result from another shape.
 
 ## First Diagnostic: A Partial Tile
 
@@ -135,8 +134,24 @@ model output—not a private symbol or source-file layout.
 
 ## Task 4: Re-profile and Decide
 
-Now repeat the exact baseline commands, then close the loop in three
-sentences:
+After the SIMD matrix checkpoint passes, measure it alongside the old control
+with the same model, phase, token count, prompt rule, prefill-logit mode,
+warmups, and iteration count:
+
+```bash
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
+  --variant week2-quantized-matvec --variant week2-simd-matmul --variant mlx \
+  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --prefill-logits last --json-output week2-day3-product.json
+
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+  --case quantized-matvec:prefill:128 --case simd-matmul:prefill:128 \
+  --warmup 4 --iterations 12 \
+  --json-output week2-day3-attribution.json
+```
+
+Compare these results with the saved pre-edit JSON, then close the loop in
+three sentences:
 
 1. which operator category dominated the baseline prefill;
 2. whether the candidate changed that category and the matched product phase;
