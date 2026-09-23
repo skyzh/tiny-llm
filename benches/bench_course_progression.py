@@ -98,7 +98,7 @@ WEEK2_VARIANTS = (
     ),
     Variant(
         "week2-selected",
-        "2.5 + Select the cumulative path",
+        "2.5 + Run the selected inference engine",
         "ref",
         "week2",
         ("--week2-checkpoint", "selected"),

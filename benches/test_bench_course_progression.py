@@ -110,7 +110,7 @@ def test_week2_live_labels_follow_the_five_day_book():
         "week2-rope": "2.4 + Compact RoPE",
         "week2-swiglu": "2.4 + Compact SwiGLU",
         "week2-tiled-prefill": "2.5 Tiled dense prefill attention",
-        "week2-selected": "2.5 + Select the cumulative path",
+        "week2-selected": "2.5 + Run the selected inference engine",
         "mlx": "MLX",
     }
 
