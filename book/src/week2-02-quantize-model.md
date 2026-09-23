@@ -18,8 +18,8 @@ Begin with the Python wrapper gate. Then build and exercise the GPU operator:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_1
-pdm run test --week 2 --day 3 -- -k gpu
+pdm run test --week 2 --day 2 -- -k task_1
+pdm run test --week 2 --day 2 -- -k gpu
 ```
 
 Finish with the complete Day 2 gate and the `quantized-matvec` model
@@ -413,7 +413,7 @@ after you implement its Metal schedules in Task 3:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_1
+pdm run test --week 2 --day 2 -- -k task_1
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -603,7 +603,7 @@ Run the focused GPU gate:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k gpu
+pdm run test --week 2 --day 2 -- -k gpu
 ```
 
 The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
@@ -648,7 +648,7 @@ assumptions: `group_size = 128` and `bits = 4`.
 Run the complete gate, then the live model checkpoint:
 
 ```bash
-pdm run test --week 2 --day 3
+pdm run test --week 2 --day 2
 
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint quantized-matvec --model qwen3-0.6b --max-tokens 16

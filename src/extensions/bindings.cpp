@@ -32,7 +32,7 @@ NB_MODULE(_ext, m) {
             array: ``alpha * x + beta * y``
       )");
 
-    // Week 2, Day 3. Day 4 extends the schedule behind this stable binding.
+    // Week 2, Day 2. Day 3 extends the schedule behind this stable binding.
     m.def("quantized_matmul", &tiny_llm_ext::quantized_matmul, "scales"_a, "biases"_a, "group_size"_a, "bits"_a, "a"_a,
           "b"_a, "transpose_b"_a = false, "use_simdgroup"_a = true, "use_split_k"_a = false, "stream"_a = nb::none());
 
@@ -40,7 +40,7 @@ NB_MODULE(_ext, m) {
     m.def("quantized_embedding", &tiny_llm_ext::quantized_embedding, "indices"_a, "scales"_a, "biases"_a, "weight"_a,
           "group_size"_a, "bits"_a, "stream"_a = nb::none());
 
-    // Week 2, Day 5.
+    // Week 2, Day 4.
     m.def("rms_norm", &tiny_llm_ext::rms_norm, "x"_a, "weight"_a, "eps"_a, "stream"_a = nb::none());
     m.def("rope", &tiny_llm_ext::rope, "x"_a, "offsets"_a, "dims"_a, "base"_a, "traditional"_a = false,
           "stream"_a = nb::none());

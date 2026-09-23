@@ -296,7 +296,7 @@ peak memory for some shapes while removing repeated prefix copies.
 ## First Diagnostic: Hide Unused Capacity
 
 ```bash
-pdm run test --week 2 --day 2 -- -k logical_prefix
+pdm run test --week 2 --day 1 -- -k logical_prefix
 ```
 
 The expected first failure points at `_logical_key_values` or the capacity
@@ -356,7 +356,7 @@ need per-request evidence.
 Run the state-transition witness before the product:
 
 ```bash
-pdm run test --week 2 --day 2 -- -k 'rewind or overflow'
+pdm run test --week 2 --day 1 -- -k 'rewind or overflow'
 ```
 
 Test the sequence append → rewind → append as well as an overflow after valid
@@ -366,7 +366,7 @@ logical state or mutate before validation.
 ## Complete the `capacity-cache` Checkpoint
 
 ```bash
-pdm run test --week 2 --day 2
+pdm run test --week 2 --day 1
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint capacity-cache --model qwen3-0.6b --max-tokens 16
 ```

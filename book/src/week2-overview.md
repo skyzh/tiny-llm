@@ -76,13 +76,15 @@ operator off-ramp, keep the course's interface and delegate only that operator
 locally; `--solution mlx` runs a different complete model and does not test
 your cache or model wiring.
 
-The supplied test tool still identifies the nine checkpoints with its earlier
-seven gate IDs. Each chapter shows the gate ID that exercises its checkpoint;
-it is a test selector, not an extra lesson. After all five lessons, run the
-complete Week 2 gate:
+The supplied tests follow the five learner days. Day 1 contains both cache
+checkpoints, while Day 5 checks tiled prefill and the selected model. Each
+chapter shows focused commands for its checkpoint. After completing all five
+lessons, run their gates in order:
 
 ```bash
-pdm run test --week 2
+for day in 1 2 3 4 5; do
+  pdm run test --week 2 --day "$day" || exit 1
+done
 ```
 
 When a command runs a model, benchmark, profiler, capture, or reducer, pass

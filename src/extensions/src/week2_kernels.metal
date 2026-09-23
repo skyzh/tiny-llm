@@ -2,11 +2,11 @@
 
 using namespace metal;
 
-// Week 2, Day 5:
+// Week 2, Day 4:
 //   week2_rms_norm
 //   week2_rope
 //   week2_swiglu
-// Week 2, Day 6:
+// Week 2, Day 5:
 //   week2_dense_prefill_mma_bf16_d128
 //
 // Add each [[kernel]] function when its task asks for it. The C++ starter

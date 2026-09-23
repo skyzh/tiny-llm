@@ -1,83 +1,139 @@
-"""Week 2 Day 5 fused-model primitive tests."""
+"""Week 2 Day 5 tiled dense-prefill tests."""
 
-import importlib
-import sys
-import types
+from math import prod
 
 import mlx.core as mx
 
+from .tiny_llm_base import (
+    FastRMSNorm,
+    Qwen3ModelWeek2,
+    dense_prefill_attention_mma,
+    scaled_dot_product_attention,
+)
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def _allow_sparse_starter_collection_without_a_generated_extension():
-    if __package__ != "tests":
-        return
-    extension_package = importlib.import_module("extensions.tiny_llm_ext")
-    if hasattr(extension_package, "_ext"):
-        return
-    module_name = "extensions.tiny_llm_ext._ext"
-    missing_extension = types.ModuleType(module_name)
-    sys.modules[module_name] = missing_extension
-    setattr(extension_package, "_ext", missing_extension)
+def _fixture(shape: tuple[int, ...], phase: float) -> mx.array:
+    values = mx.sin(mx.arange(prod(shape), dtype=mx.float32) * 0.017 + phase)
+    return values.reshape(shape).astype(mx.bfloat16)
 
 
-def _load_week_2_symbols():
-    _allow_sparse_starter_collection_without_a_generated_extension()
-    from .tiny_llm_base import FastRMSNorm, FastRoPE, Qwen3ModelWeek2, swiglu
+def test_task_1_tiled_prefill_matches_readable_causal_gqa():
+    query = _fixture((1, 4, 33, 128), 0.1)
+    key = _fixture((1, 2, 47, 128), 0.7)
+    value = _fixture(key.shape, 1.3)
 
-    return FastRMSNorm, FastRoPE, Qwen3ModelWeek2, swiglu
+    actual = dense_prefill_attention_mma(query, key, value, 128**-0.5, "causal")
+    expected = scaled_dot_product_attention(
+        query.astype(mx.float32),
+        key.astype(mx.float32),
+        value.astype(mx.float32),
+        128**-0.5,
+        "causal",
+    ).astype(mx.bfloat16)
 
-
-FastRMSNorm, FastRoPE, Qwen3ModelWeek2, swiglu = _load_week_2_symbols()
-
-
-def test_task_1_register_cached_rmsnorm_matches_readable_operator():
-    x = mx.random.normal((2, 3, 16)).astype(mx.bfloat16)
-    weight = mx.random.normal((16,)).astype(mx.bfloat16)
-    fast = FastRMSNorm(16, weight, eps=1e-5)
-    result = fast(x)
-    expected = mx.fast.rms_norm(x, weight, 1e-5)
-
-    assert result is not None, "implement the FastRMSNorm learner seam"
-    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
-    assert fast.dispatch_counts == {"register_cached": 1, "fixed_width_fallback": 0}
-
-
-def test_task_2_rope_and_swiglu_match_readable_operators():
-    x = mx.random.normal((2, 4, 2, 16)).astype(mx.bfloat16)
-    fast_rope = FastRoPE(16, 32, base=10000)
-    actual = fast_rope(x, [3, 7])
-    expected = mx.fast.rope(
-        x.transpose(0, 2, 1, 3),
-        16,
-        traditional=False,
-        base=10000,
-        scale=1.0,
-        offset=mx.array([3, 7], dtype=mx.int32),
-    ).transpose(0, 2, 1, 3)
+    assert actual.shape == query.shape
+    assert actual.dtype == mx.bfloat16
     assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
-    gate = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
-    up = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
-    assert_allclose(swiglu(gate, up), gate * mx.sigmoid(gate) * up, mx.bfloat16)
+
+def test_task_2_fully_masked_rows_are_finite_zero():
+    query = _fixture((1, 4, 9, 128), 0.1)
+    key = _fixture((1, 1, 17, 128), 0.7)
+    value = _fixture(key.shape, 1.3)
+    mask = mx.full((1, 1, 9, 17), -mx.inf, dtype=mx.float32)
+
+    actual = dense_prefill_attention_mma(query, key, value, 128**-0.5, mask)
+    mx.eval(actual)
+    assert bool(mx.all(mx.isfinite(actual)).item())
+    assert float(mx.max(mx.abs(actual)).item()) == 0.0
 
 
-def test_task_3_primitive_checkpoints_are_cumulative_and_real():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="swiglu")
+def test_task_3_tiled_prefill_checkpoint_runs_the_week2_engine():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="tiled-prefill")
     layer = model.layers_inner[0]
-    implementation_rope = importlib.import_module(
-        f"{FastRMSNorm.__module__.split('.')[0]}.positional_encoding"
-    )
 
     assert model.use_bounded_kv_capacity
-    assert layer.self_attn.wq.use_simdgroup_matmul
-    assert isinstance(model.norm, FastRMSNorm)
-    assert isinstance(layer.input_layernorm, FastRMSNorm)
-    assert isinstance(layer.self_attn.rope, FastRoPE)
-    assert layer.mlp.use_fast_swiglu
+    assert layer.self_attn.use_tiled_prefill_attention
+    assert not hasattr(layer.self_attn, "use_decode_attention")
 
-    rms_only = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="rmsnorm")
-    rms_layer = rms_only.layers_inner[0]
-    assert isinstance(rms_only.norm, FastRMSNorm)
-    assert type(rms_layer.self_attn.rope) is implementation_rope.RoPE
-    assert not rms_layer.mlp.use_fast_swiglu
+    output = model(
+        mx.array([[1, 2, 3]], dtype=mx.int32),
+        0,
+        model.create_kv_cache(capacity=3),
+    )
+    assert output.dtype == mx.bfloat16
+    assert layer.self_attn.attention_dispatch_counts["tiled_prefill_fallback"] == 1
+    assert layer.self_attn.attention_dispatch_counts["readable"] == 1
+
+
+# Final checkpoint: selected cumulative mechanisms.
+
+
+def test_selected_checkpoint_contains_exactly_the_three_selected_mechanisms():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="selected")
+    layer = model.layers_inner[0]
+
+    assert model.use_bounded_kv_capacity
+    assert isinstance(layer.input_layernorm, FastRMSNorm)
+    assert layer.self_attn.use_tiled_prefill_attention
+    assert layer.self_attn.wq.use_simdgroup_matmul
+    assert not layer.self_attn.wq.use_split_k_matmul
+    assert not hasattr(layer.self_attn, "use_decode_attention")
+
+    cache = model.create_kv_cache(capacity=4)
+    output = model(mx.array([[1, 2, 3, 4]], dtype=mx.int32), 0, cache)
+    assert output.dtype == mx.bfloat16
+    assert all(layer_cache.slice_write_bytes > 0 for layer_cache in cache)
+
+
+def test_selected_mechanisms_remain_independently_controllable():
+    mlx_model = tiny_qwen3_mlx_model()
+    disabled = Qwen3ModelWeek2(
+        mlx_model,
+        checkpoint="selected",
+        use_bounded_kv_capacity=False,
+        use_register_cached_rms_norm=False,
+        use_tiled_prefill_attention=False,
+    )
+    enabled = Qwen3ModelWeek2(
+        mlx_model,
+        checkpoint="selected",
+        use_bounded_kv_capacity=True,
+        use_register_cached_rms_norm=True,
+        use_tiled_prefill_attention=True,
+    )
+
+    assert not disabled.use_bounded_kv_capacity
+    assert not isinstance(disabled.layers_inner[0].input_layernorm, FastRMSNorm)
+    assert not disabled.layers_inner[0].self_attn.use_tiled_prefill_attention
+    assert enabled.use_bounded_kv_capacity
+    assert isinstance(enabled.layers_inner[0].input_layernorm, FastRMSNorm)
+    assert enabled.layers_inner[0].self_attn.use_tiled_prefill_attention
+
+    inputs = mx.array([[1, 2, 3]], dtype=mx.int32)
+    actual = enabled(inputs, 0, enabled.create_kv_cache(capacity=3))
+    expected = disabled(inputs, 0, disabled.create_kv_cache())
+    assert_allclose(actual, expected, mx.bfloat16, atol=3e-2, rtol=3e-2)
+
+
+def test_retired_experiments_are_not_week2_checkpoints():
+    for checkpoint in ("decode-attention", "split-k"):
+        try:
+            Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint=checkpoint)
+        except ValueError as exc:
+            assert "unknown Week 2 checkpoint" in str(exc)
+        else:
+            raise AssertionError(
+                f"retired checkpoint {checkpoint!r} remained selectable"
+            )
+
+
+def test_default_model_is_the_cumulative_selected_checkpoint():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model())
+    assert model.checkpoint == "selected"
+    assert model.mechanism_controls == {
+        "capacity_cache": True,
+        "register_cached_rmsnorm": True,
+        "tiled_prefill": True,
+    }

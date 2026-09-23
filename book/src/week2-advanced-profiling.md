@@ -20,7 +20,7 @@ capturing it. For a fused-kernel decode example:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2
+pdm run test --week 2 --day 4 -- -k swiglu
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case swiglu:decode:128 --warmup 4 --iterations 12 \

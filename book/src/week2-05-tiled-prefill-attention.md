@@ -12,7 +12,7 @@ private native binding, the BQ32/BK16 Metal kernel, and model selection/counters
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 6 -- -k causal_gqa
+pdm run test --week 2 --day 5 -- -k causal_gqa
 ```
 
 The supplied witness uses BF16, head dimension 128, grouped-query attention,
@@ -75,7 +75,7 @@ A fully masked row has no softmax mass. Return a finite all-zero row rather than
 dividing zero by zero or propagating `NaN`:
 
 ```bash
-pdm run test --week 2 --day 6 -- -k fully_masked
+pdm run test --week 2 --day 5 -- -k fully_masked
 ```
 
 ## Select the Tiled Path and Keep the Fallback
@@ -96,7 +96,7 @@ query and checks both fallback and readable counters.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 6
+pdm run test --week 2 --day 5
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint tiled-prefill --model qwen3-0.6b --max-tokens 16
 ```
@@ -148,7 +148,7 @@ with the supplied model-free test and preserve the readable attention path for
 one-token decode and ineligible shapes:
 
 ```bash
-pdm run test --week 2 --day 7
+pdm run test --week 2 --day 5
 ```
 
 The [performance appendix](./appendix-performance.md) separates component

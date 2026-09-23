@@ -18,9 +18,9 @@ regression before all three are active:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5 -- -k rms
-pdm run test --week 2 --day 5 -- -k rope
-pdm run test --week 2 --day 5 -- -k swiglu
+pdm run test --week 2 --day 4 -- -k rms
+pdm run test --week 2 --day 4 -- -k rope
+pdm run test --week 2 --day 4 -- -k swiglu
 ```
 
 RMSNorm, RoPE, and SwiGLU surround the projections in every transformer layer.
@@ -101,7 +101,7 @@ the focused test and record the cumulative model result before touching RoPE:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5 -- -k rms
+pdm run test --week 2 --day 4 -- -k rms
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint rmsnorm --model qwen3-0.6b --num-seqs 1 \
   --min-input-len 128 --max-input-len 128 \
@@ -144,7 +144,7 @@ Replace the Python `mlx.core` RoPE in the model you have already optimized.
 Test and measure that cumulative checkpoint before moving to SwiGLU:
 
 ```bash
-pdm run test --week 2 --day 5 -- -k rope
+pdm run test --week 2 --day 4 -- -k rope
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint rope --model qwen3-0.6b --num-seqs 1 \
   --min-input-len 128 --max-input-len 128 \
@@ -174,7 +174,7 @@ The fused kernel removes those intermediate tensors and dispatch boundaries.
 Wire the fused expression into the model, then record the third checkpoint:
 
 ```bash
-pdm run test --week 2 --day 5 -- -k swiglu
+pdm run test --week 2 --day 4 -- -k swiglu
 pdm run bench --solution tiny_llm --loader week2 \
   --week2-checkpoint swiglu --model qwen3-0.6b --num-seqs 1 \
   --min-input-len 128 --max-input-len 128 \
@@ -194,7 +194,7 @@ Week 2 interfaces reusable by the Week 3 serving model.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 4
 ```
 
 Use tolerance-based comparisons with the Python reference equations rather

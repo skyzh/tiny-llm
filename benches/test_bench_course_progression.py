@@ -98,42 +98,40 @@ def _assert_required_progression_is_profile_free(chapter: str, day: int) -> None
     assert optional_blocks, f"Day {day} must label its optional evidence"
 
 
-def test_week2_live_labels_follow_the_seven_day_book():
+def test_week2_live_labels_follow_the_five_day_book():
     labels = {variant.key: variant.label for variant in WEEK2_VARIANTS}
     assert labels == {
         "week1": "Week 1 readable",
         "week2-kv-cache": "2.1 Reuse the prefix",
-        "week2-capacity-cache": "2.2 Bound KV-cache movement",
-        "week2-quantized-matvec": "2.3 Keep W4 packed",
-        "week2-simd-matmul": "2.4 SIMD matrix prefill",
-        "week2-rmsnorm": "2.5 Compact RMSNorm",
-        "week2-rope": "2.5 + Compact RoPE",
-        "week2-swiglu": "2.5 + Compact SwiGLU",
-        "week2-tiled-prefill": "2.6 Tiled dense prefill attention",
-        "week2-selected": "2.7 Select the cumulative path",
+        "week2-capacity-cache": "2.1 + Bound KV-cache movement",
+        "week2-quantized-matvec": "2.2 Keep W4 packed",
+        "week2-simd-matmul": "2.3 SIMD matrix prefill",
+        "week2-rmsnorm": "2.4 Compact RMSNorm",
+        "week2-rope": "2.4 + Compact RoPE",
+        "week2-swiglu": "2.4 + Compact SwiGLU",
+        "week2-tiled-prefill": "2.5 Tiled dense prefill attention",
+        "week2-selected": "2.5 + Select the cumulative path",
         "mlx": "MLX",
     }
 
     summary = (ROOT / "book/src/SUMMARY.md").read_text()
+    week2_summary = summary.split("Week 2:", 1)[1].split("Week 3:", 1)[0]
     for title in (
-        "Day 1: Reuse the Prefix",
-        "Day 2: Bound KV-Cache Movement",
-        "Day 3: Keep W4 Packed",
-        "Day 4: SIMD Matrix Prefill",
-        "Day 5: Compact Model Primitives",
-        "Day 6: Tiled Dense Prefill Attention",
-        "Day 7: Select the Cumulative Path",
+        "Day 1: Cache and Measure",
+        "Day 2: Keep W4 Packed",
+        "Day 3: SIMD Matrix Prefill",
+        "Day 4: Fused Model Primitives",
+        "Day 5: Tiled Dense Prefill Attention",
     ):
-        assert title in summary
+        assert title in week2_summary
+    assert len(re.findall(r"\[🚧 Day \d:", week2_summary)) == 5
 
     chapter_headings = {
-        "week2-01-kv-cache.md": "# 🚧 Week 2 Day 1: Reuse the Prefix",
-        "week2-02-benchmark-profile.md": "# 🚧 Week 2 Day 2: Bound KV-Cache Movement",
-        "week2-03-quantize-model.md": "# 🚧 Week 2 Day 3: Keep W4 Packed",
-        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: SIMD Matrix Prefill",
-        "week2-05-simd-matrix-prefill.md": "# 🚧 Week 2 Day 5: Compact Model Primitives",
-        "week2-06-operator-lab.md": "# 🚧 Week 2 Day 6: Tiled Dense Prefill Attention",
-        "week2-07-split-k-prefill.md": "# 🚧 Week 2 Day 7: Select the Cumulative Path",
+        "week2-01-kv-cache.md": "# 🚧 Week 2 Day 1: Reuse the Prefix, Then Bound the Cache",
+        "week2-02-quantize-model.md": "# 🚧 Week 2 Day 2: Keep W4 Packed",
+        "week2-03-simd-matrix-prefill.md": "# 🚧 Week 2 Day 3: SIMD-Matrix Prefill",
+        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Kernels",
+        "week2-05-tiled-prefill-attention.md": "# 🚧 Week 2 Day 5: Tiled Dense Prefill Attention",
     }
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
@@ -141,26 +139,18 @@ def test_week2_live_labels_follow_the_seven_day_book():
 
     readme = (ROOT / "README.md").read_text()
     week2_overview = readme.split("- **Week 2:", 1)[1].split("- **Week 3:", 1)[0]
-    for title in (
-        "Reuse the Prefix",
-        "Bound KV-Cache Movement",
-        "Keep W4 Packed",
-        "SIMD Matrix Prefill",
-        "Compact Model Primitives",
-        "Tiled Dense Prefill Attention",
-        "Select the Cumulative Path",
-    ):
-        assert title in readme
     assert "decode attention" not in week2_overview.lower()
     assert "split-k" not in week2_overview.lower()
-
-    assert "| 2.1 | Reuse the Prefix |" in readme
-    assert "| 2.2 | Bound KV-Cache Movement |" in readme
-    assert "| 2.3 | Keep W4 Packed |" in readme
-    assert "| 2.4 | SIMD Matrix Prefill |" in readme
-    assert "| 2.5 | Compact Model Primitives |" in readme
-    assert "| 2.6 | Tiled Dense Prefill Attention |" in readme
-    assert "| 2.7 | Select the Cumulative Path |" in readme
+    for row in (
+        "| 2.1 | Cache and Measure |",
+        "| 2.2 | Keep W4 Packed |",
+        "| 2.3 | SIMD Matrix Prefill |",
+        "| 2.4 | Fused Model Primitives |",
+        "| 2.5 | Tiled Dense Prefill Attention |",
+    ):
+        assert row in readme
+    assert "| 2.6 |" not in readme
+    assert "| 2.7 |" not in readme
 
 
 def test_week2_progression_checkpoints_parse_through_public_bench(monkeypatch):
@@ -223,74 +213,61 @@ def test_benchmark_refuses_existing_json_before_host_or_model_work(
         progression.main()
 
 
-def test_week2_profile_boundary_is_optional_and_quantization_is_day_3():
-    day2 = (ROOT / "book/src/week2-02-benchmark-profile.md").read_text()
-    day3 = (ROOT / "book/src/week2-03-quantize-model.md").read_text()
-    appendix = (ROOT / "book/src/week2-advanced-profiling.md").read_text()
+def test_week2_profile_boundary_is_optional_and_quantization_is_day_2():
+    day1 = (ROOT / "book/src/week2-01-kv-cache.md").read_text()
+    day2 = (ROOT / "book/src/week2-02-quantize-model.md").read_text()
+    optional_capture = (ROOT / "book/src/week2-advanced-profiling.md").read_text()
+    overview = (ROOT / "book/src/week2-overview.md").read_text()
 
-    assert "--week2-checkpoint kv-cache" in day2
-    assert "--week2-checkpoint capacity-cache" in day2
-    assert "# Optional: Read a Week 2 Evidence Package" in appendix
-    assert "The required Week 2 route needs only" in appendix
-    assert "an optional method for reading a preserved measurement package" in appendix
-    assert "pdm run test --week 2 --day 3" in day3
-    assert "Week 2 Day 2: Benchmark, Profile, and Quantize" not in day3
-
-    removed_workflow_tokens = ("capture-week2-shader", "MLX_METAL_DEBUG")
-    live_week2 = "\n".join(
-        (ROOT / "book/src" / f"week2-0{day}-{name}.md").read_text()
-        for day, name in (
-            (2, "benchmark-profile"),
-            (3, "quantize-model"),
-            (4, "fused-model-kernels"),
-            (5, "simd-matrix-prefill"),
-            (6, "operator-lab"),
-            (7, "split-k-prefill"),
-        )
-    )
-    assert not any(token in live_week2 for token in removed_workflow_tokens)
+    assert "--week2-checkpoint kv-cache" in day1
+    assert "--week2-checkpoint capacity-cache" in day1
+    assert "pdm run test --week 2 --day 1" in day1
+    assert "pdm run test --week 2 --day 2" in day2
+    assert "--week2-checkpoint quantized-matvec" in day2
+    assert "[optional macOS capture lab]" in overview
+    assert "It is never an acceptance gate." in optional_capture
+    assert "pdm run test --week 2 --day 4 -- -k swiglu" in optional_capture
     scripts = (ROOT / "pyproject.toml").read_text()
     assert "capture-week2" in scripts
     assert "reduce-week2-gpudebug" in scripts
-    assert "| Category | Establishes | Does not establish |" in appendix
-    assert "Do not add the capacity, RMSNorm" in appendix
 
 
-def test_required_week2_progression_uses_portable_attribution_not_local_capture():
+def test_required_week2_progression_uses_portable_checks_not_local_capture():
     days = {
         day: (ROOT / "book/src" / filename).read_text()
         for day, filename in {
-            2: "week2-02-benchmark-profile.md",
-            3: "week2-03-quantize-model.md",
+            1: "week2-01-kv-cache.md",
+            2: "week2-02-quantize-model.md",
+            3: "week2-03-simd-matrix-prefill.md",
             4: "week2-04-fused-model-kernels.md",
-            5: "week2-05-simd-matrix-prefill.md",
-            6: "week2-06-operator-lab.md",
-            7: "week2-07-split-k-prefill.md",
+            5: "week2-05-tiled-prefill-attention.md",
         }.items()
     }
-
     expected_checkpoints = {
-        2: ("capacity-cache",),
-        3: ("quantized-matvec",),
-        4: ("simd-matmul",),
-        5: ("rmsnorm", "rope", "swiglu"),
-        6: ("tiled-prefill",),
-        7: ("selected",),
+        1: ("kv-cache", "capacity-cache"),
+        2: ("quantized-matvec",),
+        3: ("simd-matmul",),
+        4: ("rmsnorm", "rope", "swiglu"),
+        5: ("tiled-prefill", "selected"),
     }
-    local_capture_tokens = (
-        "Xcode GPU capture",
-        "Metal System Trace",
-        ".gputrace",
-        "gpudebug",
-        "screenshot",
-        "GPU duration",
-    )
-
     for day, chapter in days.items():
         assert all(checkpoint in chapter for checkpoint in expected_checkpoints[day])
+        assert f"pdm run test --week 2 --day {day}" in chapter
         assert "--week2-checkpoint decode-attention" not in chapter
         assert "--week2-checkpoint split-k" not in chapter
-        assert not any(token in chapter for token in local_capture_tokens)
+    assert "`gpudebug` output, screenshot, or device-specific counter gates" in days[1]
+    for day in (2, 3, 4, 5):
+        assert not any(
+            token in days[day]
+            for token in (
+                "Xcode GPU capture",
+                "Metal System Trace",
+                ".gputrace",
+                "gpudebug",
+                "screenshot",
+                "GPU duration",
+            )
+        )
 
 
 @pytest.mark.parametrize(

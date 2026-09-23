@@ -24,7 +24,7 @@ focused gate before editing:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 3
 ```
 
 Freeze the existing `quantized-matvec` control before the new SIMD matrix
@@ -49,7 +49,7 @@ prefill kernel at one shape with an old result from another shape.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4 -- -k partial_tiles
+pdm run test --week 2 --day 3 -- -k partial_tiles
 ```
 
 The first failure should reach the incomplete matrix kernel or its dispatcher.
@@ -121,7 +121,7 @@ model to exercise the checkpoint:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4
+pdm run test --week 2 --day 3
 
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint simd-matmul --model qwen3-0.6b --max-tokens 16

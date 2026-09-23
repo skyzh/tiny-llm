@@ -107,13 +107,11 @@ one explicit byte range through the existing loop.
 | 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ |
 | 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
 | 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
-| 2.1 | Reuse the Prefix | ✅ | ✅ | ✅ | 🚧 |
-| 2.2 | Bound KV-Cache Movement | ✅ | ✅ | ✅ | 🚧 |
-| 2.3 | Keep W4 Packed | ✅ | ✅ | ✅ | 🚧 |
-| 2.4 | SIMD Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
-| 2.5 | Compact Model Primitives | ✅ | ✅ | ✅ | 🚧 |
-| 2.6 | Tiled Dense Prefill Attention | ✅ | ✅ | ✅ | 🚧 |
-| 2.7 | Select the Cumulative Path | ✅ | ✅ | ✅ | 🚧 |
+| 2.1 | Cache and Measure | ✅ | ✅ | ✅ | 🚧 |
+| 2.2 | Keep W4 Packed | ✅ | ✅ | ✅ | 🚧 |
+| 2.3 | SIMD Matrix Prefill | ✅ | ✅ | ✅ | 🚧 |
+| 2.4 | Fused Model Primitives | ✅ | ✅ | ✅ | 🚧 |
+| 2.5 | Tiled Dense Prefill Attention | ✅ | ✅ | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |

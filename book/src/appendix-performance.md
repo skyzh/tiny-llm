@@ -6,9 +6,11 @@ Numbers in different categories or with different denominators are not additive.
 
 ## Bound Successor and Measurement Package
 
-The executable base for this five-day book is source head
+The underlying Week 2 mechanisms for this five-day book came from source head
 `7d02ffaa0f50bb6abfee7626bfcf5333509372f0`, tree
-`ad98560f032a5bb4b935185362733736eac5bea6`. Its public Week 2 checkpoints
+`ad98560f032a5bb4b935185362733736eac5bea6`. The five-day integration
+renumbers learner tests and labels without changing those mechanisms. Its
+public Week 2 checkpoints
 are, in order:
 
 `kv-cache` → `capacity-cache` → `quantized-matvec` → `simd-matmul` →

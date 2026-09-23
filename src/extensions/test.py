@@ -5,10 +5,10 @@ import tiny_llm_ext
 
 
 LEARNER_EXTENSION_INTERFACES = {
-    "quantized_matmul": "Week 2, Day 3",
-    "rms_norm": "Week 2, Day 5",
-    "rope": "Week 2, Day 5",
-    "swiglu": "Week 2, Day 5",
+    "quantized_matmul": "Week 2, Day 2",
+    "rms_norm": "Week 2, Day 4",
+    "rope": "Week 2, Day 4",
+    "swiglu": "Week 2, Day 4",
     "paged_cache_update": "Week 3, Day 3",
     "quantized_embedding": "Week 3, Day 4",
     "paged_attention": "Week 3, Day 4",

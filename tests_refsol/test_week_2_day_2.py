@@ -1,101 +1,198 @@
-"""Week 2 Day 2 request-bounded dense KV-cache tests."""
+"""Week 2 Day 2 quantized-matvec tests."""
+
+import importlib
+import inspect
 
 import mlx.core as mx
-import pytest
 
-from .tiny_llm_base import Qwen3ModelWeek2, TinyKvFullCache
+from .tiny_llm_base import (
+    Qwen3ModelWeek2,
+    QuantizedEmbedding,
+    QuantizedWeights,
+    RMSNorm,
+    RoPE,
+    quantized_matmul,
+    quantized_matmul_vanilla,
+    quantized_matvec_custom,
+)
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
+embedding_module = importlib.import_module(QuantizedEmbedding.__module__)
+quantize_module = importlib.import_module(quantized_matmul.__module__)
 
-def _chunk(start: int, length: int):
-    key = mx.arange(start, start + length * 2, dtype=mx.float32).reshape(
-        1, 1, length, 2
+
+def test_task_1_quantized_embedding_dequantizes_selected_rows():
+    weight = mx.random.normal((7, 256)).astype(mx.bfloat16)
+    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+    embedding = QuantizedEmbedding(
+        7, 256, QuantizedWeights(scales, biases, 128, 4, packed)
     )
-    return key, key + 100
+    indices = mx.array([[1, 4]])
 
-
-def test_task_1_capacity_cache_exposes_only_the_logical_prefix():
-    cache = TinyKvFullCache(capacity=5)
-    key_1, value_1 = _chunk(0, 2)
-    key_2, value_2 = _chunk(4, 1)
-
-    cache.update_and_fetch(key_1, value_1)
-    cached_key, cached_value, offset, _ = cache.update_and_fetch(key_2, value_2)
-    mx.eval(cached_key, cached_value)
-
-    assert offset == 3
-    assert cached_key.shape == cached_value.shape == (1, 1, 3, 2)
-    assert cache.key_values[0].shape == cache.key_values[1].shape == (1, 1, 5, 2)
-    assert_allclose(cached_key, mx.concat([key_1, key_2], axis=2), mx.float32)
-    assert_allclose(cached_value, mx.concat([value_1, value_2], axis=2), mx.float32)
-    assert cache.logical_copy_bytes == 0
-    assert cache.physical_growth_copy_bytes == 0
-    assert cache.slice_write_bytes == (
-        key_1.nbytes + value_1.nbytes + key_2.nbytes + value_2.nbytes
+    result = embedding(indices)
+    assert result is not None, "implement the QuantizedEmbedding.__call__ learner seam"
+    expected = mx.dequantize(
+        packed[indices], scales[indices], biases[indices], group_size=128, bits=4
     )
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def test_task_2_rewind_reuses_capacity_and_overflow_is_transactional():
-    cache = TinyKvFullCache(capacity=3)
-    key, value = _chunk(0, 2)
-    cache.update_and_fetch(key, value)
-    cache.rewind(1)
-    replacement_key, replacement_value = _chunk(20, 2)
-    cached_key, cached_value, offset, _ = cache.update_and_fetch(
-        replacement_key, replacement_value
+def test_task_1_quantized_embedding_accepts_sampled_uint32_tokens():
+    weight = mx.random.normal((7, 256)).astype(mx.bfloat16)
+    packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+    embedding = QuantizedEmbedding(
+        7, 256, QuantizedWeights(scales, biases, 128, 4, packed)
     )
-    mx.eval(cached_key, cached_value)
+    indices = mx.array([[1, 4]], dtype=mx.uint32)
 
-    assert offset == 3
-    assert cache.physical_growth_copy_bytes == 0
-    assert_allclose(
-        cached_key,
-        mx.concat([key[:, :, :1], replacement_key], axis=2),
-        mx.float32,
+    result = embedding(indices)
+    expected = mx.dequantize(
+        packed[indices], scales[indices], biases[indices], group_size=128, bits=4
     )
-    assert_allclose(
-        cached_value,
-        mx.concat([value[:, :, :1], replacement_value], axis=2),
-        mx.float32,
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
+
+
+def test_week2_quantization_path_uses_course_owned_operators():
+    source = (
+        inspect.getsource(quantize_module.quantized_matmul)
+        + inspect.getsource(quantize_module.dequantize_weights)
+        + inspect.getsource(embedding_module.QuantizedEmbedding.__call__)
     )
-
-    before = tuple(array.tolist() for array in cache.key_values)
-    with pytest.raises(ValueError, match="capacity 3 exceeded"):
-        extra_key, extra_value = _chunk(30, 1)
-        cache.update_and_fetch(extra_key, extra_value)
-    mx.eval(*cache.key_values)
-    assert tuple(array.tolist() for array in cache.key_values) == before
-    assert cache.offset == 3
-
-    movement_counters = (
-        cache.logical_copy_bytes,
-        cache.physical_growth_copy_bytes,
-        cache.slice_write_bytes,
-        cache.growth_copy_bytes,
-    )
-    cache.reset()
-    assert cache.offset == 0
-    assert cache.key_values is not None
-    assert (
-        cache.logical_copy_bytes,
-        cache.physical_growth_copy_bytes,
-        cache.slice_write_bytes,
-        cache.growth_copy_bytes,
-    ) == movement_counters
+    assert "mx.quantized_matmul" not in source
+    assert "mx.dequantize" not in source
 
 
-def test_task_3_capacity_checkpoint_runs_the_week2_engine():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="capacity-cache")
+def test_task_4_model_integrates_packed_weights_before_fast_kernels():
+    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="quantized-matvec")
+    layer = model.layers_inner[0]
+
+    assert isinstance(model.embedding, QuantizedEmbedding)
+    assert isinstance(layer.self_attn.wq, QuantizedWeights)
+    assert isinstance(layer.mlp.w_gate, QuantizedWeights)
+    assert isinstance(layer.input_layernorm, RMSNorm)
+    assert isinstance(layer.self_attn.rope, RoPE)
     assert model.use_bounded_kv_capacity
+    assert not layer.self_attn.use_tiled_prefill_attention
+    assert not layer.mlp.use_fast_swiglu
 
-    bounded = model.create_kv_cache(capacity=3)
-    readable = Qwen3ModelWeek2(
-        tiny_qwen3_mlx_model(), checkpoint="kv-cache"
-    ).create_kv_cache()
-    inputs = mx.array([[1, 2, 3]], dtype=mx.int32)
-    actual = model(inputs, 0, bounded)
-    expected = model(inputs, 0, readable)
 
-    assert_allclose(actual, expected, mx.bfloat16)
-    assert all(cache.capacity == 3 for cache in bounded)
-    assert all(cache.slice_write_bytes > 0 for cache in bounded)
+def quantized_matmul_helper(
+    stream: mx.Stream,
+    precision: mx.Dtype,
+    identity_matrix: bool,
+):
+    with mx.stream(stream):
+        group_size = 128
+        if identity_matrix:
+            input = mx.eye(group_size, dtype=precision)
+        else:
+            input = mx.random.normal(shape=(3, group_size), dtype=precision)
+        weight = mx.random.normal(shape=(5, group_size), dtype=precision)
+        w_q, scales, biases = mx.quantize(weight, group_size=group_size, bits=4)
+        user_out = quantized_matmul(
+            scales=scales,
+            biases=biases,
+            group_size=group_size,
+            bits=4,
+            a=input,
+            b=w_q,
+            transpose_b=True,
+        )
+        ref_out = mx.quantized_matmul(
+            input,
+            w_q,
+            scales,
+            biases,
+            group_size=group_size,
+            bits=4,
+            transpose=True,
+        )
+        assert user_out.dtype == mx.bfloat16
+        if identity_matrix:
+            assert_allclose(user_out, ref_out, precision)
+        else:
+            assert_allclose(
+                user_out,
+                ref_out,
+                precision,
+                atol=5.0e-1,
+                message=f"quantized matmul {precision} comparison",
+            )
+
+
+def test_task_3_quantized_matmul_simple_bf16_gpu():
+    quantized_matmul_helper(mx.gpu, mx.bfloat16, True)
+
+
+def test_task_3_quantized_matmul_complex_bf16_gpu():
+    quantized_matmul_helper(mx.gpu, mx.bfloat16, False)
+
+
+def test_task_3_optimized_matvec_matches_vanilla_gpu():
+    """The scalar baseline must remain callable for a decode-shaped input."""
+    with mx.stream(mx.gpu):
+        input = mx.random.normal((1, 256)).astype(mx.bfloat16)
+        weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        optimized = quantized_matvec_custom(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        vanilla = quantized_matmul_vanilla(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        assert_allclose(optimized, vanilla, mx.bfloat16, atol=0.5, rtol=2e-2)
+
+
+def quantized_matvec_custom_helper(num_rows: int):
+    with mx.stream(mx.gpu):
+        group_size = 128
+        input = mx.random.normal(shape=(num_rows, group_size), dtype=mx.bfloat16)
+        weight = mx.random.normal(shape=(64, group_size), dtype=mx.bfloat16)
+        w_q, scales, biases = mx.quantize(weight, group_size=group_size, bits=4)
+        user_out = quantized_matvec_custom(
+            scales=scales,
+            biases=biases,
+            group_size=group_size,
+            bits=4,
+            a=input,
+            b=w_q,
+            transpose_b=True,
+        )
+        ref_out = mx.quantized_matmul(
+            input,
+            w_q,
+            scales,
+            biases,
+            group_size=group_size,
+            bits=4,
+            transpose=True,
+        )
+        assert_allclose(user_out, ref_out, mx.bfloat16, atol=5.0e-1)
+
+
+def test_task_4_quantized_matvec_custom_m1_gpu():
+    quantized_matvec_custom_helper(1)
+
+
+def test_task_4_quantized_matvec_custom_m8_gpu():
+    quantized_matvec_custom_helper(8)
+
+
+def test_task_4_quantized_matvec_custom_qwen_shape_gpu():
+    with mx.stream(mx.gpu):
+        input = mx.random.normal((1, 2560)).astype(mx.bfloat16)
+        weight = mx.random.normal((1024, 2560)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        result = quantized_matvec_custom(
+            scales, biases, 128, 4, input, packed, transpose_b=True
+        )
+        expected = mx.quantized_matmul(
+            input,
+            packed,
+            scales,
+            biases,
+            group_size=128,
+            bits=4,
+            transpose=True,
+        )
+        assert_allclose(result, expected, mx.bfloat16, atol=1.5)

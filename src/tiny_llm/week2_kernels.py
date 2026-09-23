@@ -66,7 +66,7 @@ def _prepare_dense_attention_inputs(
     value: mx.array,
     mask: mx.array | str | None,
 ) -> tuple[mx.array, mx.array, mx.array, mx.array, bool, bool]:
-    """Validate and flatten grouped-query inputs for the Day 6 native seam."""
+    """Validate and flatten grouped-query inputs for the Day 5 native seam."""
     if query.ndim != 4 or key.ndim != 4 or value.ndim != 4:
         raise ValueError("dense attention expects [B,H,L,D] query, key, and value")
     batch_size, num_heads, query_length, head_dim = query.shape

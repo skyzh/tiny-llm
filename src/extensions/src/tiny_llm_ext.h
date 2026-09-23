@@ -9,8 +9,8 @@ namespace tiny_llm_ext {
 
 void load_library(const char *path);
 
-// Week 2, Day 3: implement the wrapper and the initial vanilla/matvec paths.
-// Week 2, Day 4: extend the same interface with SIMD-matrix scheduling.
+// Week 2, Day 2: implement the wrapper and the initial vanilla/matvec paths.
+// Week 2, Day 3: extend the same interface with SIMD-matrix scheduling.
 mx::array quantized_matmul(const mx::array &scales, const mx::array &biases, const int group_size, const int bits,
                            const mx::array &a, const mx::array &b, const bool transpose_b,
                            const bool use_simdgroup = true, const bool use_split_k = false, mx::StreamOrDevice s = {});
@@ -49,7 +49,7 @@ public:
     const char *name() const override { return "QuantizedEmbedding"; }
 };
 
-// Week 2, Day 5: implement the three fused model kernels in checkpoint order.
+// Week 2, Day 4: implement the three fused model kernels in checkpoint order.
 mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::StreamOrDevice s = {});
 mx::array rope(const mx::array &x, const mx::array &offsets, int dims, float base, bool traditional,
                mx::StreamOrDevice s = {});
@@ -100,7 +100,7 @@ public:
     const char *name() const override { return "Week2SwiGLU"; }
 };
 
-// Week 2, Day 6: implement BQ32/BK16 tiled prefill with online max/sum.
+// Week 2, Day 5: implement BQ32/BK16 tiled prefill with online max/sum.
 // The leading underscore keeps the raw native shape contract private; learners
 // call the checked Python wrapper in tiny_llm.week2_kernels.
 mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
