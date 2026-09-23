@@ -101,10 +101,7 @@ learner cache TODOs.
 To run a completed checkpoint without solving it first:
 
 ```bash
-# Build the supplied reference extension once after setup or a clean checkout.
-pdm run build-ext-ref
-
-# Run one supplied reference test group.
+# Run the Day 1 reference tests after setup.
 pdm run test-refsol --week 2 --day 1
 
 # Run a completed course model.
@@ -113,6 +110,10 @@ pdm run main --solution tiny_llm_ref --loader week2 --week2-checkpoint kv-cache
 # Run the separate full-MLX baseline.
 pdm run main --solution mlx
 ```
+
+The Day 1 reference tests do not require `pdm run build-ext-ref`. That
+reference-native build is deferred to Day 2; its current W4 Metal compilation
+issue should not block the Python cache checkpoints here.
 
 `--solution tiny_llm_ref` runs the supplied implementation end to end. `--solution mlx`
 runs MLX end to end. Neither command composes “earlier weeks from the reference

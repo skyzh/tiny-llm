@@ -273,13 +273,14 @@ pdm run main --solution tiny_llm_ref --loader week2 \
 
 Before adding capacity, compare the Week 1 full-prefix loop with this
 `kv-cache` checkpoint. The progression runner starts each variant in a fresh
-process, uses the same Qwen3-4B 128-token prompt and 129-token output, and
-records the workload and results in JSON:
+process, uses the cached Qwen3-0.6B model with the same 128-token prompt and
+129-token output for both variants, and records the workload and results in
+JSON:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 \
   --repeats 2 --variant week1 --variant week2-kv-cache \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits all --json-output week2-day1-cache.json
 ```
 
@@ -409,7 +410,7 @@ file so the original Week 1 versus `kv-cache` observation remains available:
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 \
   --repeats 2 --variant week1 --variant week2-kv-cache \
-  --variant week2-capacity-cache --model qwen3-4b \
+  --variant week2-capacity-cache --model qwen3-0.6b \
   --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits all --json-output week2-day1-cache-ladder.json
 ```
@@ -447,16 +448,17 @@ two different algorithms instead of locating the next optimization target.
 ### Record a Matched Baseline
 
 Use the same model, prompt length, output length, device, and warmup count for
-your solution and MLX:
+your solution and MLX. The required baseline uses the 0.6B model downloaded
+in setup:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint capacity-cache --model qwen3-4b \
+  --week2-checkpoint capacity-cache --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last
 
-pdm run bench --solution mlx --loader week2 --model qwen3-4b \
+pdm run bench --solution mlx --loader week2 --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last
@@ -471,7 +473,7 @@ Or run the cumulative ladder in fresh processes:
 pdm run bench-week2-progression --offline --repeats 2 \
   --solution tiny_llm --suite week2 \
   --variant week2-capacity-cache --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+  --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last --json-output week2-day1-baseline.json
 ```
 
@@ -505,7 +507,7 @@ Next, attribute the same cached-decode workload. Keep the learner solution,
 model, decode phase, and 128-token context fixed:
 
 ```bash
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --case capacity-cache:decode:128 --warmup 4 --iterations 12 \
   --json-output week2-day1-attribution.json
 ```
@@ -531,13 +533,26 @@ work ends with the benchmark, attribution, and decision record. The
 [earlier macOS 27 capture lab](./week2-advanced-profiling.md) is historical; no trace,
 `gpudebug` output, screenshot, or device-specific counter gates the W4 lesson.
 
+For an optional deeper run with Qwen3-4B, use a device with enough unified
+memory for the dense BF16 Week 2 model (the [model table](./preface.md#choose-a-model-for-your-mac)
+recommends at least 32 GB), and download/cache it before using `--offline`:
+
+```bash
+hf download Qwen/Qwen3-4B-MLX-4bit
+```
+
+Then rerun the matched progression, baseline, and attribution commands with
+`--model qwen3-4b` on every compared row. Keep their JSON and conclusions
+separate from the required 0.6B observations; model size changes the workload.
+
 ## Why Quantize: The Decode Roofline
 
 The measurement now has a hardware reason to test. LLM decode is typically
 **memory-bandwidth bound**: each token reads the model's weights while doing
 relatively little work with them. Use the dimensions in the official
 [Qwen3-4B configuration](https://huggingface.co/Qwen/Qwen3-4B/blob/main/config.json)
-to calculate the ideal bound:
+to calculate an illustrative 4B ideal bound. This is a model-size calculation,
+not the measured roofline of your required 0.6B run:
 
 ```plain
 Qwen3-4B dimensions:
