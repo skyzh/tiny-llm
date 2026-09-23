@@ -68,7 +68,11 @@ def test_capacity_cache_exposes_only_the_logical_prefix():
     key_2, value_2 = _chunk(4, 1)
 
     cache.update_and_fetch(key_1, value_1)
-    cached_key, cached_value, offset, _ = cache.update_and_fetch(key_2, value_2)
+    prefix_update = cache.update_and_fetch(key_2, value_2)
+    assert prefix_update is not None, (
+        "implement the TinyKvFullCache capacity-cache update_and_fetch learner seam"
+    )
+    cached_key, cached_value, offset, _ = prefix_update
     mx.eval(cached_key, cached_value)
 
     assert offset == 3
