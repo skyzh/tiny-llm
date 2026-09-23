@@ -21,6 +21,7 @@ from .week2_kernels import (
 
 @dataclass(frozen=True)
 class Week2CheckpointFeatures:
+    bounded_kv_capacity: bool = False
     quantized_weights: bool = False
     fast_rms_norm: bool = False
     fast_rope: bool = False
@@ -33,40 +34,7 @@ class Week2CheckpointFeatures:
 WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
     {
         "kv-cache": Week2CheckpointFeatures(),
-        "quantized-matvec": Week2CheckpointFeatures(quantized_weights=True),
-        "rmsnorm": Week2CheckpointFeatures(quantized_weights=True, fast_rms_norm=True),
-        "rope": Week2CheckpointFeatures(
-            quantized_weights=True, fast_rms_norm=True, fast_rope=True
-        ),
-        "swiglu": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-        ),
-        "simd-matmul": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            simdgroup_matmul=True,
-        ),
-        "decode-attention": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            simdgroup_matmul=True,
-            decode_attention=True,
-        ),
-        "split-k": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            simdgroup_matmul=True,
-            split_k_matmul=True,
-        ),
+        "capacity-cache": Week2CheckpointFeatures(bounded_kv_capacity=True),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
@@ -295,16 +263,24 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "split-k",
+        checkpoint: str = "capacity-cache",
         use_mlx_quantized_linear: bool = False,
+        use_bounded_kv_capacity: bool | None = None,
     ):
         if checkpoint not in WEEK2_CHECKPOINTS:
             raise ValueError(
                 f"unknown Week 2 checkpoint {checkpoint!r}; "
                 f"choose one of {WEEK2_CHECKPOINTS}"
             )
+        if use_bounded_kv_capacity is not None and not isinstance(
+            use_bounded_kv_capacity, bool
+        ):
+            raise ValueError("use_bounded_kv_capacity must be a bool or None")
         self.checkpoint = checkpoint
         features = WEEK2_CHECKPOINT_FEATURES[checkpoint]
+        if use_bounded_kv_capacity is None:
+            use_bounded_kv_capacity = features.bounded_kv_capacity
+        self.use_bounded_kv_capacity = use_bounded_kv_capacity
         use_quantized_weights = features.quantized_weights
         use_fast_rms_norm = features.fast_rms_norm
         use_fast_rope = features.fast_rope
@@ -393,10 +369,12 @@ class Qwen3ModelWeek2:
             self.w_lm_head = None
         self.mlx_model = mlx_model
 
-    def create_kv_cache(self) -> list[TinyKvCache]:
+    def create_kv_cache(self, capacity: int | None = None) -> list[TinyKvCache]:
         from .kv_cache import TinyKvFullCache
 
-        return [TinyKvFullCache() for _ in range(self.num_hidden_layers)]
+        return [
+            TinyKvFullCache(capacity=capacity) for _ in range(self.num_hidden_layers)
+        ]
 
     def __call__(
         self,

@@ -4,19 +4,20 @@ from typing import Any
 
 import mlx.core as mx
 
-from .embedding import Embedding
+from .embedding import Embedding  # noqa: F401 - learner checkpoint dependency
 from .kv_cache import TinyKvCache
-from .quantize import QuantizedWeights, dequantize_linear
+from .quantize import QuantizedWeights, dequantize_linear  # noqa: F401
 from .week2_kernels import (
-    FastRMSNorm,
-    FastRoPE,
-    scaled_dot_product_attention,
-    swiglu,
+    FastRMSNorm,  # noqa: F401 - learner checkpoint dependency
+    FastRoPE,  # noqa: F401 - learner checkpoint dependency
+    scaled_dot_product_attention,  # noqa: F401 - learner checkpoint dependency
+    swiglu,  # noqa: F401 - learner checkpoint dependency
 )
 
 
 @dataclass(frozen=True)
 class Week2CheckpointFeatures:
+    bounded_kv_capacity: bool = False
     quantized_weights: bool = False
     fast_rms_norm: bool = False
     fast_rope: bool = False
@@ -29,40 +30,7 @@ class Week2CheckpointFeatures:
 WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
     {
         "kv-cache": Week2CheckpointFeatures(),
-        "quantized-matvec": Week2CheckpointFeatures(quantized_weights=True),
-        "rmsnorm": Week2CheckpointFeatures(quantized_weights=True, fast_rms_norm=True),
-        "rope": Week2CheckpointFeatures(
-            quantized_weights=True, fast_rms_norm=True, fast_rope=True
-        ),
-        "swiglu": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-        ),
-        "simd-matmul": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            simdgroup_matmul=True,
-        ),
-        "decode-attention": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            simdgroup_matmul=True,
-            decode_attention=True,
-        ),
-        "split-k": Week2CheckpointFeatures(
-            quantized_weights=True,
-            fast_rms_norm=True,
-            fast_rope=True,
-            fast_swiglu=True,
-            simdgroup_matmul=True,
-            split_k_matmul=True,
-        ),
+        "capacity-cache": Week2CheckpointFeatures(bounded_kv_capacity=True),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
@@ -162,13 +130,14 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "split-k",
+        checkpoint: str = "capacity-cache",
         use_mlx_quantized_linear: bool = False,
+        use_bounded_kv_capacity: bool | None = None,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
 
-    def create_kv_cache(self) -> list[TinyKvCache]:
+    def create_kv_cache(self, capacity: int | None = None) -> list[TinyKvCache]:
         pass
 
     def __call__(
