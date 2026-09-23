@@ -247,9 +247,10 @@ The advertised bandwidths come from Apple's specifications for
 [M2 Pro and Max](https://www.apple.com/newsroom/2023/01/apple-unveils-m2-pro-and-m2-max-next-generation-chips-for-next-level-workflows/),
 [M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
 [M3 Pro and Max](https://support.apple.com/en-us/117736),
-[M3 Ultra](https://www.apple.com/mac-studio/), and
-[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's current Mac
-Studio pairs M4 Max with M3 Ultra, so there is no M4 Ultra row.
+[M3 Ultra in the 2025 Mac Studio](https://support.apple.com/en-us/122211), and
+[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's 2025 Mac
+Studio specifications listed M4 Max and M3 Ultra configurations, but no M4
+Ultra configuration; this historical table therefore has no M4 Ultra row.
 
 These values assume peak advertised bandwidth, one read of every projection
 weight, and no other traffic or work. A complete model also reads activations
