@@ -23,7 +23,7 @@
     - [Earlier Week 2 lesson addresses](./week2-02-benchmark-profile.md)
         - [Moved: Quantization](./week2-03-quantize-model.md)
         - [Moved: SIMD Prefill](./week2-05-simd-matrix-prefill.md)
-        - [Moved: Operator Lab](./week2-06-operator-lab.md)
+        - [Retired: Bounded Decode Attention](./week2-06-operator-lab.md)
         - [Moved: Split-K Lab](./week2-07-split-k-prefill.md)
 - [🚧 Week 3: Build a Mini vLLM](./week3-overview.md)
     - [🚧 Continuous Batching](./week3-01-continuous-batching.md)
