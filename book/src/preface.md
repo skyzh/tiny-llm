@@ -63,7 +63,7 @@ all earlier exercises. These are not the same path.
 </style>
 
 <div id="course-roadmap-scroll" class="course-roadmap-scroll" role="region" aria-label="Scrollable Tiny-LLM course roadmap" aria-describedby="course-roadmap-scroll-help" tabindex="0">
-  <img src="./course-roadmap.svg" alt="Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the seven Week 2 days and Week 3 into Week 4. Week 2 Days 3 through 7 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 keeps the course prerequisite of setup plus Weeks 1 through 3, while its deterministic scripted-model tests for Days 1 through 7 can run after setup. Day 8 joins the scripted sequence to the real-model path, and Day 9 continues the Week 4 sequence.">
+  <img src="./course-roadmap.svg" alt="Tiny-LLM roadmap. The cumulative interface and state path runs from Week 1 through the five Week 2 days and Week 3 into Week 4. Week 2 Days 2 through 5 show optional MLX operator off-ramps that preserve the course interfaces; they are different from the full-MLX model baseline. Week 4 keeps the course prerequisite of setup plus Weeks 1 through 3, while its deterministic scripted-model tests for Days 1 through 7 can run after setup. Day 8 joins the scripted sequence to the real-model path, and Day 9 continues the Week 4 sequence.">
 </div>
 
 <p id="course-roadmap-scroll-help">On a narrow screen, scroll the roadmap
@@ -105,9 +105,9 @@ The cumulative dependencies are deliberate:
   costs one measured mechanism at a time: first the generation algorithm and
   KV cache, then quantized and fused kernels. The current nine-checkpoint route
   is `kv-cache` → `capacity-cache` → `quantized-matvec` → `simd-matmul` →
-  `rmsnorm` → `rope` → `swiglu` → `tiled-prefill` → `selected`. Days 1–2
-  establish state and a repeatable measurement, Days 3–6 follow the measured
-  operator costs, and Day 7 tests the cumulative selection.
+  `rmsnorm` → `rope` → `swiglu` → `tiled-prefill` → `selected`. Day 1
+  establishes state and a repeatable measurement; Days 2–5 follow measured
+  operator costs, and Day 5 runs the cumulative selected product.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -137,15 +137,14 @@ every Metal kernel, you can make these explicit local substitutions:
 
 | Week 2 day | Keep in the course stack | Optional MLX substitution |
 | --- | --- | --- |
-| Days 1–2 | Dense KV-cache state, the Week 2 model boundary, and the matched measurement method | None; these are state and methodology rather than replaceable operators. |
-| Day 3 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
-| Day 4 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 3 MLX projection seam instead of implementing the SIMD-matrix schedule. |
-| Day 5 | The Week 2 norm, position, and activation call sites | Use the corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of the custom fused kernels. |
-| Day 6 | The dense-cache prefill-attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of implementing the BQ32/BK16 tiled prefill kernel. |
-| Day 7 | The independently selectable capacity, RMSNorm, and tiled-prefill controls | Keep a readable predecessor checkpoint when the cumulative `selected` path is not supported by your measurements. |
+| Day 1 | Dense KV-cache state, the Week 2 model boundary, request-bounded capacity, and the matched measurement method | None; these are state and methodology rather than replaceable operators. |
+| Day 2 | Packed-weight containers, quantized embedding/model wiring, and the `quantized_linear` interface | Route projections through `mx.quantized_matmul` instead of the custom matrix-vector kernel. |
+| Day 3 | The quantized-projection interface and matrix-shaped dispatch boundary | Keep using the Day 2 MLX projection seam instead of implementing the SIMD-matrix schedule. |
+| Day 4 | The Week 2 norm, position, and activation call sites | Use corresponding MLX RMSNorm/RoPE operators and an MLX SiLU-based SwiGLU composition instead of custom fused kernels. |
+| Day 5 | The dense-cache prefill-attention interface and its shape/mask adapter | Use `mx.fast.scaled_dot_product_attention` instead of the BQ32/BK16 tiled prefill kernel; keep a readable predecessor when the selected path is unsupported. |
 
 Only the quantized-projection seam is already selected by canonical Week 3.
-The Day 5 and Day 6 alternatives require you to wire the MLX call at the
+The Day 4 and Day 5 alternatives require you to wire the MLX call at the
 existing course interface; there is no `--use-mlx-for-day` command. These
 off-ramps let you study later mechanisms, but they do not complete the skipped
 day's custom-kernel exercises, implementation-specific tests, or performance
@@ -196,8 +195,8 @@ default batch settings.
 
 Week 1 reads an official 4-bit checkpoint but materializes its linear and embedding weights in BF16. On an 8 GB Mac,
 keep the required path at 0.6B. On a 16–24 GB Mac, use 0.6B for the required work and treat 1.7B as an upper-end experiment.
-Week 2 Days 1–2
-retain that dense BF16 model; Day 3 keeps weights packed for the quantized-matvec checkpoint. Weeks 3
+Week 2 Day 1
+retain that dense BF16 model; Day 2 keeps weights packed for the quantized-matvec checkpoint. Weeks 3
 and 4 inherit that packed path. More memory still helps after reaching the largest
 supported model because prompt length, batch size, KV caches, compilation, macOS, and other applications all share the
 same pool. These ceilings are therefore planning guidance, not a guarantee that every workload will avoid memory
@@ -208,8 +207,8 @@ pressure.
     [M4 Mac mini](https://support.apple.com/en-us/121555), and
     [M5 MacBook Air](https://support.apple.com/en-us/126320) specifications. Higher-memory configurations are outside
     this table.
-[^week2-dense]: Week 2 Days 1–2 use the dense Week 1 loader, so keep using the Week 1 recommendation
-    until the packed quantized-matvec path is complete on Day 3. The larger Week 2 entries apply after that checkpoint.
+[^week2-dense]: Week 2 Day 1 uses the dense Week 1 loader, so keep using the Week 1 recommendation
+    until the packed quantized-matvec path is complete on Day 2. The larger Week 2 entries apply after that checkpoint.
 [^moe]: 30B-A3B requires the optional Week 3 MoE implementation. In Week 4, select the Week 3 loader. Use batch size one
     and a short context when approaching this ceiling; 4B remains the required-course target.
 

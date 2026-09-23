@@ -27,10 +27,10 @@ The course follows a four-week learning path:
 - **Week 1: From Matmul to Text.** Build a Qwen3 model directly from `mlx.core`
   array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
-- **Week 2: A Step Closer to vLLM.** Reuse the prefix, bound KV-cache
-  movement, keep W4 packed, and add SIMD matrix prefill. Then compact the
-  model primitives, tile dense prefill attention, and select the cumulative
-  path with matched evidence.
+- **Week 2: A Faster Single Request.** In five lessons, reuse the prefix,
+  bound request-owned KV storage, measure the same workload, pack W4 weights,
+  add SIMD matrix prefill and fused primitives, then tile dense prefill
+  attention. Run the cumulative `selected` checkpoint inside Day 5.
 - **Week 3: Build a Mini vLLM.** Introduce continuous
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so

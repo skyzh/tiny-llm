@@ -1,107 +1,115 @@
-# 🚧 Week 2: Make One Request Faster
+<!--
+  tiny-llm-book © 2022-2026 by Alex Chi Z is licensed under CC BY-NC-SA 4.0
+-->
 
-Your Week 1 model can generate text. Week 2 asks a stricter question: **for one
-fixed request, which change removes measured work without changing the model's
-answer contract?**
+# 🚧 Week 2: A Faster Single Request
 
-Keep one control request visible all week. After every checkpoint:
+Week 1 leaves you with a readable Qwen3 model that can generate text. Week 2
+turns it into a measured single-request path. Start with the waste you can see:
+without a cache, every generated token recomputes the entire prefix. After
+caching removes that work, a matched measurement can tell you which operator
+or data movement is worth changing next. Five lessons build one cumulative
+model; every lesson keeps a readable control for comparison.
 
-1. run the focused diagnostic that exposes the missing seam;
-2. complete the supplied correctness gate;
-3. run the model at the new checkpoint and its immediate predecessor;
-4. record the workload, observation, dispatch or copy counter, and a decision;
-5. keep the readable fallback available.
+Begin with [Day 1](./week2-01-kv-cache.md). You will first send only the new
+token during decode, then remove the cache's repeated prefix copies without
+exposing unused capacity to attention.
 
-The product command is deliberately simple and accepted by the frozen public
-interface. `/usr/bin/time -p` includes process startup and model loading, so it
-is a coarse learner observation rather than a kernel benchmark. Use the same
-locally available model, prompt, and `--max-tokens` on both sides:
+> ⏱️ **Time commitment.** Days 2–5 include C++ and Metal kernels and may take
+> substantially longer than Week 1. Use the documented operator off-ramps if
+> you need to continue the serving course while studying a kernel separately.
+
+Week 2 keeps BF16 activations, scales, biases, KV entries, and model-facing
+outputs. Packed W4 codes use `uint32`. Reductions, dot products, and
+online-softmax state accumulate in FP32 before returning BF16. Week 3 inherits
+these interfaces and precision boundaries.
+
+## Measure, Change, Measure Again
+
+Keep one request shape fixed while you change a mechanism:
+
+1. Check the supplied correctness gate and the complete generation path.
+2. Record model, prompt/output lengths, checkpoint, prefill-logit mode, device,
+   software, warmups, and whether the process was fresh.
+3. Attribute the same phase and shape. Predict what one change should remove.
+4. Repeat the matched product and component controls. Record what ran, what
+   changed, and what result would reverse your choice.
+
+The old checked M4 Pro example began with dense projections dominant in cached
+decode. W4 reduced projection traffic; later fused primitives and SIMD matrix
+prefill changed the profile again. These are historical observations from one
+source tree and machine, not measurements of your checkout. A cache copy
+counter, an operator time, and a complete-request median answer different
+questions. Do not add their percentages.
+
+![Nine cumulative Week 2 checkpoints followed by separate capacity, RMSNorm, and tiled attention evidence cards. The cards distinguish component results from selected complete-request gains.](./week2-kernel-profile.svg)
+
+The synchronized benchmark and portable attribution runner are enough for the
+required learning loop. The [optional macOS capture lab](./week2-advanced-profiling.md)
+shows how to inspect a GPU trace when that toolchain is available; a trace is
+not a prerequisite.
+
+## Five Days, Nine Checkpoints
+
+| Day | What you change | Public checkpoint after the change |
+|---|---|---|
+| [1. Cache and measure](./week2-01-kv-cache.md) | Incremental decode, then request-bounded K/V storage; compare the same request and derive the decode roofline | `kv-cache`, `capacity-cache` |
+| [2. Packed W4](./week2-02-quantize-model.md) | Packed embedding and projections; decode-shaped SIMD matvec | `quantized-matvec` |
+| [3. SIMD matrix prefill](./week2-03-simd-matrix-prefill.md) | Reuse W4 and activation tiles across many prompt rows | `simd-matmul` |
+| [4. Model primitives](./week2-04-fused-model-kernels.md) | RMSNorm, RoPE, and SwiGLU, each integrated and checked separately | `rmsnorm`, `rope`, `swiglu` |
+| [5. Tiled prefill attention](./week2-05-tiled-prefill-attention.md) | Online-softmax BF16/D128 prefill with a readable attention fallback; run the completed product | `tiled-prefill`, `selected` |
+
+`selected` contains request-bounded capacity, register-cached RMSNorm, and
+tiled dense prefill attention alongside the cumulative packed-W4, SIMD,
+RoPE, and SwiGLU work. One-token decode attention stays readable. The earlier
+bounded decode-attention and Split-K experiments are
+[historical context](./appendix-performance.md#retired-week-2-experiments), not
+current checkpoints or extra days.
+
+## What Is Supplied and What You Own
+
+The starter gives you model loading, extension build plumbing, benchmark and
+attribution runners, Python reference equations, tests, and stable checkpoint
+interfaces. You implement the cache transition, packed-weight path, and
+course-owned operators. MLX is a baseline and numerical oracle. If you take an
+operator off-ramp, keep the course's interface and delegate only that operator
+locally; `--solution mlx` runs a different complete model and does not test
+your cache or model wiring.
+
+The supplied test tool still identifies the nine checkpoints with its earlier
+seven gate IDs. Each chapter shows the gate ID that exercises its checkpoint;
+it is a test selector, not an extra lesson. After all five lessons, run the
+complete Week 2 gate:
 
 ```bash
-/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-0.6b --max-tokens 16
+pdm run test --week 2
 ```
 
-Do not compare numbers from different request shapes. A small timing difference
-on one run is inconclusive; correctness and path counters come first.
+When a command runs a model, benchmark, profiler, capture, or reducer, pass
+`--solution tiny_llm` as shown. Some tools otherwise select the reference
+solution. Keep a locally available model and the same request on both sides
+of any comparison.
 
-## The Executable Route
+## Evidence and Limits
 
-The chapter order and public checkpoint order are the same:
+The [performance appendix](./appendix-performance.md) distinguishes
+correctness and dispatch witnesses, component comparisons, complete-request
+measurements, historical data, and unavailable rows. The accepted selected
+campaign on Qwen3-4B improved total latency versus all mechanisms off by
+10.427% at 128/128, 9.996% at 512/128, 15.375% at 2K/16, and 14.193% at
+2K/128. Its matched full-MLX throughput ratios were about 0.804, 0.822,
+0.829, and 0.769. The 80% direction was met on the first three rows and
+missed on 2K/128. The 2K/512 and 8K/128 product rows are unavailable after
+environmental contamination. Component gains cannot fill those cells.
 
-| Chapter | Learner-owned seam | Completed checkpoint | First diagnostic |
-|---|---|---|---|
-| [1. Reuse the prefix](./week2-01-kv-cache.md) | Dense K/V append, model offsets, generation loop | `kv-cache` | `pdm run test --week 2 --day 1 -- -k full_cache` |
-| [2. Bound cache movement](./week2-02-benchmark-profile.md) | Logical length, physical capacity, slice writes, rewind/reset | `capacity-cache` | `pdm run test --week 2 --day 2 -- -k logical_prefix` |
-| [3. Keep W4 packed](./week2-03-quantize-model.md) | Packed embedding/linear, native W4 matvec | `quantized-matvec` | `pdm run test --week 2 --day 3 -- -k task_1` |
-| [4. Reuse matrix tiles](./week2-04-fused-model-kernels.md) | SIMD-group matrix schedule and tail guards | `simd-matmul` | `pdm run test --week 2 --day 4 -- -k partial_tiles` |
-| [5. Keep small primitives compact](./week2-05-simd-matrix-prefill.md) | Register-cached RMSNorm, then RoPE and SwiGLU | `rmsnorm` → `rope` → `swiglu` | `pdm run test --week 2 --day 5 -- -k register_cached` |
-| [6. Tile dense prefill attention](./week2-06-operator-lab.md) | BQ32/BK16 online softmax, masks, GQA, tails | `tiled-prefill` | `pdm run test --week 2 --day 6 -- -k causal_gqa` |
-| [7. Select and explain](./week2-07-split-k-prefill.md) | Independent controls and cumulative decision | `selected` | `pdm run test --week 2 --day 7 -- -k exactly` |
+![Week 2 evidence ladder: correctness, routing, component comparison, complete-request comparison, then a bounded decision. Missing product rows stay unavailable rather than being inferred from components.](./week2-performance-summary.svg)
 
-The day numbers above are stable supplied-test selectors. After focused work,
-run the whole day's gate and the public checkpoint command shown in its chapter.
+## Continue to Week 3
 
-![Week 2's executable checkpoint flow and the changing component/product crossover.](./week2-kernel-profile.svg)
-
-## Three Different Kinds of Evidence
-
-- **Correctness and dispatch evidence** comes from the supplied tests and the
-  cache/kernel counters. It establishes that the intended path ran.
-- **Component evidence** compares one operator with its readable control at the
-  same shape. It can explain a mechanism, but it is not request latency.
-- **Product evidence** times the complete request. It includes every operator,
-  loading boundary, and interaction in that workload.
-
-Historical evidence is a fourth category: it can explain why a mechanism was
-selected, but it is not a fresh result from your checkout. The
-[performance appendix](./appendix-performance.md) labels each number as
-component, product, control, historical, or unavailable.
-
-![An evidence ladder from correctness to dispatch, component comparison, complete request, and a bounded decision.](./week2-performance-summary.svg)
-
-## What the Accepted Evidence Says
-
-The accepted Qwen3-4B evidence for the frozen successor found cumulative
-complete-request latency improvements of **10.427%** at 128/128, **9.996%** at
-512/128, **15.375%** at 2K/16, and **14.193%** at 2K/128 versus all mechanisms
-off. Throughput relative to the matched full-MLX control was approximately
-0.804, 0.822, 0.829, and 0.769. The 80% direction was met on the first three
-rows and missed at 2K/128.
-
-Those are supplied accepted measurements, not a command transcript for the
-current learner checkout. The 2K/512 and 8K/128 product rows are unavailable
-after environmental contamination; no component result is substituted for
-them. Read the appendix before making a broader claim.
-
-## What Is Selected—and What Is Not
-
-The `selected` checkpoint keeps three measured mechanisms: request-bounded KV
-capacity, register-cached RMSNorm, and tiled dense prefill attention. Packed W4,
-SIMD matrix prefill, RoPE, and SwiGLU remain the cumulative path that makes those
-checkpoints runnable.
-
-Single-query decode attention remains the readable baseline. A prior bounded
-single-kernel decode experiment is not a current checkpoint or Week 2
-optimization. A prior reduction-splitting projection experiment is also
-retired. Neither should appear in a current command, TODO, or selection claim.
-
-Week 2 still optimizes one request. It does not add batching, paging, request
-scheduling, or a production serving policy. Those are separate later-course
-concerns.
-
-## Precision and Fallbacks
-
-Keep BF16 activations, scales, biases, cache entries, and model-facing outputs.
-Packed W4 codes use `uint32`; reductions and online-softmax state accumulate in
-FP32. Compare alternate reduction schedules with the supplied tolerances rather
-than requiring bit-identical results.
-
-Readable implementations are controls and fallbacks, not throwaway code. They
-cover unsupported shapes, make failures easier to localize, and give every
-optimized path a causal comparison.
-
-[Optional static profiling guidance](./week2-advanced-profiling.md) explains how
-to interpret supplied evidence without reviving retired command selectors.
+By the end of Week 2, your model decodes one token at a time from a request
+cache, keeps projection weights packed, selects separate prefill and decode
+schedules, and has readable controls for its optimized operators. Week 3 keeps
+these model, cache, precision, and operator interfaces while adding paging and
+batching. No Week 2 measurement here establishes a production serving policy.
 
 {{#include copyright.md}}
