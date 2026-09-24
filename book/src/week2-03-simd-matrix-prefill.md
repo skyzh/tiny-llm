@@ -157,14 +157,15 @@ which internal kernel ran.
 The source's `M <= 8` branch retains Day 2's matvec fallback for this input,
 so Task 1 can pass before you implement the SIMD matrix kernel.
 The direct Task 2 test compares that kernel with the readable control on
-partial output tiles. The separate Task 3 test uses the same tiny Qwen fixture
-and one input of shape 1×10 for both public Week 2 checkpoints, with separate
-capacity-10 caches. It evaluates both BF16 outputs, checks equal shape and
-dtype, then compares values with absolute tolerance 0.5 and relative
+partial output tiles. The separate Task 3 test builds tiny Qwen fixtures with
+two fixed MLX random seeds, 0 and 4. For each fixture, it runs the same
+1×10-token input through both public Week 2 checkpoints with separate
+capacity-10 caches. It evaluates both BF16 outputs, checks equal full shapes
+and dtype, then compares values with absolute tolerance 0.75 and relative
 tolerance 0.05. This checks observable model behavior between `simd-matmul`
-and readable packed `quantized-matvec`; an independent code review checks
-the SIMD dispatch. Run the complete Day 3 gate and the cached model after
-both matrix checks.
+and readable packed `quantized-matvec`; it does not prove which internal
+kernel ran. Run the complete Day 3 gate and the cached model after both matrix
+checks.
 
 If you continue without a custom matrix schedule, keep the course-owned
 `quantized_linear` interface and substitute `mx.quantized_matmul` only at this
