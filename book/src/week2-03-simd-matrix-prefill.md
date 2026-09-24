@@ -147,9 +147,15 @@ pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint simd-matmul --model qwen3-0.6b --max-tokens 16
 ```
 
-The short Task 1 model test checks checkpoint wiring, bounded cache, and
-packed weights with three token positions. It uses Day 2's matvec fallback
-because `M <= 8`, so it can pass before you implement the SIMD matrix kernel.
+The short Task 1 test builds public `simd-matmul` and readable packed
+`quantized-matvec` checkpoints from the same tiny Qwen fixture, then runs
+the same 1×3-token input through each with separate capacity-3 caches. It
+evaluates both outputs, checks BF16 dtype and equal full shapes with a 1×3
+leading shape, then compares values with absolute tolerance 0.25 and relative
+tolerance 0.01. This checks observable short-input behavior; it does not assert
+which internal kernel ran.
+The source's `M <= 8` branch retains Day 2's matvec fallback for this input,
+so Task 1 can pass before you implement the SIMD matrix kernel.
 The direct Task 2 test compares that kernel with the readable control on
 partial output tiles. The separate Task 3 test uses the same tiny Qwen fixture
 and one input of shape 1×10 for both public Week 2 checkpoints, with separate
