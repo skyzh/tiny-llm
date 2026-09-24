@@ -39,7 +39,7 @@ METAL_CHECKPOINTS = {
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
     },
     "week2_kernels.metal": {
-        "week2_rms_norm": "Week 2, Day 4",
+        "week2_rms_norm_register_cached": "Week 2, Day 4",
         "week2_rope": "Week 2, Day 4",
         "week2_swiglu": "Week 2, Day 4",
         "week2_decode_attention": "Week 2, Day 6",

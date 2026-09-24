@@ -68,6 +68,27 @@ WEEK2_VARIANTS = (
         "week2",
         ("--week2-checkpoint", "simd-matmul"),
     ),
+    Variant(
+        "week2-rmsnorm",
+        "2.4 Compact RMSNorm",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "rmsnorm"),
+    ),
+    Variant(
+        "week2-rope",
+        "2.4 + Compact RoPE",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "rope"),
+    ),
+    Variant(
+        "week2-swiglu",
+        "2.4 + Compact SwiGLU",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "swiglu"),
+    ),
     MLX_VARIANT,
 )
 VARIANTS_BY_KEY = {

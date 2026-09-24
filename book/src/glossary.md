@@ -17,7 +17,7 @@
 - [KV Cache and Request-Bounded Capacity](./week2-01-kv-cache.md)
 - [Benchmarking, Profiling, and Decode Roofline](./week2-01-kv-cache.md#benchmark-the-cached-model)
 - [Packed W4 Quantization](./week2-02-quantize-model.md)
-- [Historical: Fused Model Kernels](./week2-04-fused-model-kernels.md)
+- [Fused RMSNorm, RoPE, and SwiGLU](./week2-04-fused-model-kernels.md)
 - [Historical: SIMD-Matrix Prefill](./week2-05-simd-matrix-prefill.md)
 - [Historical: Bounded Decode Attention](./week2-06-operator-lab.md)
 - [Historical: Split-K Prefill](./week2-07-split-k-prefill.md)

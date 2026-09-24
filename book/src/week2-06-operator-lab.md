@@ -2,9 +2,10 @@
 
 > **Earlier lesson address.** This page preserves the bounded decode-attention operator lab
 > explanation and its original links. The current Week 2 learner route
-> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) and
-> [Day 2: Keep W4 Packed](./week2-02-quantize-model.md), and
-> [Day 3: SIMD Matrix Prefill](./week2-03-simd-matrix-prefill.md).
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md),
+> [Day 2: Keep W4 Packed](./week2-02-quantize-model.md),
+> [Day 3: SIMD Matrix Prefill](./week2-03-simd-matrix-prefill.md), and
+> [Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md).
 > Later checkpoints, day numbers, tests, and commands below belong to an
 > earlier all-days course state; do not use them as gates for this checkout.
 
@@ -100,9 +101,9 @@ solution may use different helper names and internal organization; it must
 produce the same public attention behavior and preserve the fallback.
 
 If you completed the old Week 2 Day 5 attention exercise before the course was
-reordered, keep that work. Complete the current Day 5 SIMD checkpoint first,
-then use this canonical optional Day 6 chapter and its commands to verify your
-retained attention implementation.
+reordered, keep that work. The current SIMD checkpoint is
+[Day 3](./week2-03-simd-matrix-prefill.md); this historical optional lab and
+its former Day 6 commands are separate from the current learner route.
 
 ## Task 3: Re-measure and Decide
 

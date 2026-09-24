@@ -86,7 +86,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--week2-checkpoint",
-        choices=("kv-cache", "capacity-cache", "quantized-matvec", "simd-matmul"),
+        choices=(
+            "kv-cache",
+            "capacity-cache",
+            "quantized-matvec",
+            "simd-matmul",
+            "rmsnorm",
+            "rope",
+            "swiglu",
+        ),
         help="run one cumulative Week 2 end-to-end checkpoint",
     )
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
@@ -158,7 +166,7 @@ def validate_args(args: argparse.Namespace) -> None:
             args.loader == "week3"
             or (
                 args.loader == "week2"
-                and (args.week2_checkpoint or "simd-matmul")
+                and (args.week2_checkpoint or "swiglu")
                 not in ("kv-cache", "capacity-cache")
             )
         )

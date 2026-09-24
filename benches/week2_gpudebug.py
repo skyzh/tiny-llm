@@ -22,6 +22,9 @@ KNOWN_CHECKPOINTS = (
     "capacity-cache",
     "quantized-matvec",
     "simd-matmul",
+    "rmsnorm",
+    "rope",
+    "swiglu",
 )
 
 

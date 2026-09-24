@@ -1,5 +1,5 @@
 {
-  "shipped_day": 3,
+  "shipped_day": 4,
   "included": [
     "tests_refsol/test_dev_tools.py",
     "tests_refsol/test_model_names.py",
@@ -19,14 +19,11 @@
     "benches/test_quantized_matmul.py",
     "tests_refsol/test_week_2_day_2.py",
     "tests_refsol/test_week_2_day_3.py",
+    "tests_refsol/test_week_2_day_4.py",
+    "tests_refsol/test_rmsnorm_register_cache.py",
     "tests_refsol/test_extension_interface_sync.py"
   ],
   "deferred": [
-    {
-      "path": "tests_refsol/test_week_2_day_4.py",
-      "reenable_day": 4,
-      "reason": "RMSNorm, RoPE, and SwiGLU"
-    },
     {
       "path": "tests_refsol/test_week_2_day_5.py",
       "reenable_day": 5,
@@ -55,7 +52,7 @@
     {
       "path": "tests_refsol/test_week_3_day_1.py",
       "reenable_day": 5,
-      "reason": "requires reference-native RoPE after the Week 2 extension build"
+      "reason": "post-Week-2 regression gate"
     },
     {
       "path": "tests_refsol/test_week_3_day_2.py",

@@ -199,9 +199,10 @@ sizes or prefill-logit modes.
 Record what dominated the baseline prefill, whether the candidate changed
 that category and the matched product phase, and what result would make you
 revise the schedule. The [performance appendix](./appendix-performance.md)
-keeps older hardware observations separate from this exercise. This checkout
-stops at Day 3; the fused model primitives and tiled attention are future
-learner checkpoints, while the older seven-day pages remain
+keeps older hardware observations separate from this exercise. Continue with
+[Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md), keeping this
+`simd-matmul` result as its pre-edit control. Tiled dense prefill attention
+remains a future checkpoint; the older seven-day pages remain
 [historical material](./week2-02-benchmark-profile.md).
 
 {{#include copyright.md}}

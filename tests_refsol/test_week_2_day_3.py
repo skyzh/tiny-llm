@@ -90,7 +90,7 @@ def test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu(seed):
     )
 
 
-def test_day3_public_selectors_stop_at_simd_matmul():
+def test_day3_public_selectors_keep_simd_prefix():
     model_module = importlib.import_module(Qwen3ModelWeek2.__module__)
     checkpoints = (
         "kv-cache",
@@ -98,21 +98,20 @@ def test_day3_public_selectors_stop_at_simd_matmul():
         "quantized-matvec",
         "simd-matmul",
     )
-    assert model_module.WEEK2_CHECKPOINTS == checkpoints
-    assert KNOWN_CHECKPOINTS == checkpoints
-    assert DEFAULT_CASES == (
+    assert model_module.WEEK2_CHECKPOINTS[:4] == checkpoints
+    assert KNOWN_CHECKPOINTS[:4] == checkpoints
+    assert DEFAULT_CASES[:4] == (
         "kv-cache:decode:128",
         "capacity-cache:decode:128",
         "quantized-matvec:decode:128",
         "simd-matmul:prefill:128",
     )
-    assert [variant.key for variant in WEEK2_VARIANTS] == [
+    assert [variant.key for variant in WEEK2_VARIANTS][:5] == [
         "week1",
         "week2-kv-cache",
         "week2-capacity-cache",
         "week2-quantized-matvec",
         "week2-simd-matmul",
-        "mlx",
     ]
 
 

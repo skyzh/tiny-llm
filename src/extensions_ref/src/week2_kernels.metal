@@ -48,6 +48,56 @@ template <typename T>
 }
 
 template <typename T>
+[[kernel]] void week2_rms_norm_register_cached(
+    device const T* x [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    constant const int& rows [[buffer(3)]],
+    constant const int& dim [[buffer(4)]],
+    constant const float& eps [[buffer(5)]],
+    threadgroup float* partial_sums [[threadgroup(0)]],
+    uint row [[threadgroup_position_in_grid]],
+    uint thread_index [[thread_index_in_threadgroup]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint threads_per_threadgroup [[threads_per_threadgroup]]) {
+    if (row >= static_cast<uint>(rows)) return;
+    constexpr int values_per_thread = 4;
+    float values[values_per_thread];
+    float sum = 0.0f;
+    for (int slot = 0; slot < values_per_thread; ++slot) {
+        const uint col = thread_index * values_per_thread + slot;
+        const float value = col < static_cast<uint>(dim)
+            ? static_cast<float>(x[row * dim + col])
+            : 0.0f;
+        values[slot] = value;
+        sum += value * value;
+    }
+    sum = simd_sum(sum);
+    if (lane == 0) {
+        partial_sums[simdgroup] = sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (simdgroup == 0) {
+        const uint simdgroups = (threads_per_threadgroup + 31) / 32;
+        float threadgroup_sum = lane < simdgroups ? partial_sums[lane] : 0.0f;
+        threadgroup_sum = simd_sum(threadgroup_sum);
+        if (lane == 0) {
+            partial_sums[0] = threadgroup_sum;
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    const float inv = rsqrt(partial_sums[0] / static_cast<float>(dim) + eps);
+    for (int slot = 0; slot < values_per_thread; ++slot) {
+        const uint col = thread_index * values_per_thread + slot;
+        if (col < static_cast<uint>(dim)) {
+            out[row * dim + col] = static_cast<T>(
+                values[slot] * inv * static_cast<float>(weight[col]));
+        }
+    }
+}
+
+template <typename T>
 [[kernel]] void week2_rope(
     device const T* x [[buffer(0)]],
     device const int32_t* offsets [[buffer(1)]],
@@ -237,6 +287,9 @@ template <typename T>
 instantiate_kernel("week2_rms_norm_f32", week2_rms_norm, float);
 instantiate_kernel("week2_rms_norm_f16", week2_rms_norm, half);
 instantiate_kernel("week2_rms_norm_bf16", week2_rms_norm, bfloat16_t);
+instantiate_kernel("week2_rms_norm_register_cached_f32", week2_rms_norm_register_cached, float);
+instantiate_kernel("week2_rms_norm_register_cached_f16", week2_rms_norm_register_cached, half);
+instantiate_kernel("week2_rms_norm_register_cached_bf16", week2_rms_norm_register_cached, bfloat16_t);
 instantiate_kernel("week2_rope_f32", week2_rope, float);
 instantiate_kernel("week2_rope_f16", week2_rope, half);
 instantiate_kernel("week2_rope_bf16", week2_rope, bfloat16_t);

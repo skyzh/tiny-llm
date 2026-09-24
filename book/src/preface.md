@@ -33,7 +33,8 @@ small coding agent.
 - Week 1: Serve Qwen3 using array and matrix operations written in Python.
 - Week 2: Day 1 caches a request prefix and bounds its dense storage. Day 2
   keeps W4 projection weights packed in the cached model. Day 3 adds a SIMD
-  matrix prefill path. Later kernel lessons will follow.
+  matrix prefill path. Day 4 integrates fused RMSNorm, RoPE, and SwiGLU one
+  checkpoint at a time. Tiled prefill attention remains a later lesson.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
@@ -44,11 +45,12 @@ serving stack, or **studying and running** a later checkpoint without completing
 all earlier exercises. These are not the same path.
 
 The current route runs from Week 1 through [Week 2 Day 1](./week2-01-kv-cache.md),
-[Day 2](./week2-02-quantize-model.md), and
-[Day 3](./week2-03-simd-matrix-prefill.md): `kv-cache`, `capacity-cache`,
-`quantized-matvec`, then `simd-matmul`. Later Week 2 checkpoints are planned,
-so this three-day checkout does not offer a completed Week 2 → Week 3 learner
-path. The [earlier full-course roadmap diagram](./course-roadmap.svg) is
+[Day 2](./week2-02-quantize-model.md), [Day 3](./week2-03-simd-matrix-prefill.md),
+then [Day 4](./week2-04-fused-model-kernels.md): `kv-cache`, `capacity-cache`,
+`quantized-matvec`, `simd-matmul`, `rmsnorm`, `rope`, then `swiglu`.
+The tiled-prefill Day 5 checkpoint is planned, so this four-day checkout does
+not offer a completed Week 2 → Week 3 learner path. The
+[earlier full-course roadmap diagram](./course-roadmap.svg) is
 retained as historical context; its seven-day Week 2 order is not this
 checkout's navigation.
 
@@ -62,7 +64,8 @@ operator shortcut.
 | Build the currently shipped cache path | Week 1, then Week 2 Day 1 | Implement both cache checkpoints and their matched measurement. |
 | Build the current packed-weight path | Complete Day 1, then Week 2 Day 2 | Keep the capacity cache and implement the packed operator and model wiring. |
 | Build the current SIMD prefill path | Complete Days 1 and 2, then Week 2 Day 3 | Keep the bounded cache and packed weights; implement the SIMD matrix tile and model wiring. |
-| Study a later Week 2 kernel | Read its historical page while waiting for the staged lesson | Its commands and checkpoint are not a current gate. |
+| Build the current fused-primitives path | Complete Days 1–3, then Week 2 Day 4 | Keep the cached packed model and integrate RMSNorm, RoPE, and SwiGLU in order. |
+| Study an older Week 2 experiment | Read its historical page | Its former day numbers and commands are not current gates. |
 | Read or experiment with a later week | Open that chapter and use `tiny_llm_ref` | None in your learner tree. Run the supplied reference tests or reference loader. |
 | Compare with the production-library baseline | Use `--solution mlx` | None, but this runs the full MLX model and bypasses the course implementation. |
 | Run the Week 4 Days 1–7 deterministic tests before finishing the serving stack | After setup, run the supplied scripted-model tests | The tests do not need a working serving implementation. The course still assumes setup plus Weeks 1–3 before Week 4; follow the Week 4 days in order, and Day 8's real-model bridge needs the Week 3 model/tokenizer/KV-cache boundary. |
@@ -73,6 +76,7 @@ The cumulative dependencies are deliberate:
   dense K/V reuse and bounded storage, and compares the same request at both
   cache checkpoints. Day 2 keeps W4 weights packed through the live model.
   Day 3 adds a SIMD matrix path for prefill while keeping that model state.
+  Day 4 adds three cumulative fused primitives around those projections.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -99,9 +103,10 @@ The cumulative dependencies are deliberate:
 Day 1 requires cache state and matched measurement; it has no replaceable
 custom kernel. Days 2 and 3 have an optional `mx.quantized_matmul` substitution
 at the projection operator boundary; both still need the course-owned cache
-and model wiring.
-The earlier full-course book describes substitutions for later operators;
-their mechanisms and old addresses remain in the
+and model wiring. Day 4 can substitute the equivalent MLX operator or
+equation at one RMSNorm, RoPE, or SwiGLU boundary while preserving the other
+course-owned paths. The earlier full-course book retains additional
+mechanisms and old addresses in the
 [historical Week 2 pages](./week2-02-benchmark-profile.md). Selecting
 `--solution mlx` runs a separate complete model, not a hybrid that completes
 learner cache TODOs.
@@ -120,7 +125,7 @@ pdm run main --solution mlx
 ```
 
 The Day 1 reference tests do not require `pdm run build-ext-ref`. Build the
-reference extension for Days 2 and 3's native packed-weight tests, alongside
+reference extension for Days 2–4's native tests, alongside
 the learner extension; neither reference solution fills your learner TODOs.
 
 `--solution tiny_llm_ref` runs the supplied implementation end to end. `--solution mlx`
@@ -154,8 +159,9 @@ Week 1 reads an official 4-bit checkpoint but materializes its linear and embedd
 keep the required path at 0.6B. On a 16–24 GB Mac, use 0.6B for the required work and treat 1.7B as an upper-end experiment.
 Week 2 Day 1 retains that dense BF16 model. In this checkout, Day 2 keeps
 projection weights packed for `quantized-matvec`, and Day 3 reuses those
-weights for `simd-matmul` prefill; the Week 3 and 4 paths expect the packed
-interface. More memory still helps after reaching the largest
+weights for `simd-matmul` prefill. Day 4 keeps the packed path while adding
+RMSNorm, RoPE, and SwiGLU; the Week 3 and 4 paths expect the packed interface.
+More memory still helps after reaching the largest
 supported model because prompt length, batch size, KV caches, compilation, macOS, and other applications all share the
 same pool. These ceilings are therefore planning guidance, not a guarantee that every workload will avoid memory
 pressure.
@@ -166,8 +172,8 @@ pressure.
     [M5 MacBook Air](https://support.apple.com/en-us/126320) specifications. Higher-memory configurations are outside
     this table.
 [^week2-dense]: These conservative Week 2 model-size choices cover Day 1's
-    dense BF16 checkpoint. Days 2 and 3 retain the cache and keep projection
-    weights packed. Use 0.6B for the required Day 3 before/after comparison.
+    dense BF16 checkpoint. Days 2–4 retain the cache and keep projection
+    weights packed. Use 0.6B for the required Day 3 and Day 4 comparisons.
     The optional packed 4B comparison is described in
     [Day 2](./week2-02-quantize-model.md); its matched Day 1 control still
     needs enough memory for the dense `capacity-cache` model.
