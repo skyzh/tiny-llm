@@ -5,11 +5,12 @@
 # 🚧 Week 2: A Faster Single Request
 
 Week 1 leaves you with a readable Qwen3 model that regenerates from the full
-prefix. The **current Week 2 route contains Days 1–3**: reuse previous keys
+prefix. The **current Week 2 route contains Days 1–4**: reuse previous keys
 and values, bound their dense storage, keep projection weights packed, then
-reuse W4 and activation tiles during matrix-shaped prefill. Its four
+reuse W4 and activation tiles during matrix-shaped prefill. Day 4 integrates
+RMSNorm, RoPE, and SwiGLU as three separate model checkpoints. Its seven
 cumulative checkpoints are `kv-cache`, `capacity-cache`, `quantized-matvec`,
-and `simd-matmul`.
+`simd-matmul`, `rmsnorm`, `rope`, and `swiglu`.
 
 Begin with [Day 1: Cache and Measure](./week2-01-kv-cache.md). Its first
 feedback loop builds the extension required for test collection, runs the
@@ -30,6 +31,12 @@ Keep Day 2's `quantized-matvec` checkpoint as the pre-edit control. Build a
 cooperative matrix kernel for the larger activation shapes, verify partial
 output tiles against the readable control, then compare the two checkpoints
 under the same cached-model workload.
+
+Continue to [Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md).
+Keep `simd-matmul` as the pre-edit model control. Implement register-cached
+RMSNorm, RoPE over the model's head layout, and fused SwiGLU in order. Compare
+each operator with its readable equation, run its cumulative checkpoint, then
+measure all four model variants under one matched 0.6B workload.
 
 ## Day 1 route
 
@@ -58,22 +65,38 @@ under the same cached-model workload.
 | Integrate | Keep the decode-shaped matvec, dispatch larger matrices to SIMD, and wire `simd-matmul` through the cached model | Complete Day 3 test and live model checkpoint |
 | Measure | Compare old and new prefill paths with the same cached 0.6B model and workload | [Day 3 product loop](./week2-03-simd-matrix-prefill.md#measure-the-matched-product) |
 
+## Day 4 route
+
+<table>
+  <thead>
+    <tr><th scope="col">Step</th><th scope="col">What you own</th><th scope="col">Feedback</th></tr>
+  </thead>
+  <tbody>
+    <tr><th scope="row">Prepare</th><td>Complete Day 3 and save a <code>simd-matmul</code> 0.6B product control</td><td><a href="./week2-04-fused-model-kernels.md">Day 4 baseline</a></td></tr>
+    <tr><th scope="row">Normalize</th><td>Add register-cached RMSNorm with a wider-row fallback and integrate it into every Week 2 norm</td><td>Focused Task 1 check and live <code>rmsnorm</code> checkpoint</td></tr>
+    <tr><th scope="row">Rotate</th><td>Reuse each RoPE angle across head pairs and accept per-batch offsets</td><td>Focused Task 2 check and live <code>rope</code> checkpoint</td></tr>
+    <tr><th scope="row">Activate</th><td>Fuse SiLU and the gate/up product, then verify the cumulative model</td><td>Focused Task 3 check and complete Day 4 gate at <code>swiglu</code></td></tr>
+    <tr><th scope="row">Measure</th><td>Compare the Day 3 control and three Day 4 checkpoints at one cached 0.6B workload</td><td><a href="./week2-04-fused-model-kernels.md#measure-the-cumulative-product">Day 4 product loop</a></td></tr>
+  </tbody>
+</table>
+
 The Day 1 starter supplies model loading, test entrypoints, and benchmark and
 attribution helpers; you own the cache state and serving loop. Day 2 adds the
 packed-weight container and native operator boundaries, but you implement the
 embedding, kernels, and model wiring. Day 3 adds the SIMD matrix path behind
 that packed operator. The reference solution and full MLX
-model are separate controls; they do not fill your learner TODOs. A cache
+model are separate controls; they do not fill your learner TODOs. Day 4 adds
+three native primitives to the same cached, packed model. A cache
 counter shows which bytes moved, while a synchronized complete-request
 comparison shows whether a mechanism helped the chosen workload.
 
 ## Later lessons
 
-The reviewed five-day design continues after SIMD matrix prefill with model
-primitives and tiled dense prefill attention. Those **Day 4–5 checkpoints are
-planned, not shipped in this three-day route**. Their commands and selectors
-are not current gates. Week 3 uses later Week 2 interfaces; Days 1–3 alone do
-not supply every prerequisite for its learner exercises.
+The reviewed five-day design continues after the fused model primitives with
+tiled dense prefill attention. Its **Day 5 checkpoints are planned, not shipped
+in this four-day route**. Their commands and selectors are not current gates.
+Week 3 uses later Week 2 interfaces; Days 1–4 alone do not supply every
+prerequisite for its learner exercises.
 
 The earlier seven-day book remains available at its old addresses as
 [historical Week 2 material](./week2-02-benchmark-profile.md). It preserves
@@ -84,7 +107,7 @@ bounded-decode and Split-K experiments. Its
 [decision diagram](./week2-performance-summary.svg) are also historical
 evidence, not diagrams of the current checkout. Those pages describe a different
 checkpoint order and may show commands unavailable in this partial branch.
-Use Days 1–3 above for the current learner workflow. The
+Use Days 1–4 above for the current learner workflow. The
 [performance evidence ledger](./appendix-performance.md) is likewise
 historical context, not a performance claim for this checkout.
 
