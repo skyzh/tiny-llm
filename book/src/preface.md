@@ -31,8 +31,9 @@ This course is divided into four weeks. We will serve Qwen3 MLX models, optimize
 small coding agent.
 
 - Week 1: Serve Qwen3 using array and matrix operations written in Python.
-- Week 2: The current Day 1 route caches a request prefix, bounds its dense
-  storage, and measures matched requests. Later kernel lessons will follow.
+- Week 2: Day 1 caches a request prefix and bounds its dense storage. Day 2
+  keeps W4 projection weights packed in the cached model. Later kernel lessons
+  will follow.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
@@ -42,10 +43,11 @@ The course supports two different goals: **implementing** the cumulative
 serving stack, or **studying and running** a later checkpoint without completing
 all earlier exercises. These are not the same path.
 
-The current route runs from Week 1 to [Week 2 Day 1](./week2-01-kv-cache.md):
-first `kv-cache`, then `capacity-cache`. The later Week 2 checkpoints are
-planned, so a Day 1 checkout does not offer a completed Week 2 → Week 3 learner
-path. The [earlier full-course roadmap diagram](./course-roadmap.svg) is
+The current route runs from Week 1 through [Week 2 Day 1](./week2-01-kv-cache.md)
+and [Day 2](./week2-02-quantize-model.md): first `kv-cache`, then
+`capacity-cache`, then `quantized-matvec`. Later Week 2 checkpoints are
+planned, so this two-day checkout does not offer a completed Week 2 → Week 3
+learner path. The [earlier full-course roadmap diagram](./course-roadmap.svg) is
 retained as historical context; its seven-day Week 2 order is not this
 checkout's navigation.
 
@@ -57,7 +59,8 @@ operator shortcut.
 | Your goal | Start here | What earlier implementation is required? |
 | --- | --- | --- |
 | Build the currently shipped cache path | Week 1, then Week 2 Day 1 | Implement both cache checkpoints and their matched measurement. |
-| Study a later Week 2 kernel | Read its historical page while waiting for the staged lesson | Its commands and checkpoint are not a Day 1 gate. |
+| Build the current packed-weight path | Complete Day 1, then Week 2 Day 2 | Keep the capacity cache and implement the packed operator and model wiring. |
+| Study a later Week 2 kernel | Read its historical page while waiting for the staged lesson | Its commands and checkpoint are not a current gate. |
 | Read or experiment with a later week | Open that chapter and use `tiny_llm_ref` | None in your learner tree. Run the supplied reference tests or reference loader. |
 | Compare with the production-library baseline | Use `--solution mlx` | None, but this runs the full MLX model and bypasses the course implementation. |
 | Run the Week 4 Days 1–7 deterministic tests before finishing the serving stack | After setup, run the supplied scripted-model tests | The tests do not need a working serving implementation. The course still assumes setup plus Weeks 1–3 before Week 4; follow the Week 4 days in order, and Day 8's real-model bridge needs the Week 3 model/tokenizer/KV-cache boundary. |
@@ -66,7 +69,7 @@ The cumulative dependencies are deliberate:
 
 - **Week 1 → Week 2:** Day 1 keeps the readable model, adds request-owned
   dense K/V reuse and bounded storage, and compares the same request at both
-  cache checkpoints. Later packed-weight and custom-kernel work is planned.
+  cache checkpoints. Day 2 keeps W4 weights packed through the live model.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -91,9 +94,10 @@ The cumulative dependencies are deliberate:
 ### Later Week 2 operator off-ramps
 
 Day 1 requires cache state and matched measurement; it has no replaceable
-custom kernel. The earlier full-course book describes optional MLX substitutions
-for later operators, but those are not shipped Day 1 checkpoints. Their
-mechanisms and old addresses remain in the
+custom kernel. Day 2 has an optional `mx.quantized_matmul` substitution at
+the operator boundary; it still needs the course-owned cache and model wiring.
+The earlier full-course book describes substitutions for later operators;
+their mechanisms and old addresses remain in the
 [historical Week 2 pages](./week2-02-benchmark-profile.md). Selecting
 `--solution mlx` runs a separate complete model, not a hybrid that completes
 learner cache TODOs.
@@ -111,9 +115,9 @@ pdm run main --solution tiny_llm_ref --loader week2 --week2-checkpoint kv-cache
 pdm run main --solution mlx
 ```
 
-The Day 1 reference tests do not require `pdm run build-ext-ref`. That
-reference-native build is deferred to Day 2; its current W4 Metal compilation
-issue should not block the Python cache checkpoints here.
+The Day 1 reference tests do not require `pdm run build-ext-ref`. Build the
+reference extension for Day 2's native packed-weight tests, alongside the
+learner extension; neither reference solution fills your learner TODOs.
 
 `--solution tiny_llm_ref` runs the supplied implementation end to end. `--solution mlx`
 runs MLX end to end. Neither command composes “earlier weeks from the reference

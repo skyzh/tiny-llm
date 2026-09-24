@@ -15,6 +15,7 @@
     - [Sampling and Preparing for Week 2](./week1-07-sampling-prepare.md)
 - [🚧 Week 2: A Faster Single Request](./week2-overview.md)
     - [🚧 Day 1: Cache and Measure](./week2-01-kv-cache.md)
+    - [🚧 Day 2: Keep W4 Packed](./week2-02-quantize-model.md)
     - [Historical Week 2 lesson addresses](./week2-02-benchmark-profile.md)
         - [Earlier quantization lesson](./week2-03-quantize-model.md)
         - [Earlier fused-kernel lesson](./week2-04-fused-model-kernels.md)

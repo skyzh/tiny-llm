@@ -1,15 +1,9 @@
-# Historical Week 2: Packed W4 Quantization
+# 🚧 Week 2 Day 2: Keep W4 Packed
 
-> **Earlier lesson address.** This page preserves the packed W4 quantization
-> explanation and its original links. The current Week 2 learner route
-> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) and the revised
-> [Day 2: Keep W4 Packed](./week2-02-quantize-model.md). The old Day 3 body
-> below remains for its original address and historical context.
-> Later checkpoints, day numbers, tests, and commands below belong to an
-> earlier all-days course state; do not use them as gates for this checkout.
-
-
-Day 2 leaves you with a synchronized dense BF16 baseline. The Day 3 starter
+Complete [Day 1: Cache and Measure](./week2-01-kv-cache.md) first. Its
+`capacity-cache` checkpoint gives you a matched cached-model baseline, bounded
+dense K/V storage, and a decode roofline. Keep that baseline fixed while changing the
+projection representation. The Day 2 starter
 already supplies the packed-weight container and its
 `QuantizedWeights.from_mlx_layer` loader, the extension declaration and
 binding, fail-closed C++/Metal stubs, and cumulative model switches. Your work
@@ -21,15 +15,17 @@ is to:
    matvec; and
 4. wire packed projections and the tied output head into the live cached model.
 
-Begin with the Python wrapper gate. Then build and exercise the GPU operator:
+Build the learner and reference extensions before running Day 2's native
+tests. Begin with the Python wrapper gate, then exercise the GPU operator:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_1
-pdm run test --week 2 --day 3 -- -k gpu
+pdm run build-ext-ref
+pdm run test --week 2 --day 2 -- -k task_1
+pdm run test --week 2 --day 2 -- -k gpu
 ```
 
-Finish with the complete Day 3 gate and the `quantized-matvec` model
+Finish with the complete Day 2 gate and the `quantized-matvec` model
 checkpoint. The result is complete only when the cached model dispatches
 through your quantized path; packed storage and an isolated fast kernel are
 intermediate steps.
@@ -212,8 +208,8 @@ Now W4 can be added to the dense comparison:
 | W4 | 4 | One BF16 scale and one BF16 bias | 0.53125 | 2.137 GB | 3.765 FLOPs/byte |
 
 This representation reduces projection weight traffic by 3.765×. Treat that
-ratio as a bandwidth ceiling for one-token decode, not as an end-to-end speedup
-promise.
+ratio as a weight-traffic advantage for one-token decode, not as an end-to-end
+speedup promise.
 
 ### Theoretical Decode Roofline Across Apple Silicon
 
@@ -225,9 +221,10 @@ assuming a compute ceiling:
 ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
 ```
 
-The table uses the highest-bandwidth configuration of each named chip. GB is
-decimal, matching Apple's specifications. The results are theoretical ceilings,
-not benchmark measurements.
+The table uses the highest-bandwidth configuration of each named chip listed
+in the cited Apple product specifications. GB is decimal, matching Apple's
+specifications. The results are theoretical ceilings, not benchmark
+measurements.
 
 | Chip | Bandwidth | FP16/BF16 roofline | W4 roofline |
 |---|---:|---:|---:|
@@ -250,9 +247,9 @@ The advertised bandwidths come from Apple's specifications for
 [M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
 [M3 Pro and Max](https://support.apple.com/en-us/117736),
 [M3 Ultra in the 2025 Mac Studio](https://support.apple.com/en-us/122211), and
-[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's 2025 Mac
-Studio specifications listed M4 Max and M3 Ultra configurations, but no M4
-Ultra configuration; this historical table therefore has no M4 Ultra row.
+[M4 Pro and Max](https://support.apple.com/en-us/121553). The 2025 Mac Studio
+specifications list M3 Ultra alongside M4 Max, not an M4 Ultra; this dated
+comparison stops at M4 Pro/Max and makes no claim about subsequent products.
 
 These values assume peak advertised bandwidth, one read of every projection
 weight, and no other traffic or work. A complete model also reads activations
@@ -398,7 +395,7 @@ The declaration, fail-closed source stub, binding, and build registration are
 already present. Keep the C++ declarations and definitions in the
 `tiny_llm_ext` namespace, and modify these exact functions:
 
-- **`tiny_llm_ext.h`** — Read the Week 2 Day 3 `quantized_matmul(...)`
+- **`tiny_llm_ext.h`** — Read the Week 2 Day 2 `quantized_matmul(...)`
   declaration and `QuantizedMatmul` primitive interface; keep its signature in
   sync with the binding.
 - **`bindings.cpp`** — Verify the existing `m.def("quantized_matmul", ...)`
@@ -420,7 +417,7 @@ after you implement its Metal schedules in Task 3:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_1
+pdm run test --week 2 --day 2 -- -k task_1
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -482,15 +479,15 @@ different shapes:
    activation row and calculate several output columns together.
 
 Here, `M` is the number of activation rows after flattening every leading
-dimension. Day 3 uses this explicit dispatch:
+dimension. Day 2 uses this explicit dispatch:
 
 | Activation rows | Kernel | Role at this checkpoint |
 |---:|---|---|
 | `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
-| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 5 replaces it with a cooperative tiled kernel. |
+| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 3 replaces it with a cooperative tiled kernel. |
 
 The cutoff does not extend the SIMD kernel to larger `M`. These are separate
-schedules: Day 3 optimizes vector-shaped decode and leaves matrix-shaped
+schedules: Day 2 optimizes vector-shaped decode and leaves matrix-shaped
 prefill visible for the later benchmark to select.
 
 Keep the vanilla function callable as `quantized_matmul_vanilla` so every
@@ -506,7 +503,7 @@ control flow mirrors the equation and makes it a useful debugging control. The
 Python `mlx.core` equation remains the correctness oracle for both Metal
 schedules.
 
-Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 5
+Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 3
 revisits that workload with cooperative tiling.
 
 ### Stage 2: SIMD Matvec
@@ -573,7 +570,7 @@ Implement both required layouts in `quantized_matmul.metal`:
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
 - For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
-  SIMD matvec schedule; Day 5 introduces the tiled prefill schedule.
+  SIMD matvec schedule; Day 3 introduces the tiled prefill schedule.
 - The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
@@ -610,7 +607,8 @@ Run the focused GPU gate:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k gpu
+pdm run build-ext-ref
+pdm run test --week 2 --day 2 -- -k gpu
 ```
 
 The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
@@ -655,23 +653,27 @@ assumptions: `group_size = 128` and `bits = 4`.
 Run the complete gate, then the live model checkpoint:
 
 ```bash
-pdm run test --week 2 --day 3
+pdm run test --week 2 --day 2
 
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b --max-tokens 16
 ```
 
-Measure that same learner solution:
+Measure that same learner solution with the cached 0.6B model. Keep the model,
+prompt/output lengths, and last-logit serving mode matched when changing the
+solution or checkpoint:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+  --min-output-len 65 --max-output-len 65 --warmup 2 \
+  --prefill-logits last
 ```
 
 Run the same command with `--solution tiny_llm_ref` to compare it with the
-reference solution.
+reference solution. For a Day 1 control, change only the checkpoint to
+`capacity-cache`; do not compare different models or prefill-logit modes.
 
 Keep the vanilla matrix product callable as an inspectable Metal control. The
 Python `mlx.core` equation remains the correctness oracle, while decode
@@ -693,27 +695,32 @@ live model command to verify that those pieces compose.
 Measure the cumulative model and the real projection shapes:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-kv-cache --variant week2-quantized-matvec --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
+  --variant week2-capacity-cache --variant week2-quantized-matvec --variant mlx \
+  --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case kv-cache:decode:128 --case quantized-matvec:decode:128 \
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
+  --case capacity-cache:decode:128 --case quantized-matvec:decode:128 \
   --warmup 4 --iterations 12 \
-  --json-output week2-day3-attribution.json
+  --json-output week2-day2-attribution.json
 ```
 
 Keep one cumulative model row and one representative real-shape projection
 comparison. In the checked M4 Pro example, packed W4 reduced attributed
 projection time by 69.0% and fixed-workload decode rose from 24.38 to 58.90
 tokens/s. The re-profile then exposed normalization, position, and activation
-at 33.5% of attributed time, selecting Day 4. These are bounded observations
-from one machine and two product samples, not portable timing thresholds. The
-complete campaign and attribution are in the
-[performance appendix](./appendix-performance.md#day-3-keep-weights-packed).
+at 33.5% of attributed time, pointing to later fusion work. These are
+historical Qwen3-4B observations from one machine and two product samples,
+not results to expect from the required 0.6B run or portable timing thresholds.
+For an optional 4B comparison, first cache the model with
+`hf download Qwen/Qwen3-4B-MLX-4bit`, then rerun every compared row with
+`--model qwen3-4b`; the dense `capacity-cache` control needs the memory
+recommended in the [model table](./preface.md#choose-a-model-for-your-mac).
+The complete historical campaign and attribution are in the
+[performance appendix](./appendix-performance.md).
 
-If you need to continue without the custom Day 3 kernels, implement the same
+If you need to continue without the custom Day 2 kernels, implement the same
 `quantized_linear` interface with `mx.quantized_matmul` and leave the rest of
 the course model unchanged. This is a local operator off-ramp, not
 `--solution mlx`: the latter runs a separate complete model and does not

@@ -2,7 +2,8 @@
 
 > **Earlier lesson address.** This page preserves the bounded decode-attention operator lab
 > explanation and its original links. The current Week 2 learner route
-> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) only.
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) and
+> [Day 2: Keep W4 Packed](./week2-02-quantize-model.md).
 > Later checkpoints, day numbers, tests, and commands below belong to an
 > earlier all-days course state; do not use them as gates for this checkout.
 
