@@ -133,13 +133,14 @@ including the tied output head, so the live model uses your kernel for
 matrix-shaped work. Fused RMSNorm, RoPE, and SwiGLU are later lessons; no
 decode-attention or Split-K branch is part of this checkpoint.
 
-Check the short model setup first, then the SIMD operator and its model path:
+Check the short model setup first, then the SIMD operator and larger-prefill
+model behavior:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 3 -- -k task_1
 pdm run test --week 2 --day 3 -- -k test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu
-pdm run test --week 2 --day 3 -- -k test_task_3_model_prefill_dispatches_simd_packed_projection_gpu
+pdm run test --week 2 --day 3 -- -k test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu
 pdm run test --week 2 --day 3
 
 pdm run main --solution tiny_llm --loader week2 \
@@ -150,12 +151,14 @@ The short Task 1 model test checks checkpoint wiring, bounded cache, and
 packed weights with three token positions. It uses Day 2's matvec fallback
 because `M <= 8`, so it can pass before you implement the SIMD matrix kernel.
 The direct Task 2 test compares that kernel with the readable control on
-partial output tiles. The separate Task 3 test uses ten prefill token positions
-and observes the model's packed query projection entering `quantized_matmul`
-with `use_simdgroup=True` before it evaluates the result. Its learner TODO
-diagnostic names the SIMD model prefill quantized-matmul seam. Neither the
-short test nor the direct operator test proves that model integration alone.
-Run the complete Day 3 gate and the cached model after both matrix checks.
+partial output tiles. The separate Task 3 test uses the same tiny Qwen fixture
+and one input of shape 1×10 for both public Week 2 checkpoints, with separate
+capacity-10 caches. It evaluates both BF16 outputs, checks equal shape and
+dtype, then compares values with absolute tolerance 0.5 and relative
+tolerance 0.05. This checks observable model behavior between `simd-matmul`
+and readable packed `quantized-matvec`; an independent code review checks
+the SIMD dispatch. Run the complete Day 3 gate and the cached model after
+both matrix checks.
 
 If you continue without a custom matrix schedule, keep the course-owned
 `quantized_linear` interface and substitute `mx.quantized_matmul` only at this
