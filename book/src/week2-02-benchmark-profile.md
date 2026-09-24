@@ -3,7 +3,8 @@
 > **Earlier lesson address.** This page preserves the benchmarking and profiling
 > explanation and its original links. The current Week 2 learner route
 > ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) and
-> [Day 2: Keep W4 Packed](./week2-02-quantize-model.md). The commands below
+> [Day 2: Keep W4 Packed](./week2-02-quantize-model.md), and
+> [Day 3: SIMD Matrix Prefill](./week2-03-simd-matrix-prefill.md). The commands below
 > remain part of the earlier course order.
 > Later checkpoints, day numbers, tests, and commands below belong to an
 > earlier all-days course state; do not use them as gates for this checkout.

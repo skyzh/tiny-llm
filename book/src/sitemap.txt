@@ -16,6 +16,7 @@ https://skyzh.github.io/tiny-llm/week2-01-kv-cache
 https://skyzh.github.io/tiny-llm/week2-02-benchmark-profile
 https://skyzh.github.io/tiny-llm/week2-02-quantize-model
 https://skyzh.github.io/tiny-llm/week2-03-quantize-model
+https://skyzh.github.io/tiny-llm/week2-03-simd-matrix-prefill
 https://skyzh.github.io/tiny-llm/week2-04-fused-model-kernels
 https://skyzh.github.io/tiny-llm/week2-05-decode-attention
 https://skyzh.github.io/tiny-llm/week2-05-simd-matrix-prefill

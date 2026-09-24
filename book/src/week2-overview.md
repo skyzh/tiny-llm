@@ -5,10 +5,11 @@
 # 🚧 Week 2: A Faster Single Request
 
 Week 1 leaves you with a readable Qwen3 model that regenerates from the full
-prefix. The **current Week 2 route contains Days 1 and 2**: reuse previous keys
-and values, bound their dense storage, then keep projection weights packed.
-Its three cumulative checkpoints are `kv-cache`, `capacity-cache`, and
-`quantized-matvec`.
+prefix. The **current Week 2 route contains Days 1–3**: reuse previous keys
+and values, bound their dense storage, keep projection weights packed, then
+reuse W4 and activation tiles during matrix-shaped prefill. Its four
+cumulative checkpoints are `kv-cache`, `capacity-cache`, `quantized-matvec`,
+and `simd-matmul`.
 
 Begin with [Day 1: Cache and Measure](./week2-01-kv-cache.md). Its first
 feedback loop builds the extension required for test collection, runs the
@@ -23,6 +24,12 @@ from a working `capacity-cache` model. Implement selected-row embedding
 dequantization, a checked quantized operator, a readable Metal control and
 decode matvec, then wire packed projections into the cached model. The Day 2
 checkpoint is complete when the model actually calls the packed-weight path.
+
+Continue to [Day 3: SIMD Matrix Prefill](./week2-03-simd-matrix-prefill.md).
+Keep Day 2's `quantized-matvec` checkpoint as the pre-edit control. Build a
+cooperative matrix kernel for the larger activation shapes, verify partial
+output tiles against the readable control, then compare the two checkpoints
+under the same cached-model workload.
 
 ## Day 1 route
 
@@ -42,21 +49,31 @@ checkpoint is complete when the model actually calls the packed-weight path.
 | Integrate | Route the cached model's projections and output head through the packed operator | Complete Day 2 gate and a live `quantized-matvec` run |
 | Measure | Compare capacity, packed W4, and MLX with one model and one workload | [Day 2 measurement loop](./week2-02-quantize-model.md#verify-quantization-in-the-complete-model) |
 
+## Day 3 route
+
+| Step | What you own | Feedback |
+|---|---|---|
+| Prepare | Complete Day 2, build both native extensions, and save a `quantized-matvec` prefill control | [Day 3 baseline](./week2-03-simd-matrix-prefill.md#keep-the-pre-edit-control) |
+| Build the tile | Load BF16 activation and reconstructed W4 fragments cooperatively; accumulate in FP32 and guard partial outputs | Focused [partial-tile test](./week2-03-simd-matrix-prefill.md#task-1-load-and-multiply-a-w4-tile) |
+| Integrate | Keep the decode-shaped matvec, dispatch larger matrices to SIMD, and wire `simd-matmul` through the cached model | Complete Day 3 test and live model checkpoint |
+| Measure | Compare old and new prefill paths with the same cached 0.6B model and workload | [Day 3 product loop](./week2-03-simd-matrix-prefill.md#measure-the-matched-product) |
+
 The Day 1 starter supplies model loading, test entrypoints, and benchmark and
 attribution helpers; you own the cache state and serving loop. Day 2 adds the
 packed-weight container and native operator boundaries, but you implement the
-embedding, kernels, and model wiring. The reference solution and full MLX
+embedding, kernels, and model wiring. Day 3 adds the SIMD matrix path behind
+that packed operator. The reference solution and full MLX
 model are separate controls; they do not fill your learner TODOs. A cache
 counter shows which bytes moved, while a synchronized complete-request
 comparison shows whether a mechanism helped the chosen workload.
 
 ## Later lessons
 
-The reviewed five-day design continues after packed W4 with SIMD matrix
-prefill, model primitives, and tiled dense prefill attention. Those **Day 3–5
-checkpoints are planned, not shipped in this two-day route**. Their commands
-and selectors are not current gates. Week 3 uses later Week 2 interfaces;
-Days 1 and 2 alone do not supply every prerequisite for its learner exercises.
+The reviewed five-day design continues after SIMD matrix prefill with model
+primitives and tiled dense prefill attention. Those **Day 4–5 checkpoints are
+planned, not shipped in this three-day route**. Their commands and selectors
+are not current gates. Week 3 uses later Week 2 interfaces; Days 1–3 alone do
+not supply every prerequisite for its learner exercises.
 
 The earlier seven-day book remains available at its old addresses as
 [historical Week 2 material](./week2-02-benchmark-profile.md). It preserves
@@ -67,7 +84,7 @@ bounded-decode and Split-K experiments. Its
 [decision diagram](./week2-performance-summary.svg) are also historical
 evidence, not diagrams of the current checkout. Those pages describe a different
 checkpoint order and may show commands unavailable in this partial branch.
-Use Days 1 and 2 above for the current learner workflow. The
+Use Days 1–3 above for the current learner workflow. The
 [performance evidence ledger](./appendix-performance.md) is likewise
 historical context, not a performance claim for this checkout.
 

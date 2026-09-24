@@ -61,6 +61,13 @@ WEEK2_VARIANTS = (
         "week2",
         ("--week2-checkpoint", "quantized-matvec"),
     ),
+    Variant(
+        "week2-simd-matmul",
+        "2.3 SIMD matrix prefill",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "simd-matmul"),
+    ),
     MLX_VARIANT,
 )
 VARIANTS_BY_KEY = {

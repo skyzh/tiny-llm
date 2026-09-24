@@ -38,6 +38,11 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
         "quantized-matvec": Week2CheckpointFeatures(
             bounded_kv_capacity=True, quantized_weights=True
         ),
+        "simd-matmul": Week2CheckpointFeatures(
+            bounded_kv_capacity=True,
+            quantized_weights=True,
+            simdgroup_matmul=True,
+        ),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
@@ -266,7 +271,7 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "capacity-cache",
+        checkpoint: str = "simd-matmul",
         use_mlx_quantized_linear: bool = False,
         use_bounded_kv_capacity: bool | None = None,
     ):

@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 INTERFACES = {
-    "quantized_matmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
+    "quantized_matmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
     "rms_norm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
     "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
@@ -21,7 +21,7 @@ INTERFACES = {
 }
 
 PRIMITIVE_CLASSES = {
-    "QuantizedMatmul": ("Week 2, Day 3", "quantized_matmul.cpp"),
+    "QuantizedMatmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
     "Week2RMSNorm": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
     "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
@@ -33,11 +33,9 @@ PRIMITIVE_CLASSES = {
 
 METAL_CHECKPOINTS = {
     "quantized_matmul.metal": {
-        "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 3",
-        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 3",
-        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 5",
-        "quantized_matmul_simdgroup_splitk_w4a16_g128": "Week 2, Day 7",
-        "quantized_matmul_splitk_reduce": "Week 2, Day 7",
+        "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 2",
+        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 2",
+        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 3",
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
     },
     "week2_kernels.metal": {

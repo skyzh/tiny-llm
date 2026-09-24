@@ -5,7 +5,7 @@ import tiny_llm_ext
 
 
 LEARNER_EXTENSION_INTERFACES = {
-    "quantized_matmul": "Week 2, Day 3",
+    "quantized_matmul": "Week 2, Day 2",
     "rms_norm": "Week 2, Day 4",
     "rope": "Week 2, Day 4",
     "swiglu": "Week 2, Day 4",
