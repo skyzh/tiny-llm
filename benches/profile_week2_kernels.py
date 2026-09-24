@@ -26,6 +26,7 @@ if str(SRC_ROOT) not in sys.path:
 DEFAULT_CASES = (
     "kv-cache:decode:128",
     "capacity-cache:decode:128",
+    "quantized-matvec:decode:128",
 )
 PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"

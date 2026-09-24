@@ -35,6 +35,9 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
     {
         "kv-cache": Week2CheckpointFeatures(),
         "capacity-cache": Week2CheckpointFeatures(bounded_kv_capacity=True),
+        "quantized-matvec": Week2CheckpointFeatures(
+            bounded_kv_capacity=True, quantized_weights=True
+        ),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)

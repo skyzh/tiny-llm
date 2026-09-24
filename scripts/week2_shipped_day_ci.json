@@ -1,5 +1,5 @@
 {
-  "shipped_day": 1,
+  "shipped_day": 2,
   "included": [
     "tests_refsol/test_dev_tools.py",
     "tests_refsol/test_model_names.py",
@@ -14,14 +14,12 @@
     "tests_refsol/test_week_2_day_1.py",
     "tests_refsol/test_dense_kv_capacity.py",
     "tests_refsol/test_week_4_day_1.py",
-    "benches/test_bench_week3.py"
+    "benches/test_bench_week3.py",
+    "benches/test_bench_week2_operators.py",
+    "benches/test_quantized_matmul.py",
+    "tests_refsol/test_week_2_day_2.py"
   ],
   "deferred": [
-    {
-      "path": "tests_refsol/test_week_2_day_2.py",
-      "reenable_day": 2,
-      "reason": "packed W4 and quantized matvec"
-    },
     {
       "path": "tests_refsol/test_week_2_day_3.py",
       "reenable_day": 3,
@@ -56,16 +54,6 @@
       "path": "benches/test_week2_gpudebug.py",
       "reenable_day": 5,
       "reason": "cross-day capture assertions"
-    },
-    {
-      "path": "benches/test_bench_week2_operators.py",
-      "reenable_day": 2,
-      "reason": "quantized operator bench"
-    },
-    {
-      "path": "benches/test_quantized_matmul.py",
-      "reenable_day": 2,
-      "reason": "quantized native operator"
     },
     {
       "path": "benches/test_attention.py",
@@ -156,22 +144,15 @@
       "path": "src/extensions/test.py",
       "reenable_day": 5,
       "reason": "native tests span future Week 2 operators"
-    },
-    {
-      "path": "benches/bench_week2_operators.py",
-      "reenable_day": 2,
-      "reason": "operator benchmark alias begins with packed W4 work"
     }
   ],
-  "deferred_builds": [
-    {
-      "command": "pdm run build-ext-ref",
-      "reenable_day": 2,
-      "reason": "reference-native packed W4 build fails in unchanged cooperative_matrix.h under macOS 27.0, Xcode 27.0, Metal toolchain 27.1.266.1; Day 1 cache paths invoke no native kernel"
-    }
-  ],
+  "deferred_builds": [],
   "retired": [
     "tests_refsol/test_week_2_day_6.py at old seven-day main",
     "tests_refsol/test_week_2_day_7.py at old seven-day main"
+  ],
+  "required_builds": [
+    "pdm run build-ext",
+    "pdm run build-ext-ref"
   ]
 }

@@ -28,8 +28,6 @@ SECTIONS = (
     "embedding",
     "decode-projections",
     "prefill-projections",
-    "model-kernels",
-    "attention",
 )
 
 
