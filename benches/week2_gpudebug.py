@@ -20,6 +20,7 @@ PREFILL_LOGITS = "all"
 KNOWN_CHECKPOINTS = (
     "kv-cache",
     "capacity-cache",
+    "quantized-matvec",
 )
 
 

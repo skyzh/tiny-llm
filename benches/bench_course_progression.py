@@ -54,6 +54,13 @@ WEEK2_VARIANTS = (
         "week2",
         ("--week2-checkpoint", "capacity-cache"),
     ),
+    Variant(
+        "week2-quantized-matvec",
+        "2.2 Keep W4 packed",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "quantized-matvec"),
+    ),
     MLX_VARIANT,
 )
 VARIANTS_BY_KEY = {

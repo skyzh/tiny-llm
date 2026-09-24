@@ -14,6 +14,7 @@ https://skyzh.github.io/tiny-llm/week1-07-sampling-prepare
 https://skyzh.github.io/tiny-llm/week1-overview
 https://skyzh.github.io/tiny-llm/week2-01-kv-cache
 https://skyzh.github.io/tiny-llm/week2-02-benchmark-profile
+https://skyzh.github.io/tiny-llm/week2-02-quantize-model
 https://skyzh.github.io/tiny-llm/week2-03-quantize-model
 https://skyzh.github.io/tiny-llm/week2-04-fused-model-kernels
 https://skyzh.github.io/tiny-llm/week2-05-decode-attention

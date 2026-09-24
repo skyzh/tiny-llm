@@ -1,15 +1,9 @@
-# Historical Week 2: Packed W4 Quantization
+# 🚧 Week 2 Day 2: Keep W4 Packed
 
-> **Earlier lesson address.** This page preserves the packed W4 quantization
-> explanation and its original links. The current Week 2 learner route
-> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) and the revised
-> [Day 2: Keep W4 Packed](./week2-02-quantize-model.md). The old Day 3 body
-> below remains for its original address and historical context.
-> Later checkpoints, day numbers, tests, and commands below belong to an
-> earlier all-days course state; do not use them as gates for this checkout.
-
-
-Day 2 leaves you with a synchronized dense BF16 baseline. The Day 3 starter
+Complete [Day 1: Cache and Measure](./week2-01-kv-cache.md) first. Its
+`capacity-cache` checkpoint gives you a matched cached-model baseline, bounded
+dense K/V storage, and a decode roofline. Keep that baseline fixed while changing the
+projection representation. The Day 2 starter
 already supplies the packed-weight container and its
 `QuantizedWeights.from_mlx_layer` loader, the extension declaration and
 binding, fail-closed C++/Metal stubs, and cumulative model switches. Your work
@@ -21,15 +15,17 @@ is to:
    matvec; and
 4. wire packed projections and the tied output head into the live cached model.
 
-Begin with the Python wrapper gate. Then build and exercise the GPU operator:
+Build the learner and reference extensions before running Day 2's native
+tests. Begin with the Python wrapper gate, then exercise the GPU operator:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_1
-pdm run test --week 2 --day 3 -- -k gpu
+pdm run build-ext-ref
+pdm run test --week 2 --day 2 -- -k task_1
+pdm run test --week 2 --day 2 -- -k gpu
 ```
 
-Finish with the complete Day 3 gate and the `quantized-matvec` model
+Finish with the complete Day 2 gate and the `quantized-matvec` model
 checkpoint. The result is complete only when the cached model dispatches
 through your quantized path; packed storage and an isolated fast kernel are
 intermediate steps.
@@ -118,8 +114,8 @@ Rather than applying one scale to an entire weight matrix, divide each row into
 **groups** and quantize each group independently. A local scale and bias retain
 more information about that group's weight distribution.
 
-For a weight matrix $W$ of shape $(K, N)$, divide each row into groups of size
-$G$. The Qwen3-4B MLX 4-bit checkpoint used in this course has a fixed group
+For a weight matrix `W` of shape `(K, N)`, divide each row into groups of size
+`G`. The Qwen3-4B MLX 4-bit checkpoint used in this course has a fixed group
 size of 128:
 
 ```plain
@@ -137,11 +133,14 @@ For each stored group of G consecutive values in a row:
 ### Reconstruct a Stored Group
 
 The checkpoint already contains packed codes and affine parameters. For an
-unpacked unsigned code $q$, use the stored scale $s$ and bias $b$ directly:
+unpacked unsigned code `q`, use the stored scale `s` and bias `b` directly:
 
 $$
 \hat{w} = q s + b
 $$
+
+Read the equation as: reconstructed weight equals the unsigned code `q`
+multiplied by its stored signed scale `s`, plus its stored bias `b`.
 
 The codes are unsigned, but the stored scale is signed. A positive scale maps
 code 0 to the lower endpoint and code 15 toward the upper endpoint. A negative
@@ -212,8 +211,8 @@ Now W4 can be added to the dense comparison:
 | W4 | 4 | One BF16 scale and one BF16 bias | 0.53125 | 2.137 GB | 3.765 FLOPs/byte |
 
 This representation reduces projection weight traffic by 3.765×. Treat that
-ratio as a bandwidth ceiling for one-token decode, not as an end-to-end speedup
-promise.
+ratio as a weight-traffic advantage for one-token decode, not as an end-to-end
+speedup promise.
 
 ### Theoretical Decode Roofline Across Apple Silicon
 
@@ -225,9 +224,10 @@ assuming a compute ceiling:
 ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
 ```
 
-The table uses the highest-bandwidth configuration of each named chip. GB is
-decimal, matching Apple's specifications. The results are theoretical ceilings,
-not benchmark measurements.
+The table uses the highest-bandwidth configuration of each named chip listed
+in the cited Apple product specifications. GB is decimal, matching Apple's
+specifications. The results are theoretical ceilings, not benchmark
+measurements.
 
 | Chip | Bandwidth | FP16/BF16 roofline | W4 roofline |
 |---|---:|---:|---:|
@@ -250,9 +250,9 @@ The advertised bandwidths come from Apple's specifications for
 [M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
 [M3 Pro and Max](https://support.apple.com/en-us/117736),
 [M3 Ultra in the 2025 Mac Studio](https://support.apple.com/en-us/122211), and
-[M4 Pro and Max](https://support.apple.com/en-us/121553). Apple's 2025 Mac
-Studio specifications listed M4 Max and M3 Ultra configurations, but no M4
-Ultra configuration; this historical table therefore has no M4 Ultra row.
+[M4 Pro and Max](https://support.apple.com/en-us/121553). The 2025 Mac Studio
+specifications list M3 Ultra alongside M4 Max, not an M4 Ultra; this dated
+comparison stops at M4 Pro/Max and makes no claim about subsequent products.
 
 These values assume peak advertised bandwidth, one read of every projection
 weight, and no other traffic or work. A complete model also reads activations
@@ -270,25 +270,32 @@ bandwidth ratio does not predict prefill performance.
 
 ### Mathematical Formulation
 
-For standard matrix multiplication $C = AB^T$ where:
+For the matrix product `C = A B^T`, multiply `A` by the transpose of `B`.
+The arrays are:
 
-- $A$: shape $(M, N)$, bfloat16 (activations)
-- $B$: shape $(K, N)$, **quantized** to int4 (weights)
-- $C$: shape $(M, K)$, same 16-bit dtype as $A$ (output)
+- `A`: shape `(M, N)`, bfloat16 (activations)
+- `B`: shape `(K, N)`, **quantized** to int4 (weights)
+- `C`: shape `(M, K)`, same 16-bit dtype as `A` (output)
 
-Each element $C[i, k]$ is computed as:
+Each element `C[i, k]` is computed as:
 
 $$
 C[i, k] = \sum_{j=0}^{N-1} A[i, j] \times B[k, j]
 $$
 
-With quantization, $B[k, j]$ is represented as:
+For output row `i` and column `k`, multiply `A[i, j]` by `B[k, j]` for
+each input position `j` from zero through `N - 1`, then add the products.
+
+With quantization, `B[k, j]` is represented as:
 
 $$
 B[k, j] = B_{\text{quantized}}[k, j] \times \text{scale}[k, g] + \text{bias}[k, g]
 $$
 
-where $g = \lfloor j / G \rfloor$ is the group index.
+Reconstruct `B[k, j]` by multiplying its unsigned four-bit code by the
+stored scale for row `k` and group `g`, then adding that group's stored bias.
+
+Here, `g = floor(j / G)` is the group index.
 
 Substituting:
 
@@ -296,11 +303,19 @@ $$
 C[i, k] = \sum_{g=0}^{N/G-1} \sum_{j'=0}^{G-1} A[i, g \times G + j'] \times (B_{\text{quantized}}[k, g \times G + j'] \times \text{scale}[k, g] + \text{bias}[k, g])
 $$
 
+For each group `g` and position `j'` within it, multiply activation
+`A[i, g*G + j']` by the reconstructed weight at row `k` and that position;
+sum those products over all `N/G` groups and all `G` positions per group.
+
 Rearranging:
 
 $$
 C[i, k] = \sum_{g=0}^{N/G-1} \left( \text{scale}[k, g] \sum_{j'=0}^{G-1} A[i, g \times G + j'] \times B_{\text{quantized}}[k, g \times G + j'] + \text{bias}[k, g] \sum_{j'=0}^{G-1} A[i, g \times G + j'] \right)
 $$
+
+Equivalently, within each group, multiply the stored scale by the sum of
+activation-times-code products, and add the stored bias multiplied by the sum
+of those same activations. Add the group results to obtain `C[i, k]`.
 
 The scale and bias are constant within a group, so the computation can reuse
 them across all values in that group.
@@ -356,11 +371,11 @@ plumbing. Modify these learner-owned functions:
 
 | Field | Shape | Description |
 |-------|-------|-------------|
-| `weight` | $(K, N/8)$ uint32 | Packed quantized weights. Each uint32 stores eight consecutive 4-bit values. |
-| `scales` | $(K, N/G)$ bfloat16 | Stored signed per-group scale factors for dequantization. The sign determines which endpoint maps to the low codes. |
-| `biases` | $(K, N/G)$ bfloat16 | Stored per-group offsets. Code 0 reconstructs to this value. |
+| `weight` | `(K, N/8)` uint32 | Packed quantized weights. Each uint32 stores eight consecutive 4-bit values. |
+| `scales` | `(K, N/G)` bfloat16 | Stored signed per-group scale factors for dequantization. The sign determines which endpoint maps to the low codes. |
+| `biases` | `(K, N/G)` bfloat16 | Stored per-group offsets. Code 0 reconstructs to this value. |
 | `group_size` | int | Number of consecutive values that share the same scale/bias. For the Qwen3 MLX 4-bit weights used here, this is `128`. |
-| `bits` | int | Quantization bit width (typically 4, meaning values are in range $[0, 15]$) |
+| `bits` | int | Quantization bit width (typically 4, meaning values are in range `[0, 15]`) |
 
 The supplied `from_mlx_layer` method extracts these fields from an MLX
 quantized layer during model loading. Reuse it rather than introducing a second
@@ -398,7 +413,7 @@ The declaration, fail-closed source stub, binding, and build registration are
 already present. Keep the C++ declarations and definitions in the
 `tiny_llm_ext` namespace, and modify these exact functions:
 
-- **`tiny_llm_ext.h`** — Read the Week 2 Day 3 `quantized_matmul(...)`
+- **`tiny_llm_ext.h`** — Read the Week 2 Day 2 `quantized_matmul(...)`
   declaration and `QuantizedMatmul` primitive interface; keep its signature in
   sync with the binding.
 - **`bindings.cpp`** — Verify the existing `m.def("quantized_matmul", ...)`
@@ -420,7 +435,7 @@ after you implement its Metal schedules in Task 3:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_1
+pdm run test --week 2 --day 2 -- -k task_1
 ```
 
 ## Task 3: Implement Metal Matrix Products
@@ -482,15 +497,15 @@ different shapes:
    activation row and calculate several output columns together.
 
 Here, `M` is the number of activation rows after flattening every leading
-dimension. Day 3 uses this explicit dispatch:
+dimension. Day 2 uses this explicit dispatch:
 
 | Activation rows | Kernel | Role at this checkpoint |
 |---:|---|---|
 | `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
-| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 5 replaces it with a cooperative tiled kernel. |
+| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 3 replaces it with a cooperative tiled kernel. |
 
 The cutoff does not extend the SIMD kernel to larger `M`. These are separate
-schedules: Day 3 optimizes vector-shaped decode and leaves matrix-shaped
+schedules: Day 2 optimizes vector-shaped decode and leaves matrix-shaped
 prefill visible for the later benchmark to select.
 
 Keep the vanilla function callable as `quantized_matmul_vanilla` so every
@@ -506,7 +521,7 @@ control flow mirrors the equation and makes it a useful debugging control. The
 Python `mlx.core` equation remains the correctness oracle for both Metal
 schedules.
 
-Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 5
+Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 3
 revisits that workload with cooperative tiling.
 
 ### Stage 2: SIMD Matvec
@@ -518,14 +533,19 @@ inspectable schedule. For the Qwen3-4B checkpoint, evaluate a four-column path
 in which each lane loads two adjacent packed words, or 16 activations, and
 reuses them across the four outputs.
 
-The optimized path also uses the affine identity
+The optimized path also uses this affine identity to avoid applying the bias
+separately to every unpacked value:
 
 $$
 \sum_j a_j(sq_j+b) = s\sum_j a_jq_j + b\sum_j a_j
 $$
 
-to avoid applying the bias separately to every unpacked value. It also scales
-the activations once and reads four packed int4 values through a 16-bit mask,
+The left side sums activation `a_j` times its reconstructed weight
+`s*q_j + b`. The right side computes the same sum by multiplying `s` by the
+activation-times-code sum, then adding `b` times the activation sum.
+
+The kernel also scales the activations once and reads four packed int4 values
+through a 16-bit mask,
 avoiding a shift for every weight and output row. This adds live accumulators,
 so test it as a complete schedule rather than assuming fewer integer
 instructions must be faster.
@@ -573,7 +593,7 @@ Implement both required layouts in `quantized_matmul.metal`:
 - For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
   the input dimension and compute several output columns per group.
 - For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
-  SIMD matvec schedule; Day 5 introduces the tiled prefill schedule.
+  SIMD matvec schedule; Day 3 introduces the tiled prefill schedule.
 - The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
   checkpoint does not add a second model-storage dtype.
 - Apply the group-wise dequantization loop defined earlier in this chapter:
@@ -610,7 +630,8 @@ Run the focused GPU gate:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k gpu
+pdm run build-ext-ref
+pdm run test --week 2 --day 2 -- -k gpu
 ```
 
 The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
@@ -655,23 +676,27 @@ assumptions: `group_size = 128` and `bits = 4`.
 Run the complete gate, then the live model checkpoint:
 
 ```bash
-pdm run test --week 2 --day 3
+pdm run test --week 2 --day 2
 
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b --max-tokens 16
 ```
 
-Measure that same learner solution:
+Measure that same learner solution with the cached 0.6B model. Keep the model,
+prompt/output lengths, and last-logit serving mode matched when changing the
+solution or checkpoint:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-4b \
+  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2
+  --min-output-len 65 --max-output-len 65 --warmup 2 \
+  --prefill-logits last
 ```
 
 Run the same command with `--solution tiny_llm_ref` to compare it with the
-reference solution.
+reference solution. For a Day 1 control, change only the checkpoint to
+`capacity-cache`; do not compare different models or prefill-logit modes.
 
 Keep the vanilla matrix product callable as an inspectable Metal control. The
 Python `mlx.core` equation remains the correctness oracle, while decode
@@ -693,27 +718,32 @@ live model command to verify that those pieces compose.
 Measure the cumulative model and the real projection shapes:
 
 ```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
-  --variant week2-kv-cache --variant week2-quantized-matvec --variant mlx \
-  --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
+pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
+  --variant week2-capacity-cache --variant week2-quantized-matvec --variant mlx \
+  --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last
 
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
-  --case kv-cache:decode:128 --case quantized-matvec:decode:128 \
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
+  --case capacity-cache:decode:128 --case quantized-matvec:decode:128 \
   --warmup 4 --iterations 12 \
-  --json-output week2-day3-attribution.json
+  --json-output week2-day2-attribution.json
 ```
 
 Keep one cumulative model row and one representative real-shape projection
 comparison. In the checked M4 Pro example, packed W4 reduced attributed
 projection time by 69.0% and fixed-workload decode rose from 24.38 to 58.90
 tokens/s. The re-profile then exposed normalization, position, and activation
-at 33.5% of attributed time, selecting Day 4. These are bounded observations
-from one machine and two product samples, not portable timing thresholds. The
-complete campaign and attribution are in the
-[performance appendix](./appendix-performance.md#day-3-keep-weights-packed).
+at 33.5% of attributed time, pointing to later fusion work. These are
+historical Qwen3-4B observations from one machine and two product samples,
+not results to expect from the required 0.6B run or portable timing thresholds.
+For an optional 4B comparison, first cache the model with
+`hf download Qwen/Qwen3-4B-MLX-4bit`, then rerun every compared row with
+`--model qwen3-4b`; the dense `capacity-cache` control needs the memory
+recommended in the [model table](./preface.md#choose-a-model-for-your-mac).
+The complete historical campaign and attribution are in the
+[performance appendix](./appendix-performance.md).
 
-If you need to continue without the custom Day 3 kernels, implement the same
+If you need to continue without the custom Day 2 kernels, implement the same
 `quantized_linear` interface with `mx.quantized_matmul` and leave the rest of
 the course model unchanged. This is a local operator off-ramp, not
 `--solution mlx`: the latter runs a separate complete model and does not

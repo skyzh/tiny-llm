@@ -38,9 +38,9 @@ def main() -> int:
             f"unaccounted test files: {sorted(unaccounted)}; "
             f"missing included files: {sorted(missing_included)}"
         )
-    if manifest["shipped_day"] != 1:
-        raise SystemExit("this temporary CI gate is bound to shipped_day=1")
-    print("shipped_day=1", flush=True)
+    if manifest["shipped_day"] != 2:
+        raise SystemExit("this temporary CI gate is bound to shipped_day=2")
+    print("shipped_day=2", flush=True)
     print(f"included_files={len(included)}", flush=True)
     for path in included:
         print(f"INCLUDE {path}", flush=True)
@@ -50,16 +50,12 @@ def main() -> int:
             f"reason={item['reason']}",
             flush=True,
         )
-    if len(manifest["deferred_builds"]) != 1:
-        raise SystemExit("Day 1 must declare its one deferred reference-native build")
-    for item in manifest["deferred_builds"]:
-        if item["command"] != "pdm run build-ext-ref" or item["reenable_day"] != 2:
-            raise SystemExit("unexpected deferred native build in Day 1 manifest")
-        print(
-            f"DEFER BUILD {item['command']} reenable_day={item['reenable_day']} "
-            f"reason={item['reason']}",
-            flush=True,
-        )
+    if manifest["deferred_builds"]:
+        raise SystemExit("Day 2 must restore both extension builds")
+    if manifest["required_builds"] != ["pdm run build-ext", "pdm run build-ext-ref"]:
+        raise SystemExit("Day 2 native build gates changed")
+    for command in manifest["required_builds"]:
+        print(f"BUILD {command}", flush=True)
     for path in manifest["retired"]:
         print(f"RETIRED {path}", flush=True)
     collect = subprocess.run(

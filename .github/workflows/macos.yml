@@ -38,6 +38,7 @@ jobs:
       - name: Try building extensions
         run: |
           pdm run build-ext
+          pdm run build-ext-ref
 
       - run: cargo install mdbook-toc
       - run: cargo install mdbook-katex --version 0.10.0-alpha

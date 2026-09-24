@@ -27,10 +27,10 @@ The course follows a four-week learning path:
 - **Week 1: From Matmul to Text.** Build a Qwen3 model directly from `mlx.core`
   array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
-- **Week 2: A Faster Single Request.** The current Day 1 route adds
-  `kv-cache` and request-bounded `capacity-cache`, then measures both against
-  the Week 1 full-prefix control. Later packed-W4, SIMD, fused-primitive, and
-  tiled-attention lessons are planned; their checkpoints are not Day 1 gates.
+- **Week 2: A Faster Single Request.** Day 1 adds `kv-cache` and
+  request-bounded `capacity-cache`; Day 2 keeps W4 projection weights packed
+  through the `quantized-matvec` checkpoint. SIMD matrix prefill, fused
+  primitives, and tiled attention remain later lessons.
 - **Week 3: Build a Mini vLLM.** Introduce continuous
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
@@ -108,6 +108,7 @@ one explicit byte range through the existing loop.
 | 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
 | 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
 | 2.1 | Cache and Measure (`kv-cache`, `capacity-cache`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.2 | Keep W4 Packed (`quantized-matvec`) | 🚧 | 🚧 | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |
@@ -125,7 +126,7 @@ one explicit byte range through the existing loop.
 | 4.8 | Fork, Steer, and Select | ✅ | ✅ | ✅ | 🚧 |
 | 4.9 | Bound Tool Evidence | ✅ | ✅ | ✅ | 🚧 |
 
-The older Week 2 chapter URLs remain available as [historical material](book/src/week2-02-benchmark-profile.md). Their former Day 2–7 tests and checkpoint commands are not part of the current Day 1 learner route.
+The older Week 2 chapter URLs remain available as [historical material](book/src/week2-02-benchmark-profile.md). Their former Day 2–7 test and checkpoint order is separate from the current Day 1 → Day 2 route.
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.
