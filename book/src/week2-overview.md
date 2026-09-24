@@ -121,11 +121,14 @@ the model and dense-cache interfaces while adding paging, batching, and
 serving policy; its learner work remains separate from the single-request
 Week 2 route.
 
-The earlier seven-day book remains available at its old addresses as
-[historical Week 2 material](./week2-02-benchmark-profile.md). It preserves
+Earlier seven-day lessons whose URLs are not reused for active Days 1–5 remain
+at their old addresses as
+[historical Week 2 material](./week2-02-benchmark-profile.md). The former Day 4
+address now serves the [active fused-primitives lesson](./week2-04-fused-model-kernels.md).
+The historical pages preserve
 benchmark method, W4 derivation, Apple M1–M4 bandwidth and roofline
 calculations, fusion/SIMD mechanisms, optional capture, and the old
-bounded-decode and Split-K experiments. Its
+bounded-decode and Split-K experiments. Their
 [operator-attribution diagram](./week2-kernel-profile.svg) and
 [decision diagram](./week2-performance-summary.svg) are also historical
 evidence, not diagrams of the current checkout. Those pages describe a different
