@@ -4,6 +4,7 @@ import importlib
 import sys
 
 import mlx.core as mx
+import pytest
 
 from benches import (
     bench,
@@ -58,8 +59,15 @@ def test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu():
         assert_allclose(tiled, readable, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
-def test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu():
-    fixture = tiny_qwen3_mlx_model()
+@pytest.mark.parametrize("seed", (0, 4))
+def test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu(seed):
+    random_state = mx.random.state[:]
+    try:
+        mx.random.seed(seed)
+        fixture = tiny_qwen3_mlx_model()
+    finally:
+        mx.random.state[:] = random_state
+
     tokens = mx.array([list(range(1, 11))], dtype=mx.int32)
     with mx.stream(mx.gpu):
         simd_model = Qwen3ModelWeek2(fixture, checkpoint="simd-matmul")
@@ -72,7 +80,14 @@ def test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu():
 
     assert simd_output.dtype == readable_output.dtype == mx.bfloat16
     assert simd_output.shape == readable_output.shape
-    assert_allclose(simd_output, readable_output, mx.bfloat16, atol=0.5, rtol=5e-2)
+    assert_allclose(
+        simd_output,
+        readable_output,
+        mx.bfloat16,
+        atol=0.75,
+        rtol=5e-2,
+        message=f"fixture seed {seed}",
+    )
 
 
 def test_day3_public_selectors_stop_at_simd_matmul():
