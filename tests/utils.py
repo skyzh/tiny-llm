@@ -9,8 +9,11 @@ PRECISIONS = [mx.float32, mx.float16]
 PRECISION_IDS = ["f32", "f16"]
 
 
-def tiny_qwen3_mlx_model(num_hidden_layers: int = 1) -> SimpleNamespace:
+def tiny_qwen3_mlx_model(
+    num_hidden_layers: int = 1, *, head_dim: int = 64
+) -> SimpleNamespace:
     """Build a small MLX-shaped Qwen3 model for integration tests."""
+    hidden_size = 2 * head_dim
 
     def quantized_layer(out_dim: int, in_dim: int) -> SimpleNamespace:
         weight = mx.random.normal((out_dim, in_dim)).astype(mx.bfloat16)
@@ -25,12 +28,12 @@ def tiny_qwen3_mlx_model(num_hidden_layers: int = 1) -> SimpleNamespace:
 
     args = SimpleNamespace(
         num_hidden_layers=num_hidden_layers,
-        hidden_size=128,
+        hidden_size=hidden_size,
         vocab_size=128,
         num_attention_heads=2,
         num_key_value_heads=1,
-        head_dim=64,
-        intermediate_size=128,
+        head_dim=head_dim,
+        intermediate_size=hidden_size,
         rms_norm_eps=1e-5,
         max_position_embeddings=256,
         rope_theta=10000,
@@ -41,30 +44,32 @@ def tiny_qwen3_mlx_model(num_hidden_layers: int = 1) -> SimpleNamespace:
         layers.append(
             SimpleNamespace(
                 self_attn=SimpleNamespace(
-                    q_proj=quantized_layer(128, 128),
-                    k_proj=quantized_layer(64, 128),
-                    v_proj=quantized_layer(64, 128),
-                    o_proj=quantized_layer(128, 128),
-                    q_norm=SimpleNamespace(weight=mx.ones((64,), mx.bfloat16)),
-                    k_norm=SimpleNamespace(weight=mx.ones((64,), mx.bfloat16)),
+                    q_proj=quantized_layer(hidden_size, hidden_size),
+                    k_proj=quantized_layer(head_dim, hidden_size),
+                    v_proj=quantized_layer(head_dim, hidden_size),
+                    o_proj=quantized_layer(hidden_size, hidden_size),
+                    q_norm=SimpleNamespace(weight=mx.ones((head_dim,), mx.bfloat16)),
+                    k_norm=SimpleNamespace(weight=mx.ones((head_dim,), mx.bfloat16)),
                 ),
                 mlp=SimpleNamespace(
-                    gate_proj=quantized_layer(128, 128),
-                    up_proj=quantized_layer(128, 128),
-                    down_proj=quantized_layer(128, 128),
+                    gate_proj=quantized_layer(hidden_size, hidden_size),
+                    up_proj=quantized_layer(hidden_size, hidden_size),
+                    down_proj=quantized_layer(hidden_size, hidden_size),
                 ),
-                input_layernorm=SimpleNamespace(weight=mx.ones((128,), mx.bfloat16)),
+                input_layernorm=SimpleNamespace(
+                    weight=mx.ones((hidden_size,), mx.bfloat16)
+                ),
                 post_attention_layernorm=SimpleNamespace(
-                    weight=mx.ones((128,), mx.bfloat16)
+                    weight=mx.ones((hidden_size,), mx.bfloat16)
                 ),
             )
         )
     return SimpleNamespace(
         args=args,
         model=SimpleNamespace(
-            embed_tokens=quantized_layer(128, 128),
+            embed_tokens=quantized_layer(128, hidden_size),
             layers=layers,
-            norm=SimpleNamespace(weight=mx.ones((128,), mx.bfloat16)),
+            norm=SimpleNamespace(weight=mx.ones((hidden_size,), mx.bfloat16)),
         ),
     )
 

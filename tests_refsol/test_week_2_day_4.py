@@ -92,7 +92,7 @@ def test_task_4_primitive_checkpoints_compose_public_model(seed):
         )
 
 
-def test_day4_public_selectors_include_only_shipped_checkpoints():
+def test_day4_public_selectors_remain_the_prefix_of_day5():
     model_module = importlib.import_module(Qwen3ModelWeek2.__module__)
     checkpoints = (
         "kv-cache",
@@ -103,9 +103,9 @@ def test_day4_public_selectors_include_only_shipped_checkpoints():
         "rope",
         "swiglu",
     )
-    assert model_module.WEEK2_CHECKPOINTS == checkpoints
-    assert KNOWN_CHECKPOINTS == checkpoints
-    assert DEFAULT_CASES == (
+    assert model_module.WEEK2_CHECKPOINTS[:7] == checkpoints
+    assert KNOWN_CHECKPOINTS[:7] == checkpoints
+    assert DEFAULT_CASES[:7] == (
         "kv-cache:decode:128",
         "capacity-cache:decode:128",
         "quantized-matvec:decode:128",
@@ -114,7 +114,7 @@ def test_day4_public_selectors_include_only_shipped_checkpoints():
         "rope:decode:128",
         "swiglu:decode:128",
     )
-    assert [variant.key for variant in WEEK2_VARIANTS] == [
+    assert [variant.key for variant in WEEK2_VARIANTS][:8] == [
         "week1",
         "week2-kv-cache",
         "week2-capacity-cache",
@@ -123,7 +123,6 @@ def test_day4_public_selectors_include_only_shipped_checkpoints():
         "week2-rmsnorm",
         "week2-rope",
         "week2-swiglu",
-        "mlx",
     ]
 
 

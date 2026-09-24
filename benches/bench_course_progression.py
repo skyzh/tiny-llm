@@ -89,6 +89,20 @@ WEEK2_VARIANTS = (
         "week2",
         ("--week2-checkpoint", "swiglu"),
     ),
+    Variant(
+        "week2-tiled-prefill",
+        "2.5 Tiled dense prefill attention",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "tiled-prefill"),
+    ),
+    Variant(
+        "week2-selected",
+        "2.5 + Run the selected inference engine",
+        "ref",
+        "week2",
+        ("--week2-checkpoint", "selected"),
+    ),
     MLX_VARIANT,
 )
 VARIANTS_BY_KEY = {

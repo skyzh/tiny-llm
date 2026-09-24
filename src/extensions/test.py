@@ -9,7 +9,6 @@ LEARNER_EXTENSION_INTERFACES = {
     "rms_norm": "Week 2, Day 4",
     "rope": "Week 2, Day 4",
     "swiglu": "Week 2, Day 4",
-    "decode_attention": "Week 2, Day 6",
     "paged_cache_update": "Week 3, Day 3",
     "quantized_embedding": "Week 3, Day 4",
     "paged_attention": "Week 3, Day 4",

@@ -38,11 +38,12 @@ jobs:
       - name: Try building extensions
         run: |
           pdm run build-ext
-          pdm run build-ext-ref
+          pdm run build-ext-test
+
+      - run: pdm run build-ext-ref
 
       - run: cargo install mdbook-toc
       - run: cargo install mdbook-katex --version 0.10.0-alpha
       - uses: taiki-e/install-action@mdbook
 
-      - name: Run printed shipped-day reference CI manifest
-        run: pdm run python scripts/week2_shipped_day_ci.py
+      - run: pdm run test-refsol

@@ -42,6 +42,8 @@ parser.add_argument(
         "rmsnorm",
         "rope",
         "swiglu",
+        "tiled-prefill",
+        "selected",
     ),
     help="run one cumulative Week 2 model checkpoint",
 )
@@ -59,7 +61,7 @@ if (
         args.loader == "week3"
         or (
             args.loader == "week2"
-            and (args.week2_checkpoint or "swiglu")
+            and (args.week2_checkpoint or "selected")
             not in ("kv-cache", "capacity-cache")
         )
     )

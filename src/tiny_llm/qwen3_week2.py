@@ -23,8 +23,7 @@ class Week2CheckpointFeatures:
     fast_rope: bool = False
     fast_swiglu: bool = False
     simdgroup_matmul: bool = False
-    decode_attention: bool = False
-    split_k_matmul: bool = False
+    tiled_prefill_attention: bool = False
 
 
 WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
@@ -60,12 +59,27 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
             fast_rope=True,
             fast_swiglu=True,
         ),
+        "tiled-prefill": Week2CheckpointFeatures(
+            bounded_kv_capacity=True,
+            quantized_weights=True,
+            simdgroup_matmul=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            tiled_prefill_attention=True,
+        ),
+        "selected": Week2CheckpointFeatures(
+            bounded_kv_capacity=True,
+            quantized_weights=True,
+            simdgroup_matmul=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+            tiled_prefill_attention=True,
+        ),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
-
-DECODE_ATTENTION_MAX_CONTEXT = 256
-DECODE_ATTENTION_MAX_QUERY = 2
 
 
 class Qwen3MultiHeadAttention:
@@ -86,7 +100,7 @@ class Qwen3MultiHeadAttention:
         rms_norm_eps: float = 1e-5,
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
-        use_decode_attention: bool = True,
+        use_tiled_prefill_attention: bool = False,
     ):
         pass
 
@@ -141,7 +155,7 @@ class Qwen3TransformerBlock:
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
         use_fast_swiglu: bool = True,
-        use_decode_attention: bool = True,
+        use_tiled_prefill_attention: bool = False,
     ):
         pass
 
@@ -159,9 +173,11 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "swiglu",
+        checkpoint: str = "selected",
         use_mlx_quantized_linear: bool = False,
         use_bounded_kv_capacity: bool | None = None,
+        use_register_cached_rms_norm: bool | None = None,
+        use_tiled_prefill_attention: bool | None = None,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
