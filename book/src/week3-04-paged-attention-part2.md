@@ -10,8 +10,9 @@ kernel may serve every query shape; separate decode and prefill kernels are an
 optimization choice. Day 5 replaces the supported BF16 long-prefill hot case
 with a tiled implementation.
 
-> **Prerequisite:** Complete Week 3 Day 3's paged storage and Week 2 Day 5's
-> online-softmax attention. The new concept here is translating logical K/V
+> **Prerequisite:** Complete Week 3 Day 3's paged storage and
+> [Week 2 Day 5's online-softmax attention](./week2-05-tiled-prefill-attention.md).
+> The new concept here is translating logical K/V
 > positions through a block table. Tiled FlashAttention comes only after this
 > direct path works.
 

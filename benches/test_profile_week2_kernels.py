@@ -1,9 +1,11 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import mlx.core as mx
 import pytest
 
 from benches import profile_week2_kernels as profile
+from tests_refsol.utils import tiny_qwen3_mlx_model
 
 
 def test_kernel_group_profile_rotates_every_group_through_each_position():
@@ -124,8 +126,27 @@ def test_kernel_replay_routes_attention_with_production_guard(
 def test_student_and_reference_profiles_share_the_production_guard():
     for name in ("tiny_llm", "tiny_llm_ref"):
         implementation = profile.load_implementation(name)
-        assert implementation.decode_attention_max_query == 2
-        assert implementation.decode_attention_max_context == 256
+        assert implementation.decode_attention_max_query == 0
+        assert implementation.decode_attention_max_context == 0
+
+
+def test_selected_prefill_attribution_uses_the_tiled_operator():
+    implementation = profile.load_implementation("tiny_llm_ref")
+    model = implementation.model_type(
+        tiny_qwen3_mlx_model(head_dim=128), checkpoint="selected"
+    )
+    calls = []
+
+    def record(query, _key, _value, *, scale, mask):
+        calls.append((query.shape[-2], scale, mask))
+        return query
+
+    replay = profile.KernelReplay(
+        replace(implementation, tiled_attention=record), model, "prefill", 9
+    )
+    outputs = replay.attention()
+    assert len(outputs) == len(model.layers_inner)
+    assert calls == [(9, model.layers_inner[0].self_attn.scale, "causal")]
 
 
 def test_decision_requires_exact_source_solution_model_and_workload_identity():
@@ -210,21 +231,32 @@ def test_profile_workload_identity_covers_every_workload_field(monkeypatch):
 
 def test_default_attribution_and_model_expose_only_canonical_checkpoints():
     cases = [profile.parse_case(value) for value in profile.DEFAULT_CASES]
-    checkpoints = [case.checkpoint for case in cases]
-    assert checkpoints.index("simd-matmul") < checkpoints.index("decode-attention")
-    assert checkpoints[-1] == "split-k"
+    checkpoints = tuple(case.checkpoint for case in cases)
+    assert checkpoints == (
+        "kv-cache",
+        "capacity-cache",
+        "quantized-matvec",
+        "simd-matmul",
+        "rmsnorm",
+        "rope",
+        "swiglu",
+        "tiled-prefill",
+        "selected",
+    )
+    assert {"decode-attention", "split-k"}.isdisjoint(checkpoints)
 
     for implementation_name in ("tiny_llm", "tiny_llm_ref"):
         implementation = profile.load_implementation(implementation_name)
         assert implementation.checkpoints == (
             "kv-cache",
+            "capacity-cache",
             "quantized-matvec",
+            "simd-matmul",
             "rmsnorm",
             "rope",
             "swiglu",
-            "simd-matmul",
-            "decode-attention",
-            "split-k",
+            "tiled-prefill",
+            "selected",
         )
 
 

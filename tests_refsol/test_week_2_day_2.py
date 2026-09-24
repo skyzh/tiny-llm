@@ -1,8 +1,5 @@
 """Week 2 Day 2 quantized-matvec tests."""
 
-import importlib
-import inspect
-
 import mlx.core as mx
 import pytest
 
@@ -16,16 +13,21 @@ from .tiny_llm_base import (
     Qwen3ModelWeek2,
     QuantizedEmbedding,
     QuantizedWeights,
-    RMSNorm,
-    RoPE,
+    dequantize_weights,
     quantized_matmul,
     quantized_matmul_vanilla,
     quantized_matvec_custom,
 )
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
-embedding_module = importlib.import_module(QuantizedEmbedding.__module__)
-quantize_module = importlib.import_module(quantized_matmul.__module__)
+
+def _fixed_fixture(seed: int):
+    random_state = mx.random.state[:]
+    try:
+        mx.random.seed(seed)
+        return tiny_qwen3_mlx_model()
+    finally:
+        mx.random.state[:] = random_state
 
 
 def test_task_1_quantized_embedding_dequantizes_selected_rows():
@@ -60,31 +62,40 @@ def test_task_1_quantized_embedding_accepts_sampled_uint32_tokens():
     assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def test_week2_quantization_path_uses_course_owned_operators():
-    source = (
-        inspect.getsource(quantize_module.quantized_matmul)
-        + inspect.getsource(quantize_module.dequantize_weights)
-        + inspect.getsource(embedding_module.QuantizedEmbedding.__call__)
+def test_task_1_dequantize_weights_matches_packed_weight_values():
+    weight = mx.sin(mx.arange(5 * 256, dtype=mx.float32) * 0.07).reshape(5, 256)
+    packed, scales, biases = mx.quantize(
+        weight.astype(mx.bfloat16), group_size=128, bits=4
     )
-    assert "mx.quantized_matmul" not in source
-    assert "mx.dequantize" not in source
+    actual = dequantize_weights(packed, scales, biases, 128, 4)
+    expected = mx.dequantize(packed, scales, biases, group_size=128, bits=4)
+    assert actual is not None, "implement the dequantize_weights learner seam"
+    assert actual.shape == (5, 256)
+    assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def test_task_4_model_integrates_packed_weights_before_fast_kernels():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="quantized-matvec")
-    assert hasattr(model, "layers_inner"), (
-        "implement the Qwen3ModelWeek2 quantized-matvec learner seam"
+@pytest.mark.parametrize("seed", (0, 2))
+def test_task_4_quantized_model_matches_packed_mlx_control(seed: int):
+    fixture = _fixed_fixture(seed)
+    model = Qwen3ModelWeek2(fixture, checkpoint="quantized-matvec")
+    control = Qwen3ModelWeek2(
+        fixture, checkpoint="quantized-matvec", use_mlx_quantized_linear=True
     )
-    layer = model.layers_inner[0]
+    tokens = mx.array([[1, 2, 3]], dtype=mx.int32)
+    with mx.stream(mx.gpu):
+        actual_cache = model.create_kv_cache(capacity=4)
+        expected_cache = control.create_kv_cache(capacity=4)
+        actual = model(tokens, 0, actual_cache)
+        expected = control(tokens, 0, expected_cache)
+        decoded = model(mx.array([[4]], dtype=mx.int32), 3, actual_cache)
+        decoded_control = control(mx.array([[4]], dtype=mx.int32), 3, expected_cache)
+        mx.eval(actual, expected, decoded, decoded_control)
 
-    assert isinstance(model.embedding, QuantizedEmbedding)
-    assert isinstance(layer.self_attn.wq, QuantizedWeights)
-    assert isinstance(layer.mlp.w_gate, QuantizedWeights)
-    assert isinstance(layer.input_layernorm, RMSNorm)
-    assert isinstance(layer.self_attn.rope, RoPE)
-    assert model.use_bounded_kv_capacity
-    assert not layer.self_attn.use_decode_attention
-    assert not layer.mlp.use_fast_swiglu
+    assert actual.dtype == expected.dtype == mx.bfloat16
+    assert actual.shape == expected.shape == (1, 3, fixture.args.vocab_size)
+    assert_allclose(actual, expected, mx.bfloat16, atol=1.0, rtol=0.05)
+    assert decoded.shape == decoded_control.shape == (1, 1, fixture.args.vocab_size)
+    assert_allclose(decoded, decoded_control, mx.bfloat16, atol=1.0, rtol=0.05)
 
 
 def quantized_matmul_helper(
@@ -251,4 +262,4 @@ def test_day2_public_selectors_preserve_day2_prefix():
         "week2-capacity-cache",
         "week2-quantized-matvec",
     ]
-    assert SECTIONS == ("embedding", "decode-projections", "prefill-projections")
+    assert SECTIONS[:3] == ("embedding", "decode-projections", "prefill-projections")

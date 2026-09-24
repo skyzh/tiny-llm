@@ -18,6 +18,7 @@
     - [🚧 Day 2: Keep W4 Packed](./week2-02-quantize-model.md)
     - [🚧 Day 3: SIMD Matrix Prefill](./week2-03-simd-matrix-prefill.md)
     - [🚧 Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md)
+    - [🚧 Day 5: Tiled Dense Prefill Attention](./week2-05-tiled-prefill-attention.md)
     - [Historical Week 2 lesson addresses](./week2-02-benchmark-profile.md)
         - [Earlier quantization lesson](./week2-03-quantize-model.md)
         - [Earlier SIMD-prefill lesson](./week2-05-simd-matrix-prefill.md)

@@ -15,9 +15,6 @@ def validate_week_day(args, required=False):
     if week_provided and (args.week <= 0 or args.day <= 0):
         print("Week and day must be positive integers")
         return False
-    if week_provided and args.week == 2 and args.day > 4:
-        print("Week 2 Days 1–4 are shipped; later tests are deferred")
-        return False
     return True
 
 

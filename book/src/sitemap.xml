@@ -67,6 +67,9 @@
         <loc>https://skyzh.github.io/tiny-llm/week2-05-simd-matrix-prefill</loc>
     </url>
     <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-05-tiled-prefill-attention</loc>
+    </url>
+    <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-06-operator-lab</loc>
     </url>
     <url>

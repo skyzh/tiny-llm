@@ -25,6 +25,8 @@ KNOWN_CHECKPOINTS = (
     "rmsnorm",
     "rope",
     "swiglu",
+    "tiled-prefill",
+    "selected",
 )
 
 

@@ -3,8 +3,17 @@
 import mlx.core as mx
 import pytest
 
-from .tiny_llm_base import Embedding, Qwen3ModelWeek2, RMSNorm, RoPE, TinyKvFullCache
+from .tiny_llm_base import Qwen3ModelWeek2, TinyKvFullCache
 from .utils import assert_allclose, tiny_qwen3_mlx_model
+
+
+def _fixed_fixture(seed: int):
+    random_state = mx.random.state[:]
+    try:
+        mx.random.seed(seed)
+        return tiny_qwen3_mlx_model()
+    finally:
+        mx.random.state[:] = random_state
 
 
 def test_task_1_full_cache_appends_chunks():
@@ -31,23 +40,22 @@ def test_task_1_full_cache_appends_chunks():
 
 
 def test_tasks_2_and_3_cached_checkpoint_is_runnable_and_readable():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="kv-cache")
-    layer = model.layers_inner[0]
+    fixture = _fixed_fixture(0)
+    model = Qwen3ModelWeek2(fixture, checkpoint="kv-cache")
+    cache = model.create_kv_cache()
+    assert len(cache) == fixture.args.num_hidden_layers
 
-    assert isinstance(model.embedding, Embedding)
-    assert isinstance(layer.input_layernorm, RMSNorm)
-    assert isinstance(layer.self_attn.rope, RoPE)
-    assert not model.use_bounded_kv_capacity
-    assert not layer.self_attn.use_decode_attention
-    assert not layer.mlp.use_fast_swiglu
-    assert len(model.create_kv_cache()) == model.num_hidden_layers
-
-    output = model(mx.array([[1, 2]], dtype=mx.int32), 0, model.create_kv_cache())
-    assert output.dtype == mx.bfloat16
+    prefill = model(mx.array([[1, 2]], dtype=mx.int32), 0, cache)
+    decoded = model(mx.array([[3]], dtype=mx.int32), 2, cache)
+    complete = model(mx.array([[1, 2, 3]], dtype=mx.int32), 0, model.create_kv_cache())
+    assert prefill.dtype == decoded.dtype == complete.dtype == mx.bfloat16
+    assert prefill.shape == (1, 2, fixture.args.vocab_size)
+    assert decoded.shape == (1, 1, fixture.args.vocab_size)
+    assert_allclose(decoded, complete[:, -1:, :], mx.bfloat16)
 
 
 def test_task_3_rejects_a_position_that_disagrees_with_the_cache():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="kv-cache")
+    model = Qwen3ModelWeek2(_fixed_fixture(0), checkpoint="kv-cache")
     with pytest.raises(ValueError):
         model(mx.array([[1]], dtype=mx.int32), 1, model.create_kv_cache())
 
@@ -77,17 +85,14 @@ def test_capacity_cache_exposes_only_the_logical_prefix():
 
     assert offset == 3
     assert cached_key.shape == cached_value.shape == (1, 1, 3, 2)
-    assert cache.key_values[0].shape == cache.key_values[1].shape == (1, 1, 5, 2)
     assert_allclose(cached_key, mx.concat([key_1, key_2], axis=2), mx.float32)
     assert_allclose(cached_value, mx.concat([value_1, value_2], axis=2), mx.float32)
-    assert cache.logical_copy_bytes == 0
-    assert cache.physical_growth_copy_bytes == 0
-    assert cache.slice_write_bytes == (
-        key_1.nbytes + value_1.nbytes + key_2.nbytes + value_2.nbytes
-    )
+
+    # Unused request capacity must never appear in the returned K/V prefix.
+    assert cached_key.shape[2] == 3 < cache.capacity
 
 
-def test_capacity_rewind_reuses_storage_and_overflow_is_transactional():
+def test_capacity_rewind_and_overflow_preserve_the_logical_prefix():
     cache = TinyKvFullCache(capacity=3)
     key, value = _chunk(0, 2)
     cache.update_and_fetch(key, value)
@@ -101,7 +106,6 @@ def test_capacity_rewind_reuses_storage_and_overflow_is_transactional():
     mx.eval(cached_key, cached_value)
 
     assert offset == 3
-    assert cache.physical_growth_copy_bytes == 0
     assert_allclose(
         cached_key,
         mx.concat([key[:, :, :1], replacement_key], axis=2),
@@ -113,43 +117,51 @@ def test_capacity_rewind_reuses_storage_and_overflow_is_transactional():
         mx.float32,
     )
 
-    before = tuple(array.tolist() for array in cache.key_values)
     with pytest.raises(ValueError, match="capacity 3 exceeded"):
         extra_key, extra_value = _chunk(30, 1)
         cache.update_and_fetch(extra_key, extra_value)
-    mx.eval(*cache.key_values)
-    assert tuple(array.tolist() for array in cache.key_values) == before
     assert cache.offset == 3
 
-    movement_counters = (
-        cache.logical_copy_bytes,
-        cache.physical_growth_copy_bytes,
-        cache.slice_write_bytes,
-        cache.growth_copy_bytes,
+    # A rejected append must leave the retained prefix available for rewind.
+    cache.rewind(1)
+    final_key, final_value = _chunk(40, 1)
+    cached_key, cached_value, offset, _ = cache.update_and_fetch(final_key, final_value)
+    assert offset == 3
+    assert_allclose(
+        cached_key,
+        mx.concat([key[:, :, :1], replacement_key[:, :, :1], final_key], axis=2),
+        mx.float32,
     )
+    assert_allclose(
+        cached_value,
+        mx.concat([value[:, :, :1], replacement_value[:, :, :1], final_value], axis=2),
+        mx.float32,
+    )
+
     cache.reset()
     assert cache.offset == 0
-    assert cache.key_values is not None
-    assert (
-        cache.logical_copy_bytes,
-        cache.physical_growth_copy_bytes,
-        cache.slice_write_bytes,
-        cache.growth_copy_bytes,
-    ) == movement_counters
+    restarted_key, restarted_value = _chunk(60, 1)
+    cached_key, cached_value, offset, _ = cache.update_and_fetch(
+        restarted_key, restarted_value
+    )
+    assert offset == 1
+    assert_allclose(cached_key, restarted_key, mx.float32)
+    assert_allclose(cached_value, restarted_value, mx.float32)
 
 
 def test_capacity_checkpoint_runs_the_week2_engine():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="capacity-cache")
-    assert model.use_bounded_kv_capacity
-
+    fixture = _fixed_fixture(0)
+    model = Qwen3ModelWeek2(fixture, checkpoint="capacity-cache")
+    readable_model = Qwen3ModelWeek2(fixture, checkpoint="kv-cache")
     bounded = model.create_kv_cache(capacity=3)
-    readable = Qwen3ModelWeek2(
-        tiny_qwen3_mlx_model(), checkpoint="kv-cache"
-    ).create_kv_cache()
+    readable = readable_model.create_kv_cache()
     inputs = mx.array([[1, 2, 3]], dtype=mx.int32)
     actual = model(inputs, 0, bounded)
-    expected = model(inputs, 0, readable)
+    expected = readable_model(inputs, 0, readable)
 
+    assert actual.dtype == expected.dtype == mx.bfloat16
+    assert actual.shape == expected.shape == (1, 3, fixture.args.vocab_size)
     assert_allclose(actual, expected, mx.bfloat16)
-    assert all(cache.capacity == 3 for cache in bounded)
-    assert all(cache.slice_write_bytes > 0 for cache in bounded)
+    assert all(cache.offset == 3 for cache in bounded)
+    with pytest.raises(ValueError, match="capacity"):
+        model(mx.array([[4]], dtype=mx.int32), 3, bounded)

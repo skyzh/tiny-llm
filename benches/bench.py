@@ -94,6 +94,8 @@ def parse_args() -> argparse.Namespace:
             "rmsnorm",
             "rope",
             "swiglu",
+            "tiled-prefill",
+            "selected",
         ),
         help="run one cumulative Week 2 end-to-end checkpoint",
     )
@@ -166,7 +168,7 @@ def validate_args(args: argparse.Namespace) -> None:
             args.loader == "week3"
             or (
                 args.loader == "week2"
-                and (args.week2_checkpoint or "swiglu")
+                and (args.week2_checkpoint or "selected")
                 not in ("kv-cache", "capacity-cache")
             )
         )
