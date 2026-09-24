@@ -75,10 +75,15 @@ shape; it must not expand the full weight matrix in memory.
 Build each 32×32 output tile from 8×8 `simdgroup_matrix` fragments. Four SIMD
 groups can each own a 16×16 quadrant of that output tile:
 
-| Output rows within a tile | Columns 0–15 | Columns 16–31 |
-| --- | --- | --- |
-| 0–15 | SIMD group 0 | SIMD group 1 |
-| 16–31 | SIMD group 2 | SIMD group 3 |
+<table>
+  <thead>
+    <tr><th scope="col">Output rows within a tile</th><th scope="col">Columns 0–15</th><th scope="col">Columns 16–31</th></tr>
+  </thead>
+  <tbody>
+    <tr><th scope="row">0–15</th><td>SIMD group 0</td><td>SIMD group 1</td></tr>
+    <tr><th scope="row">16–31</th><td>SIMD group 2</td><td>SIMD group 3</td></tr>
+  </tbody>
+</table>
 
 Each group accumulates its four 8×8 output fragments across reduction slices.
 On the 10×97 witness, only the first ten rows and the valid columns in each
@@ -128,22 +133,29 @@ including the tied output head, so the live model uses your kernel for
 matrix-shaped work. Fused RMSNorm, RoPE, and SwiGLU are later lessons; no
 decode-attention or Split-K branch is part of this checkpoint.
 
-Get direct and model-level feedback in that order:
+Check the short model setup first, then the SIMD operator and its model path:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu
 pdm run test --week 2 --day 3 -- -k task_1
+pdm run test --week 2 --day 3 -- -k test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu
+pdm run test --week 2 --day 3 -- -k test_task_3_model_prefill_dispatches_simd_packed_projection_gpu
 pdm run test --week 2 --day 3
 
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint simd-matmul --model qwen3-0.6b --max-tokens 16
 ```
 
-The direct test compares the SIMD kernel with the readable control on partial
-output tiles. The model test checks that `simd-matmul` actually selects the
-new path, with bounded cache and packed weights still enabled. A green native
-test alone is not the complete checkpoint; run the cached model through it.
+The short Task 1 model test checks checkpoint wiring, bounded cache, and
+packed weights with three token positions. It uses Day 2's matvec fallback
+because `M <= 8`, so it can pass before you implement the SIMD matrix kernel.
+The direct Task 2 test compares that kernel with the readable control on
+partial output tiles. The separate Task 3 test uses ten prefill token positions
+and observes the model's packed query projection entering `quantized_matmul`
+with `use_simdgroup=True` before it evaluates the result. Its learner TODO
+diagnostic names the SIMD model prefill quantized-matmul seam. Neither the
+short test nor the direct operator test proves that model integration alone.
+Run the complete Day 3 gate and the cached model after both matrix checks.
 
 If you continue without a custom matrix schedule, keep the course-owned
 `quantized_linear` interface and substitute `mx.quantized_matmul` only at this
