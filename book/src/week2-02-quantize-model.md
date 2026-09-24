@@ -712,8 +712,9 @@ your custom primitive. Decode-shaped work must route through
 `quantized_linear` → `quantized_matvec_custom` → the extension primitive → the
 Metal matvec. Matrix-shaped work must route through `quantized_linear` →
 `quantized_matmul` → the extension primitive → its Metal matrix schedule. The
-supplied tests validate packed model state and the direct operators. Use the
-live model command to verify that those pieces compose.
+supplied tests compare public `quantized-matvec` checkpoint outputs and direct
+operator results with MLX controls; they do not assert private routing. Use
+the live model command to verify that those pieces compose.
 
 Measure the cumulative model and the real projection shapes:
 

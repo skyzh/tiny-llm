@@ -130,7 +130,11 @@ one explicit byte range through the existing loop.
 | 4.8 | Fork, Steer, and Select | ✅ | ✅ | ✅ | 🚧 |
 | 4.9 | Bound Tool Evidence | ✅ | ✅ | ✅ | 🚧 |
 
-The older Week 2 chapter URLs remain available as [historical material](book/src/week2-02-benchmark-profile.md). Their former Day 2–7 test and checkpoint order is separate from the current Day 1 → Day 2 → Day 3 → Day 4 → Day 5 route.
+Earlier Week 2 chapter URLs not reused by active Days 1–5 remain available as
+[historical material](book/src/week2-02-benchmark-profile.md). The former Day 4
+address now serves the [active fused-primitives lesson](book/src/week2-04-fused-model-kernels.md).
+Those historical pages describe an earlier test and checkpoint order, separate
+from the current Day 1 → Day 2 → Day 3 → Day 4 → Day 5 route.
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.
