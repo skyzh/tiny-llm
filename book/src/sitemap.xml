@@ -55,6 +55,9 @@
         <loc>https://skyzh.github.io/tiny-llm/week2-03-quantize-model</loc>
     </url>
     <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-03-simd-matrix-prefill</loc>
+    </url>
+    <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-04-fused-model-kernels</loc>
     </url>
     <url>
