@@ -34,7 +34,15 @@ parser.add_argument(
 )
 parser.add_argument(
     "--week2-checkpoint",
-    choices=("kv-cache", "capacity-cache", "quantized-matvec", "simd-matmul"),
+    choices=(
+        "kv-cache",
+        "capacity-cache",
+        "quantized-matvec",
+        "simd-matmul",
+        "rmsnorm",
+        "rope",
+        "swiglu",
+    ),
     help="run one cumulative Week 2 model checkpoint",
 )
 
@@ -51,7 +59,7 @@ if (
         args.loader == "week3"
         or (
             args.loader == "week2"
-            and (args.week2_checkpoint or "simd-matmul")
+            and (args.week2_checkpoint or "swiglu")
             not in ("kv-cache", "capacity-cache")
         )
     )

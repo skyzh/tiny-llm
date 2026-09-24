@@ -39,6 +39,27 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
             quantized_weights=True,
             simdgroup_matmul=True,
         ),
+        "rmsnorm": Week2CheckpointFeatures(
+            bounded_kv_capacity=True,
+            quantized_weights=True,
+            simdgroup_matmul=True,
+            fast_rms_norm=True,
+        ),
+        "rope": Week2CheckpointFeatures(
+            bounded_kv_capacity=True,
+            quantized_weights=True,
+            simdgroup_matmul=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+        ),
+        "swiglu": Week2CheckpointFeatures(
+            bounded_kv_capacity=True,
+            quantized_weights=True,
+            simdgroup_matmul=True,
+            fast_rms_norm=True,
+            fast_rope=True,
+            fast_swiglu=True,
+        ),
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
@@ -138,7 +159,7 @@ class Qwen3ModelWeek2:
     def __init__(
         self,
         mlx_model: Any,
-        checkpoint: str = "simd-matmul",
+        checkpoint: str = "swiglu",
         use_mlx_quantized_linear: bool = False,
         use_bounded_kv_capacity: bool | None = None,
     ):

@@ -38,9 +38,9 @@ def main() -> int:
             f"unaccounted test files: {sorted(unaccounted)}; "
             f"missing included files: {sorted(missing_included)}"
         )
-    if manifest["shipped_day"] != 3:
-        raise SystemExit("this temporary CI gate is bound to shipped_day=3")
-    print("shipped_day=3", flush=True)
+    if manifest["shipped_day"] != 4:
+        raise SystemExit("this temporary CI gate is bound to shipped_day=4")
+    print("shipped_day=4", flush=True)
     print(f"included_files={len(included)}", flush=True)
     for path in included:
         print(f"INCLUDE {path}", flush=True)

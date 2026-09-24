@@ -3,7 +3,7 @@
 using namespace metal;
 
 // Week 2, Day 4:
-//   week2_rms_norm
+//   week2_rms_norm_register_cached (keep a readable fallback for wide rows)
 //   week2_rope
 //   week2_swiglu
 // Week 2, Day 6:
