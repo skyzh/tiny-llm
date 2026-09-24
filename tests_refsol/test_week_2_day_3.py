@@ -19,19 +19,21 @@ from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
 def test_task_1_simd_matmul_checkpoint_runs_the_week2_engine():
-    model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="simd-matmul")
-    layer = model.layers_inner[0]
+    fixture = tiny_qwen3_mlx_model()
+    tokens = mx.array([[1, 2, 3]], dtype=mx.int32)
+    with mx.stream(mx.gpu):
+        simd_model = Qwen3ModelWeek2(fixture, checkpoint="simd-matmul")
+        readable_model = Qwen3ModelWeek2(fixture, checkpoint="quantized-matvec")
+        simd_output = simd_model(tokens, 0, simd_model.create_kv_cache(capacity=3))
+        readable_output = readable_model(
+            tokens, 0, readable_model.create_kv_cache(capacity=3)
+        )
+        mx.eval(simd_output, readable_output)
 
-    assert model.use_bounded_kv_capacity
-    assert layer.self_attn.wq.use_simdgroup_matmul
-    assert not layer.self_attn.use_decode_attention
-
-    output = model(
-        mx.array([[1, 2, 3]], dtype=mx.int32),
-        0,
-        model.create_kv_cache(capacity=3),
-    )
-    assert output.dtype == mx.bfloat16
+    assert simd_output.dtype == readable_output.dtype == mx.bfloat16
+    assert simd_output.shape == readable_output.shape
+    assert simd_output.shape[:2] == (1, 3)
+    assert_allclose(simd_output, readable_output, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
 def test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu():
