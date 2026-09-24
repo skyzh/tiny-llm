@@ -56,6 +56,23 @@ def test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu():
         assert_allclose(tiled, readable, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
+def test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu():
+    fixture = tiny_qwen3_mlx_model()
+    tokens = mx.array([list(range(1, 11))], dtype=mx.int32)
+    with mx.stream(mx.gpu):
+        simd_model = Qwen3ModelWeek2(fixture, checkpoint="simd-matmul")
+        readable_model = Qwen3ModelWeek2(fixture, checkpoint="quantized-matvec")
+        simd_output = simd_model(tokens, 0, simd_model.create_kv_cache(capacity=10))
+        readable_output = readable_model(
+            tokens, 0, readable_model.create_kv_cache(capacity=10)
+        )
+        mx.eval(simd_output, readable_output)
+
+    assert simd_output.dtype == readable_output.dtype == mx.bfloat16
+    assert simd_output.shape == readable_output.shape
+    assert_allclose(simd_output, readable_output, mx.bfloat16, atol=0.5, rtol=5e-2)
+
+
 def test_day3_public_selectors_stop_at_simd_matmul():
     model_module = importlib.import_module(Qwen3ModelWeek2.__module__)
     checkpoints = (
