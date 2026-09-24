@@ -148,9 +148,9 @@ default batch settings.
 
 Week 1 reads an official 4-bit checkpoint but materializes its linear and embedding weights in BF16. On an 8 GB Mac,
 keep the required path at 0.6B. On a 16–24 GB Mac, use 0.6B for the required work and treat 1.7B as an upper-end experiment.
-Week 2 Day 1 retains that dense BF16 model. A later lesson will keep
-weights packed for the quantized-matvec checkpoint; the Week 3 and 4 paths
-expect that later interface. More memory still helps after reaching the largest
+Week 2 Day 1 retains that dense BF16 model. In this checkout, Day 2 keeps
+projection weights packed for the `quantized-matvec` checkpoint; the Week 3
+and 4 paths expect that interface. More memory still helps after reaching the largest
 supported model because prompt length, batch size, KV caches, compilation, macOS, and other applications all share the
 same pool. These ceilings are therefore planning guidance, not a guarantee that every workload will avoid memory
 pressure.
@@ -160,8 +160,11 @@ pressure.
     [M4 Mac mini](https://support.apple.com/en-us/121555), and
     [M5 MacBook Air](https://support.apple.com/en-us/126320) specifications. Higher-memory configurations are outside
     this table.
-[^week2-dense]: Week 2 Day 1 uses dense BF16 weights and the same model-size
-    guidance as Week 1. Larger packed-model options belong to a later lesson.
+[^week2-dense]: These conservative Week 2 model-size choices cover Day 1's
+    dense BF16 checkpoint. Day 2 retains its cache and keeps projection weights
+    packed. The optional packed 4B comparison is described in
+    [Day 2](./week2-02-quantize-model.md); its matched Day 1 control still
+    needs enough memory for the dense `capacity-cache` model.
 [^moe]: 30B-A3B requires the optional Week 3 MoE implementation. In Week 4, select the Week 3 loader. Use batch size one
     and a short context when approaching this ceiling; 4B remains the required-course target.
 
