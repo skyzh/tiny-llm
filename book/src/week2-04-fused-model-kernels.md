@@ -86,8 +86,9 @@ Start with the fail-closed `tiny_llm_ext::rms_norm` binding and
 `src/extensions/src/week2_kernels.metal`, then implement
 `FastRMSNorm.__call__` in `src/tiny_llm/week2_kernels.py`. The starter already
 provides the header, binding, C++/Metal files, and CMake registration. Keep
-those interfaces. `Week2RMSNorm::eval_cpu` in
-`src/extensions/src/week2_kernels.cpp` reports the GPU-only error.
+those interfaces. Make `Week2RMSNorm::eval_cpu` in
+`src/extensions/src/week2_kernels.cpp` report a GPU-only error instead of the
+starter TODO.
 
 The readable equation normalizes each row using its mean squared value, then
 applies a learned weight. For a 2,560-element hidden row, one 32-lane SIMD
@@ -137,8 +138,8 @@ Next complete `tiny_llm_ext::rope` and `Week2RoPE::eval_gpu` in
 `src/extensions/src/week2_kernels.cpp`, add the
 `week2_rope` function in `src/extensions/src/week2_kernels.metal`, and finish
 `FastRoPE.__call__` in `src/tiny_llm/week2_kernels.py`.
-`Week2RoPE::eval_cpu` in `src/extensions/src/week2_kernels.cpp`
-reports the GPU-only error.
+Make `Week2RoPE::eval_cpu` in `src/extensions/src/week2_kernels.cpp`
+report a GPU-only error instead of the starter TODO.
 
 Implement RoPE for the model's native `B, L, H, D` layout. A naive element
 kernel calculates the same angle, sine, and cosine separately for both members
@@ -186,8 +187,8 @@ Finish the operator sequence with `tiny_llm_ext::swiglu` and
 `src/extensions/src/week2_kernels.cpp`. Add the `week2_swiglu` function in
 `src/extensions/src/week2_kernels.metal`, and `swiglu` in
 `src/tiny_llm/week2_kernels.py`.
-`Week2SwiGLU::eval_cpu` in `src/extensions/src/week2_kernels.cpp`
-reports the GPU-only error.
+Make `Week2SwiGLU::eval_cpu` in `src/extensions/src/week2_kernels.cpp`
+report a GPU-only error instead of the starter TODO.
 
 SwiGLU combines the gate and up branches:
 
