@@ -32,7 +32,7 @@ NB_MODULE(_ext, m) {
             array: ``alpha * x + beta * y``
       )");
 
-    // Week 2, Day 2. Later days extend the schedule behind this stable binding.
+    // Week 2, Day 2. Day 3 extends the schedule behind this stable binding.
     m.def("quantized_matmul", &tiny_llm_ext::quantized_matmul, "scales"_a, "biases"_a, "group_size"_a, "bits"_a, "a"_a,
           "b"_a, "transpose_b"_a = false, "use_simdgroup"_a = true, "use_split_k"_a = false, "stream"_a = nb::none());
 

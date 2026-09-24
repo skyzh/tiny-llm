@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--week2-checkpoint",
-        choices=("kv-cache", "capacity-cache", "quantized-matvec"),
+        choices=("kv-cache", "capacity-cache", "quantized-matvec", "simd-matmul"),
         help="run one cumulative Week 2 end-to-end checkpoint",
     )
     parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
@@ -158,12 +158,13 @@ def validate_args(args: argparse.Namespace) -> None:
             args.loader == "week3"
             or (
                 args.loader == "week2"
-                and args.week2_checkpoint not in (None, "kv-cache", "capacity-cache")
+                and (args.week2_checkpoint or "simd-matmul")
+                not in ("kv-cache", "capacity-cache")
             )
         )
     ):
         raise ValueError(
-            "Week 3 and the Week 2 quantized-matvec checkpoint require GPU; "
+            "Week 3 and the Week 2 packed-weight checkpoints require GPU; "
             "the Day 1 Week 2 checkpoints use the readable path"
         )
     if args.disable_paged_attention and args.loader != "week3":

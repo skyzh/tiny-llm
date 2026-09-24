@@ -21,6 +21,7 @@ KNOWN_CHECKPOINTS = (
     "kv-cache",
     "capacity-cache",
     "quantized-matvec",
+    "simd-matmul",
 )
 
 

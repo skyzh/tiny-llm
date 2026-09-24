@@ -38,9 +38,9 @@ def main() -> int:
             f"unaccounted test files: {sorted(unaccounted)}; "
             f"missing included files: {sorted(missing_included)}"
         )
-    if manifest["shipped_day"] != 2:
-        raise SystemExit("this temporary CI gate is bound to shipped_day=2")
-    print("shipped_day=2", flush=True)
+    if manifest["shipped_day"] != 3:
+        raise SystemExit("this temporary CI gate is bound to shipped_day=3")
+    print("shipped_day=3", flush=True)
     print(f"included_files={len(included)}", flush=True)
     for path in included:
         print(f"INCLUDE {path}", flush=True)
@@ -51,9 +51,9 @@ def main() -> int:
             flush=True,
         )
     if manifest["deferred_builds"]:
-        raise SystemExit("Day 2 must restore both extension builds")
+        raise SystemExit("Day 3 requires both extension builds")
     if manifest["required_builds"] != ["pdm run build-ext", "pdm run build-ext-ref"]:
-        raise SystemExit("Day 2 native build gates changed")
+        raise SystemExit("Day 3 native build gates changed")
     for command in manifest["required_builds"]:
         print(f"BUILD {command}", flush=True)
     for path in manifest["retired"]:

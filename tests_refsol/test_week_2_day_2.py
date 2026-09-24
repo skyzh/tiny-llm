@@ -237,19 +237,18 @@ def test_day2_matvec_handles_partial_output_tiles(rows: int, outputs: int):
         assert_allclose(actual, expected, mx.bfloat16, atol=5e-1)
 
 
-def test_day2_public_selectors_exclude_future_checkpoints():
-    assert WEEK2_CHECKPOINTS == ("kv-cache", "capacity-cache", "quantized-matvec")
-    assert KNOWN_CHECKPOINTS == WEEK2_CHECKPOINTS
-    assert DEFAULT_CASES == (
+def test_day2_public_selectors_preserve_day2_prefix():
+    assert WEEK2_CHECKPOINTS[:3] == ("kv-cache", "capacity-cache", "quantized-matvec")
+    assert KNOWN_CHECKPOINTS[:3] == WEEK2_CHECKPOINTS[:3]
+    assert DEFAULT_CASES[:3] == (
         "kv-cache:decode:128",
         "capacity-cache:decode:128",
         "quantized-matvec:decode:128",
     )
-    assert [variant.key for variant in WEEK2_VARIANTS] == [
+    assert [variant.key for variant in WEEK2_VARIANTS][:4] == [
         "week1",
         "week2-kv-cache",
         "week2-capacity-cache",
         "week2-quantized-matvec",
-        "mlx",
     ]
     assert SECTIONS == ("embedding", "decode-projections", "prefill-projections")

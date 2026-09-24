@@ -27,6 +27,7 @@ DEFAULT_CASES = (
     "kv-cache:decode:128",
     "capacity-cache:decode:128",
     "quantized-matvec:decode:128",
+    "simd-matmul:prefill:128",
 )
 PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"
