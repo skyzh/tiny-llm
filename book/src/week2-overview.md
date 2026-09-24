@@ -5,12 +5,13 @@
 # 🚧 Week 2: A Faster Single Request
 
 Week 1 leaves you with a readable Qwen3 model that regenerates from the full
-prefix. The **current Week 2 route contains Days 1–4**: reuse previous keys
+prefix. The **current Week 2 route contains Days 1–5**: reuse previous keys
 and values, bound their dense storage, keep projection weights packed, then
 reuse W4 and activation tiles during matrix-shaped prefill. Day 4 integrates
-RMSNorm, RoPE, and SwiGLU as three separate model checkpoints. Its seven
+RMSNorm, RoPE, and SwiGLU as three separate model checkpoints. Day 5 adds
+tiled dense prefill attention and runs the final selected model. Its nine
 cumulative checkpoints are `kv-cache`, `capacity-cache`, `quantized-matvec`,
-`simd-matmul`, `rmsnorm`, `rope`, and `swiglu`.
+`simd-matmul`, `rmsnorm`, `rope`, `swiglu`, `tiled-prefill`, and `selected`.
 
 Begin with [Day 1: Cache and Measure](./week2-01-kv-cache.md). Its first
 feedback loop builds the extension required for test collection, runs the
@@ -37,6 +38,13 @@ Keep `simd-matmul` as the pre-edit model control. Implement register-cached
 RMSNorm, RoPE over the model's head layout, and fused SwiGLU in order. Compare
 each operator with its readable equation, run its cumulative checkpoint, then
 measure all four model variants under one matched 0.6B workload.
+
+Finish with [Day 5: Tiled Dense Prefill Attention](./week2-05-tiled-prefill-attention.md).
+Keep `swiglu` as the pre-edit product control. Build the BF16/D128 tiled path,
+preserve causal and additive masks, GQA, and the short-query fallback, then
+run `tiled-prefill` and the completed `selected` model on the same cached
+0.6B request. The selected checkpoint names the final cumulative feature set;
+it adds no second attention kernel.
 
 ## Day 1 route
 
@@ -80,23 +88,38 @@ measure all four model variants under one matched 0.6B workload.
   </tbody>
 </table>
 
+## Day 5 route
+
+<table>
+  <thead>
+    <tr><th scope="col">Step</th><th scope="col">What you own</th><th scope="col">Feedback</th></tr>
+  </thead>
+  <tbody>
+    <tr><th scope="row">Prepare</th><td>Keep the Day 4 <code>swiglu</code> model and save its matched 0.6B product control</td><td><a href="./week2-05-tiled-prefill-attention.md">Day 5 baseline</a></td></tr>
+    <tr><th scope="row">Tile</th><td>Implement BF16/D128 grouped attention with BQ32/BK16 tiles and online softmax</td><td>Focused causal GQA and partial-tail check</td></tr>
+    <tr><th scope="row">Preserve</th><td>Apply causal/additive masks, return zero for fully masked rows, and keep readable short-query attention</td><td>Mask and fallback checks</td></tr>
+    <tr><th scope="row">Integrate</th><td>Run the cumulative <code>tiled-prefill</code> model, then the named final <code>selected</code> model</td><td>Complete Day 5 gate and live model commands</td></tr>
+    <tr><th scope="row">Measure</th><td>Compare Day 4 control, tiled prefill, selected, and MLX on one cached 0.6B request</td><td><a href="./week2-05-tiled-prefill-attention.md#measure-the-matched-product">Day 5 product loop</a></td></tr>
+  </tbody>
+</table>
+
 The Day 1 starter supplies model loading, test entrypoints, and benchmark and
 attribution helpers; you own the cache state and serving loop. Day 2 adds the
 packed-weight container and native operator boundaries, but you implement the
 embedding, kernels, and model wiring. Day 3 adds the SIMD matrix path behind
 that packed operator. The reference solution and full MLX
 model are separate controls; they do not fill your learner TODOs. Day 4 adds
-three native primitives to the same cached, packed model. A cache
+three native primitives to the same cached, packed model. Day 5 adds the
+tiled attention operator and model selector. A cache
 counter shows which bytes moved, while a synchronized complete-request
 comparison shows whether a mechanism helped the chosen workload.
 
-## Later lessons
+## Historical lessons and Week 3
 
-The reviewed five-day design continues after the fused model primitives with
-tiled dense prefill attention. Its **Day 5 checkpoints are planned, not shipped
-in this four-day route**. Their commands and selectors are not current gates.
-Week 3 uses later Week 2 interfaces; Days 1–4 alone do not supply every
-prerequisite for its learner exercises.
+The five active days end at `selected`. [Week 3](./week3-overview.md) reuses
+the model and dense-cache interfaces while adding paging, batching, and
+serving policy; its learner work remains separate from the single-request
+Week 2 route.
 
 The earlier seven-day book remains available at its old addresses as
 [historical Week 2 material](./week2-02-benchmark-profile.md). It preserves
@@ -107,7 +130,7 @@ bounded-decode and Split-K experiments. Its
 [decision diagram](./week2-performance-summary.svg) are also historical
 evidence, not diagrams of the current checkout. Those pages describe a different
 checkpoint order and may show commands unavailable in this partial branch.
-Use Days 1–4 above for the current learner workflow. The
+Use Days 1–5 above for the current learner workflow. The
 [performance evidence ledger](./appendix-performance.md) is likewise
 historical context, not a performance claim for this checkout.
 

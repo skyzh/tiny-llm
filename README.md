@@ -31,7 +31,7 @@ The course follows a four-week learning path:
   request-bounded `capacity-cache`; Day 2 keeps W4 projection weights packed
   through the `quantized-matvec` checkpoint. Day 3 adds SIMD matrix prefill at
   `simd-matmul`. Day 4 adds cumulative RMSNorm, RoPE, and SwiGLU checkpoints.
-  Tiled dense prefill attention remains a later lesson.
+  Day 5 adds `tiled-prefill` and runs the completed `selected` model.
 - **Week 3: Build a Mini vLLM.** Introduce continuous
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
@@ -112,6 +112,7 @@ one explicit byte range through the existing loop.
 | 2.2 | Keep W4 Packed (`quantized-matvec`) | 🚧 | 🚧 | ✅ | 🚧 |
 | 2.3 | SIMD Matrix Prefill (`simd-matmul`) | 🚧 | 🚧 | ✅ | 🚧 |
 | 2.4 | Fused Model Primitives (`rmsnorm`, `rope`, `swiglu`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.5 | Tiled Dense Prefill Attention (`tiled-prefill`, `selected`) | 🚧 | 🚧 | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |
@@ -129,7 +130,7 @@ one explicit byte range through the existing loop.
 | 4.8 | Fork, Steer, and Select | ✅ | ✅ | ✅ | 🚧 |
 | 4.9 | Bound Tool Evidence | ✅ | ✅ | ✅ | 🚧 |
 
-The older Week 2 chapter URLs remain available as [historical material](book/src/week2-02-benchmark-profile.md). Their former Day 2–7 test and checkpoint order is separate from the current Day 1 → Day 2 → Day 3 → Day 4 route.
+The older Week 2 chapter URLs remain available as [historical material](book/src/week2-02-benchmark-profile.md). Their former Day 2–7 test and checkpoint order is separate from the current Day 1 → Day 2 → Day 3 → Day 4 → Day 5 route.
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

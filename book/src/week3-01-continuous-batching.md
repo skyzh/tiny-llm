@@ -1,9 +1,10 @@
 # 🚧 Week 3 Day 1: Continuous Batching
 
-You begin with the completed Week 2 single-request model: multi-offset RoPE and
-causal masking already have stable interfaces, and each request can own a dense
-KV cache. The Day 1 starter leaves four learner-owned slices behind those
-interfaces:
+You begin with the completed
+[Week 2 Day 5 single-request model](./week2-05-tiled-prefill-attention.md):
+multi-offset RoPE and causal masking already have stable interfaces, and each
+request can own a dense KV cache. The Day 1 starter leaves four learner-owned
+slices behind those interfaces:
 
 - dense batch assembly and masking in `BatchingKvCache`;
 - `mlx_quantized_linear` plus the per-weight selector and the explicit
@@ -115,8 +116,9 @@ src/tiny_llm/qwen3_week2.py::Qwen3ModelWeek2.__init__
 src/tiny_llm/models.py::dispatch_week3_batch_model
 ```
 
-Week 2 ends with a course-owned quantized matmul so you can inspect its loader,
-SIMD-matrix operations, and Split-K policy. Week 3 teaches serving mechanisms,
+Week 2 ends with course-owned quantized projections and tiled dense attention.
+The [Day 3 projection](./week2-03-simd-matrix-prefill.md) exposes its loader and
+SIMD-matrix operations. Week 3 teaches serving mechanisms,
 so it should not make every cache and scheduler measurement depend on that
 teaching kernel's remaining projection overhead.
 

@@ -1,7 +1,8 @@
 # 🚧 Appendix: Performance Evidence Ledger
 
 > **Historical evidence from an earlier full Week 2 course state.** The
-> [current Week 2 route](./week2-overview.md) ships Days 1–4. The
+> [current Week 2 route](./week2-overview.md) ships Days 1–5, ending at
+> [tiled dense attention and `selected`](./week2-05-tiled-prefill-attention.md). The
 > checkpoint labels, commands, and measured results below describe the older
 > source tree; they are not runnable gates or performance results for this
 > checkout.

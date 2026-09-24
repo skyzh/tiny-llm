@@ -10,9 +10,10 @@ model uses one page-aware attention interface. A correct direct page-walking
 implementation may serve every query shape; the completed reference adds a
 tiled schedule for the supported BF16 long-prefill hot case.
 
-Week 2's course-owned quantized projections remain the inspectable endpoint of
-that week's kernel lessons. Week 3 deliberately switches dense-model
-projections to `mx.quantized_matmul` at model construction, while retaining the
+The [Week 2 `selected` model](./week2-05-tiled-prefill-attention.md) completes
+the single-request route with tiled dense attention; its course-owned quantized
+projections remain an inspectable kernel lesson. Week 3 deliberately switches
+dense-model projections to `mx.quantized_matmul` at model construction, while retaining the
 course-owned normalization, activation, cache, attention, paging, and
 scheduler paths. This keeps Week 3 focused on serving-system mechanisms rather
 than carrying the teaching kernel's projection cost through every benchmark.

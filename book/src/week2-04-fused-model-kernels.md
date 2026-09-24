@@ -292,7 +292,8 @@ at 4B rather than mixing model sizes.
 If you continue without writing one of these kernels, keep its public course
 interface and substitute the equivalent MLX operator or equation only at that
 boundary. The cached Week 2 model and other course-owned operators still run;
-`--solution mlx` runs a separate complete model. Day 5's tiled dense prefill
-attention remains a future learner checkpoint in this checkout.
+`--solution mlx` runs a separate complete model. Continue to
+[Day 5: Tiled Dense Prefill Attention](./week2-05-tiled-prefill-attention.md)
+with the `swiglu` measurement as its pre-edit control.
 
 {{#include copyright.md}}

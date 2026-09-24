@@ -202,7 +202,7 @@ revise the schedule. The [performance appendix](./appendix-performance.md)
 keeps older hardware observations separate from this exercise. Continue with
 [Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md), keeping this
 `simd-matmul` result as its pre-edit control. Tiled dense prefill attention
-remains a future checkpoint; the older seven-day pages remain
-[historical material](./week2-02-benchmark-profile.md).
+now follows on [Day 5](./week2-05-tiled-prefill-attention.md); the older
+seven-day pages remain [historical material](./week2-02-benchmark-profile.md).
 
 {{#include copyright.md}}

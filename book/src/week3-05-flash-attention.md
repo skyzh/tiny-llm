@@ -16,18 +16,19 @@ preserving the same observable behavior. The manual control-flow trace at the
 end of the chapter is the completion feedback for that performance change; it
 is guidance, not a hidden grading requirement.
 
-This is a required chapter. FlashAttention belongs here rather than in Week 2
-because the serving model's real K/V source is now the page pool. Building a
-dense-only kernel first would create a second attention path and then require
-students to relearn its memory schedule around page translation.
+This is a required chapter. Week 2's dense tiled kernel teaches the
+online-softmax update, but the serving model's K/V source is now the page
+pool. Reuse that arithmetic while translating each K/V tile through the
+block table; the dense loading schedule cannot read paged state directly.
 
 ## Prerequisites
 
 This chapter combines four prerequisites:
 
-- The Week 2 decode-attention lab introduced the online-softmax recurrence.
-- The Week 2 SIMD-matrix prefill lesson introduced the cooperative 32×32 tile built from BF16 8×8
-  SIMD-matrix fragments.
+- [Week 2 Day 5](./week2-05-tiled-prefill-attention.md) introduced the
+  online-softmax recurrence for tiled dense prefill attention.
+- [Week 2 Day 3](./week2-03-simd-matrix-prefill.md) introduced cooperative
+  SIMD-matrix fragments for quantized projection prefill.
 - Week 3 Day 3 introduced physical pages and block tables.
 - Week 3 Day 4 introduced direct page-walking attention and the decode
   schedule.
