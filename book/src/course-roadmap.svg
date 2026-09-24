@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1040" role="img" aria-labelledby="title description">
-  <title id="title">Tiny-LLM course roadmap, Week 2 operator off-ramps, and entry paths</title>
-  <desc id="description">The cumulative course implementation proceeds from setup and Week 1 through seven Week 2 days and Week 3 into Week 4. Week 2 Days 1 and 2 establish required state and measurement. Days 3 through 7 preserve course interfaces but allow manual substitution of corresponding MLX operators instead of custom kernels. This per-operator path is different from the full-MLX solution, which bypasses the course stack. Week 4 keeps setup plus Weeks 1 through 3 as course prerequisites, while the deterministic scripted-model tests for Days 1 through 7 can run after setup without a working serving implementation. Day 8 reconnects the scripted sequence to the Week 3 tokenizer and KV cache.</desc>
+  <title id="title">Historical Tiny-LLM roadmap: earlier seven-day Week 2 operator routes</title>
+  <desc id="description">This historical roadmap showed a former seven-day Week 2 course route from setup and Week 1 through Week 3 into Week 4. In that route, Week 2 Days 1 and 2 established state and measurement. Days 3 through 7 preserved course interfaces but allowed manual substitution of corresponding MLX operators instead of custom kernels. That per-operator path differed from the full-MLX solution, which bypassed the course stack. Week 4 kept setup plus Weeks 1 through 3 as course prerequisites, while deterministic scripted-model tests for Days 1 through 7 could run after setup without a working serving implementation. Day 8 reconnected the scripted sequence to the Week 3 tokenizer and KV cache. Consult the current book navigation for today's Week 2 sequence.</desc>
   <style>
     :root {
       color-scheme: light dark;
@@ -57,7 +57,7 @@
   </defs>
 
   <rect class="background" width="1200" height="1040" />
-  <text class="title" x="48" y="38">Cumulative course interfaces and state</text>
+  <text class="title" x="48" y="38">Historical roadmap: cumulative course interfaces and state</text>
   <text class="detail" x="48" y="59">Keep the course boundary; choose a custom kernel or an explicit MLX operator at optimization seams.</text>
 
   <rect class="box setup" x="48" y="82" width="170" height="86" rx="10" />
@@ -72,7 +72,7 @@
   <path class="arrow" d="M 218 125 L 286 125" />
 
   <rect class="panel" x="48" y="210" width="1104" height="220" rx="12" />
-  <text class="title" x="72" y="242">Week 2 · keep the model/state boundary; optimize or substitute each operator</text>
+  <text class="title" x="72" y="242">Historical Week 2 · model/state boundary and operator options</text>
 
   <rect class="box week2" x="96" y="275" width="350" height="105" rx="10" />
   <text class="label" x="271" y="307" text-anchor="middle">Days 1–2 · Foundation</text>

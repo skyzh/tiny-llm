@@ -244,10 +244,26 @@ class BatchingKvCache(TinyKvCache):
 
 
 class TinyKvFullCache(TinyKvCache):
-    def __init__(self):
+    def __init__(self, capacity: int | None = None):
+        if capacity is not None and (
+            not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 0
+        ):
+            raise ValueError("capacity must be a non-negative integer or None")
         self.key_values = None
         self.offset = 0
+        self.capacity = capacity
+        self.logical_copy_bytes = 0
+        self.physical_growth_copy_bytes = 0
+        self.slice_write_bytes = 0
         self.growth_copy_bytes = 0
+
+    @property
+    def uses_capacity(self) -> bool:
+        return self.capacity is not None
+
+    def _logical_key_values(self) -> tuple[mx.array, mx.array]:
+        keys, values = self.key_values
+        return keys[:, :, : self.offset], values[:, :, : self.offset]
 
     def update_and_fetch(
         self,
@@ -256,19 +272,49 @@ class TinyKvFullCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        assert key.shape == value.shape
+        B, H, S, D = key.shape
+        if self.uses_capacity:
+            end = self.offset + S
+            if end > self.capacity:
+                raise ValueError(
+                    f"KV cache capacity {self.capacity} exceeded by append ending at {end}"
+                )
+            if self.key_values is None:
+                assert self.offset == 0
+                keys = mx.zeros((B, H, self.capacity, D), dtype=key.dtype)
+                values = mx.zeros((B, H, self.capacity, D), dtype=value.dtype)
+                self.key_values = (keys, values)
+            else:
+                keys, values = self.key_values
+                assert keys.shape == (B, H, self.capacity, D)
+                assert values.shape == (B, H, self.capacity, D)
+                assert keys.dtype == key.dtype
+                assert values.dtype == value.dtype
+            if S:
+                keys, values = self.key_values
+                start = mx.array([self.offset])
+                keys = mx.slice_update(keys, key, start_indices=start, axes=(2,))
+                values = mx.slice_update(values, value, start_indices=start, axes=(2,))
+                self.key_values = (keys, values)
+                self.slice_write_bytes += key.nbytes + value.nbytes
+            self.offset = end
+            logical_keys, logical_values = self._logical_key_values()
+            return logical_keys, logical_values, self.offset, mask
+
         if self.key_values is None:
             assert self.offset == 0
             self.key_values = (key, value)
-            B, H, S, D = key.shape
             self.offset = S
             return key, value, self.offset, mask
         else:
-            B, H, S, D = key.shape
-            assert key.shape == value.shape
             prev_keys, prev_values = self.key_values
             assert prev_keys.shape == (B, H, self.offset, D)
             assert prev_values.shape == (B, H, self.offset, D)
-            self.growth_copy_bytes += prev_keys.nbytes + prev_values.nbytes
+            copied_bytes = prev_keys.nbytes + prev_values.nbytes
+            self.logical_copy_bytes += copied_bytes
+            self.physical_growth_copy_bytes += copied_bytes
+            self.growth_copy_bytes += copied_bytes
             new_keys = mx.concat([prev_keys, key], axis=2)
             new_values = mx.concat([prev_values, value], axis=2)
             self.key_values = (new_keys, new_values)
@@ -279,6 +325,12 @@ class TinyKvFullCache(TinyKvCache):
         if self.key_values is not None:
             mx.eval(*self.key_values)
 
+    def reset(self):
+        """Reset the logical request while retaining bounded physical storage."""
+        self.offset = 0
+        if not self.uses_capacity:
+            self.key_values = None
+
     def rewind(self, n: int):
         if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= self.offset:
             raise ValueError("rewind length must be between zero and the cache length")
@@ -286,7 +338,10 @@ class TinyKvFullCache(TinyKvCache):
             return
         self.offset -= n
         if self.offset == 0:
-            self.key_values = None
+            if not self.uses_capacity:
+                self.key_values = None
+            return
+        if self.uses_capacity:
             return
         self.key_values = (
             self.key_values[0][:, :, : self.offset],

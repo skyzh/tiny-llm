@@ -1,8 +1,10 @@
 # 🚧 Appendix: Performance Evidence Ledger
 
-> **Status: Experimental, single-machine evidence.** See the
-> [Week 2 verification matrix](./week2-overview.md#verification-status) before
-> treating a correctness, integration, or performance result as broader proof.
+> **Historical evidence from an earlier full Week 2 course state.** The
+> [current Week 2 route](./week2-overview.md) ships Day 1 only. Later
+> checkpoint labels, commands, and measured results below describe the older
+> source tree; they are not runnable gates or performance results for this
+> checkout.
 
 This appendix records the measurements that determined the course order. The
 numbers are not additive promises: after one bottleneck shrinks, every other

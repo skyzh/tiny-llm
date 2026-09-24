@@ -1,4 +1,11 @@
-# 🚧 Week 2 Day 6 (Optional): Workload-Conditioned Operator Lab
+# Historical Week 2: Bounded Decode-Attention Operator Lab
+
+> **Earlier lesson address.** This page preserves the bounded decode-attention operator lab
+> explanation and its original links. The current Week 2 learner route
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) only.
+> Later checkpoints, day numbers, tests, and commands below belong to an
+> earlier all-days course state; do not use them as gates for this checkout.
+
 
 Day 5 restores the matrix-shaped projection path selected by the fixed
 128-token prefill profile. Day 6 asks a different question: can a secondary

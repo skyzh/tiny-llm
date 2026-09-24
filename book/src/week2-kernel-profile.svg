@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 667" role="img" aria-labelledby="title description">
-  <title id="title">Week 2 Qwen3-4B kernel-time attribution by checkpoint</title>
-  <desc id="description">Eight stacked bars follow the chronological Week 2 order: cached decode on Day 2, packed W4 on Day 3, fused model kernels on Day 4, the pre-SIMD control immediately before the SIMD prefill rows on Day 5, the optional decode-attention lab on Day 6, and Split-K on Day 7. Each bar normalizes synchronized kernel-group time across projections, attention, normalization position and activation kernels, and KV growth.</desc>
+  <title id="title">Historical seven-day Week 2 Qwen3-4B kernel-time attribution</title>
+  <desc id="description">These eight historical stacked bars followed the former seven-day Week 2 order: cached decode on Day 2, packed W4 on Day 3, fused model kernels on Day 4, the pre-SIMD control immediately before the SIMD prefill rows on Day 5, the optional decode-attention lab on Day 6, and Split-K on Day 7. Each bar normalized synchronized kernel-group time across projections, attention, normalization position and activation kernels, and KV growth. The day labels do not describe the current book sequence.</desc>
   <style>
     :root {
       color-scheme: light dark;
@@ -63,7 +63,7 @@
     <text class="label" x="759" y="37">KV growth</text>
   </g>
 
-  <text class="heading" x="0" y="76">Week 2 checkpoints in chronological order</text>
+  <text class="heading" x="0" y="76">Historical Week 2 checkpoint order</text>
   <line class="axis" x1="220" y1="84" x2="830" y2="84" />
 
   <g aria-label="Day 2 cached decode: projections 81.5 percent, attention 2.1 percent, pointwise 15.6 percent, KV growth 0.8 percent">
@@ -151,7 +151,7 @@
   </g>
 
   <g class="narrow-layout">
-    <text class="narrow-heading" x="20" y="36">Week 2 checkpoints · chronological</text>
+    <text class="narrow-heading" x="20" y="36">Historical Week 2 checkpoint order</text>
 
     <g aria-label="Legend">
       <rect class="projection" x="20" y="46" width="22" height="22" rx="3" />

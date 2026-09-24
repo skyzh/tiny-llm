@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 820" role="img" aria-labelledby="week2-performance-title week2-performance-description">
-  <title id="week2-performance-title">Week 2 measured performance decisions</title>
-  <desc id="week2-performance-description">Five decision cards summarize one M4 Pro, macOS 27, Qwen3-4B, MLX 0.32.0 observation. Packed W4 decode, fused pointwise kernels, and SIMD-matrix prefill are kept for their measured controls. Decode attention remains optional and inconclusive. Split-K is conditional at the measured 32-token shape and rejected for the fixed 128-token product workload. The metrics use different denominators and are not additive.</desc>
+  <title id="week2-performance-title">Historical Week 2 measured performance decisions</title>
+  <desc id="week2-performance-description">These five historical decision cards summarize one earlier M4 Pro, macOS 27, Qwen3-4B, MLX 0.32.0 observation from the former seven-day Week 2 route. Packed W4 decode, fused pointwise kernels, and SIMD-matrix prefill were kept for their measured controls. Decode attention remained optional and inconclusive. Split-K was conditional at the measured 32-token shape and rejected for the fixed 128-token product workload. The metrics used different denominators and are not additive; they are not results from the current Day 1 checkout.</desc>
   <style>
     :root {
       color-scheme: light dark;
@@ -57,7 +57,7 @@
 
   <rect class="background" width="840" height="820" />
   <g class="wide-layout">
-  <text class="title" x="32" y="46">Week 2: measure, change, decide</text>
+  <text class="title" x="32" y="46">Historical Week 2: measure, change, decide</text>
   <text class="subtitle" x="32" y="72">One M4 Pro · macOS 27 · Qwen3-4B · MLX 0.32.0 observation</text>
 
   <g aria-label="Packed W4 decode. Product decode increased from 24.38 to 58.90 tokens per second, plus 141.6 percent. Decision: keep for the measured control.">
@@ -114,7 +114,7 @@
   </g>
 
   <g class="narrow-layout">
-    <text class="narrow-title" x="24" y="38">Week 2: measure, change, decide</text>
+    <text class="narrow-title" x="24" y="38">Historical Week 2: measure, change, decide</text>
     <text class="narrow-subtitle" x="24" y="70">One M4 Pro · macOS 27 · Qwen3-4B · MLX 0.32.0 observation</text>
 
     <g aria-label="Packed W4 decode. Product decode increased from 24.38 to 58.90 tokens per second, plus 141.6 percent. Decision: keep for the measured control.">

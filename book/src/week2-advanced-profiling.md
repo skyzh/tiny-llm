@@ -1,4 +1,11 @@
-# Optional: Inspect a Week 2 Capture on macOS 27
+# Historical Week 2: Optional Macos Capture
+
+> **Earlier lesson address.** This page preserves the optional macOS capture
+> explanation and its original links. The current Week 2 learner route
+> ships [Day 1: Cache and Measure](./week2-01-kv-cache.md) only.
+> Later checkpoints, day numbers, tests, and commands below belong to an
+> earlier all-days course state; do not use them as gates for this checkout.
+
 
 The synchronized product benchmark and portable operator-attribution runner
 are sufficient for every required Week 2 checkpoint. This page is an optional
