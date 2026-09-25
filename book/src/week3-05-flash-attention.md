@@ -207,8 +207,9 @@ Neither path gathers a dense K/V tensor. Canonical Week 3 uses MLX quantized
 projections, but its cache, paged attention, batching, and scheduling remain
 course-owned. This hybrid course path is not the full-MLX baseline.
 
-The checked continuous-serving trace is useful system context, but it is not a
-matched scalar-versus-tiled Day 5 experiment. The current model-free runner
+The historical task #367 continuous-serving trace is useful system context,
+but it is not a matched scalar-versus-tiled Day 5 experiment. The current
+model-free runner
 also lacks that isolated long-BF16 comparison. Do not claim a Day 5 speedup
 from these rows. A separate benchmark follow-up should hold inputs, page tables,
 precision, warmup, synchronization, and every non-attention mechanism fixed
@@ -217,24 +218,31 @@ while changing only the scalar-versus-tiled schedule.
 Run the cumulative system check on your solution:
 
 ```bash
+week3_result_root="$HOME/tiny-llm-week3-results"
+mkdir -p "$week3_result_root"
+week3_result_dir="$(mktemp -d "$week3_result_root/run-XXXXXX")"
+
 pdm run bench-serving-progression --solution tiny_llm --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 --prefill-step 128 \
   --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/learner-week3-serving.json
+  --json-output "$week3_result_dir/serving-tiny-llm.json"
 ```
 
-The table below is checked reference evidence. Reproduce it separately with
-`--solution ref` and
-`--json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json`.
+This writes a new JSON file outside the tracked historical corpus. The table
+below is historical reference evidence from task #367 on source
+`18aec8503929d80c986324578068ecac2463c2ac`, not a result for the current
+five-day Week 2 baseline. To compare current reference behavior, rerun the
+same flags with `--solution ref` and a different filename in the new directory;
+the old medians need not recur.
 
 FlashAttention is expected to matter more as prefill grows. Treat that as a
 hypothesis until a matched operator benchmark measures it. It should not
 replace the Day 4 decode schedule: a one-token query has no query-tile reuse.
 
-On the checked M4 Pro trace, all three course rows share the same projection
-seam:
+On that predecessor M4 Pro trace, all three course rows shared the same
+projection seam:
 
 | Storage / attention path | Prefill tok/s | Output tok/s | Decode tok/s | Requests/s | Peak KV | Avoidable KV copy |
 |---|---:|---:|---:|---:|---:|---:|
@@ -242,8 +250,9 @@ seam:
 | Paged storage + dense gather | 725.46 | 41.64 | 78.53 | 0.555 | not a total peak | 103,445 MiB |
 | Direct paged attention | 672.68 | 46.36 | 105.01 | 0.618 | 576 MiB | 504 MiB |
 
-Relative to dense serving, direct paging is 5.4% lower on prefill, 31.6%
-higher on output/request throughput, 82.3% higher on decode, 47.4% lower on
+Relative to dense serving in that predecessor trace, direct paging was 5.4%
+lower on prefill, 31.6% higher on output/request throughput, 82.3% higher on
+decode, and 47.4% lower on
 measured peak KV storage, and 99.76% lower on avoidable logical copy volume.
 The compatibility row's page-pool counter excludes its temporary dense staging
 allocation, so it is not a total peak. These are cumulative Week 3 system
@@ -259,17 +268,24 @@ and long-context measurements. Long-context decode remains a Day 4 vector
 kernel workload; do not credit a prefill schedule with a decode gain.
 
 ```bash
+week3_result_root="$HOME/tiny-llm-week3-results"
+mkdir -p "$week3_result_root"
+week3_result_dir="$(mktemp -d "$week3_result_root/run-XXXXXX")"
+
 pdm run bench-course-progression --solution tiny_llm --offline --suite course \
   --variant week2 --variant week3 --variant mlx --model qwen3-4b \
   --input-len 8192 --output-len 2 --prefill-logits last \
   --warmup 1 --repeats 4 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/learner-week3-8k.json
+  --json-output "$week3_result_dir/8k-tiny-llm.json"
 ```
 
 This command measures your Week 2 and Week 3 course rows while retaining MLX
-as the library baseline. The checked table below is reference evidence;
-reproduce it separately with `--solution ref` and
-`--json-output benchmark_results/task367-final-main/raw/week3-8k-final-main.json`.
+as the library baseline and writes a new user-owned JSON file. The table below
+is historical task #367 evidence from source
+`18aec8503929d80c986324578068ecac2463c2ac`.
+For a current reference control, rerun with `--solution ref` and a new filename
+in your output directory. Today's `week2` variant uses the five-day route, so
+the old table is not its expected output.
 
 | 8K static checkpoint | Prefill tok/s | Decode tok/s |
 |---|---:|---:|
@@ -277,9 +293,12 @@ reproduce it separately with `--solution ref` and
 | Week 3 seam + course paged path | 463.69 | 27.42 |
 | Full MLX | 639.73 | 28.37 |
 
-The cumulative Week 3 row is 43.1% faster than the cumulative Week 2 row and
-reaches 72.5% of full MLX at this shape. This remains a static diagnostic: it
-does not measure request turnover, page reuse, admission capacity, the
+In that predecessor source, the cumulative Week 3 prefill row was 43.1% faster
+than the former Week 2 Split-K row and reached 72.5% of full MLX at this shape.
+The 43.1% denominator is not today's five-day `selected` checkpoint; no
+current Week 2-versus-3 percentage follows from this table. It remains a
+historical static diagnostic: it does not measure request turnover, page reuse,
+admission capacity, the
 projection seam, or the Day 5 schedule causally. Its decode row is the Day 4
 vector schedule, not evidence for the tiled prefill kernel. Full method and raw
 samples are in

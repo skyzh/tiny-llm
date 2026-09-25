@@ -3,8 +3,10 @@
 > **Historical evidence from an earlier full Week 2 course state.** The
 > [current Week 2 route](./week2-overview.md) ships Days 1–5, ending at
 > [tiled dense attention and `selected`](./week2-05-tiled-prefill-attention.md). The
-> checkpoint labels, commands, and measured results below describe the older
-> source tree; they are not runnable gates or performance results for this
+> task #367's legacy Week 2 and Week 3 tables below belong to predecessor
+> source `18aec8503929d80c986324578068ecac2463c2ac`; other historical runs
+> state their own source. The example runner commands now write fresh results
+> outside the tracked corpus; they do not reproduce those figures on this
 > checkout.
 
 This appendix records the measurements that determined the course order. The
@@ -15,20 +17,26 @@ operator becomes a larger fraction of model time.
 
 The progression runner launches every checkpoint in a fresh process,
 alternates their order, performs complete-request warmups, synchronizes lazy
-MLX work inside the timer, and reports the median:
+MLX work inside the timer, and reports the median. These commands use current
+runner syntax to collect new data; their output files belong to you and do
+not replace the predecessor samples:
 
 ```bash
+benchmark_result_root="$HOME/tiny-llm-benchmark-results"
+mkdir -p "$benchmark_result_root"
+benchmark_result_dir="$(mktemp -d "$benchmark_result_root/run-XXXXXX")"
+
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last \
-  --json-output benchmark_results/task367-final-main/raw/week2-128-final-main.json
+  --json-output "$benchmark_result_dir/week2-128-tiny-llm.json"
 
 pdm run bench-serving-progression --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 \
   --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
+  --json-output "$benchmark_result_dir/week3-serving-ref.json"
 ```
 
 `--prefill-logits last` is a generation-serving workload: both the reference
@@ -156,11 +164,15 @@ rotation changes full-attention semantics; and KV quantization trades numerical
 precision and sometimes speed for capacity. None makes the first full 300K
 prefill linear-time.
 
-Reproduce the operator sweep with:
+Run a new operator sweep without replacing the preserved historical JSON:
 
 ```bash
+benchmark_result_root="$HOME/tiny-llm-benchmark-results"
+mkdir -p "$benchmark_result_root"
+benchmark_result_dir="$(mktemp -d "$benchmark_result_root/run-XXXXXX")"
+
 pdm run bench-long-context-attention \
-  --json-output benchmark_results/m4-pro-qwen3-4b-long-context-mlx-0.32.0.json
+  --json-output "$benchmark_result_dir/long-context-attention.json"
 ```
 
 ## Dependency Upgrade
@@ -199,21 +211,29 @@ balanced synchronized iterations. With n=2, product medians can reject a
 large contradiction; they cannot turn a sub-percent change into a portable
 claim.
 
-Learners reproduce the method with their own tiny_llm solution:
+To apply the method on the current five-day checkout, use its live checkpoint
+selectors and fresh user-owned output files. These commands produce new
+measurements; they do not reproduce the historical results below:
 
 ~~~bash
+benchmark_result_root="$HOME/tiny-llm-benchmark-results"
+mkdir -p "$benchmark_result_root"
+benchmark_result_dir="$(mktemp -d "$benchmark_result_root/run-XXXXXX")"
+
 pdm run bench-week2-progression --offline --solution tiny_llm --repeats 2 \
   --variant week2-kv-cache --variant week2-quantized-matvec \
   --variant week2-swiglu --variant week2-simd-matmul \
-  --variant week2-split-k --variant mlx \
+  --variant week2-tiled-prefill --variant week2-selected --variant mlx \
   --model qwen3-4b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-progression.json
+  --prefill-logits last \
+  --json-output "$benchmark_result_dir/week2-progression-tiny-llm.json"
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case kv-cache:decode:128 --case quantized-matvec:decode:128 \
   --case swiglu:decode:128 --case swiglu:prefill:128 \
-  --case simd-matmul:prefill:128 --case split-k:prefill:128 \
-  --warmup 4 --iterations 12 --json-output week2-attribution.json
+  --case simd-matmul:prefill:128 --case tiled-prefill:prefill:128 \
+  --case selected:prefill:128 --warmup 4 --iterations 12 \
+  --json-output "$benchmark_result_dir/week2-attribution-tiny-llm.json"
 ~~~
 
 The checked compact result is
@@ -321,15 +341,20 @@ every required checkpoint.
 Paging adds indirect K/V reads and is not expected to beat contiguous
 attention for one preallocated static request. Week 3 therefore measures a
 serving workload with request turnover, incremental unknown-size growth,
-chunked admission, dense batch reconstruction, and page reuse:
+chunked admission, dense batch reconstruction, and page reuse. This command
+collects a new result rather than replaying the predecessor table:
 
 ```bash
+benchmark_result_root="$HOME/tiny-llm-benchmark-results"
+mkdir -p "$benchmark_result_root"
+benchmark_result_dir="$(mktemp -d "$benchmark_result_root/run-XXXXXX")"
+
 pdm run bench-serving-progression --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 \
   --prefill-step 128 --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json
+  --json-output "$benchmark_result_dir/week3-serving-ref.json"
 ```
 
 A complete warmup compiles the kernels. The runner then synchronizes and resets
@@ -348,7 +373,8 @@ The projection boundary must be fixed before interpreting any Week 3 table:
 | Task #360 seam versus inherited | MLX quantized projections versus inherited Week 2 course projections | Identical course-owned Week 3 mechanisms | Causal projection-seam effect on one measured source tree. |
 
 Task #360 and task #367 answer different questions. The former is a causal
-ablation; the latter is representative final-main absolute evidence. Do not
+ablation; the latter is representative absolute evidence for predecessor
+`18aec850`, not today's five-day Week 2 baseline. Do not
 splice one campaign's absolute values into the other or credit its projection
 gain to paging, FlashAttention, or scheduling.
 
@@ -435,13 +461,15 @@ higher on output/request throughput, 33.7% higher on decode, and removes 99.51%
 of the remaining copy volume. These cumulative system results do not isolate
 the Day 5 prefill kernel or prove a short-chunk FlashAttention win.
 
-The 8K static run remains a secondary kernel diagnostic, not a Week 3 headline
-or acceptance result. At that shape, the Week 3 seam plus course paged path
-raises prefill from the Week 2 path's 323.96 to 463.69 tok/s, a 43.1% gain, and
-reaches 72.5% of the 639.73 tok/s full-MLX row. This does not isolate the
-projection seam, measure request turnover or admission capacity, or establish
-long-context support. One-token decode continues to dispatch to the Day 4
-vector schedule.
+The predecessor's 8K static run remains a secondary kernel diagnostic, not a
+current Week 3 headline or acceptance result. At that shape, its Week 3 seam
+plus course paged path raised prefill from the former Week 2 Split-K path's
+323.96 to 463.69 tok/s, a 43.1% gain, and reached 72.5% of the 639.73 tok/s
+full-MLX row. The old Week 2 denominator is not today's five-day `selected`
+checkpoint; a current percentage needs a fresh matched run. This does not
+isolate the projection seam, measure request turnover or admission capacity,
+or establish long-context support. One-token decode continues to dispatch to
+the Day 4 vector schedule.
 
 ### Separate causal projection-seam result
 
@@ -458,7 +486,8 @@ ownership on measured source `170211be3503c0ec0b1fa75bbb3b0c23a86bd3ac`:
 Full MLX remains 17.83% faster than the dense Day 3 seam on prefill
 (equivalently, the seam is 15.13% below full MLX), because the seam changes
 projections only. These causal percentages explain the ownership decision;
-the task #367 tables above provide current absolute values.
+the task #367 tables above provide absolute values for the predecessor source,
+not current measurements.
 
 The checked-in final-main corpus contains the complete raw samples, exact
 source commit and tracked-clean flag, host, configuration, execution order,
@@ -506,7 +535,10 @@ checked result records unavailable trees instead of substituting zeros or
 inferring counters; learners without that toolchain can still complete every
 checkpoint and reason from the portable artifact.
 
-## Optimization Map
+## Historical Optimization Map
+
+This map records the predecessor course's seven-day Week 2 sequence. Its Day
+5–7 labels do not name the [active five-day route](./week2-overview.md).
 
 | Measured bottleneck | Retained change | Chapter |
 |---|---|---|
@@ -520,7 +552,7 @@ checkpoint and reason from the portable artifact.
 | Scalar paged final reduction | Compact D=128 SIMD reduction | Week 3 Day 4 |
 | Scalar contiguous-page K/V tile loads | Cooperative paged FlashAttention loads | Week 3 Day 5 |
 
-This is the course progression: optimize one measured cost, benchmark again,
-then let the evidence choose the next chapter.
+The transferable method is to optimize one measured cost, benchmark again,
+then let new evidence choose the next change.
 
 {{#include copyright.md}}

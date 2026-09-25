@@ -181,9 +181,11 @@ and release their slots. Its shuffled prompt order and cumulative wall-clock
 display are not the source of a decode-gap measurement.
 
 Day 2's deterministic `bench-chunked-prefill` runner owns that comparison. Its
-512-token budget processes every prompt in the checked 64–512-token trace in
-one chunk, so that row is the reproducible Day 1 control. The runner records
-the exact token ids, output budget, seed, process order, and decode-completion
-gaps before Day 2 changes the prefill budget.
+512-token budget processes every prompt in a 64–512-token trace in one chunk,
+so it provides a Day 1 control for your new run. The table later in Day 2 uses
+the historical task #367 trace from source `18aec850`, not a result reproduced
+on this five-day Week 2 checkout. The runner records the exact token ids,
+output budget, seed, process order, and decode-completion gaps before Day 2
+changes the prefill budget.
 
 {{#include copyright.md}}
