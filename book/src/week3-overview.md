@@ -43,13 +43,16 @@ retains correct direct fallbacks for short queries and generic shapes. Every
 schedule reads the same page pool through the same block-table interface;
 none rebuilds dense K/V.
 
-Paged attention is not an automatic single-request latency win. The checked
-trace measures lower KV storage, page reuse, incremental growth, and batching;
-page-table indirection can make one request slower. It does not establish an
+Paged attention is not an automatic single-request latency win. The historical
+task #367 trace, measured on source
+`18aec8503929d80c986324578068ecac2463c2ac` before the five-day Week 2
+revamp, showed lower KV storage, page reuse, incremental growth, and batching;
+page-table indirection can make one request slower. Those figures do not
+describe the current Week 2 `selected` baseline or establish an
 admission-capacity gain without a memory-capped sweep. Each chapter ends with a
-focused measurement, while the
-[performance appendix](./appendix-performance.md) records the matched
-chapter-by-chapter results.
+focused measurement you can run on this checkout. The
+[performance appendix](./appendix-performance.md) preserves the older matched
+chapter-by-chapter results with their source boundary.
 
 Optional Day 6 adds MoE model support independently of the cache and scheduler.
 Optional Day 7 then adds speculative decoding, whose rejection path needs a

@@ -470,28 +470,34 @@ metadata; the MLX row measures its fused attention operator on the already
 gathered tensor:
 
 ```bash
+week3_result_root="$HOME/tiny-llm-week3-results"
+mkdir -p "$week3_result_root"
+week3_result_dir="$(mktemp -d "$week3_result_root/run-XXXXXX")"
+
 pdm run bench-week3-attention --solution tiny_llm --offline --contexts 128 1024 \
   --page-size 128 --warmup 5 --iterations 60 --repeats 4 \
   --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/learner-week3-attention.json
+  --json-output "$week3_result_dir/attention-tiny-llm.json"
 ```
 
-This command measures your `tiny_llm` operators. The checked reference values
-below are medians of four balanced fresh-process medians, with 60
-synchronized calls after five warmups per process:
-
-To reproduce those checked rows separately, rerun the command with
-`--solution ref` and
-`--json-output benchmark_results/task367-final-main/raw/week3-attention-final-main.json`.
+This command measures your `tiny_llm` operators into a new JSON file outside
+the tracked historical corpus. For a current reference control, use the same
+flags with `--solution ref` and a different filename in the new directory.
+The table below instead records historical task #367 results from source
+`18aec8503929d80c986324578068ecac2463c2ac`: medians of four balanced
+fresh-process medians, with 60 synchronized calls after five warmups per
+process. A current run measures this checkout; it need not reproduce those
+values.
 
 | Context | Dense + gather | Direct paged | MLX fused |
 |---:|---:|---:|---:|
 | 128 | 201.26 us | 228.58 us | 188.79 us |
 | 1,024 | 468.39 us | 299.14 us | 250.04 us |
 
-Direct traversal is 13.6% slower than dense-plus-gather at 128 tokens, but
-36.1% faster at 1,024 tokens. MLX remains faster at both shapes. The checked
-BF16 outputs match the readable dense equation within 0.00439453125 at
+In that predecessor trace, direct traversal was 13.6% slower than
+dense-plus-gather at 128 tokens, but 36.1% faster at 1,024 tokens. MLX was
+faster at both shapes. The recorded BF16 outputs matched the readable dense
+equation within 0.00439453125 at
 `S=128` and 0.001953125 at `S=1,024`. This operator benchmark contains no model
 projection, so it isolates the attention paths directly.
 
@@ -557,12 +563,16 @@ long-prefill schedule rather than routing around the page-table contract.
 Use the paired serving runner rather than a preallocated static request:
 
 ```bash
+week3_result_root="$HOME/tiny-llm-week3-results"
+mkdir -p "$week3_result_root"
+week3_result_dir="$(mktemp -d "$week3_result_root/run-XXXXXX")"
+
 pdm run bench-serving-progression --solution tiny_llm --offline --repeats 4 \
   --model qwen3-4b --num-seqs 16 --batch-size 4 \
   --min-input-len 128 --max-input-len 1024 \
   --min-output-len 32 --max-output-len 128 --prefill-step 128 \
   --warmup 1 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/learner-week3-serving.json
+  --json-output "$week3_result_dir/serving-tiny-llm.json"
 ```
 
 This command compares your Week 2 dense batch reconstruction, Week 3 paged
@@ -571,18 +581,21 @@ dense-gather compatibility path, and Week 3 direct paged attention. All three
 course rows use the same MLX quantized-projection seam; they differ in KV
 representation and attention path. The runner resets page capacity after
 warmup and reports prefill, output, and decode throughput alongside peak KV
-bytes, copy volume, page reuse, and tail fragmentation. The direct path's
+bytes, copy volume, page reuse, and tail fragmentation. It writes a new JSON
+file outside the tracked historical corpus. The numbers that follow are from
+task #367 on predecessor source `18aec8503929d80c986324578068ecac2463c2ac`;
+they do not describe today's five-day Week 2 baseline. The direct path's
 four-process medians are 672.68 prefill tok/s, 46.36 output tok/s, 105.01 decode
 tok/s, and 0.618 requests/s. Its synchronized decode calls take
 28.97/36.78/63.04 ms at median/p95/max; the completion gaps, which include
 intervening scheduler and prefill work, are 30.16/222.18/239.49 ms.
 
-These are cumulative system results, not an isolated Day 4 kernel speedup. The
-ledger at
+Those are historical cumulative system results, not an isolated Day 4 kernel
+speedup. The ledger at
 `benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
 records the fixed trace, balanced process order, and denominator boundary.
-Reproduce that checked reference trace separately with `--solution ref` and
-`--json-output benchmark_results/task367-final-main/raw/week3-serving-final-main.json`.
+For a current reference comparison, rerun with `--solution ref` and a new
+filename in your output directory; do not overwrite the predecessor JSON.
 
 ```bash
 pdm run test --week 3 --day 4

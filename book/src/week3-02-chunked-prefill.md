@@ -67,6 +67,10 @@ default from the measured tradeoff rather than treating one chunk size as
 universal.
 
 ```bash
+week3_result_root="$HOME/tiny-llm-week3-results"
+mkdir -p "$week3_result_root"
+week3_result_dir="$(mktemp -d "$week3_result_root/run-XXXXXX")"
+
 pdm run test --week 3 --day 2
 pdm run batch-main --solution tiny_llm --loader week2
 
@@ -75,19 +79,23 @@ pdm run bench-chunked-prefill --solution tiny_llm --offline --model qwen3-0.6b \
   --min-input-len 64 --max-input-len 512 \
   --min-output-len 32 --max-output-len 32 \
   --warmup 1 --repeats 4 --cooldown-seconds 1 \
-  --json-output benchmark_results/task367-final-main/raw/learner-week3-chunked-prefill.json
+  --json-output "$week3_result_dir/chunked-prefill-tiny-llm.json"
 ```
 
-This command measures your `tiny_llm` solution. The checked reference trace
-below uses seed 0 and the same 32-token output budget for every
-request. Each chunk size runs twice in forward order and twice in reverse order
-in fresh processes. Every row uses the same canonical Week 3 MLX
+This command measures your `tiny_llm` solution and writes a new JSON file
+outside the tracked historical corpus. For a current reference control, rerun
+the same flags with `--solution ref` and a different filename in the new
+directory; compare those new measurements with your own run. The table below
+is historical task #367 evidence from source
+`18aec8503929d80c986324578068ecac2463c2ac`, before the five-day Week 2
+revamp. Its trace used seed 0 and the same 32-token output budget for every
+request. Each chunk size ran twice in forward order and twice in reverse order
+in fresh processes. Every row used the same canonical Week 3 MLX
 quantized-projection seam and the same course-owned scheduler, dense cache, and
-attention code; only the prefill budget changes. The JSON stores every prompt
+attention code; only the prefill budget changed. The saved JSON stores every prompt
 token id, the per-request output budget, and their canonical SHA-256 checksum.
-To reproduce the checked rows separately, rerun the command with
-`--solution ref` and
-`--json-output benchmark_results/task367-final-main/raw/week3-chunked-prefill-final-main.json`.
+Running today's reference can produce different values; it does not reproduce
+the predecessor table.
 
 A decode-completion gap is the wall-clock interval between two consecutive
 synchronized decode calls while at least one decode request remains active. It
@@ -101,14 +109,14 @@ were:
 | 128 | 153.82 | 4,215.12 | 242.23 | 4.807 | 17.79 ms | 45.36 / 53.76 ms |
 | 512 | 170.46 | 4,769.14 | 262.01 | 5.327 | 17.11 ms | 73.56 / 119.90 ms |
 
-The 512-token row is the full-prompt Day 1 control for this trace. Relative to
+The 512-token row was the full-prompt Day 1 control for that trace. Relative to
 that row, the 128-token budget gives up 9.8% output throughput while reducing
 the p95 completion gap by 38.3% and the maximum gap by 55.2%. The 32-token
 budget reduces the p95 gap further but gives up substantially more throughput.
-The course uses 128 as a measured compromise for this workload, not as a
-universal optimum. The ledger at
+For that predecessor workload, 128 was a measured compromise, not a universal
+optimum for your current run. The ledger at
 `benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
-keeps this final-main absolute result separate from task #360's causal
+keeps this predecessor absolute result separate from task #360's causal
 projection-seam ablation.
 
 {{#include copyright.md}}
