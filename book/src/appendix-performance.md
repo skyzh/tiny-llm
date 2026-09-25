@@ -215,7 +215,7 @@ To apply the method on the current five-day checkout, use its live checkpoint
 selectors and fresh user-owned output files. These commands produce new
 measurements; they do not reproduce the historical results below:
 
-~~~bash
+```bash
 benchmark_result_root="$HOME/tiny-llm-benchmark-results"
 mkdir -p "$benchmark_result_root"
 benchmark_result_dir="$(mktemp -d "$benchmark_result_root/run-XXXXXX")"
@@ -234,7 +234,7 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-4b \
   --case simd-matmul:prefill:128 --case tiled-prefill:prefill:128 \
   --case selected:prefill:128 --warmup 4 --iterations 12 \
   --json-output "$benchmark_result_dir/week2-attribution-tiny-llm.json"
-~~~
+```
 
 The checked compact result is
 benchmark_results/m4-pro-qwen3-4b-week2-gpudebug-macos27-mlx-0.32.0.json.
