@@ -244,6 +244,7 @@ replace the Day 4 decode schedule: a one-token query has no query-tile reuse.
 On that predecessor M4 Pro trace, all three course rows shared the same
 projection seam:
 
+<div class="table-wrapper">
 <table>
   <thead>
     <tr><th scope="col">Storage / attention path</th><th scope="col">Prefill tok/s</th><th scope="col">Output tok/s</th><th scope="col">Decode tok/s</th><th scope="col">Requests/s</th><th scope="col">Peak KV</th><th scope="col">Avoidable KV copy</th></tr>
@@ -254,6 +255,7 @@ projection seam:
     <tr><th scope="row">Direct paged attention</th><td>672.68</td><td>46.36</td><td>105.01</td><td>0.618</td><td>576 MiB</td><td>504 MiB</td></tr>
   </tbody>
 </table>
+</div>
 
 Relative to dense serving in that predecessor trace, direct paging was 5.4%
 lower on prefill, 31.6% higher on output/request throughput, 82.3% higher on
@@ -292,6 +294,7 @@ For a current reference control, rerun with `--solution ref` and a new filename
 in your output directory. Today's `week2` variant uses the five-day route, so
 the old table is not its expected output.
 
+<div class="table-wrapper">
 <table>
   <thead>
     <tr><th scope="col">8K static checkpoint</th><th scope="col">Prefill tok/s</th><th scope="col">Decode tok/s</th></tr>
@@ -302,6 +305,7 @@ the old table is not its expected output.
     <tr><th scope="row">Full MLX</th><td>639.73</td><td>28.37</td></tr>
   </tbody>
 </table>
+</div>
 
 In that predecessor source, the cumulative Week 3 prefill row was 43.1% faster
 than the former Week 2 Split-K row and reached 72.5% of full MLX at this shape.
