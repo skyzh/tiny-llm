@@ -131,9 +131,10 @@ pdm run main --solution tiny_llm_ref --loader week2 --week2-checkpoint kv-cache
 pdm run main --solution mlx
 ```
 
-The Day 1 reference tests do not require `pdm run build-ext-ref`. Build the
-reference extension for Days 2–5's native tests, alongside
-the learner extension; neither reference solution fills your learner TODOs.
+Build both the learner and reference extensions during
+[setup](./setup.md#build-the-native-extensions-before-tests), before the first
+test command. Even Day 1 test collection reaches native modules through package
+imports; the reference build does not fill your learner TODOs.
 
 `--solution tiny_llm_ref` runs the supplied implementation end to end. `--solution mlx`
 runs MLX end to end. Neither command composes “earlier weeks from the reference
