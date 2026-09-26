@@ -118,6 +118,11 @@ reused for active Days 1–5 in the
 `--solution mlx` runs a separate complete model, not a hybrid that completes
 learner cache TODOs.
 
+Build both the learner and reference extensions during
+[setup](./setup.md#build-the-native-extensions-before-tests), before the first
+test command. Even Day 1 test collection reaches native modules through package
+imports; the reference build does not fill your learner TODOs.
+
 To run a completed checkpoint without solving it first:
 
 ```bash
@@ -130,11 +135,6 @@ pdm run main --solution tiny_llm_ref --loader week2 --week2-checkpoint kv-cache
 # Run the separate full-MLX baseline.
 pdm run main --solution mlx
 ```
-
-Build both the learner and reference extensions during
-[setup](./setup.md#build-the-native-extensions-before-tests), before the first
-test command. Even Day 1 test collection reaches native modules through package
-imports; the reference build does not fill your learner TODOs.
 
 `--solution tiny_llm_ref` runs the supplied implementation end to end. `--solution mlx`
 runs MLX end to end. Neither command composes “earlier weeks from the reference
