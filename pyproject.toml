@@ -53,10 +53,8 @@ batch-main.cmd = "python batch-main.py"
 agent = { cmd = "python agent.py", env = { PYTHONPATH = "src" } }
 week4-capstone = { cmd = "python week4-capstone.py", env = { PYTHONPATH = "src" } }
 test.cmd = "python scripts/dev-tools.py test"
-test.env = { MLX_ENABLE_TF32 = "0" }
 check-installation.cmd = "python scripts/check-installation.py"
 test-refsol.cmd = "python scripts/dev-tools.py test-refsol"
-test-refsol.env = { MLX_ENABLE_TF32 = "0" }
 bench-test.cmd = "pytest benches"
 format = "ruff format"
 format-cpp-ref.shell = "find src/extensions_ref -type file \\( -name '*.h' -or -name '*.cpp' \\) | xargs -n1 clang-format -i"
