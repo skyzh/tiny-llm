@@ -63,8 +63,9 @@ def test_task_1_simple_attention(
                 value,
             )
             # MLX may run float32 GPU attention/matmul at reduced precision.
-            # A ten-fraction-bit input model gives a 2^-11 unit-scale rounding
-            # margin for this bounded fixture; keep the shared bound elsewhere.
+            # The empirical 2^-11 margin covers issue #322's reported 1.1e-4
+            # gap and a 2.01e-4 local rounding surrogate for these bounded inputs.
+            # It implies no MLX/M5 format or formal output-error bound.
             atol = 2**-11 if precision == mx.float32 and stream == mx.gpu else None
             assert_allclose(
                 user_output, reference_output, precision=precision, atol=atol
