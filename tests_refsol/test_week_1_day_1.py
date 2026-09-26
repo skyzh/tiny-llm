@@ -62,7 +62,14 @@ def test_task_1_simple_attention(
                 key,
                 value,
             )
-            assert_allclose(user_output, reference_output, precision=precision)
+            # MLX may run float32 GPU attention/matmul at reduced precision.
+            # The empirical 2^-11 margin covers issue #322's reported 1.1e-4
+            # gap and a 2.01e-4 local rounding surrogate for these bounded inputs.
+            # It implies no MLX/M5 format or formal output-error bound.
+            atol = 2**-11 if precision == mx.float32 and stream == mx.gpu else None
+            assert_allclose(
+                user_output, reference_output, precision=precision, atol=atol
+            )
 
 
 @pytest.mark.parametrize("stream", AVAILABLE_STREAMS, ids=AVAILABLE_STREAMS_IDS)
