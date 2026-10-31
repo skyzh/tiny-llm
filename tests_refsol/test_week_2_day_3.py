@@ -61,12 +61,7 @@ def test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu():
 
 @pytest.mark.parametrize("seed", (0, 4))
 def test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu(seed):
-    random_state = mx.random.state[:]
-    try:
-        mx.random.seed(seed)
-        fixture = tiny_qwen3_mlx_model()
-    finally:
-        mx.random.state[:] = random_state
+    fixture = tiny_qwen3_mlx_model(seed=seed)
 
     tokens = mx.array([list(range(1, 11))], dtype=mx.int32)
     with mx.stream(mx.gpu):

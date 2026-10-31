@@ -10,13 +10,20 @@ PRECISION_IDS = ["f32", "f16"]
 
 
 def tiny_qwen3_mlx_model(
-    num_hidden_layers: int = 1, *, head_dim: int = 64
+    num_hidden_layers: int = 1, *, head_dim: int = 64, seed: int | None = None
 ) -> SimpleNamespace:
-    """Build a small MLX-shaped Qwen3 model for integration tests."""
+    """Build a tiny model; an explicit seed leaves the global RNG untouched."""
     hidden_size = 2 * head_dim
+    rng_key = None if seed is None else mx.random.key(seed)
 
     def quantized_layer(out_dim: int, in_dim: int) -> SimpleNamespace:
-        weight = mx.random.normal((out_dim, in_dim)).astype(mx.bfloat16)
+        nonlocal rng_key
+        if rng_key is None:
+            weight = mx.random.normal((out_dim, in_dim))
+        else:
+            rng_key, draw_key = mx.random.split(rng_key)
+            weight = mx.random.normal((out_dim, in_dim), key=draw_key)
+        weight = weight.astype(mx.bfloat16)
         packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
         return SimpleNamespace(
             weight=packed,

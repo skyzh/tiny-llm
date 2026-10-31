@@ -15,12 +15,7 @@ def _fixture(shape: tuple[int, ...], phase: float) -> mx.array:
 
 
 def _model_fixture(seed: int):
-    state = mx.random.state[:]
-    try:
-        mx.random.seed(seed)
-        return tiny_qwen3_mlx_model(head_dim=128)
-    finally:
-        mx.random.state[:] = state
+    return tiny_qwen3_mlx_model(head_dim=128, seed=seed)
 
 
 def _run(model, length: int):
