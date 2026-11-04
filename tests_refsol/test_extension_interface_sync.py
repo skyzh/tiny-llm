@@ -419,7 +419,9 @@ def _assert_task_pairs(chapter: str, task: str, pairs: set[tuple[str, str]]) -> 
 def test_starter_and_reference_publish_the_same_learner_extension_functions():
     expected = set(INTERFACES)
     assert _header_functions("src/extensions_ref/src/tiny_llm_ext.h") == expected | {
-        "decode_attention"
+        "decode_attention",
+        "_qk_norm_rope4",
+        "_decode_attention_online",
     }
     assert _header_functions("src/extensions/src/tiny_llm_ext.h") == expected
 
@@ -430,7 +432,12 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "load_library",
         "axpby",
     }
-    assert reference_bindings == expected | {"decode_attention"}
+    assert reference_bindings == expected | {
+        "decode_attention",
+        "_qk_norm_rope4",
+        "_decode_attention_online",
+        "_submit_decode_prefix_if_ordinary",
+    }
     assert starter_bindings == expected
 
     for function in expected:
