@@ -140,21 +140,39 @@ METAL_FUNC void course_load_transposed_matrix(
         source[(coordinate.x + 1) * row_stride + coordinate.y];
 }
 
+template <typename T>
+METAL_FUNC void course_fragment_multiply_accumulate(
+    thread float2& accumulator,
+    thread vec<T, 2>& left,
+    thread vec<T, 2>& right) {
+    simdgroup_matrix<float, 8, 8> result;
+    simdgroup_matrix<float, 8, 8> previous;
+    simdgroup_matrix<T, 8, 8> left_matrix;
+    simdgroup_matrix<T, 8, 8> right_matrix;
+    previous.thread_elements()[0] = accumulator[0];
+    previous.thread_elements()[1] = accumulator[1];
+    left_matrix.thread_elements()[0] = left[0];
+    left_matrix.thread_elements()[1] = left[1];
+    right_matrix.thread_elements()[0] = right[0];
+    right_matrix.thread_elements()[1] = right[1];
+    simdgroup_multiply_accumulate(result, left_matrix, right_matrix, previous);
+    accumulator[0] = result.thread_elements()[0];
+    accumulator[1] = result.thread_elements()[1];
+}
+
 // Four simdgroups cover the four 16x16 quadrants of one 32x32 output tile.
 // The wrapper only exposes the two operations the course kernel needs: add a
 // 32-wide reduction tile, then store the accumulated result with edge guards.
 template <typename T, typename OutT, int TILE_STRIDE>
 struct CooperativeBlockMMA {
-    simdgroup_matrix<float, 8, 8> accumulators[2][2];
+    float2 accumulators[2][2];
     ushort simdgroup_index;
     ushort lane_index;
 
     METAL_FUNC CooperativeBlockMMA(ushort simdgroup, ushort lane) thread
         : accumulators{
-              {make_filled_simdgroup_matrix<float, 8, 8>(0.0f),
-               make_filled_simdgroup_matrix<float, 8, 8>(0.0f)},
-              {make_filled_simdgroup_matrix<float, 8, 8>(0.0f),
-               make_filled_simdgroup_matrix<float, 8, 8>(0.0f)}},
+              {float2(0.0f), float2(0.0f)},
+              {float2(0.0f), float2(0.0f)}},
           simdgroup_index(simdgroup),
           lane_index(lane) {}
 
@@ -163,21 +181,21 @@ struct CooperativeBlockMMA {
         threadgroup const T* right_tile) thread {
         const int simdgroup_row = simdgroup_index / 2;
         const int simdgroup_column = simdgroup_index % 2;
+        const ushort2 coordinate = course_matrix_coordinate(lane_index);
 
         #pragma unroll
         for (int reduction_fragment = 0; reduction_fragment < 4;
              ++reduction_fragment) {
-            simdgroup_matrix<T, 8, 8> left[2];
-            simdgroup_matrix<T, 8, 8> right[2];
+            vec<T, 2> left[2];
+            vec<T, 2> right[2];
 
             #pragma unroll
             for (int row_fragment = 0; row_fragment < 2; ++row_fragment) {
                 const int left_row = simdgroup_row * 16 + row_fragment * 8;
-                course_load_matrix(
-                    left[row_fragment],
-                    left_tile + left_row * TILE_STRIDE + reduction_fragment * 8,
-                    TILE_STRIDE,
-                    lane_index);
+                const int offset = (left_row + coordinate.y) * TILE_STRIDE +
+                    reduction_fragment * 8 + coordinate.x;
+                left[row_fragment] = vec<T, 2>(
+                    left_tile[offset], left_tile[offset + 1]);
             }
 
             #pragma unroll
@@ -185,11 +203,10 @@ struct CooperativeBlockMMA {
                  ++column_fragment) {
                 const int right_row =
                     simdgroup_column * 16 + column_fragment * 8;
-                course_load_transposed_matrix(
-                    right[column_fragment],
-                    right_tile + right_row * TILE_STRIDE + reduction_fragment * 8,
-                    TILE_STRIDE,
-                    lane_index);
+                const int offset = (right_row + coordinate.x) * TILE_STRIDE +
+                    reduction_fragment * 8 + coordinate.y;
+                right[column_fragment] = vec<T, 2>(
+                    right_tile[offset], right_tile[offset + TILE_STRIDE]);
             }
 
             #pragma unroll
@@ -197,11 +214,10 @@ struct CooperativeBlockMMA {
                 #pragma unroll
                 for (int column_fragment = 0; column_fragment < 2;
                      ++column_fragment) {
-                    simdgroup_multiply_accumulate(
+                    course_fragment_multiply_accumulate(
                         accumulators[row_fragment][column_fragment],
                         left[row_fragment],
-                        right[column_fragment],
-                        accumulators[row_fragment][column_fragment]);
+                        right[column_fragment]);
                 }
             }
         }
@@ -229,13 +245,11 @@ struct CooperativeBlockMMA {
                     simdgroup_column * 16 + column_fragment * 8 + coordinate.x;
                 if (column < valid_shape.x) {
                     output[row * output_stride + column] = OutT(
-                        accumulators[row_fragment][column_fragment]
-                            .thread_elements()[0]);
+                        accumulators[row_fragment][column_fragment][0]);
                 }
                 if (column + 1 < valid_shape.x) {
                     output[row * output_stride + column + 1] = OutT(
-                        accumulators[row_fragment][column_fragment]
-                            .thread_elements()[1]);
+                        accumulators[row_fragment][column_fragment][1]);
                 }
             }
         }

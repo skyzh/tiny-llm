@@ -5,16 +5,24 @@
 
 using namespace metal;
 
+constant bool decode_split_unit_dimension [[function_constant(100)]];
+constant bool decode_split_is_causal [[function_constant(101)]];
+constant bool decode_split_has_mask [[function_constant(102)]];
+constant bool decode_split_sequence128 [[function_constant(103)]];
+constant bool prefill_is_causal [[function_constant(120)]];
+constant bool prefill_has_mask [[function_constant(121)]];
+constant bool prefill_full_tiles [[function_constant(122)]];
+
 namespace {
 
 constant constexpr int DENSE_MMA_SIZE = 8;
 
 template <int N>
 inline float dense_row_max(
-    thread const simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>* matrices) {
+    thread const float2* matrices) {
     float value = -INFINITY;
     for (int fragment_idx = 0; fragment_idx < N; ++fragment_idx) {
-        const auto elements = matrices[fragment_idx].thread_elements();
+        const auto elements = matrices[fragment_idx];
         value = max(value, max(elements[0], elements[1]));
     }
     value = max(value, simd_shuffle_xor(value, ushort(1)));
@@ -24,10 +32,10 @@ inline float dense_row_max(
 
 template <int N>
 inline float dense_row_sum(
-    thread const simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>* matrices) {
+    thread const float2* matrices) {
     float value = 0.0f;
     for (int fragment_idx = 0; fragment_idx < N; ++fragment_idx) {
-        const auto elements = matrices[fragment_idx].thread_elements();
+        const auto elements = matrices[fragment_idx];
         value += elements[0] + elements[1];
     }
     value += simd_shuffle_xor(value, ushort(1));
@@ -36,26 +44,44 @@ inline float dense_row_sum(
 }
 
 inline void dense_clear_matrix(
-    thread simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& matrix) {
-    matrix.thread_elements()[0] = 0.0f;
-    matrix.thread_elements()[1] = 0.0f;
+    thread float2& matrix) {
+    matrix[0] = 0.0f;
+    matrix[1] = 0.0f;
 }
 
 inline void dense_scale_matrix_rows(
-    thread simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& matrix,
+    thread float2& matrix,
     float scale) {
-    matrix.thread_elements()[0] *= scale;
-    matrix.thread_elements()[1] *= scale;
+    matrix[0] *= scale;
+    matrix[1] *= scale;
 }
 
 template <typename T>
 inline void dense_matrix_multiply_accumulate(
-    thread simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& accumulator,
-    thread simdgroup_matrix<T, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& left,
-    thread simdgroup_matrix<T, DENSE_MMA_SIZE, DENSE_MMA_SIZE>& right) {
+    thread float2& accumulator,
+    thread vec<T, 2>& left,
+    thread vec<T, 2>& right) {
     simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE> result;
-    simdgroup_multiply_accumulate(result, left, right, accumulator);
-    accumulator = result;
+    simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE> previous;
+    simdgroup_matrix<T, DENSE_MMA_SIZE, DENSE_MMA_SIZE> left_matrix;
+    simdgroup_matrix<T, DENSE_MMA_SIZE, DENSE_MMA_SIZE> right_matrix;
+    previous.thread_elements()[0] = accumulator[0];
+    previous.thread_elements()[1] = accumulator[1];
+    left_matrix.thread_elements()[0] = left[0];
+    left_matrix.thread_elements()[1] = left[1];
+    right_matrix.thread_elements()[0] = right[0];
+    right_matrix.thread_elements()[1] = right[1];
+    simdgroup_multiply_accumulate(result, left_matrix, right_matrix, previous);
+    accumulator[0] = result.thread_elements()[0];
+    accumulator[1] = result.thread_elements()[1];
+}
+
+template <typename T>
+METAL_FUNC vec<T, 2> dense_load_fragment(
+    threadgroup const T* source, int row_stride, ushort lane) {
+    const ushort2 coordinate = tiny_llm::course_matrix_coordinate(lane);
+    return vec<T, 2>(source[coordinate.y * row_stride + coordinate.x],
+                     source[coordinate.y * row_stride + coordinate.x + 1]);
 }
 
 }  // namespace
@@ -341,6 +367,490 @@ template <typename T>
     }
 }
 
+// Single-token BF16 storage, FP32 online accumulation; no score tensor.
+[[kernel, max_total_threads_per_threadgroup(256)]] void week2_decode_online_bf16_d128(
+    device const bfloat* q [[buffer(0)]],
+    device const bfloat* k [[buffer(1)]],
+    device const bfloat* v [[buffer(2)]],
+    device const float* mask [[buffer(3)]],
+    device bfloat* out [[buffer(4)]],
+    constant const int& q_rows [[buffer(5)]],
+    constant const int& length [[buffer(6)]],
+    constant const int& context [[buffer(7)]],
+    constant const int& runtime_dim [[buffer(8)]],
+    constant const int& num_heads [[buffer(9)]],
+    constant const int& num_kv_heads [[buffer(10)]],
+    constant const float& scale [[buffer(11)]],
+    constant const int& is_causal [[buffer(12)]],
+    constant const int& has_mask [[buffer(13)]],
+    constant const size_t& key_row_stride [[buffer(14)]],
+    constant const size_t& key_sequence_stride [[buffer(15)]],
+    constant const size_t& key_dimension_stride [[buffer(16)]],
+    constant const size_t& value_row_stride [[buffer(17)]],
+    constant const size_t& value_sequence_stride [[buffer(18)]],
+    constant const size_t& value_dimension_stride [[buffer(19)]],
+    threadgroup float* scratch [[threadgroup(0)]],
+    uint query_index [[threadgroup_position_in_grid]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    if (query_index >= q_rows * length) return;
+    const int query_row = query_index / length;
+    const int query_position = query_index % length;
+    const int batch = query_row / num_heads;
+    const int query_head = query_row % num_heads;
+    const int kv_head = query_head / (num_heads / num_kv_heads);
+    const int kv_row = batch * num_kv_heads + kv_head;
+
+    // This entry is admitted only for D128. Keep four adjacent values per
+    // lane, matching the pinned MLX D128 vector ownership; preserve KV strides.
+    constexpr int dim = 128;
+    constexpr int max_values_per_lane = 4;
+    constexpr int simdgroups_per_query = 8;
+    float accumulator[max_values_per_lane] = {0.0f};
+    float query_values[max_values_per_lane] = {0.0f};
+    float max_score = -INFINITY;
+    float sum = 0.0f;
+    constexpr int values_per_lane = 4;
+
+    for (int item = 0; item < values_per_lane; ++item) {
+        const int d = lane * values_per_lane + item;
+        if (d < dim && item < max_values_per_lane) {
+            query_values[item] =
+                static_cast<float>(q[query_index * dim + d]) * scale;
+        }
+    }
+
+    for (int position = simdgroup; position < context; position += simdgroups_per_query) {
+        if (is_causal && position > context - length + query_position) continue;
+        float partial = 0.0f;
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane * values_per_lane + item;
+            if (d < dim && item < max_values_per_lane) {
+                partial += query_values[item] *
+                           static_cast<float>(k[kv_row * key_row_stride + position * key_sequence_stride + d * key_dimension_stride]);
+            }
+        }
+        float score = simd_sum(partial);
+        if (has_mask) score += mask[query_index * context + position];
+        const float new_max = max(max_score, score);
+        const float old_factor = max_score == -INFINITY ? 0.0f : fast::exp(max_score - new_max);
+        const float score_factor = score == -INFINITY ? 0.0f : fast::exp(score - new_max);
+        sum = sum * old_factor + score_factor;
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane * values_per_lane + item;
+            if (d < dim && item < max_values_per_lane) {
+                accumulator[item] = accumulator[item] * old_factor +
+                                    score_factor * static_cast<float>(v[kv_row * value_row_stride + position * value_sequence_stride + d * value_dimension_stride]);
+            }
+        }
+        max_score = new_max;
+    }
+
+    threadgroup float* partial_accumulators = scratch;
+    threadgroup float* partial_maxima =
+        partial_accumulators + simdgroups_per_query * dim;
+    threadgroup float* partial_sums = partial_maxima + simdgroups_per_query;
+    threadgroup float* partial_factors = partial_sums + simdgroups_per_query;
+    if (lane == 0) {
+        partial_maxima[simdgroup] = max_score;
+        partial_sums[simdgroup] = sum;
+    }
+    for (int item = 0; item < values_per_lane; ++item) {
+        const int d = lane * values_per_lane + item;
+        if (d < dim && item < max_values_per_lane) {
+            partial_accumulators[simdgroup * dim + d] = accumulator[item];
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float global_max = -INFINITY;
+    if (simdgroup == 0) {
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            global_max = max(global_max, partial_maxima[group]);
+        }
+        if (lane < simdgroups_per_query) {
+            partial_factors[lane] =
+                partial_sums[lane] == 0.0f ? 0.0f : fast::exp(partial_maxima[lane] - global_max);
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (thread_index == 0) {
+        float global_sum = 0.0f;
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            global_sum += partial_sums[group] * partial_factors[group];
+        }
+        partial_sums[0] = global_sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (thread_index < dim) {
+        float value_sum = 0.0f;
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            value_sum += partial_accumulators[group * dim + thread_index] *
+                         partial_factors[group];
+        }
+        out[query_index * dim + thread_index] =
+            bfloat(partial_sums[0] == 0.0f ? 0.0f : value_sum / partial_sums[0]);
+    }
+}
+
+// Partition long prefixes into 256-key blocks; retain FP32 local softmax state.
+[[kernel, max_total_threads_per_threadgroup(256)]] void week2_decode_split_bf16_d128(
+    device const bfloat* q [[buffer(0)]],
+    device const bfloat* k [[buffer(1)]],
+    device const bfloat* v [[buffer(2)]],
+    device const float* mask [[buffer(3)]],
+    device float* partials [[buffer(4)]],
+    constant const int& q_rows [[buffer(5)]],
+    constant const int& length [[buffer(6)]],
+    constant const int& context [[buffer(7)]],
+    constant const int& runtime_dim [[buffer(8)]],
+    constant const int& num_heads [[buffer(9)]],
+    constant const int& num_kv_heads [[buffer(10)]],
+    constant const float& scale [[buffer(11)]],
+    constant const int& is_causal [[buffer(12)]],
+    constant const int& has_mask [[buffer(13)]],
+    constant const size_t& key_row_stride [[buffer(14)]],
+    constant const size_t& key_sequence_stride [[buffer(15)]],
+    constant const size_t& key_dimension_stride [[buffer(16)]],
+    constant const size_t& value_row_stride [[buffer(17)]],
+    constant const size_t& value_sequence_stride [[buffer(18)]],
+    constant const size_t& value_dimension_stride [[buffer(19)]],
+    constant const int& partitions [[buffer(20)]],
+    threadgroup float* scratch [[threadgroup(0)]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    const uint query_index = group.x;
+    const uint partition = group.y;
+    if (query_index >= q_rows * length || partition >= partitions) return;
+    const int query_row = query_index / length;
+    const int query_position = query_index % length;
+    const int batch = query_row / num_heads;
+    const int query_head = query_row % num_heads;
+    const int kv_head = query_head / (num_heads / num_kv_heads);
+    const int kv_row = batch * num_kv_heads + kv_head;
+    const size_t key_dim_stride = decode_split_unit_dimension ? size_t(1) : key_dimension_stride;
+    const size_t value_dim_stride = decode_split_unit_dimension ? size_t(1) : value_dimension_stride;
+    const size_t key_seq_stride = decode_split_sequence128 ? size_t(128) : key_sequence_stride;
+    const size_t value_seq_stride = decode_split_sequence128 ? size_t(128) : value_sequence_stride;
+
+    // This entry is admitted only for D128. Keep four adjacent values per
+    // lane, matching the pinned MLX D128 vector ownership; preserve KV strides.
+    constexpr int dim = 128;
+    constexpr int max_values_per_lane = 4;
+    constexpr int simdgroups_per_query = 8;
+    float accumulator[max_values_per_lane] = {0.0f};
+    float query_values[max_values_per_lane] = {0.0f};
+    float max_score = -INFINITY;
+    float sum = 0.0f;
+    constexpr int values_per_lane = 4;
+
+    for (int item = 0; item < values_per_lane; ++item) {
+        const int d = lane * values_per_lane + item;
+        if (d < dim && item < max_values_per_lane) {
+            query_values[item] =
+                static_cast<float>(q[query_index * dim + d]) * scale;
+        }
+    }
+
+    for (int position = partition * 256 + simdgroup;
+         position < min(context, int(partition + 1) * 256); position += simdgroups_per_query) {
+        if (decode_split_is_causal && position > context - length + query_position) continue;
+        float partial = 0.0f;
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane * values_per_lane + item;
+            if (d < dim && item < max_values_per_lane) {
+                partial += query_values[item] *
+                           static_cast<float>(k[kv_row * key_row_stride + position * key_seq_stride + d * key_dim_stride]);
+            }
+        }
+        float score = simd_sum(partial);
+        if (decode_split_has_mask) score += mask[query_index * context + position];
+        const float new_max = max(max_score, score);
+        const float old_factor = max_score == -INFINITY ? 0.0f : fast::exp(max_score - new_max);
+        const float score_factor = score == -INFINITY ? 0.0f : fast::exp(score - new_max);
+        sum = sum * old_factor + score_factor;
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane * values_per_lane + item;
+            if (d < dim && item < max_values_per_lane) {
+                accumulator[item] = accumulator[item] * old_factor +
+                                    score_factor * static_cast<float>(v[kv_row * value_row_stride + position * value_seq_stride + d * value_dim_stride]);
+            }
+        }
+        max_score = new_max;
+    }
+
+    threadgroup float* partial_accumulators = scratch;
+    threadgroup float* partial_maxima =
+        partial_accumulators + simdgroups_per_query * dim;
+    threadgroup float* partial_sums = partial_maxima + simdgroups_per_query;
+    threadgroup float* partial_factors = partial_sums + simdgroups_per_query;
+    if (lane == 0) {
+        partial_maxima[simdgroup] = max_score;
+        partial_sums[simdgroup] = sum;
+    }
+    for (int item = 0; item < values_per_lane; ++item) {
+        const int d = lane * values_per_lane + item;
+        if (d < dim && item < max_values_per_lane) {
+            partial_accumulators[simdgroup * dim + d] = accumulator[item];
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float global_max = -INFINITY;
+    if (simdgroup == 0) {
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            global_max = max(global_max, partial_maxima[group]);
+        }
+        if (lane < simdgroups_per_query) {
+            partial_factors[lane] =
+                partial_sums[lane] == 0.0f ? 0.0f : fast::exp(partial_maxima[lane] - global_max);
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (thread_index == 0) {
+        float global_sum = 0.0f;
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            global_sum += partial_sums[group] * partial_factors[group];
+        }
+        partial_sums[0] = global_sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (thread_index < dim) {
+        float value_sum = 0.0f;
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            value_sum += partial_accumulators[group * dim + thread_index] *
+                         partial_factors[group];
+        }
+        partials[(query_index * partitions + partition) * (dim + 2) + thread_index] = value_sum;
+    }
+    if (thread_index == 0) {
+        float partition_max = -INFINITY;
+        for (int group = 0; group < simdgroups_per_query; ++group) {
+            partition_max = max(partition_max, partial_maxima[group]);
+        }
+        const int state = (query_index * partitions + partition) * (dim + 2);
+        partials[state + dim] = partition_max;
+        partials[state + dim + 1] = partial_sums[0];
+    }
+
+}
+
+// Four adjacent query heads share one KV row; each retains its original state.
+[[kernel, max_total_threads_per_threadgroup(256)]] void week2_decode_split_gqa4_bf16_d128(
+    device const bfloat* q [[buffer(0)]],
+    device const bfloat* k [[buffer(1)]],
+    device const bfloat* v [[buffer(2)]],
+    device const float* mask [[buffer(3)]],
+    device float* partials [[buffer(4)]],
+    constant const int& q_rows [[buffer(5)]],
+    constant const int& length [[buffer(6)]],
+    constant const int& context [[buffer(7)]],
+    constant const int& runtime_dim [[buffer(8)]],
+    constant const int& num_heads [[buffer(9)]],
+    constant const int& num_kv_heads [[buffer(10)]],
+    constant const float& scale [[buffer(11)]],
+    constant const int& is_causal [[buffer(12)]],
+    constant const int& has_mask [[buffer(13)]],
+    constant const size_t& key_row_stride [[buffer(14)]],
+    constant const size_t& key_sequence_stride [[buffer(15)]],
+    constant const size_t& key_dimension_stride [[buffer(16)]],
+    constant const size_t& value_row_stride [[buffer(17)]],
+    constant const size_t& value_sequence_stride [[buffer(18)]],
+    constant const size_t& value_dimension_stride [[buffer(19)]],
+    constant const int& partitions [[buffer(20)]],
+    threadgroup float* scratch [[threadgroup(0)]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint thread_index [[thread_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    constexpr int heads_per_group = 4;
+    constexpr int dim = 128;
+    constexpr int values_per_lane = 4;
+    constexpr int simdgroups_per_query = 8;
+    constexpr int head_scratch = simdgroups_per_query * (dim + 3);
+    const uint query_base = group.x * heads_per_group;
+    const uint partition = group.y;
+    if (length != 1 || runtime_dim != dim || num_heads != heads_per_group * num_kv_heads ||
+        query_base + heads_per_group > q_rows || partition >= partitions) return;
+    const uint kv_row = group.x;
+    const size_t key_dim_stride = decode_split_unit_dimension ? size_t(1) : key_dimension_stride;
+    const size_t value_dim_stride = decode_split_unit_dimension ? size_t(1) : value_dimension_stride;
+    const size_t key_seq_stride = decode_split_sequence128 ? size_t(128) : key_sequence_stride;
+    const size_t value_seq_stride = decode_split_sequence128 ? size_t(128) : value_sequence_stride;
+    float accumulator[heads_per_group][values_per_lane] = {};
+    float query_values[heads_per_group][values_per_lane] = {};
+    float max_score[heads_per_group] = {-INFINITY, -INFINITY, -INFINITY, -INFINITY};
+    float sums[heads_per_group] = {};
+
+    #pragma clang loop unroll(full)
+    for (int head = 0; head < heads_per_group; ++head) {
+        #pragma clang loop unroll(full)
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane * values_per_lane + item;
+            query_values[head][item] =
+                static_cast<float>(q[(query_base + head) * dim + d]) * scale;
+        }
+    }
+
+    for (int position = partition * 256 + simdgroup;
+         position < min(context, int(partition + 1) * 256);
+         position += simdgroups_per_query) {
+        if (decode_split_is_causal && position > context - length) continue;
+        float key_values[values_per_lane];
+        float value_values[values_per_lane];
+        #pragma clang loop unroll(full)
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane * values_per_lane + item;
+            key_values[item] = static_cast<float>(
+                k[kv_row * key_row_stride + position * key_seq_stride + d * key_dim_stride]);
+            value_values[item] = static_cast<float>(
+                v[kv_row * value_row_stride + position * value_seq_stride + d * value_dim_stride]);
+        }
+        #pragma clang loop unroll(full)
+        for (int head = 0; head < heads_per_group; ++head) {
+            float partial = 0.0f;
+            #pragma clang loop unroll(full)
+            for (int item = 0; item < values_per_lane; ++item) {
+                partial += query_values[head][item] * key_values[item];
+            }
+            float score = simd_sum(partial);
+            if (decode_split_has_mask) score += mask[(query_base + head) * context + position];
+            const float new_max = max(max_score[head], score);
+            const float old_factor = max_score[head] == -INFINITY
+                ? 0.0f : fast::exp(max_score[head] - new_max);
+            const float score_factor = score == -INFINITY
+                ? 0.0f : fast::exp(score - new_max);
+            sums[head] = sums[head] * old_factor + score_factor;
+            #pragma clang loop unroll(full)
+            for (int item = 0; item < values_per_lane; ++item) {
+                accumulator[head][item] = accumulator[head][item] * old_factor +
+                    score_factor * value_values[item];
+            }
+            max_score[head] = new_max;
+        }
+    }
+
+    #pragma clang loop unroll(full)
+    for (int head = 0; head < heads_per_group; ++head) {
+        threadgroup float* partial_accumulators = scratch + head * head_scratch;
+        threadgroup float* partial_maxima = partial_accumulators + simdgroups_per_query * dim;
+        threadgroup float* partial_sums = partial_maxima + simdgroups_per_query;
+        if (lane == 0) {
+            partial_maxima[simdgroup] = max_score[head];
+            partial_sums[simdgroup] = sums[head];
+        }
+        #pragma clang loop unroll(full)
+        for (int item = 0; item < values_per_lane; ++item) {
+            const int d = lane * values_per_lane + item;
+            partial_accumulators[simdgroup * dim + d] = accumulator[head][item];
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (simdgroup == 0) {
+        #pragma clang loop unroll(full)
+        for (int head = 0; head < heads_per_group; ++head) {
+            threadgroup float* partial_maxima =
+                scratch + head * head_scratch + simdgroups_per_query * dim;
+            threadgroup float* partial_sums = partial_maxima + simdgroups_per_query;
+            threadgroup float* partial_factors = partial_sums + simdgroups_per_query;
+            float global_max = -INFINITY;
+            for (int group = 0; group < simdgroups_per_query; ++group) {
+                global_max = max(global_max, partial_maxima[group]);
+            }
+            if (lane < simdgroups_per_query) {
+                partial_factors[lane] = partial_sums[lane] == 0.0f
+                    ? 0.0f : fast::exp(partial_maxima[lane] - global_max);
+            }
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (thread_index == 0) {
+        #pragma clang loop unroll(full)
+        for (int head = 0; head < heads_per_group; ++head) {
+            threadgroup float* partial_sums = scratch + head * head_scratch +
+                simdgroups_per_query * dim + simdgroups_per_query;
+            threadgroup float* partial_factors = partial_sums + simdgroups_per_query;
+            float global_sum = 0.0f;
+            for (int group = 0; group < simdgroups_per_query; ++group) {
+                global_sum += partial_sums[group] * partial_factors[group];
+            }
+            partial_sums[0] = global_sum;
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    #pragma clang loop unroll(full)
+    for (int head = 0; head < heads_per_group; ++head) {
+        threadgroup float* partial_accumulators = scratch + head * head_scratch;
+        threadgroup float* partial_maxima = partial_accumulators + simdgroups_per_query * dim;
+        threadgroup float* partial_sums = partial_maxima + simdgroups_per_query;
+        threadgroup float* partial_factors = partial_sums + simdgroups_per_query;
+        const int state = ((query_base + head) * partitions + partition) * (dim + 2);
+        if (thread_index < dim) {
+            float value_sum = 0.0f;
+            for (int group = 0; group < simdgroups_per_query; ++group) {
+                value_sum += partial_accumulators[group * dim + thread_index] *
+                    partial_factors[group];
+            }
+            partials[state + thread_index] = value_sum;
+        }
+        if (thread_index == 0) {
+            float partition_max = -INFINITY;
+            for (int group = 0; group < simdgroups_per_query; ++group) {
+                partition_max = max(partition_max, partial_maxima[group]);
+            }
+            partials[state + dim] = partition_max;
+            partials[state + dim + 1] = partial_sums[0];
+        }
+    }
+}
+
+// Merge unnormalized partition states with a common maximum; masked-empty
+// partitions contribute exactly zero, including an entirely masked query.
+[[kernel, max_total_threads_per_threadgroup(128)]] void week2_decode_split_merge_bf16_d128(
+    device const float* partials [[buffer(0)]],
+    device bfloat* out [[buffer(1)]],
+    constant const int& partitions [[buffer(2)]],
+    threadgroup float* scratch [[threadgroup(0)]],
+    uint query [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]]) {
+    constexpr int dim = 128;
+    device const float* states = partials + query * partitions * (dim + 2);
+    // Dynamic partitions may exceed the 128 merging threads on long prefixes.
+    // Each thread handles a strided subset; scratch has partitions + 2 floats.
+    if (tid == 0) {
+        float maximum = -INFINITY;
+        for (int part = 0; part < partitions; ++part) {
+            maximum = max(maximum, states[part * (dim + 2) + dim]);
+        }
+        scratch[partitions] = maximum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (int part = tid; part < partitions; part += 128) {
+        const float sum = states[part * (dim + 2) + dim + 1];
+        scratch[part] = sum == 0.0f ? 0.0f :
+            fast::exp(states[part * (dim + 2) + dim] - scratch[partitions]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (tid == 0) {
+        float denominator = 0.0f;
+        for (int part = 0; part < partitions; ++part) {
+            denominator += states[part * (dim + 2) + dim + 1] * scratch[part];
+        }
+        scratch[partitions + 1] = denominator;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float numerator = 0.0f;
+    for (int part = 0; part < partitions; ++part) {
+        numerator += states[part * (dim + 2) + tid] * scratch[part];
+    }
+    const float denominator = scratch[partitions + 1];
+    out[query * dim + tid] = bfloat(denominator == 0.0f ? 0.0f : numerator / denominator);
+}
+
 [[kernel, max_total_threads_per_threadgroup(128)]] void week2_dense_prefill_mma_bf16_d128(
     device const bfloat* q [[buffer(0)]],
     device const bfloat* k [[buffer(1)]],
@@ -388,8 +898,8 @@ template <typename T>
     const ushort2 coordinate = tiny_llm::course_matrix_coordinate(lane);
     const int query_row_in_block = simd_gid * DENSE_MMA_SIZE + coordinate.y;
     const int query_position = query_block * BQ + query_row_in_block;
-    const bool query_valid = query_position < length;
-    const int live_queries = clamp(length - query_block * BQ, 0, BQ);
+    const bool query_valid = prefill_full_tiles || query_position < length;
+    const int live_queries = prefill_full_tiles ? BQ : clamp(length - query_block * BQ, 0, BQ);
     const float scale_log2 = scale * LOG2_E;
 
     threadgroup bfloat q_tile[BQ * LDQ];
@@ -403,16 +913,16 @@ template <typename T>
         HEAD_DIM);
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE> output[OUTPUT_FRAGMENTS];
+    float2 output[OUTPUT_FRAGMENTS];
     for (int fragment_idx = 0; fragment_idx < OUTPUT_FRAGMENTS; ++fragment_idx) {
         dense_clear_matrix(output[fragment_idx]);
     }
     float running_max = -INFINITY;
     float running_sum = 0.0f;
 
-    const int total_tiles = (context + BK - 1) / BK;
+    const int total_tiles = prefill_full_tiles ? context / BK : (context + BK - 1) / BK;
     int tile_limit = total_tiles;
-    if (is_causal) {
+    if (prefill_is_causal) {
         const int last_query = min((query_block + 1) * BQ, length) - 1;
         const int last_key = last_query + (context - length);
         tile_limit = clamp((last_key + 1 + BK - 1) / BK, 0, total_tiles);
@@ -420,7 +930,7 @@ template <typename T>
 
     for (int tile = 0; tile < tile_limit; ++tile) {
         const int tile_start = tile * BK;
-        const int live_keys = clamp(context - tile_start, 0, BK);
+        const int live_keys = prefill_full_tiles ? BK : clamp(context - tile_start, 0, BK);
         KBlockLoader::load(
             k + (kv_row * context + tile_start) * HEAD_DIM,
             HEAD_DIM,
@@ -430,22 +940,18 @@ template <typename T>
             HEAD_DIM);
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        simdgroup_matrix<float, DENSE_MMA_SIZE, DENSE_MMA_SIZE> scores[SCORE_FRAGMENTS];
+        float2 scores[SCORE_FRAGMENTS];
         for (int fragment_idx = 0; fragment_idx < SCORE_FRAGMENTS; ++fragment_idx) {
             dense_clear_matrix(scores[fragment_idx]);
         }
         for (int dim = 0; dim < HEAD_DIM; dim += DENSE_MMA_SIZE) {
-            simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> q_fragment;
-            tiny_llm::course_load_matrix(
-                q_fragment,
-                q_tile + simd_gid * DENSE_MMA_SIZE * LDQ + dim,
+            vec<bfloat, 2> q_fragment;
+            q_fragment = dense_load_fragment(q_tile + simd_gid * DENSE_MMA_SIZE * LDQ + dim,
                 LDQ,
                 lane);
             for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; ++key_fragment) {
-                simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> k_fragment;
-                tiny_llm::course_load_matrix(
-                    k_fragment,
-                    kv_tile + dim * LDK + key_fragment * DENSE_MMA_SIZE,
+                vec<bfloat, 2> k_fragment;
+                k_fragment = dense_load_fragment(kv_tile + dim * LDK + key_fragment * DENSE_MMA_SIZE,
                     LDK,
                     lane);
                 dense_matrix_multiply_accumulate(scores[key_fragment], q_fragment, k_fragment);
@@ -453,16 +959,16 @@ template <typename T>
         }
 
         for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; ++key_fragment) {
-            thread auto& values = scores[key_fragment].thread_elements();
+            thread auto& values = scores[key_fragment];
             for (int element = 0; element < 2; ++element) {
                 const int tile_key = key_fragment * DENSE_MMA_SIZE + coordinate.x + element;
                 const int key_position = tile_start + tile_key;
-                bool valid = query_valid && key_position < context;
-                if (is_causal) {
+                bool valid = query_valid && (prefill_full_tiles || key_position < context);
+                if (prefill_is_causal) {
                     valid = valid && key_position <= query_position + (context - length);
                 }
                 float score = valid ? values[element] * scale_log2 : -INFINITY;
-                if (valid && has_mask) {
+                if (valid && prefill_has_mask) {
                     score += mask[(query_row_group * length + query_position) * context + key_position] * LOG2_E;
                 }
                 values[element] = score;
@@ -476,7 +982,7 @@ template <typename T>
             ? 0.0f
             : fast::exp2(running_max - new_max);
         for (int fragment_idx = 0; fragment_idx < SCORE_FRAGMENTS; ++fragment_idx) {
-            thread auto& values = scores[fragment_idx].thread_elements();
+            thread auto& values = scores[fragment_idx];
             for (int element = 0; element < 2; ++element) {
                 values[element] = values[element] == -INFINITY || !finite_row
                     ? 0.0f
@@ -490,11 +996,11 @@ template <typename T>
             dense_scale_matrix_rows(output[fragment_idx], previous_scale);
         }
 
-        simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> probabilities[SCORE_FRAGMENTS];
+        vec<bfloat, 2> probabilities[SCORE_FRAGMENTS];
         for (int fragment_idx = 0; fragment_idx < SCORE_FRAGMENTS; ++fragment_idx) {
-            const auto values = scores[fragment_idx].thread_elements();
-            probabilities[fragment_idx].thread_elements()[0] = bfloat(values[0]);
-            probabilities[fragment_idx].thread_elements()[1] = bfloat(values[1]);
+            const auto values = scores[fragment_idx];
+            probabilities[fragment_idx][0] = bfloat(values[0]);
+            probabilities[fragment_idx][1] = bfloat(values[1]);
         }
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -508,10 +1014,8 @@ template <typename T>
         threadgroup_barrier(mem_flags::mem_threadgroup);
         for (int output_fragment = 0; output_fragment < OUTPUT_FRAGMENTS; ++output_fragment) {
             for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; ++key_fragment) {
-                simdgroup_matrix<bfloat, DENSE_MMA_SIZE, DENSE_MMA_SIZE> value_fragment;
-                tiny_llm::course_load_matrix(
-                    value_fragment,
-                    kv_tile + key_fragment * DENSE_MMA_SIZE * LDV + output_fragment * DENSE_MMA_SIZE,
+                vec<bfloat, 2> value_fragment;
+                value_fragment = dense_load_fragment(kv_tile + key_fragment * DENSE_MMA_SIZE * LDV + output_fragment * DENSE_MMA_SIZE,
                     LDV,
                     lane);
                 dense_matrix_multiply_accumulate(
@@ -523,7 +1027,7 @@ template <typename T>
 
     if (query_valid) {
         for (int fragment_idx = 0; fragment_idx < OUTPUT_FRAGMENTS; ++fragment_idx) {
-            const auto values = output[fragment_idx].thread_elements();
+            const auto values = output[fragment_idx];
             for (int element = 0; element < 2; ++element) {
                 const int dim = fragment_idx * DENSE_MMA_SIZE + coordinate.x + element;
                 out[(query_row_group * length + query_position) * HEAD_DIM + dim] = running_sum == 0.0f
@@ -549,3 +1053,64 @@ instantiate_kernel("week2_swiglu_bf16", week2_swiglu, bfloat16_t);
 instantiate_kernel("week2_decode_attention_f32", week2_decode_attention, float);
 instantiate_kernel("week2_decode_attention_f16", week2_decode_attention, half);
 instantiate_kernel("week2_decode_attention_bf16", week2_decode_attention, bfloat16_t);
+
+// Research-only: full BF16 decode, four independent D128 heads per group.
+[[kernel, max_total_threads_per_threadgroup(128)]]
+void week2_qk_norm_rope4_bf16(
+    device const bfloat16_t* x [[buffer(0)]],
+    device const bfloat16_t* weight [[buffer(1)]],
+    device const int32_t* offsets [[buffer(2)]],
+    device bfloat16_t* out [[buffer(3)]],
+    constant const float& eps [[buffer(4)]],
+    constant const float& base [[buffer(5)]],
+    constant const int& dim [[buffer(6)]],
+    uint block [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    threadgroup float coefficients_c[64];
+    threadgroup float coefficients_s[64];
+    if (tid < 64) {
+        const int pair = tid;
+        const int l = 0;
+        const int half_dim = dim / 2;
+        const float frequency_power = -static_cast<float>(pair) / half_dim;
+        const float angle = static_cast<float>(offsets[0] + l) *
+            fast::exp2(frequency_power * log2(base));
+        coefficients_c[pair] = fast::cos(angle);
+        coefficients_s[pair] = fast::sin(angle);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    const uint head = block * 4 + simdgroup;
+    float values[4];
+    float sum = 0.0f;
+    for (int slot = 0; slot < 4; ++slot) {
+        const uint col = lane * 4 + slot;
+        const float value = static_cast<float>(x[head * 128 + col]);
+        values[slot] = value;
+        sum += value * value;
+    }
+    sum = simd_sum(sum);
+    float threadgroup_sum = lane == 0 ? sum : 0.0f;
+    threadgroup_sum = simd_sum(threadgroup_sum);
+    const float inv = rsqrt(threadgroup_sum / static_cast<float>(dim) + eps);
+    float rounded[4];
+    float partners[4];
+    for (int slot = 0; slot < 4; ++slot) {
+        const uint col = lane * 4 + slot;
+        rounded[slot] = static_cast<float>(static_cast<bfloat16_t>(
+            values[slot] * inv * static_cast<float>(weight[col])));
+        partners[slot] = simd_shuffle_xor(rounded[slot], ushort(16));
+    }
+    if (lane < 16) {
+        for (int slot = 0; slot < 4; ++slot) {
+            const uint pair = lane * 4 + slot;
+            const float c = coefficients_c[pair];
+            const float s = coefficients_s[pair];
+            const float real = rounded[slot];
+            const float imag = partners[slot];
+            out[head * 128 + pair] = static_cast<bfloat16_t>(real * c - imag * s);
+            out[head * 128 + pair + 64] = static_cast<bfloat16_t>(imag * c + real * s);
+        }
+    }
+}
