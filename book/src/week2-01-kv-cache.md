@@ -527,8 +527,9 @@ the same.
 ## Find Where the Time Goes
 
 A benchmark tells you how fast the whole model is. To decide what to change
-next, you need to know which part is slow. Profile one cached decode step with
-a 128-token context:
+next, you want to know which kind of work is expensive. The supplied profiler
+answers that by **replaying** one step's work through the course's public
+operators, one group at a time:
 
 ```bash
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
@@ -536,23 +537,63 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --json-output week2-day1-attribution.json
 ```
 
-The output groups the time into categories such as projections, attention,
-and normalization, and records the checkpoint, phase, token count, software,
-and machine. It does not depend on private function names or Metal symbols.
-On one earlier M4 Pro run of the then-current `kv-cache` checkpoint, dense
-projections took 81.5% of cached-decode time. Your machine and model may point
-somewhere else.
+Here is what that case means. `capacity-cache:decode:128` replays one decode
+step that ends with **S = 128** tokens in the cache: the first 127 tokens are
+put in the cache before timing starts, and the timed step adds one more at
+position 127. The profiler builds this from the loaded Qwen weights and your
+solution's public functions, the same ones Week 1 and today's tasks give you.
+It never builds or looks inside your `Qwen3ModelWeek2`, so it does not care
+how you laid out your model, and you do not write anything extra for it. It
+does need those functions to work, so run it after today's tests pass.
+
+It times four groups, each synchronized with the GPU, and reports the median
+of each:
+
+- **projections**: every linear layer of every block, plus the output head;
+- **attention**: the attention operation in every layer;
+- **normalization, position, and activation**: RMSNorm, RoPE, SwiGLU, the
+  embedding lookup, and the residual additions. The RoPE position offsets are
+  built once per sample, inside this group's timing, and shared by every
+  layer's Q and K calls;
+- **KV cache update**: one append per layer through your own
+  `TinyKvFullCache.update_and_fetch`, with the cache your checkpoint uses.
+
+A few options shape the replay, and the output records all of them:
+
+- `--cache-capacity C` sets the bound for checkpoints that use a bounded
+  cache. It defaults to `C = S`, just enough for this one replayed step, which
+  is smaller than the prompt-plus-output bound a real request would use.
+  `C` must be at least `S`. `kv-cache` always uses an unbounded cache.
+- `--prefill-logits last|all` decides how many rows go through the final norm
+  and output head in a prefill case; it defaults to `last`. A decode case
+  always uses one row.
+
+The output's `replay_total_us` is the sum of the four group medians, and each
+category's share is a fraction of that sum. It is not the time of a real
+decode step: the groups run separately on prepared inputs, without the rest
+of the model around them. The `cache` record also shows the cache's offsets,
+capacity, whether the update started from an empty cache
+(`first_update_from_empty`, which describes logical state, not memory
+allocation), and the change in the counters from Task 1. Those counters are
+your code's bookkeeping, as before, not a measure of what the GPU copied.
+
+The replay does not check that your model uses these operators, and it is not
+a whole-request timing. Your tests and the benchmark above still answer those
+questions. An earlier version of this profiler, on an M4 Pro with older
+course code, put 81.5% of a `kv-cache` decode step in dense projections. Its
+output is not comparable with this one's, so compare only runs you made with
+the current tool and the same case, capacity, and logit setting.
 
 Turn what you see into a plan you can test, in three sentences:
 
-1. "Dense projections take most of the time in this cached-decode workload."
+1. "Dense projections take most of the time in this replay."
 2. "Keeping the weights packed in 4 bits and changing only the projection
-   path should shrink that category and speed up decode on the same
-   workload."
-3. "If projection time does not drop, or whole-model decode gets slower on the
-   same workload, I will drop or revise this idea."
+   path should shrink that category in the replay and speed up decode in the
+   whole-request benchmark."
+3. "If replayed projection time does not drop, or whole-model decode gets
+   slower on the same workload, I will drop or revise this idea."
 
-Use whichever category your profile shows. The benchmark, the profile, and
+Use whichever category your replay shows. The benchmark, the replay, and
 this plan finish Day 1. The
 [earlier macOS 27 capture lab](./week2-advanced-profiling.md) is optional
 history: no trace, `gpudebug` output, screenshot, or device-specific counter gates your move to Day 2.
