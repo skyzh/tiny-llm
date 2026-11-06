@@ -276,7 +276,8 @@ improvement. With
 above; report those rows separately and do not credit the difference to tiled
 attention.
 
-To see what dominates prefill now:
+To see which kind of work dominates prefill now, replay the same step for the
+three checkpoints:
 
 ```bash
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
@@ -285,10 +286,29 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --json-output week2-day5-attribution.json
 ```
 
-The profile replays groups of kernels on synthetic token IDs; it does not
-replace the whole-request comparison. Note whether the tiled path ran and what
-takes the most time now. An operator result, or an older 4B number, cannot
-show a speedup for your 0.6B checkout. The
+Each case replays one 128-token prefill through the public operators that
+checkpoint selects, with the same cache bound and logit setting (see
+[Day 1](./week2-01-kv-cache.md) for what the replay does and does not
+include). Your tiled attention should show up in the attention group of the
+`tiled-prefill` case. For your solution, `selected` selects the same
+operators as `tiled-prefill`, so its replay should look the same; a gap
+between them is run-to-run variation, not a second improvement.
+
+The replay times operators on prepared inputs. It does not show that your
+model sends 128-token prompts to the tiled kernel; check that by reading the
+attention dispatch you wrote in Task 2 and Task 3. It also does not replace
+the whole-request comparison above.
+
+If you profile `--solution tiny_llm_ref` with `selected`, the profiler
+reports that case as unsupported (`coverage.complete` is false, with a
+reason) and gives no total or shares. That is because the reference adds
+scheduling to `selected` that a public-operator replay cannot represent. It
+is a missing measurement, not a zero; use `tiled-prefill` if you want a
+reference replay to compare with.
+
+An operator result, or an older 4B number, cannot show a speedup for your
+0.6B checkout. Results from earlier versions of the profiler are not
+comparable with this replay. The
 [performance appendix](./appendix-performance.md) keeps earlier measurements,
 including rows that could not be run, as history. A 4B comparison is
 optional: cache the model and rerun every row at 4B.
