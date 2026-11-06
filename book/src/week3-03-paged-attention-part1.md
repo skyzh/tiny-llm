@@ -417,29 +417,55 @@ request reuses them without growing the pool.
 src/tiny_llm/qwen3_week3.py
 ```
 
-Update `Qwen3ModelWeek3.__init__`, `Qwen3ModelWeek3.create_kv_cache`, and
-`Qwen3MultiHeadAttention.__call__`:
+So far your server has run the Week 2 model: Day 1's batch-ready factory
+builds it, and Day 2 still uses the `week2` loader. `qwen3_week3.py` is a
+fresh shell, and most of its methods are empty. Fill it in two steps.
 
-- In `__init__`, create one `TinyKvPagedPool(page_size=page_size)` per layer
-  and keep them in `self.page_pools`.
+**First, port your dense Week 2 model into the shell.** Copy the working
+logic from your completed `qwen3_week2.py`, including the per-request offsets
+from Day 1:
+
+- `Qwen3MultiHeadAttention.__init__`: store the projections, the Q/K norms,
+  RoPE, and the `use_paged_attention` flag.
+- `Qwen3MLP.__init__` and `__call__`: the SwiGLU MLP.
+- `Qwen3TransformerBlock.__init__` and `__call__`: the two RMSNorms, the
+  residual connections, and the attention and MLP calls. Forward
+  `use_paged_attention` to the attention layer.
+- `Qwen3ModelWeek3.__init__`: load every projection, the embedding, and any
+  separate `lm_head` with `QuantizedWeights.from_mlx_layer(...)`, passing the
+  constructor's `use_mlx_quantized_linear` through. Build one block per layer
+  with `use_paged_attention=enable_paged_attention`.
+- `Qwen3ModelWeek3.__call__`: the embedding lookup, the layers with a causal
+  mask, `logits_to_keep`, the final norm, and the tied or separate output
+  head.
+
+A dense model uses `Qwen3MLP` in every layer. `is_qwen3_moe_sparse_layer` and
+`Moe` belong to the optional Day 6 chapter.
+
+Keep Day 1's projection setup: `use_mlx_quantized_linear=True` is the dense
+Week 3 default, so dense-model projections run through `mx.quantized_matmul`,
+while embedding, normalization, activation, RoPE, cache, and attention stay
+your own code. The optional MoE chapter keeps its own router and expert
+projection rules; this default does not extend to them.
+
+**Then add the paging changes:**
+
+- In `Qwen3ModelWeek3.__init__`, create one
+  `TinyKvPagedPool(page_size=page_size)` per layer and keep them in
+  `self.page_pools`.
 - `create_kv_cache()` returns one new `TinyKvPagedCache` per layer, each
   attached to that layer's pool.
-- When the model is built with `enable_paged_attention=False`, attention calls
-  the cache's dense `update_and_fetch` and runs the same dense attention as
-  before on the gathered K/V. Leave `paged_attention` alone; it belongs to
-  Day 4.
-
-Keep the projection setup from Day 1: `use_mlx_quantized_linear=True` stays
-the Week 3 default, so the projections run through `mx.quantized_matmul`,
-while embedding, normalization, activation, RoPE, cache, and attention stay
-your own code.
+- In `Qwen3MultiHeadAttention.__call__`, when the model is built with
+  `enable_paged_attention=False`, call the cache's dense `update_and_fetch`
+  and run the same dense attention as before on the gathered K/V. Leave
+  `paged_attention` alone; it belongs to Day 4.
 
 ```bash
 pdm run test --week 3 --day 3 -- -k task_3
 ```
 
 The Task 3 tests compare the Week 3 model with your Week 2 model on a full
-prompt and token by token during decode, with tied and untied output heads.
+prompt, with tied and untied output heads, and token by token during decode.
 They also build two requests from one model, batch them, and check the
 returned `block_table` and `context_lens`.
 
