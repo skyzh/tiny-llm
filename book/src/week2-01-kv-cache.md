@@ -22,7 +22,8 @@ Today you build two checkpoints:
 1. **`kv-cache`** keeps each layer's keys and values from earlier steps, so a
    decode step sends only the newest token through the model.
 2. **`capacity-cache`** stores that cache in one buffer sized for the whole
-   request, so adding a token no longer copies everything cached so far.
+   request, so your code no longer concatenates the old cache with each new
+   token.
 
 You will write four pieces:
 
@@ -164,7 +165,7 @@ prefix, but it is not free. The starter's constructor already creates byte
 counters for this; add the size of the copied old K/V to
 `logical_copy_bytes`, `physical_growth_copy_bytes`, and `growth_copy_bytes`
 on each concatenation, so the benchmark can report it. The `capacity-cache`
-checkpoint later today removes the copy.
+checkpoint later today removes the concatenation.
 
 ## Task 2: Build the Cached Week 2 Model
 
@@ -281,13 +282,19 @@ than expecting a particular number.
 
 ## Second Checkpoint: Bound the Request Cache
 
-`kv-cache` removed the repeated model work, but every append still copies the
-old K/V into a new buffer. The fix is to allocate once.
+`kv-cache` removed the repeated model work, but every append still asks for a
+bigger buffer and concatenates the old K/V into it. The alternative is to
+size the storage once.
 
 The generation loop knows how long a request can get: the prompt length plus
 `max_tokens`. If each layer's cache allocates that much space up front, an
-append only has to write the new tokens into the next free slots. Two numbers
-now matter, and they are different:
+append only has to describe a write of the new tokens into the next free
+slots. Whether the GPU then updates that buffer in place or copies it first is
+up to MLX: `mx.slice_update` reuses the existing buffer when MLX can donate it
+to the result, and copies it otherwise. Your code no longer asks for the
+copy, but nothing in this chapter measures which case happens.
+
+With storage sized up front, two numbers matter, and they are different:
 
 ```text
 physical storage: [token 0][token 1][unused][unused]
@@ -300,9 +307,11 @@ tokens. Attention must see only the first `offset` slots. If it sees the unused
 tail, it attends to zeros that are not part of the sequence.
 
 Allocating the full request up front can raise peak memory for some shapes,
-in exchange for removing the repeated copies. The `capacity-cache` checkpoint
+in exchange for removing the repeated concatenation. The `capacity-cache` checkpoint
 keeps the same serving loop and the same Week 1 operators; only the cache's
 storage changes.
+
+<a id="first-diagnostic-hide-unused-capacity"></a>
 
 ### Show Only the Logical Prefix
 
@@ -316,6 +325,8 @@ It points at `_logical_key_values` or the capacity branch of
 `update_and_fetch`. For storage shaped `B, H, capacity, D`,
 `_logical_key_values` returns `storage[:, :, :offset, :]` for both keys and
 values. Never work out the logical length from the storage's shape.
+
+<a id="allocate-from-the-request-bound"></a>
 
 ### Allocate from the Request's Limit
 
@@ -343,6 +354,8 @@ if given, otherwise the model's, and when it is true create the caches with
 `capacity = len(prompt tokens) + max_tokens`. The capacity belongs to this
 request only, and the cache must never grow past it.
 
+<a id="make-movement-observable"></a>
+
 ### Count What Moves
 
 The cache keeps four byte counters:
@@ -354,8 +367,14 @@ The cache keeps four byte counters:
 | `slice_write_bytes` | New K/V written | grows by each append's K/V size |
 | `growth_copy_bytes` | Older name for the growth-copy total | stays zero |
 
-The counters tell you which bytes moved. They do not tell you whether a whole
-request got faster or used less memory; only a timed, matched comparison does.
+These are bookkeeping counts kept by your Python code: what it asked to
+concatenate and what it asked to write. They do not observe what the GPU
+actually copies, so zero growth bytes means your code stopped concatenating,
+not that no copy happened underneath. They also do not tell you whether a
+whole request got faster or used less memory; only a timed, matched
+comparison does.
+
+<a id="reset-and-rewind-without-leaking-a-suffix"></a>
 
 ### Rewind and Reset
 
@@ -377,6 +396,8 @@ pdm run test --week 2 --day 1 -- -k 'rewind or overflow'
 This test appends, rewinds, appends again, then overflows on purpose,
 checking each time that only the right tokens are visible. It catches caches
 that show unused slots or change state before rejecting an append.
+
+<a id="complete-the-capacity-cache-checkpoint"></a>
 
 ### Finish `capacity-cache`
 
@@ -482,6 +503,8 @@ hardware, the MLX and mlx-lm versions, the logit mode, and the exact model.
 After upgrading a dependency, measure MLX again instead of reusing the old
 number.
 
+<a id="synchronize-lazy-work"></a>
+
 ### Wait for the GPU
 
 MLX builds a computation graph lazily. If you time only the Python call, you
@@ -498,6 +521,8 @@ elapsed = perf_counter() - start
 The supplied benchmark also releases each request's caches after its warmup
 and timed runs, even when a run fails. If you write your own timing loop, do
 the same.
+
+<a id="attribute-the-cached-model"></a>
 
 ## Find Where the Time Goes
 
