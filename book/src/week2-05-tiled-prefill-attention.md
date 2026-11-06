@@ -126,10 +126,10 @@ those to the readable path instead.
 
 Each threadgroup handles **32 query rows** (BQ32) and walks the source **16
 positions at a time** (BK16), using four 32-lane SIMD groups, 128 threads in
-all. For each source tile:
+all. First, load the threadgroup's 32 × 128 Q tile into threadgroup memory
+once; it stays there for the whole walk. Then, for each source tile:
 
-1. load a 32 × 128 Q tile and a 16 × 128 K tile into
-   threadgroup memory;
+1. load a 16 × 128 K tile into threadgroup memory;
 2. compute the 32 × 16 block of scores with SIMD-group matrix fragments;
 3. reuse the same threadgroup storage to load the matching 16 × 128 V tile;
 4. update each query row's running `m`, `l`, and `a` in FP32, as above.
