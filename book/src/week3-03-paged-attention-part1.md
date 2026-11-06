@@ -339,7 +339,10 @@ src/tiny_llm/paged_kv_cache.py
 src/tiny_llm/kv_cache.py
 ```
 
-Implement `TinyKvPagedPool` and `TinyKvPagedCache` in `paged_kv_cache.py`, and
+Implement `TinyKvPagedPool` and `TinyKvPagedCache` in `paged_kv_cache.py`,
+starting with `TinyKvPagedPool.__init__`, `TinyKvPagedCache.__init__`,
+`TinyKvPagedCache.update_and_fetch`, and `TinyKvPagedCache.gather_dense`, then
+the rest of the methods in the table below. Also implement
 `BatchingKvCache.update_and_fetch_paged` in `kv_cache.py`.
 
 The starter lists most of the methods. The tests also use a few attributes it
@@ -384,16 +387,18 @@ src/tiny_llm/paged_kv_cache.py
 The C++ and Metal files, the header declaration, the Python binding, and the
 CMake entries for `paged_cache_update` already exist. Replace the stubs:
 
-- `tiny_llm_ext::paged_cache_update(pages, values, page_id, start)` checks its
-  inputs and returns a lazy array with the same shape and dtype as `pages`.
+- `tiny_llm_ext::paged_cache_update(pages, values, page_id, start)` in
+  `paged_attention.cpp` checks its inputs and returns a lazy array with the same shape and dtype as `pages`.
   Require `pages` to be `[P, H, page_size, D]` and `values` to be
   `[1, H, length, D]`, with matching `H`, `D`, and dtype (float32 or
   bfloat16). Require `0 <= page_id < P` and
   `0 <= start` with `start + length <= page_size`. Throw on anything else.
-- `PagedCacheUpdate::eval_cpu` throws. The operator is GPU-only.
-- `PagedCacheUpdate::eval_gpu` checks that both inputs are row-contiguous,
-  makes the output share the `pages` buffer, and launches
-  `paged_cache_update_kernel` over the `H × length × D` new elements.
+- `PagedCacheUpdate::eval_cpu` in `paged_attention.cpp` throws. The operator
+  is GPU-only.
+- `PagedCacheUpdate::eval_gpu` in `paged_attention.cpp` checks that both
+  inputs are row-contiguous, makes the output share the `pages` buffer, and
+  launches `paged_cache_update_kernel` over the `H × length × D` new
+  elements.
 - `paged_cache_update_kernel` in `paged_attention.metal` copies each element
   of `values` to its slot in page `page_id`, starting at `start`.
 
@@ -453,8 +458,8 @@ projection rules; this default does not extend to them.
 - In `Qwen3ModelWeek3.__init__`, create one
   `TinyKvPagedPool(page_size=page_size)` per layer and keep them in
   `self.page_pools`.
-- `create_kv_cache()` returns one new `TinyKvPagedCache` per layer, each
-  attached to that layer's pool.
+- `Qwen3ModelWeek3.create_kv_cache()` returns one new `TinyKvPagedCache` per
+  layer, each attached to that layer's pool.
 - In `Qwen3MultiHeadAttention.__call__`, when the model is built with
   `enable_paged_attention=False`, call the cache's dense `update_and_fetch`
   and run the same dense attention as before on the gathered K/V. Leave
