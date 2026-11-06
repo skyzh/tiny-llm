@@ -68,6 +68,35 @@ To collect your own numbers, use the runner commands under
 directory; your machine, model size, and software
 versions will change the results.
 
+### Profiler Results
+
+The Week 2 chapters use `pdm run profile-week2-kernels` to see which kind of
+work dominates a step. The current profiler is a **public-operator replay**:
+for a case such as `capacity-cache:decode:128`, it replays one step ending at
+128 cached tokens through the public operators that checkpoint selects and
+through the solution's own cache, one group at a time. Its results (schema 3,
+`profile_kind` `public-operator-replay`) record:
+
+- the workload: checkpoint, phase, context `S`, cache bound `C`, logit
+  setting, warmups and iterations, and when RoPE offsets are prepared;
+- each group's synchronized median, and `replay_total_us`, which is the sum of
+  those medians; each share is a fraction of that sum, not of a model
+  timeline;
+- the cache's offsets, capacity, whether the update started from an empty
+  cache, and the change in its bookkeeping counters, which are not a measure
+  of GPU copies;
+- coverage: a case the replay cannot represent, such as the reference
+  solution's `selected`, is marked incomplete with a reason and has no total
+  or shares.
+
+There are no published results from this profiler yet. To compare two
+checkpoints, make fresh runs with the same tool version and the same case,
+cache bound, logit setting, and machine. Earlier profiler results, including
+every category share quoted in the historical sections below, came from a
+different tool that walked the model's internals and timed a different cache
+operation. They stay in this appendix as history and should not be mixed with
+replay results.
+
 ## Historical Evidence
 
 > The task #367's legacy Week 2 and Week 3 tables below belong to predecessor
