@@ -66,7 +66,19 @@ Every day follows the same loop:
 3. **Put it in the model.** Wire it into the cached model, run the day's full
    test gate, and generate text with the new checkpoint.
 4. **Measure.** Time the new checkpoint against the control with the same
-   model, prompt length, output length, and logit mode.
+   model, prompt length, output length, and logit mode. Then use the supplied
+   profiler to see which kind of work changed.
+
+The profiler and the benchmark answer different questions. The benchmark
+times whole requests through your model. The profiler replays one prefill or
+decode step's work through the course's public operators and your cache, one
+group at a time (projections, attention, normalization and activation, and
+the cache update), and reports each group's share of that replay. It builds
+the work from the model weights and your public functions, so it never needs
+a particular layout inside your model, an extra TODO, or counters of your
+own. It also cannot tell you whether your model actually calls those
+operators; your tests and wiring do that. [Day 1](./week2-01-kv-cache.md)
+explains the replay's settings.
 
 The chapters use Qwen3-0.6B for every required comparison, so the work fits
 on any Mac in the [model table](./preface.md#choose-a-model-for-your-mac).
@@ -85,7 +97,7 @@ Three kinds of results come up, and they answer different questions:
 ## What the Starter Gives You
 
 The Day 1 starter supplies model loading, the test entry points, and the
-benchmark and attribution tools; you write the cache and the serving loop.
+benchmark and profiling tools; you write the cache and the serving loop.
 Day 2 adds the packed-weight container and the native operator declarations,
 and you write the embedding, the kernels, and the model wiring. Days 3 to 5
 each add the declarations for that day's kernels in the same way. Each
