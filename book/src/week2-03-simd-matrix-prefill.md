@@ -54,7 +54,7 @@ pdm run test --week 2 --day 3 -- -k partial_tiles
 ```
 
 Before you change anything, time the current `quantized-matvec` model and
-profile one 128-token prefill. The `--offline` run needs the 0.6B model cached
+replay one 128-token prefill with the supplied profiler. The `--offline` run needs the 0.6B model cached
 already. Save both files; they are today's control:
 
 ```bash
@@ -68,10 +68,19 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --json-output week2-day3-control-attribution.json
 ```
 
+The profiler case `quantized-matvec:prefill:128` replays one prefill of 128
+prompt tokens into an empty cache, through the public operators this
+checkpoint selects. With the default `--prefill-logits last`, only the last
+row goes through the final norm and output head, matching the benchmark's
+serving setup; `all` would put all 128 rows through the head. The cache
+bound defaults to `C = S = 128`. This replay times the operators on prepared
+inputs; it is not a run of your model's prefill, which the benchmark times.
+
 When you measure again at the end, keep everything the same: model, phase,
 prompt and output lengths, logit mode, warmups, and machine for the benchmark,
-and the same case and iteration counts for the profile. Do not use an older
-4B result as the 0.6B control.
+and the same case, cache bound, logit setting, and iteration counts for the
+profile. Do not use an older 4B result, or a result from an earlier version of
+the profiler, as the 0.6B control.
 
 ## Task 1: Load and multiply a W4 tile
 
@@ -215,7 +224,7 @@ does none of your cache or model work.
 ## Measure the matched product
 
 Once the full Day 3 gate passes, run the Day 2 control and the new checkpoint
-in one progression, and profile both:
+in one progression, and replay both:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
@@ -232,17 +241,19 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
 First check that this run's `quantized-matvec` row is close to the control you
 saved before editing; if it is not, something about the machine changed and
 the comparison is not fair. Then report two things separately: how much
-prefill throughput changed for the whole model, and how much the projection
-time changed in the profile. A faster operator does not by itself mean a
-faster model.
+prefill throughput changed for the whole model, and how much the projections
+group changed in the replay. A faster operator in the replay does not by
+itself mean a faster model, and the replay does not show that your model
+routes prompts to the new kernel; that is what the three-step flag check in
+Task 2 and the full-model tests are for.
 
 Decode still runs Day 2's matvec, so expect the change to show up mainly in
 prefill. If you
 repeat this with the optional 4B model, cache it first and rerun every row at
 4B; do not mix model sizes or logit modes.
 
-Write down what took the most prefill time before the change, whether the new
-kernel reduced it and the prefill result, and what result would make you
+Write down which group took the most replayed prefill time before the change,
+whether the new kernel reduced it, how the whole-model prefill result moved, and what result would make you
 rethink the tiling. The [performance appendix](./appendix-performance.md)
 keeps older hardware results separate from this exercise.
 
