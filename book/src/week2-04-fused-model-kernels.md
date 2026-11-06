@@ -60,7 +60,8 @@ For each operator, check its numbers against a readable version first, then
 run the live model at that operator's checkpoint. The live run checks that the
 whole model still works with the change. Neither check shows which kernel the
 model actually called, because the readable path gives the same answers; for
-that, read your wiring (Task 4) or, for RMSNorm, check its dispatch counts.
+that, read your wiring (Task 4). For RMSNorm you can also look at its
+optional dispatch counts.
 
 <a id="why-fusion-helps"></a>
 
@@ -126,8 +127,9 @@ and writes them directly. A 2,560-value row needs 640 threads (2,560 / 4,
 rounded up to a whole SIMD group). Use this kernel for rows up to 4,096 wide
 and the fallback above that. The supplied `FastRMSNorm.__init__` creates a
 `dispatch_counts` dictionary with `register_cached` and
-`fixed_width_fallback` entries; increment the one you use on each call, so you
-can check which path ran.
+`fixed_width_fallback` entries. Incrementing the matching entry on each call is
+optional, but it gives you a quick way to see which path ran. No test or tool
+requires it.
 
 In the primitive, check shape and dtype, allocate the output, bind buffers
 and constants, and give each active SIMD group one float slot for its partial
@@ -293,10 +295,15 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
 ```
 
 First check that this run's `simd-matmul` row is close to the control you
-saved. Then report each checkpoint's whole-model change and the profiled
-operator change separately; a faster operator alone does not mean a faster
-request. Write down which category now takes the most time, and what result
-would make you undo one of these kernels. The
+saved. The profiler replays the same decode and prefill steps for `simd-matmul`
+and `swiglu`, with the same 128-token context, cache bound, and logit setting.
+The normalization, position, and activation group is where Day 4's kernels
+show up; the other groups replay the same operators in both cases. Report each
+checkpoint's whole-model change and the replayed group change separately: the
+replay times your operators, not your model, so a faster group alone does not
+mean a faster request, and it does not show which kernel your model called.
+Write down which group now takes the most replayed time, and what result would
+make you undo one of these kernels. The
 [performance appendix](./appendix-performance.md) keeps older M4 Pro and 4B
 results as history, not as claims about your checkout. A 4B comparison is
 optional: cache the model first and rerun every row at 4B.
