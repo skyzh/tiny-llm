@@ -670,7 +670,7 @@ Run it again with `--solution tiny_llm_ref` to compare with the reference
 solution, and again with `--week2-checkpoint capacity-cache` to compare with
 Day 1. Don't change anything else between runs.
 
-To see the whole progression and where the time goes inside a decode step:
+To see the whole progression, and how the replayed decode work changes:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
@@ -684,12 +684,24 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --json-output week2-day2-attribution.json
 ```
 
+The profiler replays one decode step that ends at 128 cached tokens through
+the public operators each checkpoint selects, as described in
+[Day 1](./week2-01-kv-cache.md). Both cases in one command share the same
+context, cache bound (`C = S = 128` by default), and logit setting; only the
+checkpoint's operators and cache type differ. If you change `--cache-capacity`
+or `--prefill-logits`, change it for both. Compare the projections group
+between the two cases to see how much of the replay packing removed, and read
+the whole-request change from the progression run above. The replay shows the
+packed operator is cheaper; the progression run and your wiring check show
+that the model actually benefits from it.
+
 For a sense of scale, here is one older measurement of this step. It used
-Qwen3-4B on an M4 Pro, with an earlier version of the course code. Packing
-the weights cut the time spent in projections by 69.0%, and decode on a fixed
-workload went from 24.38 to 58.90 tokens per second. The profile then showed
-normalization, positional encoding, and activation taking 33.5% of the time,
-which is what Day 4 goes after. Your 0.6B numbers will differ, and these are
+Qwen3-4B on an M4 Pro, with an earlier version of the course code and an
+earlier version of the profiler whose numbers are not comparable with today's
+replay. Packing the weights cut the time spent in projections by 69.0%, and
+decode on a fixed workload went from 24.38 to 58.90 tokens per second. That
+older profile then showed normalization, positional encoding, and activation
+taking 33.5% of the time, which is what Day 4 goes after. Your 0.6B numbers will differ, and these are
 not targets to hit. The [performance appendix](./appendix-performance.md)
 has the full history.
 
