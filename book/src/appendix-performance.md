@@ -1,9 +1,76 @@
 # 🚧 Appendix: Performance Evidence Ledger
 
-> **Historical evidence from an earlier full Week 2 course state.** The
-> [current Week 2 route](./week2-overview.md) ships Days 1–5, ending at
-> [tiled dense attention and `selected`](./week2-05-tiled-prefill-attention.md). The
-> task #367's legacy Week 2 and Week 3 tables below belong to predecessor
+This appendix has two parts. The first section below is the most recent
+measurement of the finished Week 2 reference against MLX. Everything after it
+is **historical**: measurements of earlier course code that decided the course
+order, kept so you can see why each optimization is where it is. The
+[current Week 2 route](./week2-overview.md) ships Days 1–5, ending at
+[tiled dense attention and `selected`](./week2-05-tiled-prefill-attention.md).
+
+## Current Week 2 Reference Against MLX
+
+How close does the finished Week 2 model come to a production library? These
+runs compared the supplied reference solution's default `selected` model,
+including the reference-only scheduling described in Day 5, with stock MLX on
+the same Qwen3-4B checkpoint.
+
+| Prompt / generated tokens | Total throughput vs. MLX | Worst paired run | Paired runs below 95% | Reference minus MLX peak allocation |
+| --- | ---: | ---: | ---: | ---: |
+| 128 / 128 | 95.104188% | 91.643368% | 5 of 8 | -13,500,228 B |
+| 512 / 128 | 98.503080% | 95.015974% | 0 of 8 | +162,529,416 B |
+| 2,048 / 128 | 97.892287% | 97.323148% | 0 of 8 | +54,526,000 B |
+| 8,192 / 128 | 96.180499% | 90.361573% | 2 of 8 | +102,760,472 B |
+| 2,048 / 16 | 97.925131% | 95.473139% | 0 of 8 | +38,010,928 B |
+| 2,048 / 512 | 96.770866% | 95.645613% | 0 of 8 | +111,149,104 B |
+| 32,640 / 128 | 97.652315% | 96.601819% | 0 of 8 | +902,430,720 B |
+| 8,192 / 8,192 | 101.286978% | 97.282512% | 0 of 8 | +599,351,232 B |
+
+**How to read it.** Each case ran eight times on each side, and each
+reference run was paired with one MLX run. "Total throughput vs. MLX" is
+`100 × median(MLX total time) / median(reference total time)` for the same
+fixed number of generated tokens, so values above 100% mean the reference was
+faster. It is a ratio of two medians, not the median of the paired ratios;
+the next two columns show how the individual pairs spread. Totals cover the
+whole request, including the CPU work of preparing and submitting GPU
+commands, not isolated kernel time.
+
+**Conditions.** BF16 activations, W4 weights with group size 128, one request
+at a time, request-bounded K/V capacity (prompt plus generated tokens),
+last-row prefill logits, and a fixed generation count that continues past a
+natural end-of-sequence token. MLX 0.32.4 and mlx-lm 0.31.3.
+
+**What else the runs showed.**
+
+- Time to first token was slower than MLX in every case.
+- Decode was faster only at 2,048 / 16 and 8,192 / 8,192, and slower in the
+  other six cases.
+- The allocation column is the difference in MLX's reported peak allocation,
+  not physical memory residency. The reference used more in seven of eight
+  cases, up to about 0.9 GB at 32,640 / 128.
+- At 8,192 / 128, besides the two pairs below 95%, the subgroup ratios for
+  runs where the reference went first, and for runs in the second position,
+  also came out below 95% (about 94.4%).
+
+**Where the numbers come from, and their limits.** These are separate
+measurement runs made on a development revision of the reference before it
+was merged in [PR #328](https://github.com/skyzh/tiny-llm/pull/328), on one
+Apple-silicon Mac. They are not a fresh timing of this checkout, and they are
+not pooled into one matrix. Two long measurement campaigns were interrupted
+partway; those runs are kept. The reference's outputs differ numerically from
+MLX's. On answer-quality checks, the reference failed a biology-answer rubric
+and MLX's answer to a factual check had its own problem. Because runs keep
+generating past a natural end of sequence, they do not show output quality
+over the full length. PR #328 has the full method and the remaining
+qualifications.
+
+To collect your own numbers, use the runner commands under
+[Benchmark Method](#benchmark-method) and write the results to a new
+directory; your machine, model size, and software
+versions will change the results.
+
+## Historical Evidence
+
+> The task #367's legacy Week 2 and Week 3 tables below belong to predecessor
 > source `18aec8503929d80c986324578068ecac2463c2ac`; other historical runs
 > state their own source. The example runner commands now write fresh results
 > outside the tracked corpus; they do not reproduce those figures on this
