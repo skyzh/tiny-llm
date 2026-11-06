@@ -4,6 +4,8 @@
 #include "mlx/backend/metal/kernels/complex.h"
 #include "cooperative_matrix.h"
 
+constant bool qmm_full_tiles [[function_constant(110)]];
+
 template <typename T>
 [[kernel]] void quantized_matmul_vanilla_w4a16_g128(
     device const T* scales [[buffer(0)]],
@@ -105,6 +107,7 @@ inline void quantized_matmul_block_w4a16_g128(
     const int reduction_start,
     const int reduction_end,
     const int output_offset,
+    const bool full_tiles,
     threadgroup T* activation_tile,
     threadgroup T* weight_tile,
     threadgroup T* quantization_parameters,
@@ -133,7 +136,7 @@ inline void quantized_matmul_block_w4a16_g128(
     const int weight_output = thread_id / 4;
     const int weight_pack = thread_id % 4;
     const int output_column = column_base + weight_output;
-    const bool valid_output = output_column < K;
+    const bool valid_output = full_tiles || output_column < K;
     device const uint32_t* weight_source = valid_output
         ? b + output_column * packed_cols + reduction_start / packs_per_item +
             weight_pack
@@ -149,7 +152,7 @@ inline void quantized_matmul_block_w4a16_g128(
     // group.
     if (thread_id < output_block_size) {
         const int parameter_output = column_base + thread_id;
-        const bool valid_parameter = parameter_output < K;
+        const bool valid_parameter = full_tiles || parameter_output < K;
         const int parameter_index =
             parameter_output * groups_per_row + reduction_start / group_size;
         quantization_parameters[thread_id] =
@@ -162,8 +165,9 @@ inline void quantized_matmul_block_w4a16_g128(
          reduction_base < reduction_end;
          reduction_base += reduction_block_size) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        const int valid_rows = clamp(M - row_base, 0, output_block_size);
-        const int valid_reduction = clamp(
+        const int valid_rows = full_tiles ? output_block_size
+            : clamp(M - row_base, 0, output_block_size);
+        const int valid_reduction = full_tiles ? reduction_block_size : clamp(
             min(N, reduction_end) - reduction_base,
             0,
             reduction_block_size);
@@ -200,7 +204,7 @@ inline void quantized_matmul_block_w4a16_g128(
             if (next_reduction_base < reduction_end &&
                 thread_id < output_block_size) {
                 const int parameter_output = column_base + thread_id;
-                const bool valid_parameter = parameter_output < K;
+                const bool valid_parameter = full_tiles || parameter_output < K;
                 const int parameter_index = parameter_output * groups_per_row +
                     next_reduction_base / group_size;
                 quantization_parameters[thread_id] =
@@ -211,8 +215,10 @@ inline void quantized_matmul_block_w4a16_g128(
         }
     }
 
-    const short valid_rows = min(output_block_size, M - row_base);
-    const short valid_columns = min(output_block_size, K - column_base);
+    const short valid_rows = full_tiles ? output_block_size
+        : min(output_block_size, M - row_base);
+    const short valid_columns = full_tiles ? output_block_size
+        : min(output_block_size, K - column_base);
     mma.store_result_safe(
         out + output_offset + row_base * K + column_base,
         K,
@@ -237,7 +243,7 @@ template <typename T>
     threadgroup T weight_tile[32 * 40];
     threadgroup T quantization_parameters[2 * 32];
     quantized_matmul_block_w4a16_g128(
-        scales, biases, a, b, out, M, N, K, 0, N, 0,
+        scales, biases, a, b, out, M, N, K, 0, N, 0, qmm_full_tiles,
         activation_tile, weight_tile, quantization_parameters,
         group_id, thread_id, simdgroup, lane);
 }
@@ -265,7 +271,7 @@ template <typename T>
     quantized_matmul_block_w4a16_g128(
         scales, biases, a, b, partials, M, N, K,
         reduction_start, reduction_start + partition_size,
-        group_id.z * partition_stride, activation_tile, weight_tile,
+        group_id.z * partition_stride, false, activation_tile, weight_tile,
         quantization_parameters, group_id, thread_id, simdgroup, lane);
 }
 

@@ -4,7 +4,8 @@ Complete [Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md)
 first. You have a cached, packed-W4 Qwen3 model whose `swiglu` checkpoint
 already includes SIMD matrix prefill, RMSNorm, RoPE, and SwiGLU. Day 5 changes
 the dense attention computation for a prompt with at least nine query tokens.
-One-token decode keeps readable grouped attention.
+The learner implementation and `tiled-prefill` checkpoint keep readable grouped
+attention for one-token decode.
 
 Keep the same cached 0.6B model and request while you work. Save the Day 4
 `swiglu` product result before editing attention; later compare it with
@@ -165,7 +166,8 @@ which kernel ran.
 ## Finish the Cumulative `selected` Model
 
 `selected` is the named final Week 2 checkpoint, not an additional Metal
-kernel. It keeps the `tiled-prefill` feature set: request-bounded KV capacity,
+kernel. Its public functionality keeps the `tiled-prefill` feature set:
+request-bounded KV capacity,
 register-cached RMSNorm, the tiled prefill selector, packed W4 projections,
 SIMD matrix prefill, RoPE, and SwiGLU. Each of the capacity, RMSNorm, and tiled
 attention controls can also be switched off independently for a matched
@@ -194,6 +196,22 @@ Once complete, `selected` is the
 default Week 2 checkpoint, but name it explicitly in measurements so the
 comparison remains legible.
 
+The supplied **reference** implementation adds guarded performance scheduling
+only to `selected`: native online decode, four-head Q/K normalization with
+RoPE for its supported shape, and midpoint submission of an ordinary 36-layer
+decode graph. These are reference optimizations, not additional learner tasks.
+The reference `tiled-prefill` checkpoint retains readable one-token decode,
+and unsupported optimized shapes keep their fallbacks. No experiment flags
+are needed for the reference default:
+
+```bash
+pdm run main-week2 --solution tiny_llm_ref --model qwen3-0.6b --max-tokens 16
+```
+
+This command runs the supplied reference; the earlier `--solution tiny_llm`
+commands run your implementation. It does not require your starter to reproduce
+the reference scheduling internals.
+
 ## Measure the Matched Product
 
 Compare the saved pre-edit `swiglu` row with a new `swiglu` row first. Then
@@ -209,9 +227,12 @@ pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --re
 ```
 
 A 128-token prompt crosses the `L >= 9` selector boundary. Report the prefill
-and complete-request results separately; the `selected` and `tiled-prefill`
-rows name the same default feature set, so do not count any difference between
-them as a second mechanism gain. Inspect which kernel category dominates under
+and complete-request results separately. With `--solution tiny_llm`, the
+`selected` and `tiled-prefill` rows share the course feature set; do not count
+their difference as a second mechanism gain. With `--solution tiny_llm_ref`,
+`selected` also enables the reference scheduling above, so report those rows
+separately and do not attribute that difference to tiled prefill. Inspect which
+kernel category dominates under
 the same 0.6B model and 128-token prefill shape:
 
 ```bash

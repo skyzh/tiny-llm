@@ -229,3 +229,68 @@ def dense_prefill_attention_mma(
         num_kv_heads,
     )
     return result.reshape(expected_shape)
+
+
+def decode_attention_online(query, key, value, scale, mask=None):
+    if (
+        query.ndim != 4
+        or key.ndim != 4
+        or value.ndim != 4
+        or query.shape[-2:] != (1, 128)
+        or any(a.dtype != mx.bfloat16 for a in (query, key, value))
+    ):
+        raise ValueError("online decode requires single-token BF16 D128 inputs")
+    batch, heads, length, dim = query.shape
+    kv_heads, context = key.shape[1:3]
+    if (
+        batch <= 0
+        or heads <= 0
+        or kv_heads <= 0
+        or heads % kv_heads
+        or key.shape != value.shape
+        or key.shape[0] != batch
+        or key.shape[-1] != dim
+    ):
+        raise ValueError("incompatible online GQA shapes")
+    causal = isinstance(mask, str)
+    if causal and mask != "causal":
+        raise ValueError("unsupported online decode mask")
+    has_mask = isinstance(mask, mx.array)
+    if has_mask:
+        mask = mx.contiguous(
+            mx.broadcast_to(mask, (batch, heads, 1, context))
+            .astype(mx.float32)
+            .reshape(batch * heads, 1, context)
+        )
+    elif mask is None or causal:
+        mask = _NO_ATTENTION_MASK
+    else:
+        raise ValueError("unsupported online decode mask type")
+    # Keep the bounded cache's padded row strides; only the small query is copied.
+    query = mx.contiguous(query.reshape(batch * heads, 1, dim))
+    key = key.reshape(batch * kv_heads, context, dim)
+    value = value.reshape(batch * kv_heads, context, dim)
+    return tiny_llm_ext_ref_private._decode_attention_online(
+        query, key, value, mask, scale, causal, has_mask, heads, kv_heads
+    ).reshape(batch, heads, 1, dim)
+
+
+def _qk_norm_rope4(x: mx.array, rope: FastRoPE, offset=0) -> mx.array:
+    batch_size = x.shape[0]
+    if isinstance(offset, int):
+        offset = mx.full((batch_size,), offset, dtype=mx.int32)
+    elif isinstance(offset, list):
+        if len(offset) != batch_size:
+            raise ValueError("FastRoPE needs one offset per batch row")
+        offset = mx.array(offset, dtype=mx.int32)
+    elif offset.ndim == 0:
+        offset = mx.broadcast_to(offset.astype(mx.int32), (batch_size,))
+    elif offset.shape != (batch_size,):
+        raise ValueError("FastRoPE needs one offset per batch row")
+    return tiny_llm_ext_ref_private._qk_norm_rope4(
+        x,
+        mx.contiguous(offset.astype(mx.int32)),
+        rope.dims,
+        rope.base,
+        rope.traditional,
+    )

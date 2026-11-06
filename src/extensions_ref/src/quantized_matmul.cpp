@@ -164,7 +164,18 @@ void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector
         kernel_name = out.dtype() == mx::float16 ? "quantized_matmul_vanilla_w4a16_g128_f16"
                                                  : "quantized_matmul_vanilla_w4a16_g128_bf16";
     }
-    auto kernel = d.get_kernel(kernel_name, library);
+    MTL::ComputePipelineState *kernel;
+    if (use_simdgroup_ && !use_matvec && !use_split_k) {
+        const bool full_tiles = out.dtype() == mx::bfloat16 &&
+            M % 32 == 0 && K % 32 == 0;
+        const std::string hash_name = std::string(kernel_name) +
+            (full_tiles ? "_full" : "_edge");
+        mx::metal::MTLFCList constants = {
+            {&full_tiles, MTL::DataType::DataTypeBool, 110}};
+        kernel = d.get_kernel(kernel_name, library, hash_name, constants);
+    } else {
+        kernel = d.get_kernel(kernel_name, library);
+    }
     auto &compute_encoder = mx::metal::get_command_encoder(s);
     compute_encoder.set_compute_pipeline_state(kernel);
     compute_encoder.set_input_array(scales, 0);

@@ -58,10 +58,15 @@ public:
 mx::array rms_norm(const mx::array &x, const mx::array &weight, float eps, mx::StreamOrDevice s = {});
 mx::array rope(const mx::array &x, const mx::array &offsets, int dims, float base, bool traditional,
                mx::StreamOrDevice s = {});
+mx::array _qk_norm_rope4(const mx::array &normalized, const mx::array &offsets, int dims, float base, bool traditional,
+                         mx::StreamOrDevice s = {});
 mx::array swiglu(const mx::array &gate, const mx::array &up, mx::StreamOrDevice s = {});
 mx::array decode_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
                            float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads,
                            mx::StreamOrDevice s = {});
+mx::array _decode_attention_online(const mx::array &q, const mx::array &k, const mx::array &v,
+                                    const mx::array &mask, float scale, bool is_causal, bool has_mask,
+                                    int num_heads, int num_kv_heads, mx::StreamOrDevice s = {});
 mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
                                        const mx::array &mask, float scale, bool is_causal, bool has_mask,
                                        int num_heads, int num_kv_heads, mx::StreamOrDevice s = {});
@@ -76,6 +81,7 @@ public:
         throw std::runtime_error("Week2RMSNorm has no vmap implementation.");
     }
     const char *name() const override { return "Week2RMSNorm"; }
+    float research_eps() const { return eps_; }
 
 private:
     float eps_;
@@ -99,6 +105,22 @@ private:
     bool traditional_;
 };
 
+class Week2QKNormRoPE4 : public mx::Primitive {
+public:
+    Week2QKNormRoPE4(mx::Stream stream, float eps, float base) : mx::Primitive(stream), eps_(eps), base_(base) {}
+    void eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) override;
+    void eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) override;
+    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
+                                                             const std::vector<int> &) override {
+        throw std::runtime_error("Week2QKNormRoPE4 has no vmap implementation.");
+    }
+    const char *name() const override { return "Week2QKNormRoPE4"; }
+
+private:
+    float eps_;
+    float base_;
+};
+
 class Week2SwiGLU : public mx::Primitive {
 public:
     explicit Week2SwiGLU(mx::Stream stream) : mx::Primitive(stream) {}
@@ -113,13 +135,13 @@ public:
 
 class Week2DecodeAttention : public mx::Primitive {
 public:
-    Week2DecodeAttention(mx::Stream stream, float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads)
+    Week2DecodeAttention(mx::Stream stream, float scale, bool is_causal, bool has_mask, int num_heads, int num_kv_heads, bool online = false)
         : mx::Primitive(stream),
           scale_(scale),
           is_causal_(is_causal),
           has_mask_(has_mask),
           num_heads_(num_heads),
-          num_kv_heads_(num_kv_heads) {}
+          num_kv_heads_(num_kv_heads), online_(online) {}
     void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
     void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
     std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &,
@@ -134,6 +156,7 @@ private:
     bool has_mask_;
     int num_heads_;
     int num_kv_heads_;
+    bool online_;
 };
 
 class Week2DensePrefillMMA : public mx::Primitive {
