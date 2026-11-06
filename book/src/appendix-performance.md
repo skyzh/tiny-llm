@@ -55,8 +55,8 @@ natural end-of-sequence token. MLX 0.32.4 and mlx-lm 0.31.3.
 measurement runs made on a development revision of the reference before it
 was merged in [PR #328](https://github.com/skyzh/tiny-llm/pull/328), on one
 Apple-silicon Mac. They are not a fresh timing of this checkout, and they are
-not pooled into one matrix. Two long measurement campaigns were interrupted
-partway; those runs are kept. The reference's outputs differ numerically from
+not pooled into one matrix. One long measurement campaign was interrupted
+twice; the runs on both sides of each interruption are kept. The reference's outputs differ numerically from
 MLX's. On answer-quality checks, the reference failed a biology-answer rubric
 and MLX's answer to a factual check had its own problem. Because runs keep
 generating past a natural end of sequence, they do not show output quality
