@@ -80,11 +80,12 @@ DOC_TASK_MARKERS = {
     "book/src/week3-03-paged-attention-part1.md": {
         "Task 1": {
             "TinyKvPagedPool.__init__",
-            "tiny_llm_ext::paged_cache_update",
-            "paged_cache_update_kernel",
+            "TinyKvPagedCache.__init__",
+            "update_and_fetch",
+            "TinyKvPagedCache.gather_dense",
         },
-        "Task 2": {"TinyKvPagedCache.__init__", "update_and_fetch"},
-        "Task 3": {"TinyKvPagedCache.gather_dense", "Qwen3ModelWeek3.create_kv_cache"},
+        "Task 2": {"tiny_llm_ext::paged_cache_update", "paged_cache_update_kernel"},
+        "Task 3": {"Qwen3ModelWeek3.create_kv_cache"},
     },
     "book/src/week3-04-paged-attention-part2.md": {
         "Task 1": {"TinyKvPagedCache.block_table", "Request.try_prefill"},
@@ -172,7 +173,7 @@ EXTENSION_TASK_PAIRS = {
         },
     },
     "book/src/week3-03-paged-attention-part1.md": {
-        "Task 1": {
+        "Task 2": {
             (
                 "src/extensions/src/paged_attention.cpp",
                 "tiny_llm_ext::paged_cache_update",
