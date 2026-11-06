@@ -3,6 +3,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/variant.h>
 
+#include "mlx/transforms.h"
 #include "tiny_llm_ext.h"
 
 namespace nb = nanobind;
@@ -12,6 +13,16 @@ NB_MODULE(_ext, m) {
     m.doc() = "tiny-llm extensions for MLX";
 
     m.def("load_library", &tiny_llm_ext_ref::load_library, "path"_a);
+
+    m.def("_submit_decode_prefix_if_ordinary", [](const mx::array &root) {
+        if (root.is_tracer() || !root.has_primitive() ||
+            root.status() != mx::array::Status::unscheduled ||
+            root.primitive().device() != mx::Device::gpu) {
+            return false;
+        }
+        mx::async_eval({root});
+        return true;
+    }, nb::call_guard<nb::gil_scoped_release>());
 
     m.def("quantized_matmul", &tiny_llm_ext_ref::quantized_matmul, "scales"_a, "biases"_a, "group_size"_a, "bits"_a,
           "a"_a, "b"_a, "transpose_b"_a = false, "use_simdgroup"_a = true, "use_split_k"_a = false,
@@ -36,9 +47,14 @@ NB_MODULE(_ext, m) {
     m.def("rms_norm", &tiny_llm_ext_ref::rms_norm, "x"_a, "weight"_a, "eps"_a, "stream"_a = nb::none());
     m.def("rope", &tiny_llm_ext_ref::rope, "x"_a, "offsets"_a, "dims"_a, "base"_a, "traditional"_a = false,
           "stream"_a = nb::none());
+    m.def("_qk_norm_rope4", &tiny_llm_ext_ref::_qk_norm_rope4, "normalized"_a, "offsets"_a, "dims"_a, "base"_a,
+          "traditional"_a = false, "stream"_a = nb::none());
     m.def("swiglu", &tiny_llm_ext_ref::swiglu, "gate"_a, "up"_a, "stream"_a = nb::none());
     m.def("decode_attention", &tiny_llm_ext_ref::decode_attention, "query"_a, "key"_a, "value"_a, "mask"_a, "scale"_a,
           "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a, "stream"_a = nb::none());
+    m.def("_decode_attention_online", &tiny_llm_ext_ref::_decode_attention_online, "query"_a, "key"_a,
+          "value"_a, "mask"_a, "scale"_a, "is_causal"_a, "has_mask"_a, "num_heads"_a,
+          "num_kv_heads"_a, "stream"_a = nb::none());
     m.def("_dense_attention_prefill_mma", &tiny_llm_ext_ref::_dense_attention_prefill_mma, "query"_a, "key"_a,
           "value"_a, "mask"_a, "scale"_a, "is_causal"_a, "has_mask"_a, "num_heads"_a, "num_kv_heads"_a,
           "stream"_a = nb::none());

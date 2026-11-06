@@ -3,19 +3,22 @@ from types import MappingProxyType
 from typing import Any
 
 import mlx.core as mx
+from extensions_ref.tiny_llm_ext_ref import _ext as tiny_llm_ext_ref_private
 
 from .basics import linear, silu
 from .attention import scaled_dot_product_attention_grouped
 from .embedding import Embedding, QuantizedEmbedding
-from .kv_cache import TinyKvCache
+from .kv_cache import TinyKvCache, TinyKvFullCache
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
 from .quantize import QuantizedWeights, dequantize_linear, quantized_linear
 from .week2_kernels import (
     DENSE_PREFILL_MIN_QUERY,
+    _qk_norm_rope4,
     FastRMSNorm,
     FastRoPE,
     dense_prefill_attention_mma,
+    decode_attention_online,
     swiglu,
 )
 
@@ -29,6 +32,9 @@ class Week2CheckpointFeatures:
     fast_swiglu: bool = False
     simdgroup_matmul: bool = False
     tiled_prefill_attention: bool = False
+    native_online_decode: bool = False
+    fused_qk_norm_rope4: bool = False
+    decode_submit18: bool = False
 
 
 WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
@@ -81,6 +87,9 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
             fast_rope=True,
             fast_swiglu=True,
             tiled_prefill_attention=True,
+            native_online_decode=True,
+            fused_qk_norm_rope4=True,
+            decode_submit18=True,
         ),
     }
 )
@@ -125,6 +134,8 @@ class Qwen3MultiHeadAttention:
         use_fast_rms_norm: bool = True,
         use_fast_rope: bool = True,
         use_tiled_prefill_attention: bool = False,
+        use_native_online_decode: bool = False,
+        use_fused_qk_norm_rope4: bool = False,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -143,10 +154,18 @@ class Qwen3MultiHeadAttention:
         self.wo = wo
         self.use_fast_rope = use_fast_rope
         self.use_tiled_prefill_attention = use_tiled_prefill_attention
+        self.use_native_online_decode = (
+            use_native_online_decode and use_tiled_prefill_attention
+        )
+        self.use_fused_qk_norm_rope4 = (
+            use_fused_qk_norm_rope4 and use_fast_rms_norm and use_fast_rope
+        )
         self.attention_dispatch_counts = {
             "tiled_prefill": 0,
             "tiled_prefill_fallback": 0,
             "readable": 0,
+            "native_online_decode": 0,
+            "native_split_decode": 0,
         }
         rope_cls = FastRoPE if use_fast_rope else RoPE
         norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
@@ -174,8 +193,24 @@ class Qwen3MultiHeadAttention:
         rope_offsets = offsets
         if not self.use_fast_rope:
             rope_offsets = _readable_rope_offset(rope_offsets, L)
-        projection_q = self.rope(projection_q, offset=rope_offsets)
-        projection_k = self.rope(projection_k, offset=rope_offsets)
+        can_fuse_qk = (
+            self.use_fused_qk_norm_rope4
+            and type(self.q_norm) is FastRMSNorm
+            and type(self.k_norm) is FastRMSNorm
+            and type(self.rope) is FastRoPE
+            and projection_q.shape == (1, 1, 32, 128)
+            and projection_k.shape == (1, 1, 8, 128)
+            and projection_q.dtype == mx.bfloat16
+            and projection_k.dtype == mx.bfloat16
+            and self.rope.dims == 128
+            and not self.rope.traditional
+        )
+        if can_fuse_qk:
+            projection_q = _qk_norm_rope4(projection_q, self.rope, rope_offsets)
+            projection_k = _qk_norm_rope4(projection_k, self.rope, rope_offsets)
+        else:
+            projection_q = self.rope(projection_q, offset=rope_offsets)
+            projection_k = self.rope(projection_k, offset=rope_offsets)
         projection_q = projection_q.transpose(0, 2, 1, 3)
         projection_k = projection_k.transpose(0, 2, 1, 3)
         projection_v = projection_v.transpose(0, 2, 1, 3)
@@ -198,6 +233,24 @@ class Qwen3MultiHeadAttention:
                 projection_v,
                 scale=self.scale,
                 mask=mask,
+            )
+        elif (
+            self.use_native_online_decode
+            and self.use_tiled_prefill_attention
+            and L == 1
+            and self.head_dim == 128
+            and 0 < projection_k.shape[2] <= 32768
+            and all(
+                a.dtype == mx.bfloat16
+                for a in (projection_q, projection_k, projection_v)
+            )
+            and (mask is None or isinstance(mask, mx.array) or mask == "causal")
+        ):
+            self.attention_dispatch_counts["native_online_decode"] += 1
+            if projection_k.shape[2] > 256:
+                self.attention_dispatch_counts["native_split_decode"] += 1
+            x = decode_attention_online(
+                projection_q, projection_k, projection_v, self.scale, mask
             )
         else:
             self.attention_dispatch_counts["readable"] += 1
@@ -262,6 +315,8 @@ class Qwen3TransformerBlock:
         use_fast_rope: bool = True,
         use_fast_swiglu: bool = True,
         use_tiled_prefill_attention: bool = False,
+        use_native_online_decode: bool = False,
+        use_fused_qk_norm_rope4: bool = False,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
@@ -297,6 +352,8 @@ class Qwen3TransformerBlock:
             use_fast_rms_norm=use_fast_rms_norm,
             use_fast_rope=use_fast_rope,
             use_tiled_prefill_attention=use_tiled_prefill_attention,
+            use_native_online_decode=use_native_online_decode,
+            use_fused_qk_norm_rope4=use_fused_qk_norm_rope4,
         )
 
     def __call__(
@@ -314,6 +371,14 @@ class Qwen3TransformerBlock:
 
 
 class Qwen3ModelWeek2:
+    """Reference Week 2 model with an optimized ``selected`` default.
+
+    ``tiled-prefill`` preserves the readable teaching decode path. The three
+    reference scheduling controls default on only for ``selected`` and retain
+    shape/dtype/cache guards. Pass False to disable a control explicitly; no
+    experiment environment variables are read by this model.
+    """
+
     def __init__(
         self,
         mlx_model: Any,
@@ -322,6 +387,9 @@ class Qwen3ModelWeek2:
         use_bounded_kv_capacity: bool | None = None,
         use_register_cached_rms_norm: bool | None = None,
         use_tiled_prefill_attention: bool | None = None,
+        use_native_online_decode: bool | None = None,
+        use_fused_qk_norm_rope4: bool | None = None,
+        use_decode_submit18: bool | None = None,
     ):
         if checkpoint not in WEEK2_CHECKPOINTS:
             raise ValueError(
@@ -332,6 +400,9 @@ class Qwen3ModelWeek2:
             ("use_bounded_kv_capacity", use_bounded_kv_capacity),
             ("use_register_cached_rms_norm", use_register_cached_rms_norm),
             ("use_tiled_prefill_attention", use_tiled_prefill_attention),
+            ("use_native_online_decode", use_native_online_decode),
+            ("use_fused_qk_norm_rope4", use_fused_qk_norm_rope4),
+            ("use_decode_submit18", use_decode_submit18),
         ):
             if value is not None and not isinstance(value, bool):
                 raise ValueError(f"{name} must be a bool or None")
@@ -343,6 +414,12 @@ class Qwen3ModelWeek2:
             use_register_cached_rms_norm = features.fast_rms_norm
         if use_tiled_prefill_attention is None:
             use_tiled_prefill_attention = features.tiled_prefill_attention
+        if use_native_online_decode is None:
+            use_native_online_decode = features.native_online_decode
+        if use_fused_qk_norm_rope4 is None:
+            use_fused_qk_norm_rope4 = features.fused_qk_norm_rope4
+        if use_decode_submit18 is None:
+            use_decode_submit18 = features.decode_submit18
         use_quantized_weights = features.quantized_weights
         use_fast_rms_norm = use_register_cached_rms_norm
         use_fast_rope = features.fast_rope
@@ -350,6 +427,7 @@ class Qwen3ModelWeek2:
         use_simdgroup_matmul = features.simdgroup_matmul
         use_split_k_matmul = False
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
+        self.use_decode_submit18 = use_decode_submit18
         self.use_bounded_kv_capacity = use_bounded_kv_capacity
         self.use_register_cached_rms_norm = use_register_cached_rms_norm
         self.use_tiled_prefill_attention = use_tiled_prefill_attention
@@ -358,6 +436,9 @@ class Qwen3ModelWeek2:
                 "capacity_cache": use_bounded_kv_capacity,
                 "register_cached_rmsnorm": use_register_cached_rms_norm,
                 "tiled_prefill": use_tiled_prefill_attention,
+                "native_online_decode": use_native_online_decode,
+                "fused_qk_norm_rope4": use_fused_qk_norm_rope4,
+                "decode_submit18": use_decode_submit18,
             }
         )
         self.use_fast_rope = use_fast_rope
@@ -426,6 +507,8 @@ class Qwen3ModelWeek2:
                 use_fast_rope=use_fast_rope,
                 use_fast_swiglu=use_fast_swiglu,
                 use_tiled_prefill_attention=use_tiled_prefill_attention,
+                use_native_online_decode=use_native_online_decode,
+                use_fused_qk_norm_rope4=use_fused_qk_norm_rope4,
             )
             self.layers_inner.append(layer)
         norm_cls = FastRMSNorm if use_fast_rms_norm else RMSNorm
@@ -472,8 +555,24 @@ class Qwen3ModelWeek2:
             rope_offsets = mx.array(offset, dtype=mx.int32)
         else:
             rope_offsets = offset
+        submit_decode_prefix = (
+            self.use_decode_submit18
+            and type(self) is Qwen3ModelWeek2
+            and self.num_hidden_layers == 36
+            and inputs.shape == (1, 1)
+            and self.precision == mx.bfloat16
+            and len(cache) == 36
+            and all(type(c) is TinyKvFullCache and c.uses_capacity for c in cache)
+            and all(
+                layer.self_attn.use_fused_qk_norm_rope4
+                and layer.self_attn.use_native_online_decode
+                for layer in self.layers_inner
+            )
+        )
         for layer in range(self.num_hidden_layers):
             h = self.layers_inner[layer](h, rope_offsets, cache[layer], mask=mask)
+            if submit_decode_prefix and layer == 17 and h.dtype == mx.bfloat16:
+                tiny_llm_ext_ref_private._submit_decode_prefix_if_ordinary(h)
         if logits_to_keep is not None:
             if logits_to_keep <= 0:
                 raise ValueError("logits_to_keep must be positive")
