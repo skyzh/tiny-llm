@@ -686,14 +686,19 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
 
 The profiler replays one decode step that ends at 128 cached tokens through
 the public operators each checkpoint selects, as described in
-[Day 1](./week2-01-kv-cache.md). Both cases in one command share the same
-context, cache bound (`C = S = 128` by default), and logit setting; only the
-checkpoint's operators and cache type differ. If you change `--cache-capacity`
-or `--prefill-logits`, change it for both. Compare the projections group
-between the two cases to see how much of the replay packing removed, and read
-the whole-request change from the progression run above. The replay shows the
-packed operator is cheaper; the progression run and your wiring check show
-that the model actually benefits from it.
+[Day 1](./week2-01-kv-cache.md). Both checkpoints use the same bounded cache,
+and in one command both cases share the same context, cache bound
+(`C = S = 128` by default), and logit setting. The only thing that changes is
+the packed-weight path: projections and the embedding. If you change
+`--cache-capacity` or `--prefill-logits`, change it for both.
+
+Then answer three questions from your own runs. Did packing change the
+replayed projections group, and by how much? Did the whole-request decode
+result in the progression run improve, and by how much? Does your model
+actually route its projections through `quantized_linear` (the wiring check
+earlier in this chapter)? Any of these can come out differently from what you
+expect: a kernel can be slower than the dense path, and a smaller replay group
+can still sit next to a worse whole-request result.
 
 For a sense of scale, here is one older measurement of this step. It used
 Qwen3-4B on an M4 Pro, with an earlier version of the course code and an
