@@ -167,10 +167,18 @@ Python side, `quantized_matmul(..., use_simdgroup=True)` in
 
 Then turn it on in the model. The `simd-matmul` checkpoint sets
 `simdgroup_matmul` in `WEEK2_CHECKPOINT_FEATURES`, on top of Day 1's bounded
-cache and Day 2's packed weights. Pass that choice to each packed projection
-as `use_simdgroup_matmul`, including the tied output head, so prompts run
-through your kernel. Normalization, RoPE, and SwiGLU kernels are Day 4; this
-checkpoint has no other new kernels.
+cache and Day 2's packed weights. The choice travels in three steps:
+
+1. the model loader passes it to each packed projection as
+   `QuantizedWeights.from_mlx_layer(..., use_simdgroup_matmul=...)`,
+   including the tied output head;
+2. `quantized_linear` reads `w.use_simdgroup_matmul` and, for more than eight
+   rows, calls `quantized_matmul(..., use_simdgroup=w.use_simdgroup_matmul)`;
+3. the native primitive sees `use_simdgroup` and selects your kernel.
+
+If any step drops the flag, prompts quietly keep using the simple kernel.
+Normalization, RoPE, and SwiGLU kernels are Day 4; this checkpoint has no
+other new kernels.
 
 ```bash
 pdm run build-ext
