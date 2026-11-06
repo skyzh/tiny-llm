@@ -289,10 +289,13 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
 Each case replays one 128-token prefill through the public operators that
 checkpoint selects, with the same cache bound and logit setting (see
 [Day 1](./week2-01-kv-cache.md) for what the replay does and does not
-include). Your tiled attention should show up in the attention group of the
+include). Your tiled attention is replayed in the attention group of the
 `tiled-prefill` case. For your solution, `selected` selects the same
-operators as `tiled-prefill`, so its replay should look the same; a gap
-between them is run-to-run variation, not a second improvement.
+operators as `tiled-prefill`, so there is no further operator change to
+credit between those two cases. If their timings still differ, keep the gap
+in your notes and look into it (rerun both, check that the machine was idle,
+compare the per-group medians) rather than calling it an improvement or
+assuming it is noise.
 
 The replay times operators on prepared inputs. It does not show that your
 model sends 128-token prompts to the tiled kernel; check that by reading the
