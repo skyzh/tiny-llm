@@ -292,14 +292,16 @@ src/tiny_llm/embedding.py
 Before writing any GPU code, write the reconstruction in plain `mlx.core`.
 This version becomes the reference you trust when a kernel misbehaves.
 
-Implement these functions:
+The starter's `QuantizedWeights.from_mlx_layer` already loads the packed
+fields; reuse it rather than writing another loader. Implement these
+functions:
 
 - `dequantize_weights` in `quantize.py`. Unpack each `uint32` with shifts and
   masks, repeat each group's scale and bias across its 128 values, and
   compute `q * scale + bias`. Do not call `mx.dequantize`; the point is to
   write the unpacking yourself.
-- `QuantizedEmbedding.__init__`, `__call__`, and `as_linear` in
-  `embedding.py`.
+- `QuantizedEmbedding.__init__`, `QuantizedEmbedding.__call__`, and
+  `QuantizedEmbedding.as_linear` in `embedding.py`.
 
 The token embedding table is quantized too, and it is large: `vocab_size`
 rows of `hidden_size` values. A lookup should only unpack the rows it needs.
@@ -358,12 +360,13 @@ the `tiny_llm_ext` namespace.
 
 Then fill in `quantized_matmul.cpp`:
 
-- `tiny_llm_ext::quantized_matmul(...)` checks the inputs and returns the lazy
-  output array of shape `(M, K)`. Require `group_size == 128` and `bits == 4`,
-  BF16 scales, biases, and activations that all share one dtype, and shapes
-  that agree with each other.
-- `QuantizedMatmul::eval_cpu(...)` should throw a clear error. This operator
-  runs only on the GPU; there is no CPU fallback to keep in sync.
+- `tiny_llm_ext::quantized_matmul(...)` in `quantized_matmul.cpp` checks the
+  inputs and returns the lazy output array of shape `(M, K)`. Require
+  `group_size == 128` and `bits == 4`, BF16 scales, biases, and activations
+  that all share one dtype, and shapes that agree with each other.
+- `QuantizedMatmul::eval_cpu(...)` in `quantized_matmul.cpp` should throw a
+  clear error. This operator runs only on the GPU; there is no CPU fallback
+  to keep in sync.
 
 On the Python side, `quantized_matmul` in `quantize.py` flattens the leading
 dimensions of `a` into `M`, calls `mx.contiguous` on each input, calls the
@@ -447,8 +450,9 @@ different `M`:
 
 Implement these functions:
 
-- the two kernels above in `quantized_matmul.metal`, instantiated for
-  `bfloat16_t`;
+- `quantized_matmul_vanilla_w4a16_g128` and
+  `quantized_matvec_x4_fast_w4a16_g128` in `quantized_matmul.metal`,
+  instantiated for `bfloat16_t`;
 - `QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`;
 - `quantized_matmul_vanilla` and `quantized_matvec_custom` in `quantize.py`,
   so each kernel can be called directly in tests and comparisons.
@@ -727,8 +731,8 @@ remaining limits:
 
 - in the 128 / 128 and 8,192 / 128 rows, several paired runs fell below 95%
   even though the medians did not;
-- two long measurement campaigns were interrupted partway, and those runs are
-  kept in the results;
+- one long measurement campaign was interrupted twice, and the runs on both
+  sides of each interruption are kept in the results;
 - the course model's outputs differ numerically from MLX's;
 - the course model failed a biology-answer check, and MLX's answer to a
   factual check had its own problem;
