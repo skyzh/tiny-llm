@@ -107,9 +107,9 @@ positive scale: s =  0.0867, b = -0.5  =>  q=0 is -0.5, q=15 is about  0.8
 negative scale: s = -0.0867, b =  0.8  =>  q=0 is  0.8, q=15 is about -0.5
 ```
 
-Both orientations appear in the shipped Qwen3-4B checkpoint. If you rebuild
-the scale from an assumed min/max, half of the groups come out reversed. Use
-`scale` and `bias` as stored.
+Because a stored scale can be negative, you cannot assume code 0 is the low
+end. If you rebuild the scale from an assumed min/max, every group with a
+negative scale comes out reversed. Use `scale` and `bias` as stored.
 
 ### Eight Codes in One `uint32`
 
@@ -509,14 +509,17 @@ once per weight.
 
 **Skip the shifts.** Four codes fit in one 16-bit half-word. Masking that
 half-word with `0x00F0` gives `16 * q` instead of `q`. If you divide the
-matching activation by 16 once, before the loop, the factor cancels:
+matching activation by 16 once, before the loop, the factor cancels. Call the
+pre-divided activations `a0'` to `a3'`:
 
 ```plain
-half-word  = 0x7620              # codes 0, 2, 6, 7
-a0 * (hw & 0x000F) = a0        * 0
-a1 * (hw & 0x00F0) = (a1/16)   * 32    = a1 * 2
-a2 * (hw & 0x0F00) = (a2/256)  * 1536  = a2 * 6
-a3 * (hw & 0xF000) = (a3/4096) * 28672 = a3 * 7
+hw  = 0x7620                      # codes 0, 2, 6, 7
+a0' = a0,  a1' = a1/16,  a2' = a2/256,  a3' = a3/4096
+
+a0' * (hw & 0x000F) = a0        * 0     = a0 * 0
+a1' * (hw & 0x00F0) = (a1/16)   * 32    = a1 * 2
+a2' * (hw & 0x0F00) = (a2/256)  * 1536  = a2 * 6
+a3' * (hw & 0xF000) = (a3/4096) * 28672 = a3 * 7
 ```
 
 The kernel scales each lane's 16 activations once, then uses only masks and
@@ -596,7 +599,15 @@ src/tiny_llm/qwen3_week2.py
 
 Now make the cached model use the new operator. Update
 `Qwen3ModelWeek2.__init__`, `Qwen3MultiHeadAttention.__call__`,
-`Qwen3MLP.__call__`, and `Qwen3ModelWeek2.__call__`:
+`Qwen3MLP.__call__`, and `Qwen3ModelWeek2.__call__`.
+
+Add the packed path next to the dense one; do not replace it. The model takes
+a `checkpoint` name, and `WEEK2_CHECKPOINT_FEATURES` in `qwen3_week2.py`
+records what each checkpoint turns on. `quantized_weights` is false for
+`kv-cache` and `capacity-cache` and true from `quantized-matvec` onward. Keep
+the dense BF16 weights, embedding, and `linear` calls for the two Day 1
+checkpoints, so `capacity-cache` stays a fair control. When
+`quantized_weights` is true:
 
 - Load every attention projection (`wq`, `wk`, `wv`, `wo`) and MLP projection
   (`w_gate`, `w_up`, `w_down`) with `QuantizedWeights.from_mlx_layer(...)`
@@ -690,20 +701,39 @@ prefill, Day 4 adds RMSNorm, RoPE, and SwiGLU kernels, and Day 5 adds tiled
 prefill attention.
 The supplied reference adds further scheduling on top of those. The table
 compares that finished Week 2 reference with stock MLX running the same
-Qwen3-4B model. It was measured on one Apple-silicon Mac. Each case ran eight
-times on each model, and each course-model run was paired with one MLX run. A
-value above 100% means the course model was faster.
+Qwen3-4B model. A value above 100% means the course model was faster.
 
-| Prompt / generated tokens | Total throughput vs. MLX (medians) | Worst paired run |
-|---|---:|---:|
-| 128 / 128 | 95.1% | 91.6% |
-| 512 / 128 | 98.5% | 95.0% |
-| 2,048 / 128 | 97.9% | 97.3% |
-| 8,192 / 128 | 96.2% | 90.4% |
-| 2,048 / 16 | 97.9% | 95.5% |
-| 2,048 / 512 | 96.8% | 95.6% |
-| 32,640 / 128 | 97.7% | 96.6% |
-| 8,192 / 8,192 | 101.3% | 97.3% |
+| Prompt / generated tokens | Total throughput vs. MLX | Worst paired run | Paired runs below 95% |
+|---|---:|---:|---:|
+| 128 / 128 | 95.1% | 91.6% | 5 of 8 |
+| 512 / 128 | 98.5% | 95.0% | 0 of 8 |
+| 2,048 / 128 | 97.9% | 97.3% | 0 of 8 |
+| 8,192 / 128 | 96.2% | 90.4% | 2 of 8 |
+| 2,048 / 16 | 97.9% | 95.5% | 0 of 8 |
+| 2,048 / 512 | 96.8% | 95.6% | 0 of 8 |
+| 32,640 / 128 | 97.7% | 96.6% | 0 of 8 |
+| 8,192 / 8,192 | 101.3% | 97.3% | 0 of 8 |
+
+*Where these numbers come from:* separate measurement runs on one
+Apple-silicon Mac, made on an earlier development revision of the reference
+before it was merged in [PR #328](https://github.com/skyzh/tiny-llm/pull/328).
+They are not a fresh timing of the merged code. Each case ran eight times on
+each model, with each course-model run paired with one MLX run. The
+throughput column is the ratio of the two medians (MLX's median total time
+divided by the course model's), not a median of the paired ratios. All runs
+used BF16 activations, W4 weights with group size 128, one request at a time,
+and the same fixed number of generated tokens. PR #328 records the
+remaining limits:
+
+- in the 128 / 128 and 8,192 / 128 rows, several paired runs fell below 95%
+  even though the medians did not;
+- two long measurement campaigns were interrupted partway, and those runs are
+  kept in the results;
+- the course model's outputs differ numerically from MLX's;
+- the course model failed a biology-answer check, and MLX's answer to a
+  factual check had its own problem;
+- runs keep generating past a natural end-of-sequence token to reach the fixed
+  count, so they say nothing about output quality over the full length.
 
 These are whole-request times, including the CPU work of preparing and
 submitting GPU commands, not isolated kernel timings. The course model was
