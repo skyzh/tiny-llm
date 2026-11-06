@@ -57,8 +57,12 @@ pdm run test --week 2 --day 4 -- -k task_1
 ```
 
 For each operator, check its numbers against a readable version first, then
-run the live model at that operator's checkpoint. A matching operator does not
-show the model uses it; the live run does.
+run the live model at that operator's checkpoint. The live run checks that the
+whole model still works with the change. Neither check shows which kernel the
+model actually called, because the readable path gives the same answers; for
+that, read your wiring (Task 4) or, for RMSNorm, check its dispatch counts.
+
+<a id="why-fusion-helps"></a>
 
 ## Why One Kernel Beats Several Operations
 
@@ -142,9 +146,13 @@ pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint rmsnorm --model qwen3-0.6b --max-tokens 16
 ```
 
-The test compares your BF16 output with `mx.fast.rms_norm`. Separate supplied
-tests cover rows at and past the register-cached limit, so the fallback gets
-checked too.
+The test compares your BF16 output with `mx.fast.rms_norm` on a narrow,
+16-value row, so it exercises only your register-cached path. The repository
+also has tests for rows at and past the 4,096 limit
+(`tests_refsol/test_rmsnorm_register_cache.py`), but they import the
+reference solution, not yours, and the Day 4 test command does not run them
+against your code. Check your wide-row fallback yourself, for example by
+comparing a 4,097-wide row with the readable equation.
 
 ## Task 2: RoPE
 
