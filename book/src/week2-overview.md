@@ -20,6 +20,12 @@ against the checkpoint before it. By Day 5 the expensive parts run on Metal
 kernels you wrote, inside the same Python model structure you built in
 Week 1.
 
+<a id="day-1-route"></a>
+<a id="day-2-route"></a>
+<a id="day-3-route"></a>
+<a id="day-4-route"></a>
+<a id="day-5-route"></a>
+
 ## The Route
 
 | Day | You build | Checkpoint | Compare with |
@@ -33,8 +39,9 @@ Week 1.
 The checkpoints are cumulative. Each one keeps everything the previous one
 turned on and adds one thing, so the difference between two neighbors is the
 effect of that one change. `selected` is the name of the finished Week 2
-model; it turns on the same features as `tiled-prefill` and adds no new
-kernel of its own.
+model. In your solution it turns on the same features as `tiled-prefill` and
+adds no new kernel of its own. (The supplied reference solution adds some
+extra scheduling to `selected`; Day 5 describes it. None of it is your work.)
 
 Pass a checkpoint to the model with `--week2-checkpoint`:
 
@@ -119,6 +126,8 @@ limits, including numerical differences from MLX and answer-quality checks,
 are in [PR #328](https://github.com/skyzh/tiny-llm/pull/328). Your own runs
 with 0.6B will give different numbers. The value of the course model is that
 you can see and change every part of it, not that it beats MLX.
+
+<a id="historical-lessons-and-week-3"></a>
 
 ## Older Week 2 Material
 
