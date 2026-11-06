@@ -578,8 +578,10 @@ allocation), and the change in the counters from Task 1. Those counters are
 your code's bookkeeping, as before, not a measure of what the GPU copied.
 
 The replay does not check that your model uses these operators, and it is not
-a whole-request timing. Your tests and the benchmark above still answer those
-questions. An earlier version of this profiler, on an M4 Pro with older
+a whole-request timing. Those are separate checks: your tests check the
+behavior they cover (outputs, offsets, capacity, and failures), reading your
+model's code tells you which operators it calls, and the benchmark above
+times whole requests. An earlier version of this profiler, on an M4 Pro with older
 course code, put 81.5% of a `kv-cache` decode step in dense projections. Its
 output is not comparable with this one's, so compare only runs you made with
 the current tool and the same case, capacity, and logit setting.
