@@ -1,22 +1,34 @@
 # 🚧 Week 2 Day 2: Keep W4 Packed
 
-Complete [Day 1: Cache and Measure](./week2-01-kv-cache.md) first. Its
-`capacity-cache` checkpoint gives you a matched cached-model baseline, bounded
-dense K/V storage, and a decode roofline. Keep that baseline fixed while changing the
-projection representation. The Day 2 starter
-already supplies the packed-weight container and its
-`QuantizedWeights.from_mlx_layer` loader, the extension declaration and
-binding, fail-closed C++/Metal stubs, and cumulative model switches. Your work
-is to:
+At the end of [Day 1](./week2-01-kv-cache.md) your model reuses its K/V cache,
+so each decode step feeds only one new token through the network. That token
+is cheap to compute, but it still has to visit every projection weight in the
+model. Day 1's roofline showed what that costs: for Qwen3-4B, one decode step
+streams about 8 GB of BF16 weights and does only one floating-point operation
+per byte it reads. Decode spends its time waiting on memory.
 
-1. dequantize selected embedding rows without expanding the full table;
-2. define the lazy quantized-matmul primitive and its validation boundary;
-3. implement the readable Metal matrix control and the decode-shaped SIMD
-   matvec; and
-4. wire packed projections and the tied output head into the live cached model.
+The checkpoint you download is already much smaller than that. The
+`Qwen3-4B-MLX-4bit` files store each weight as a 4-bit code. Up to now the
+course has unpacked those codes into BF16 when loading the model, then read
+the unpacked copy on every token. Today you stop doing that. The weights stay
+packed in memory, and a Metal kernel unpacks each one in registers right before
+multiplying it by the activation. Every token then reads about a quarter of
+the bytes.
 
-Build the learner and reference extensions before running Day 2's native
-tests. Begin with the Python wrapper gate, then exercise the GPU operator:
+By the end of the day, you will have:
+
+1. an embedding lookup that unpacks only the rows it needs;
+2. a quantized-matmul operator, backed by your own MLX primitive;
+3. two Metal kernels for it: a simple one that is easy to check, and a fast
+   one shaped for decode; and
+4. a cached Qwen3 model whose projections and output head all run through that
+   operator.
+
+The starter already supplies the packed-weight container
+(`QuantizedWeights` and its `from_mlx_layer` loader), the C++ declaration and
+Python binding for the operator, CMake registration, and stubs that raise an
+error naming the missing function. Build both extensions, then run the first
+tests. They fail until you fill in the stubs:
 
 ```bash
 pdm run build-ext
@@ -25,211 +37,162 @@ pdm run test --week 2 --day 2 -- -k task_1
 pdm run test --week 2 --day 2 -- -k gpu
 ```
 
-Finish with the complete Day 2 gate and the `quantized-matvec` model
-checkpoint. The result is complete only when the cached model dispatches
-through your quantized path; packed storage and an isolated fast kernel are
-intermediate steps.
-
 **📚 Readings**
 
 - [Model Compression and Quantization](https://huggingface.co/blog/hf-bitsandbytes-integration)
 - [MLX Extensions Development Guide](https://ml-explore.github.io/mlx/build/html/dev/extensions.html)
 - [Quantized Matmul on GPU (Video)](https://www.youtube.com/watch?v=jYCxVirq4d0)
 
-## Debug Metal Without a CPU Twin
+## Eight Weights, Four Bits Each
 
-You do not need a C++ CPU twin. Bring up the operator with this three-level
-validation ladder:
-
-1. Write the equation in Python with `mlx.core`. This is the semantic oracle.
-2. Translate it into a deliberately simple Metal kernel, usually with one
-   thread responsible for one output element.
-3. Optimize the validated Metal kernel with SIMD groups, vectorized loads, or
-   SIMD-group matrix operations.
-
-Compare each level with the one immediately above it. Full-model text output
-is too indirect to diagnose an optimized kernel.
-
-### Make Failures Small and Synchronous
-
-Use deterministic fixtures whose expected values are easy to inspect: zeros,
-ones, ramps, identity-like weights, and a fixed random seed. Exercise a small
-aligned shape and then a tail shape. For example, test 8 and 10 rows for an
-8-row tile, or sequence lengths 32 and 35 for a 32-token block.
-
-MLX execution is lazy, so force evaluation directly after the operator under
-test. This turns a delayed compile or GPU execution failure into a failure at
-the responsible call site:
-
-```python
-expected = python_reference(*inputs)
-actual = metal_operator(*inputs)
-mx.eval(expected, actual)
-
-assert actual.shape == expected.shape
-assert actual.dtype == mx.bfloat16
-assert mx.allclose(actual, expected, rtol=2e-2, atol=2e-2).item()
-```
-
-When a check fails, inspect the wrapper boundary before the arithmetic. Assert
-the tensor rank, shape, dtype, and contiguity assumptions in Python or C++, and
-verify that the encoded buffer indices match the Metal function signature.
-Then classify the failure:
-
-- a pipeline creation error usually means the kernel name, specialization, or
-  Metal compilation is wrong;
-- an execution or address error usually means a grid, bounds check, stride, or
-  buffer binding is wrong;
-- a finite but inaccurate result usually means the indexing, reduction, mask,
-  dequantization, or accumulator update is wrong.
-
-For a numerical mismatch, simplify the schedule temporarily. Assign one output
-to one thread, remove cooperative loads, and compare an intermediate such as a
-dequantized weight group, a partial dot product, or an online-softmax row. A
-small debug-only output buffer is usually more useful than printing from every
-GPU thread. Restore one optimization at a time, rerunning the aligned and
-tail-shape tests after each change.
-
-## Represent Weights With Fewer Bits
-
-**Quantization** stores each floating-point weight as a value from a small
-integer codebook plus the parameters needed to reconstruct an approximation.
-This course uses **weight-only 4-bit quantization**:
-
-- **W4** means that each logical weight is represented by a 4-bit code.
-- **A16** means that activations and outputs remain 16-bit floating point.
-- The resulting path is called **W4A16**. This course uses BF16 for its
-  activations, scales, biases, and outputs.
-
-The 16 possible codes approximate the original values. In return for some
-numerical precision, the smaller representation reduces memory traffic.
-
-The kernel does not materialize a dense BF16 weight matrix. It unpacks each
-4-bit code, reconstructs the weight in registers, and immediately multiplies
-it by the corresponding BF16 activation.
-
-### Group-Wise Affine Quantization
-
-Rather than applying one scale to an entire weight matrix, divide each row into
-**groups** and quantize each group independently. A local scale and bias retain
-more information about that group's weight distribution.
-
-For a weight matrix `W` of shape `(K, N)`, divide each row into groups of size
-`G`. The Qwen3-4B MLX 4-bit checkpoint used in this course has a fixed group
-size of 128:
+Start with a small example. Suppose a row of a weight matrix begins with these
+eight values:
 
 ```plain
-Logical weight matrix W: K × N
-
-Group size: G = 128
-Number of groups per row = N / G
-
-For each stored group of G consecutive values in a row:
-  1. Unpack each unsigned 4-bit code q in [0, 15]
-  2. Load the group's stored scale s and bias b
-  3. Reconstruct each value as q * s + b
+w = [-0.50, -0.31, 0.02, 0.10, 0.33, 0.47, 0.61, 0.80]
 ```
 
-### Reconstruct a Stored Group
+Four bits give you 16 codes, `0` through `15`. One simple way to map the
+values onto those codes is to spread the codes evenly between the smallest
+and largest value:
 
-The checkpoint already contains packed codes and affine parameters. For an
-unpacked unsigned code `q`, use the stored scale `s` and bias `b` directly:
+```plain
+bias  b = min(w)                   = -0.50
+scale s = (max(w) - min(w)) / 15   =  0.08667
+code  q = round((w - b) / s)
+
+q = [0, 2, 6, 7, 10, 11, 13, 15]
+```
+
+To get a weight back, reverse the mapping:
 
 $$
 \hat{w} = q s + b
 $$
 
-Read the equation as: reconstructed weight equals the unsigned code `q`
-multiplied by its stored signed scale `s`, plus its stored bias `b`.
-
-The codes are unsigned, but the stored scale is signed. A positive scale maps
-code 0 to the lower endpoint and code 15 toward the upper endpoint. A negative
-scale reverses the mapping: code 0 is the upper endpoint and code 15 moves
-toward the lower endpoint. Both orientations occur in the shipped Qwen3-4B MLX
-checkpoint. Use `scale` and `bias` as stored instead of reconstructing them from
-an assumed min/max orientation.
-
-For example, these two stored parameter pairs reconstruct the same endpoint
-range in opposite code order:
-
 ```plain
-positive orientation: scale =  0.0867, bias = -0.5  => q=0 is -0.5, q=15 is about 0.8
-negative orientation: scale = -0.0867, bias =  0.8  => q=0 is  0.8, q=15 is about -0.5
+q * s + b = [-0.500, -0.327, 0.020, 0.107, 0.367, 0.453, 0.627, 0.800]
 ```
 
-All required quantized-matmul tests use `group_size = 128` and BF16 scales,
-biases, activations, and outputs. Normalize those tensors to BF16 in your
-solution's model loader so every later kernel receives one model dtype.
+Each reconstructed value is within half a step (`s / 2`, about 0.043) of the
+original. That small error is the price of storing four bits per weight
+instead of sixteen.
 
-### Packed Storage Layout
+You will never run this quantization step yourself. The checkpoint already
+contains the codes, scales, and biases, and the model may have chosen them
+differently from the min/max rule above. Your code only does the
+reconstruction, `q * s + b`, using the stored numbers exactly as they are.
 
-The 4-bit codes are packed for compact storage and efficient access:
+### Groups of 128
+
+A single scale and bias for a whole matrix row would be a poor fit: one large
+weight would stretch the range and waste most of the 16 codes on values that
+never occur. Instead, each row is split into **groups** of consecutive
+weights, and every group gets its own scale and bias. The Qwen3 MLX 4-bit
+checkpoints use a group size of 128, and every required test in this chapter
+does too.
+
+The format has a name: **W4A16**. Weights use 4-bit codes; activations stay
+16-bit floating point. In this course, activations, scales, biases, and
+outputs are all BF16.
+
+### The Scale Can Be Negative
+
+The codes are unsigned, but the stored scale is signed. With a positive scale,
+code 0 is the low end of the group's range. With a negative scale, code 0 is
+the high end:
 
 ```plain
-Logical weight matrix: K × N
-Dense BF16 storage: K × N bfloat16 (2 bytes each) = 2KN bytes
-W4 code storage: K × N int4 (0.5 bytes each) = 0.5KN bytes
-
-Packing: 8 × 4-bit values fit in one uint32 (32 bits)
-
-Packed codes shape: K × (N / 8) uint32
-Scales shape: K × (N / G) bfloat16
-Biases shape: K × (N / G) bfloat16
+positive scale: s =  0.0867, b = -0.5  =>  q=0 is -0.5, q=15 is about  0.8
+negative scale: s = -0.0867, b =  0.8  =>  q=0 is  0.8, q=15 is about -0.5
 ```
 
-Example packing for 8 consecutive 4-bit values `[a, b, c, d, e, f, g, h]`:
+Because a stored scale can be negative, you cannot assume code 0 is the low
+end. If you rebuild the scale from an assumed min/max, every group with a
+negative scale comes out reversed. Use `scale` and `bias` as stored.
+
+### Eight Codes in One `uint32`
+
+A 4-bit code is too small to address on its own, so eight codes share one
+32-bit word. The first code sits in the lowest four bits:
 
 ```plain
-uint32_value = (h << 28) | (g << 24) | (f << 20) | (e << 16) |
-               (d << 12) | (c << 8)  | (b << 4)  | a
+codes  [a, b, c, d, e, f, g, h] = [0, 2, 6, 7, 10, 11, 13, 15]
 
-Unpacking:
-  a = (uint32_value >> 0)  & 0xF
-  b = (uint32_value >> 4)  & 0xF
-  c = (uint32_value >> 8)  & 0xF
-  ...
-  h = (uint32_value >> 28) & 0xF
+word = (h << 28) | (g << 24) | (f << 20) | (e << 16)
+     | (d << 12) | (c << 8)  | (b << 4)  | a
+     = 0xFDBA7620
+
+a = (word >> 0)  & 0xF = 0
+b = (word >> 4)  & 0xF = 2
+...
+h = (word >> 28) & 0xF = 15
 ```
 
-## Revisit the Decode Roofline
+Read the hex digits from right to left and you get the codes in order:
+`0, 2, 6, 7, A, B, D, F`.
 
-The packed codes are not the entire W4 representation. Each group of 128
-weights also stores one BF16 scale and one BF16 bias:
+For a matrix with `K` output rows and `N` input columns, the checkpoint stores
+three arrays:
 
 ```plain
-bytes per W4 weight = 0.5 + (2 + 2) / 128 = 0.53125 bytes
-streamed W4 bytes   = 4,022,272,000 × 0.53125 = 2.137 GB per token
+packed codes: K × (N / 8)    uint32    eight codes per word
+scales:       K × (N / 128)  bfloat16  one per group
+biases:       K × (N / 128)  bfloat16  one per group
+```
+
+The `QuantizedWeights` container in `src/tiny_llm/quantize.py` holds exactly
+these fields:
+
+| Field | Shape | Meaning |
+|-------|-------|---------|
+| `weight` | `(K, N/8)` uint32 | Packed codes, eight per word, lowest nibble first. |
+| `scales` | `(K, N/G)` bfloat16 | Signed per-group scale. Its sign decides which end of the range code 0 maps to. |
+| `biases` | `(K, N/G)` bfloat16 | Per-group offset. Code 0 reconstructs to this value. |
+| `group_size` | int | `G`, the number of weights sharing one scale and bias: `128` here. |
+| `bits` | int | Bits per code: `4` here, so codes run from 0 to 15. |
+
+`QuantizedWeights.from_mlx_layer` reads these fields from an MLX quantized
+layer and converts the scales and biases to BF16. Use it everywhere you load a
+quantized layer rather than writing a second loader.
+
+## How Much Faster Can Decode Get?
+
+The packed codes are half a byte per weight, but each group of 128 also
+carries a 2-byte scale and a 2-byte bias. Add that metadata and recompute
+Day 1's numbers for Qwen3-4B:
+
+```plain
+bytes per W4 weight  = 0.5 + (2 + 2) / 128   = 0.53125 bytes
+streamed bytes/token = 4,022,272,000 × 0.53125 = 2.137 GB
 arithmetic intensity = 8.045 GFLOPs / 2.137 GB = 3.765 FLOPs/byte
 ```
 
-Now W4 can be added to the dense comparison:
-
-| Weight format | Value bits | Metadata per 128 weights | Effective bytes per weight | Streamed weight bytes per token | Weight arithmetic intensity |
+| Weight format | Value bits | Metadata per 128 weights | Bytes per weight | Weight bytes per token | FLOPs per byte |
 |---|---:|---|---:|---:|---:|
-| FP16 | 16 | None | 2 | 8.045 GB | 1.0 FLOP/byte |
-| BF16 | 16 | None | 2 | 8.045 GB | 1.0 FLOP/byte |
-| W4 | 4 | One BF16 scale and one BF16 bias | 0.53125 | 2.137 GB | 3.765 FLOPs/byte |
+| FP16 | 16 | None | 2 | 8.045 GB | 1.0 |
+| BF16 | 16 | None | 2 | 8.045 GB | 1.0 |
+| W4 | 4 | One BF16 scale and one BF16 bias | 0.53125 | 2.137 GB | 3.765 |
 
-This representation reduces projection weight traffic by 3.765×. Treat that
-ratio as a weight-traffic advantage for one-token decode, not as an end-to-end
-speedup promise.
+Decode reads 3.765 times fewer projection-weight bytes per token. If decode
+were limited only by reading those weights, that would also be the speedup.
+Real decode also reads K/V, runs normalization and attention, and launches
+many small operations, so expect a smaller gain.
 
-### Theoretical Decode Roofline Across Apple Silicon
+### A Bandwidth Ceiling for Each Chip
 
-Apple publishes unified-memory bandwidth but not a directly comparable BF16
-GPU TFLOPS figure. A bandwidth roofline can therefore be calculated without
-assuming a compute ceiling:
+Apple publishes memory bandwidth for each chip, but not a comparable BF16
+GPU throughput figure. Bandwidth alone still gives a useful upper bound:
 
 ```plain
-ideal tokens/s = advertised memory bandwidth / streamed weight bytes per token
+best possible tokens/s = memory bandwidth / weight bytes per token
 ```
 
-The table uses the highest-bandwidth configuration of each named chip listed
-in the cited Apple product specifications. GB is decimal, matching Apple's
-specifications. The results are theoretical ceilings, not benchmark
-measurements.
+The table below uses the highest-bandwidth configuration of each chip in
+Apple's published specifications, with decimal GB as Apple uses. These
+numbers are ceilings for the arithmetic above, not measurements.
 
-| Chip | Bandwidth | FP16/BF16 roofline | W4 roofline |
+| Chip | Bandwidth | FP16/BF16 ceiling | W4 ceiling |
 |---|---:|---:|---:|
 | M1 Pro | 200 GB/s | 24.9 tok/s | 93.6 tok/s |
 | M1 Max | 400 GB/s | 49.7 tok/s | 187.2 tok/s |
@@ -243,164 +206,136 @@ measurements.
 | M4 Pro | 273 GB/s | 33.9 tok/s | 127.8 tok/s |
 | M4 Max | 546 GB/s | 67.9 tok/s | 255.5 tok/s |
 
-The advertised bandwidths come from Apple's specifications for
+Bandwidths come from Apple's specifications for
 [M1 Pro and Max](https://www.apple.com/newsroom/2021/10/introducing-m1-pro-and-m1-max-the-most-powerful-chips-apple-has-ever-built/),
 [M1 Ultra](https://www.apple.com/newsroom/2022/03/apple-unveils-m1-ultra-the-worlds-most-powerful-chip-for-a-personal-computer/),
 [M2 Pro and Max](https://www.apple.com/newsroom/2023/01/apple-unveils-m2-pro-and-m2-max-next-generation-chips-for-next-level-workflows/),
 [M2 Ultra](https://www.apple.com/newsroom/2023/06/apple-introduces-m2-ultra/),
 [M3 Pro and Max](https://support.apple.com/en-us/117736),
 [M3 Ultra in the 2025 Mac Studio](https://support.apple.com/en-us/122211), and
-[M4 Pro and Max](https://support.apple.com/en-us/121553). The 2025 Mac Studio
-specifications list M3 Ultra alongside M4 Max, not an M4 Ultra; this dated
-comparison stops at M4 Pro/Max and makes no claim about subsequent products.
+[M4 Pro and Max](https://support.apple.com/en-us/121553). The table stops at
+M4 Pro and Max; it makes no claim about later chips.
 
-These values assume peak advertised bandwidth, one read of every projection
-weight, and no other traffic or work. A complete model also reads activations
-and KV, launches other operators, and cannot sustain peak bandwidth
-continuously, so actual throughput is lower. The
-[performance appendix](./appendix-performance.md) records measured results
-separately from this theoretical exercise.
+A real model falls short of these ceilings because it reads more than
+projection weights and cannot hold peak bandwidth for a whole step. The
+[performance appendix](./appendix-performance.md) keeps measured results
+separate from this exercise.
 
-This roofline describes one-token decode, where `M = 1` and each streamed
-weight serves one activation row. Prefill reuses each weight tile across many
-rows and raises arithmetic intensity, so it needs a matrix schedule. The decode
-bandwidth ratio does not predict prefill performance.
+The roofline also applies only to decode, where one activation row meets each
+weight. Prefill sends many rows through the same weights, so each byte is
+reused many times and the bottleneck moves toward arithmetic. Day 3 gives
+prefill its own kernel.
 
-## Quantized Matrix Multiplication
+## The Math You Will Implement
 
-### Mathematical Formulation
+The course writes a linear layer as `C = A Bᵀ`:
 
-For the matrix product `C = A B^T`, multiply `A` by the transpose of `B`.
-The arrays are:
+- `A`: activations, shape `(M, N)`, BF16;
+- `B`: weights, shape `(K, N)`, stored as W4 codes;
+- `C`: outputs, shape `(M, K)`, BF16.
 
-- `A`: shape `(M, N)`, bfloat16 (activations)
-- `B`: shape `(K, N)`, **quantized** to int4 (weights)
-- `C`: shape `(M, K)`, same 16-bit dtype as `A` (output)
-
-Each element `C[i, k]` is computed as:
+`M` is the number of activation rows after you flatten every leading
+dimension. During decode, `M` is 1. Each output is a dot product over the
+input dimension:
 
 $$
-C[i, k] = \sum_{j=0}^{N-1} A[i, j] \times B[k, j]
+C[i, k] = \sum_{j=0}^{N-1} A[i, j] \cdot B[k, j]
 $$
 
-For output row `i` and column `k`, multiply `A[i, j]` by `B[k, j]` for
-each input position `j` from zero through `N - 1`, then add the products.
-
-With quantization, `B[k, j]` is represented as:
+With quantized weights, `B[k, j]` is reconstructed from its code and its
+group's parameters, where `g = floor(j / G)`:
 
 $$
-B[k, j] = B_{\text{quantized}}[k, j] \times \text{scale}[k, g] + \text{bias}[k, g]
+B[k, j] = q[k, j] \cdot \text{scale}[k, g] + \text{bias}[k, g]
 $$
 
-Reconstruct `B[k, j]` by multiplying its unsigned four-bit code by the
-stored scale for row `k` and group `g`, then adding that group's stored bias.
-
-Here, `g = floor(j / G)` is the group index.
-
-Substituting:
+Split the sum by group. Inside a group the scale and bias are constants, so
+they come out of the inner sum:
 
 $$
-C[i, k] = \sum_{g=0}^{N/G-1} \sum_{j'=0}^{G-1} A[i, g \times G + j'] \times (B_{\text{quantized}}[k, g \times G + j'] \times \text{scale}[k, g] + \text{bias}[k, g])
+C[i, k] = \sum_{g=0}^{N/G-1} \left( \text{scale}[k, g] \sum_{j'=0}^{G-1} A[i, gG + j'] \, q[k, gG + j'] \;+\; \text{bias}[k, g] \sum_{j'=0}^{G-1} A[i, gG + j'] \right)
 $$
 
-For each group `g` and position `j'` within it, multiply activation
-`A[i, g*G + j']` by the reconstructed weight at row `k` and that position;
-sum those products over all `N/G` groups and all `G` positions per group.
-
-Rearranging:
+In words: for each group, multiply the scale by the dot product of activations
+and raw codes, add the bias times the plain sum of those activations, and add
+up the group results. The fast kernel later in this chapter uses exactly this
+form. For one group, the identity is:
 
 $$
-C[i, k] = \sum_{g=0}^{N/G-1} \left( \text{scale}[k, g] \sum_{j'=0}^{G-1} A[i, g \times G + j'] \times B_{\text{quantized}}[k, g \times G + j'] + \text{bias}[k, g] \sum_{j'=0}^{G-1} A[i, g \times G + j'] \right)
+\sum_j a_j (s q_j + b) = s \sum_j a_j q_j + b \sum_j a_j
 $$
 
-Equivalently, within each group, multiply the stored scale by the sum of
-activation-times-code products, and add the stored bias multiplied by the sum
-of those same activations. Add the group results to obtain `C[i, k]`.
-
-The scale and bias are constant within a group, so the computation can reuse
-them across all values in that group.
-
-### Computation Flow
+Written as a loop, the direct version computes one output like this:
 
 ```plain
-Input:
-  A: M × N (bfloat16 activations)
-  B_quantized: K × (N/8) (uint32, packed weights)
-  scales: K × (N/G) (bfloat16)
-  biases: K × (N/G) (bfloat16)
-
-Output:
-  C: M × K (bfloat16)
-
-For each output element C[i, k]:
-  sum = 0  # float accumulator
-  for each group g in 0..(N/G - 1):
+for each output C[i, k]:
+  sum = 0.0                                  # float32 accumulator
+  for each group g in 0 .. N/G - 1:
     scale = scales[k, g]
-    bias = biases[k, g]
-
-    # Process G values in the group (G/8 uint32 packs)
-    for each pack p in 0..(G/8 - 1):
-      packed_value = B_quantized[k, g*(G/8) + p]
-
-      # Unpack 8 × 4-bit values
-      for bit_offset in [0, 4, 8, 12, 16, 20, 24, 28]:
-        quantized = (packed_value >> bit_offset) & 0xF
-        b_value = quantized * scale + bias
-        a_value = A[i, g*G + p*8 + bit_offset/4]
-        sum = sum + a_value * b_value
-
+    bias  = biases[k, g]
+    for each packed word p in 0 .. G/8 - 1:  # 16 words per group
+      word = B_packed[k, g * (G/8) + p]
+      for shift in [0, 4, 8, ..., 28]:
+        q = (word >> shift) & 0xF
+        a = A[i, g*G + p*8 + shift/4]
+        sum += a * (q * scale + bias)
   C[i, k] = bfloat16(sum)
 ```
 
-## Task 1: Implement Quantized Linear and Embedding
+## Task 1: Unpack in Python First
 
 ```
 src/tiny_llm/quantize.py
 src/tiny_llm/embedding.py
 ```
 
-Inspect and reuse the starter's `QuantizedWeights.from_mlx_layer` packed-weight
-plumbing. Modify these learner-owned functions:
+Before writing any GPU code, write the reconstruction in plain `mlx.core`.
+This version becomes the reference you trust when a kernel misbehaves.
 
-- `dequantize_weights` and `quantized_linear` in
-  `src/tiny_llm/quantize.py`;
-- `QuantizedEmbedding.__call__` and `QuantizedEmbedding.as_linear` in
-  `src/tiny_llm/embedding.py`.
+The starter's `QuantizedWeights.from_mlx_layer` already loads the packed
+fields; reuse it rather than writing another loader. Implement these
+functions:
 
-`QuantizedWeights` holds a quantized matrix and its dequantization parameters:
+- `dequantize_weights` in `quantize.py`. Unpack each `uint32` with shifts and
+  masks, repeat each group's scale and bias across its 128 values, and
+  compute `q * scale + bias`. Do not call `mx.dequantize`; the point is to
+  write the unpacking yourself.
+- `QuantizedEmbedding.__init__`, `QuantizedEmbedding.__call__`, and
+  `QuantizedEmbedding.as_linear` in `embedding.py`.
 
-| Field | Shape | Description |
-|-------|-------|-------------|
-| `weight` | `(K, N/8)` uint32 | Packed quantized weights. Each uint32 stores eight consecutive 4-bit values. |
-| `scales` | `(K, N/G)` bfloat16 | Stored signed per-group scale factors for dequantization. The sign determines which endpoint maps to the low codes. |
-| `biases` | `(K, N/G)` bfloat16 | Stored per-group offsets. Code 0 reconstructs to this value. |
-| `group_size` | int | Number of consecutive values that share the same scale/bias. For the Qwen3 MLX 4-bit weights used here, this is `128`. |
-| `bits` | int | Quantization bit width (typically 4, meaning values are in range `[0, 15]`) |
+The token embedding table is quantized too, and it is large: `vocab_size`
+rows of `hidden_size` values. A lookup should only unpack the rows it needs.
+`embedding(input_ids)` gathers the packed words, scales, and biases for the
+requested token ids, then calls `dequantize_weights` on just those rows. The
+ids may arrive as `uint32` values from the sampler, so accept them as well as
+`int32`.
 
-The supplied `from_mlx_layer` method extracts these fields from an MLX
-quantized layer during model loading. Reuse it rather than introducing a second
-loader.
+Qwen3 ties its output head to the embedding table: the same matrix that maps
+token ids to vectors also maps the final hidden state back to vocabulary
+logits. `embedding.as_linear(h)` is that output projection. Implement it as
+`quantized_linear(h, weight)` so it reuses the quantized-matmul path instead
+of expanding the whole `vocab_size × hidden_size` table. It starts working
+once Task 3 is done.
 
-Then implement `quantized_linear` as a wrapper around `quantized_matmul`, using
-the same input convention as the standard `linear` function. The next task
-makes `quantized_matmul` runnable.
+Also implement two thin wrappers in `quantize.py`:
 
-Keep the token embedding table quantized too. Add a `QuantizedEmbedding`
-wrapper with two call patterns:
+- `quantized_linear(x, w, bias=None)` takes the same arguments as Week 1's
+  `linear`. On the course path, it chooses a kernel from the number of rows,
+  as described in Task 3.
+- `mlx_quantized_linear(x, w, bias=None)` computes the same result with
+  `mx.quantized_matmul(..., transpose=True)`. This is a control, not your
+  implementation: the Task 4 model test builds a second copy of your model
+  that routes through it, then compares the two. `quantized_linear` should
+  call it only when `w.use_mlx_quantized_linear` is true.
 
-- `embedding(input_ids)` performs a row lookup. Gather the matching packed
-  weights, scales, and biases. Unpack each `uint32` with shifts and masks,
-  repeat each group's scale and bias across its 128 values, and compute
-  `q * scale + bias` with basic `mlx.core` array operations. Do not call
-  `mx.dequantize`. Put this unpacking logic in `dequantize_weights(...)` so
-  the embedding and its direct tests share one explicit implementation.
-- `embedding.as_linear(h)` is the tied output projection. Implement this with
-  `quantized_linear(h, embedding_weight)` so it uses your quantized matmul path
-  instead of materializing the full `vocab_size x hidden_size` table. This path
-  starts working once the quantized matmul kernel is implemented in the next
-  tasks.
+The Task 1 tests check `dequantize_weights` and the embedding lookup against
+`mx.dequantize`:
 
-## Task 2: Define the Quantized Matmul Primitive
+```bash
+pdm run test --week 2 --day 2 -- -k task_1
+```
+
+## Task 2: Declare the Operator
 
 ```
 src/extensions/src/tiny_llm_ext.h
@@ -409,224 +344,225 @@ src/extensions/src/quantized_matmul.cpp
 src/extensions/CMakeLists.txt
 ```
 
-The declaration, fail-closed source stub, binding, and build registration are
-already present. Keep the C++ declarations and definitions in the
-`tiny_llm_ext` namespace, and modify these exact functions:
+An MLX extension operator has two parts. A C++ function checks its inputs and
+returns a lazy `mx::array` that records "this array will be produced by my
+primitive." Later, when MLX evaluates the graph, it calls the primitive's
+`eval_gpu` (or `eval_cpu`) to do the work. MLX owns the arrays and the command
+encoder; you supply the shape logic and the kernel launch. This is the same
+pattern as the `axpby` example in the MLX extension guide.
 
-- **`tiny_llm_ext.h`** — Read the Week 2 Day 2 `quantized_matmul(...)`
-  declaration and `QuantizedMatmul` primitive interface; keep its signature in
-  sync with the binding.
-- **`bindings.cpp`** — Verify the existing `m.def("quantized_matmul", ...)`
-  entry; do not create a second binding.
-- **`quantized_matmul.cpp`** — Replace the body of
-  `tiny_llm_ext::quantized_matmul(...)` to validate
-  inputs, determine the output shape, return a lazy `mx::array`, and reject CPU
-  evaluation explicitly in `QuantizedMatmul::eval_cpu(...)`.
-- **`CMakeLists.txt`** — Verify the existing `quantized_matmul.cpp` source
-  registration; do not add a duplicate.
+Most of the plumbing is already in place. Read the Day 2
+`quantized_matmul(...)` declaration and the `QuantizedMatmul` class in
+`tiny_llm_ext.h`, and check that the existing `m.def("quantized_matmul", ...)`
+binding and the `quantized_matmul.cpp` entry in `CMakeLists.txt` match it.
+Do not add a second binding or a duplicate source entry. Keep everything in
+the `tiny_llm_ext` namespace.
 
-The extension API lets an `mx.array` graph node schedule the Metal loop from
-the next task. MLX owns the array lifetime and command encoder; your primitive
-supplies the quantized multiplication.
+Then fill in `quantized_matmul.cpp`:
 
-Build now to catch declaration, binding, and registration mismatches. The
-focused test checks the Task 1 Python wrappers. The primitive becomes runnable
-after you implement its Metal schedules in Task 3:
+- `tiny_llm_ext::quantized_matmul(...)` in `quantized_matmul.cpp` checks the
+  inputs and returns the lazy output array of shape `(M, K)`. Require
+  `group_size == 128` and `bits == 4`, BF16 scales, biases, and activations
+  that all share one dtype, and shapes that agree with each other.
+- `QuantizedMatmul::eval_cpu(...)` in `quantized_matmul.cpp` should throw a
+  clear error. This operator runs only on the GPU; there is no CPU fallback
+  to keep in sync.
+
+On the Python side, `quantized_matmul` in `quantize.py` flattens the leading
+dimensions of `a` into `M`, calls `mx.contiguous` on each input, calls the
+extension, and reshapes the result back. Metal receives raw buffers, not
+strides, so the extension can only index correctly if the data is laid out
+row by row. Make that a rule at the boundary: call `mx.contiguous` once in
+Python, and check it again in C++ before encoding the kernel.
+
+Build to catch signature and binding mismatches early:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 2 -- -k task_1
 ```
 
-## Task 3: Implement Metal Matrix Products
+## Before You Write Metal: How to Debug a Kernel
 
-Before writing the Metal kernels, connect their work to Metal's four nested
-execution scopes:
+You will not write a C++ CPU version of this operator, so GPU bugs need a
+plan. Use three levels, each checked against the one before it:
 
-- **Lane (thread).** The smallest unit. Each lane executes the same
-  instruction stream with its own register file. Lanes within a SIMD group
-  can share data through `simd_` operations.
-- **SIMD group (warp/subgroup).** A fixed-size set of lanes (32 on Apple
-  GPUs) that execute in lockstep. `simd_sum`, `simd_shuffle`, and
-  `simdgroup_matrix` operations work within this scope. A SIMD group cannot
-  directly share registers with another SIMD group in the same threadgroup.
-- **Threadgroup (block).** A collection of SIMD groups scheduled together on
-  one GPU core. Threadgroups share threadgroup memory (explicitly allocated
-  with `threadgroup` address space and synchronized with
-  `threadgroup_barrier`). The grid is a 1D/2D/3D array of threadgroups.
-- **Grid.** The total work dispatched. `dispatchThreadgroups` launches a grid
-  of threadgroups; the GPU schedules them across available cores. Increasing
-  the grid's threadgroup count can expose more independent work, but a finer
-  partition can also duplicate reads or require partial-result merging.
+1. **The equation in Python** (`dequantize_weights` plus a normal matmul, or
+   `mx.quantized_matmul`). This defines the right answer.
+2. **A simple Metal kernel** where one thread computes one output. It is slow,
+   but you can read it line by line against the equation.
+3. **The fast Metal kernel**, using SIMD groups and wider loads. Compare it
+   with the simple kernel, not with whole-model text output, which is too far
+   from the bug to tell you anything.
 
-Keep two launch knobs separate. Adding SIMD groups within one threadgroup adds
-threads and can raise register demand; it increases threadgroup-memory use only
-when the schedule allocates shared storage per group or tile. Either resource
-can reduce the number of resident threadgroups. Adding threadgroups to the grid
-changes how output or reduction work is partitioned. Measure both choices;
-neither guarantees higher throughput.
+Pick inputs whose answers you can predict: zeros, ones, a ramp, an identity
+matrix, and a fixed random seed. Try one shape that fits the kernel's tiles
+exactly and one with a leftover tail, such as 8 and then 10 rows for an
+8-row tile.
 
-Begin with the required two-SIMD-group matvec schedule for Qwen. Then benchmark
-two, four, eight, and sixteen groups per threadgroup as described below. Change
-the grid partition separately so each measurement isolates one launch knob.
+MLX is lazy, so an error may not appear where it happened. Force evaluation
+right after the operator you are testing:
+
+```python
+expected = python_reference(*inputs)
+actual = metal_operator(*inputs)
+mx.eval(expected, actual)
+
+assert actual.shape == expected.shape
+assert actual.dtype == mx.bfloat16
+assert mx.allclose(actual, expected, rtol=2e-2, atol=2e-2).item()
+```
+
+When something fails, check the boundary before the arithmetic: rank, shape,
+dtype, and contiguity in Python and C++, and whether each buffer index in the
+encoder matches the Metal function signature. The kind of failure narrows
+the search:
+
+- **Pipeline creation fails:** the kernel name, its template instantiation,
+  or the Metal source is wrong.
+- **The GPU faults or reads garbage:** a grid size, bounds check, stride, or
+  buffer binding is wrong.
+- **The result is finite but wrong:** indexing, reduction, masking,
+  unpacking, or the accumulator update is wrong.
+
+For a wrong number, make the kernel simpler until it agrees: one output per
+thread, no cooperative loads. Then compare an intermediate, such as one
+unpacked group or one partial dot product, by writing it to a small debug
+output buffer. Printing from thousands of GPU threads is rarely readable. Put
+optimizations back one at a time, rerunning the aligned and tail shapes after
+each.
+
+## Task 3: Write the Metal Kernels
 
 ```
 src/extensions/src/quantized_matmul.metal
 src/extensions/src/quantized_matmul.cpp
+src/tiny_llm/quantize.py
 ```
 
-Modify these exact starter functions:
+You will write two kernels that compute the same math, each shaped for a
+different `M`:
 
-- `QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`;
-- `quantized_matmul_vanilla_w4a16_g128` and
-  `quantized_matvec_x4_fast_w4a16_g128` in `quantized_matmul.metal`;
-- `quantized_matmul_vanilla` and `quantized_matvec_custom` in
-  `src/tiny_llm/quantize.py` for the explicit comparison paths.
-
-Write both Metal kernels, then connect `eval_gpu` to them. On GPU, the Python
-`quantized_matmul` wrapper always dispatches your primitive. The required path
-never routes through `mx.quantized_matmul`.
-
-Work in two measured stages. Both implement the same math, with schedules for
-different shapes:
-
-1. **Vanilla matmul:** one Metal thread computes one output element. This is
-   the direct GPU translation of the computation flow above and an inspectable
-   bring-up control.
-2. **SIMD matvec:** for decode, SIMD lanes cooperate on the reduction for one
-   activation row and calculate several output columns together.
-
-Here, `M` is the number of activation rows after flattening every leading
-dimension. Day 2 uses this explicit dispatch:
-
-| Activation rows | Kernel | Role at this checkpoint |
+| Activation rows | Kernel | Why |
 |---:|---|---|
-| `M <= 8` | SIMD matvec | Optimized path for decode and other very small matrix inputs. |
-| `M > 8` | Vanilla matmul | Correctness-first prefill path; Day 3 replaces it with a cooperative tiled kernel. |
+| `M <= 8` | `quantized_matvec_x4_fast_w4a16_g128` | Decode and other very small inputs. Lanes share the work of one long dot product. |
+| `M > 8` | `quantized_matmul_vanilla_w4a16_g128` | Prefill. One thread per output: correct and readable. Day 3 replaces it with a tiled kernel. |
 
-The cutoff does not extend the SIMD kernel to larger `M`. These are separate
-schedules: Day 2 optimizes vector-shaped decode and leaves matrix-shaped
-prefill visible for the later benchmark to select.
+Implement these functions:
 
-Keep the vanilla function callable as `quantized_matmul_vanilla` so every
-optimization can be compared directly with its readable control.
+- `quantized_matmul_vanilla_w4a16_g128` and
+  `quantized_matvec_x4_fast_w4a16_g128` in `quantized_matmul.metal`,
+  instantiated for `bfloat16_t`;
+- `QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`;
+- `quantized_matmul_vanilla` and `quantized_matvec_custom` in `quantize.py`,
+  so each kernel can be called directly in tests and comparisons.
 
-### Stage 1: Vanilla Matmul
+### A Quick Map of the GPU
 
-Start with a two-dimensional grid over output row `i` and output column `k`.
-Each thread walks all `N` input values, unpacks eight int4 weights from each
-`uint32`, applies the group scale and bias, and accumulates one `C[i, k]` in
-float32. This kernel repeats activation loads and does not share work, but its
-control flow mirrors the equation and makes it a useful debugging control. The
-Python `mlx.core` equation remains the correctness oracle for both Metal
-schedules.
+Metal organizes work in four levels. You need all four to read the kernels
+below:
 
-Keep the vanilla kernel for matrix-shaped prefill in this chapter; Day 3
-revisits that workload with cooperative tiling.
+- **Thread (lane).** One instruction stream with its own registers.
+- **SIMD group.** 32 lanes on Apple GPUs that run in lockstep. Lanes in one
+  group can combine values directly with functions like `simd_sum`, without
+  going through memory.
+- **Threadgroup.** One or more SIMD groups scheduled together on one GPU core.
+  They can share `threadgroup` memory and wait for each other with
+  `threadgroup_barrier`.
+- **Grid.** All the threadgroups in one launch. `dispatchThreadgroups` sets how
+  many there are, and the GPU spreads them across its cores.
 
-### Stage 2: SIMD Matvec
+### Stage 1: The Simple Kernel
 
-Decode normally has `M = 1`, so an 8×8 matrix tile would leave most rows empty.
-Instead, let one SIMD group reduce the input dimension and use `simd_sum` to
-combine lane-local partial sums. Begin with two output columns per group as an
-inspectable schedule. For the Qwen3-4B checkpoint, evaluate a four-column path
-in which each lane loads two adjacent packed words, or 16 activations, and
-reuses them across the four outputs.
+Launch a 2D grid with one thread per output `(i, k)`. Each thread walks all
+`N` inputs, unpacks eight codes from each `uint32`, applies the group's scale
+and bias, and accumulates in `float32`. Check `i < M` and `k < K` before
+writing.
 
-The optimized path also uses this affine identity to avoid applying the bias
-separately to every unpacked value:
+This kernel reloads the same activations in every thread and shares no work,
+so it is slow. Keep it anyway. It mirrors the loop in the previous section
+almost line for line, which makes it the kernel you compare everything else
+against. `quantized_matmul_vanilla` should always reach it.
 
-$$
-\sum_j a_j(sq_j+b) = s\sum_j a_jq_j + b\sum_j a_j
-$$
+### Stage 2: A Matvec Built for Decode
 
-The left side sums activation `a_j` times its reconstructed weight
-`s*q_j + b`. The right side computes the same sum by multiplying `s` by the
-activation-times-code sum, then adding `b` times the activation sum.
+With `M = 1`, there is only one activation row, and each output is a dot
+product of length `N`, which is 2,560 for Qwen3-4B's hidden size. Giving that
+whole product to one thread leaves most of the GPU idle. Instead, give one
+output tile to a SIMD group:
 
-The kernel also scales the activations once and reads four packed int4 values
-through a 16-bit mask,
-avoiding a shift for every weight and output row. This adds live accumulators,
-so test it as a complete schedule rather than assuming fewer integer
-instructions must be faster.
+- each lane takes a different slice of the `N` inputs and keeps a partial
+  sum;
+- at the end, `simd_sum` adds the 32 partial sums together;
+- lane 0 writes the result.
 
-### Tune the SIMD Schedule
+That works for one output, but every lane still loads activations that the
+neighboring output will load again. So let each SIMD group compute **four**
+outputs at once. In the reference schedule, each lane loads two adjacent
+packed words of a row, which is 16 activations, and reuses those 16 activations
+for all four output rows. Two SIMD groups per threadgroup gives eight outputs
+per threadgroup. For `M` rows and `K` outputs, the grid has
+`M × ceil(K / 8)` threadgroups of 64 threads each.
 
-Treat output width, threadgroup size, and shared-memory reuse as benchmark
-variables. Begin with this Qwen-focused configuration:
+Two more tricks make the inner loop cheaper.
 
-- flatten all leading activation dimensions into `M`,
-- use the custom matvec when `M <= 8` and the vanilla matmul when `M > 8`,
-- compute four output columns per SIMD group and load two adjacent packed words
-  per lane,
-- launch two SIMD groups, or eight output rows, per threadgroup.
+**Apply the bias once per group.** Use the identity from the math section.
+Each lane keeps `Σ a·q` and `Σ a` separately, then adds
+`scale * Σ a·q + bias * Σ a`. The bias is applied once per group instead of
+once per weight.
 
-These thresholds are measured starting points rather than mathematical
-requirements. Keep them visible in the dispatcher and vary one choice at a
-time. Compare two, four, and eight output columns per SIMD group. More columns
-increase activation reuse, but also extend accumulator lifetimes and raise
-register pressure. Compare two, four, eight, and sixteen SIMD groups per
-threadgroup. More groups expose additional outputs, but may duplicate
-activation reads and reduce residency.
+**Skip the shifts.** Four codes fit in one 16-bit half-word. Masking that
+half-word with `0x00F0` gives `16 * q` instead of `q`. If you divide the
+matching activation by 16 once, before the loop, the factor cancels. Call the
+pre-divided activations `a0'` to `a3'`:
 
-Evaluate the affine rearrangement as part of the complete schedule. A lower
-instruction count helps only if the longer-lived activation sum and output
-accumulators do not reduce occupancy. Select the schedule with a synchronized
-whole-model decode benchmark, not with an instruction-count estimate.
+```plain
+hw  = 0x7620                      # codes 0, 2, 6, 7
+a0' = a0,  a1' = a1/16,  a2' = a2/256,  a3' = a3/4096
 
-Define a row-contiguous Python-to-extension contract for scales, biases,
-activations, and packed weights. Call `mx.contiguous` once at that boundary and
-validate the layout in the C++ primitive before encoding the kernel. Metal
-receives raw buffers rather than implicit array strides, so layout is a
-correctness condition as well as a performance condition.
+a0' * (hw & 0x000F) = a0        * 0     = a0 * 0
+a1' * (hw & 0x00F0) = (a1/16)   * 32    = a1 * 2
+a2' * (hw & 0x0F00) = (a2/256)  * 1536  = a2 * 6
+a3' * (hw & 0xF000) = (a3/4096) * 28672 = a3 * 7
+```
 
-Read activations directly in the kernel. The one-row activation is small and
-cache-friendly, while staging it in threadgroup memory adds a barrier to every
-projection. If you test shared staging as an ablation, keep it only when the
-whole-model result shows that reuse outweighs synchronization.
+The kernel scales each lane's 16 activations once, then uses only masks and
+multiply-adds for all four outputs. Fewer integer instructions do not
+guarantee a faster kernel, though. The extra live values compete for
+registers. Judge the trick by measuring the whole model, as described below.
 
-### Kernel Requirements
+A lane's 16 values come from two adjacent words, and a group of 128 spans 16
+words, so a lane's slice never straddles two groups. That is why one scale and
+one bias per output per loop iteration are enough.
 
-Implement both required layouts in `quantized_matmul.metal`:
+Read activations straight from device memory. One activation row is small and
+stays in cache. Copying it into threadgroup memory first would add a barrier
+to every projection. If you try that as an experiment, keep it only if the
+whole-model measurement improves.
 
-- First, implement the vanilla one-thread-per-output matrix grid.
-- For `M <= 8`, assign one SIMD group to an output tile. Cooperatively reduce
-  the input dimension and compute several output columns per group.
-- For `M > 8`, dispatch the vanilla matrix grid. Do not loop over rows with the
-  SIMD matvec schedule; Day 3 introduces the tiled prefill schedule.
-- The required kernel supports `bfloat16_t` inputs and outputs. The Week 2
-  checkpoint does not add a second model-storage dtype.
-- Apply the group-wise dequantization loop defined earlier in this chapter:
-  - Iterate over groups of 128 values.
-  - Unpack int4 values from each `uint32`.
-  - Dequantize each value with `q * scale + bias`.
-  - Accumulate products in `float`, then cast the result to the kernel dtype.
-- Add boundary checks (`i < M`, `k < K`) before writing output.
+### Connect `eval_gpu`
 
-The custom kernel only needs to support `bits = 4` and `group_size = 128`. Use
-the group size to compute `groups_per_row` and the packed-weight offsets.
-Instantiate the required Metal kernel for `bfloat16_t` and select it in
-`eval_gpu`. If you retain an optional `half` specialization, keep it out of the
-model dispatch in your solution.
-
-### GPU Dispatch
-
-Complete `eval_gpu` in `quantized_matmul.cpp` with `axpby`'s GPU dispatch
-pattern:
+Follow the `axpby` dispatch pattern:
 
 1. Get the Metal device and command encoder from the stream.
-2. Load the quantized matmul kernel matching the output dtype from the Metal
-   library.
-3. Bind the input and output buffers and the dimension constants (`M`, `N`,
-   `K`). The buffer order must match the kernel signature.
-4. Select the matrix-vector layout for `M <= 8`; otherwise select the vanilla
-   matrix layout. Keep both paths explicit for direct comparisons.
-   Calculate a SIMD-aligned thread-group configuration and tile output columns
-   so packed input values and activations can be reused. Use the four-column,
-   two-packed-word kernel with two SIMD groups.
-5. Dispatch with `dispatchThreadgroups`.
+2. Choose the kernel. The binding's `use_simdgroup` flag defaults to true.
+   When it is true and `M <= 8`, use the matvec kernel. When it is false, use
+   the simple kernel. (Day 3 adds the case of `use_simdgroup` with `M > 8`.)
+3. Bind the inputs, the output, and the constants `M`, `N`, and `K`, in the
+   order of the kernel's buffer indices.
+4. Size the grid for the chosen kernel and call `dispatchThreadgroups`.
 
-Run the focused GPU gate:
+On the Python side:
+
+- `quantized_matvec_custom` calls the extension with the default
+  `use_simdgroup` and rejects inputs with more than 8 rows.
+- `quantized_matmul_vanilla` calls `quantized_matmul` with
+  `use_simdgroup=False`.
+- `quantized_linear` counts the rows and calls `quantized_matvec_custom` when
+  there are at most 8 and `w.use_simdgroup_matvec` is set; otherwise it calls
+  `quantized_matmul`.
+
+Then run the GPU tests:
 
 ```bash
 pdm run build-ext
@@ -634,46 +570,69 @@ pdm run build-ext-ref
 pdm run test --week 2 --day 2 -- -k gpu
 ```
 
-The direct tests cover matvec at `M = 1` and `M = 8`, the vanilla matmul at
-`M = 128`, and compare them with an MLX oracle. The oracle checks the result;
-it is not the implementation under test.
+These tests compare your kernels with `mx.quantized_matmul`: the simple
+kernel on a 128-row identity input and a 3-row random input; the matvec at
+`M = 1`, at `M = 8`, and at a real Qwen3-4B projection shape (one row of
+2,560 inputs, 1,024 outputs); and the matvec against your simple kernel. The
+full Day 2 gate also runs output counts that do not fill the last tile (5
+and 65 outputs).
 
-## Task 4: Integrate Before Continuing
+### Optional: Tune the Schedule
+
+The four-output, two-SIMD-group layout is a measured starting point, not a
+rule. If you want to see why, change one choice at a time and measure the
+whole model each time:
+
+- **Outputs per SIMD group:** try 2, 4, and 8. More outputs reuse each
+  activation load more often but keep more accumulators alive, which uses
+  registers.
+- **SIMD groups per threadgroup:** try 2, 4, 8, and 16. More groups cover more
+  outputs per threadgroup but can lower how many threadgroups fit on a core.
+
+Adding SIMD groups to a threadgroup and adding threadgroups to the grid are
+different knobs. The first changes per-threadgroup register demand. The
+second changes how the outputs are divided. Keep the experiments separate so
+each number answers one question. If you add an experimental variant, keep
+the selected path's kernel names unchanged.
+
+## Task 4: Use It in the Model
 
 ```
 src/tiny_llm/qwen3_week2.py
 ```
 
-Modify `Qwen3ModelWeek2.__init__`, `Qwen3MultiHeadAttention.__call__`,
-`Qwen3MLP.__call__`, and `Qwen3ModelWeek2.__call__`. These are the points that
-load quantized weights, replace dense projections, and keep only the requested
-logits row.
+Now make the cached model use the new operator. Update
+`Qwen3ModelWeek2.__init__`, `Qwen3MultiHeadAttention.__call__`,
+`Qwen3MLP.__call__`, and `Qwen3ModelWeek2.__call__`.
 
-Now integrate quantized matrix multiplication into the Week 2 Qwen3 model so
-its linear layers remain quantized throughout inference.
+Add the packed path next to the dense one; do not replace it. The model takes
+a `checkpoint` name, and `WEEK2_CHECKPOINT_FEATURES` in `qwen3_week2.py`
+records what each checkpoint turns on. `quantized_weights` is false for
+`kv-cache` and `capacity-cache` and true from `quantized-matvec` onward. Keep
+the dense BF16 weights, embedding, and `linear` calls for the two Day 1
+checkpoints, so `capacity-cache` stays a fair control. When
+`quantized_weights` is true:
 
-Change the weight type from `mx.array` to `QuantizedWeights` for every
-attention projection (`wq`, `wk`, `wv`, and `wo`) and MLP projection (`w_gate`,
-`w_up`, and `w_down`). Replace `linear(x, w)` with `quantized_linear(x, w)`. In
-the Week 2 model loader, use `QuantizedWeights.from_mlx_layer(...)` instead of
-materializing a 16-bit matrix. Keep the Week 1 model's boundary intact; its
-layers still expect plain `mx.array` weights.
+- Load every attention projection (`wq`, `wk`, `wv`, `wo`) and MLP projection
+  (`w_gate`, `w_up`, `w_down`) with `QuantizedWeights.from_mlx_layer(...)`
+  instead of expanding it to BF16, and call `quantized_linear(x, w)` where you
+  used to call `linear(x, w)`.
+- Load `embed_tokens` the same way and wrap it in your `QuantizedEmbedding`.
+- If the model has a separate `lm_head` (that is, the embeddings are not
+  tied), keep it as `QuantizedWeights` too and apply it with
+  `quantized_linear`. It is a projection, not a lookup.
+- Pass the constructor's `use_mlx_quantized_linear` flag through to
+  `from_mlx_layer`. The test builds a control model with this flag set and
+  expects its projections to go through `mlx_quantized_linear`.
+- Keep `group_size` and `bits` from each loaded layer, and let the extension
+  reject anything other than 128 and 4.
 
-For embeddings, wire the `QuantizedEmbedding` from Task 1 into the loader. Load
-`embed_tokens` with `QuantizedWeights.from_mlx_layer(...)` and pass it to
-`QuantizedEmbedding`. If the model has a separate `lm_head`, keep that head as
-`QuantizedWeights` too and apply it with `quantized_linear`; `lm_head` is a
-projection rather than an embedding lookup.
+Leave the Week 1 model alone. Its layers still take plain `mx.array` weights.
 
-Normalize each loaded layer's scales and biases to BF16. Require scales,
-biases, and activations to match and return BF16. If the output is `nan` or
-otherwise invalid, check for a dtype mismatch first.
+If the model outputs `nan` or nonsense, check dtypes first. Scales, biases,
+and activations must all be BF16, and the output must be BF16 too.
 
-Preserve the quantized layer's parameters as well. The model should pass
-`w.group_size` and `w.bits` to the extension, which should validate the course
-assumptions: `group_size = 128` and `bits = 4`.
-
-Run the complete gate, then the live model checkpoint:
+Run the whole Day 2 gate, then generate text with your model:
 
 ```bash
 pdm run test --week 2 --day 2
@@ -682,9 +641,22 @@ pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint quantized-matvec --model qwen3-0.6b --max-tokens 16
 ```
 
-Measure that same learner solution with the cached 0.6B model. Keep the model,
-prompt/output lengths, and last-logit serving mode matched when changing the
-solution or checkpoint:
+## Check That the Model Really Uses Your Kernel
+
+Passing tests is not quite enough. The tests compare outputs and call your
+operators directly, but they do not check which path the model takes
+internally. Make sure that:
+
+- a decode step goes `quantized_linear` → `quantized_matvec_custom` → your
+  primitive → the matvec kernel; and
+- a prompt longer than eight tokens goes `quantized_linear` →
+  `quantized_matmul` → your primitive → the simple kernel.
+
+An easy way to check is to put a temporary exception in one branch of
+`quantized_linear` and confirm that the `main` command above hits it.
+
+Then measure. Keep the model, prompt length, output length, and logit mode
+identical across every run you compare:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
@@ -694,29 +666,11 @@ pdm run bench --solution tiny_llm --loader week2 \
   --prefill-logits last
 ```
 
-Run the same command with `--solution tiny_llm_ref` to compare it with the
-reference solution. For a Day 1 control, change only the checkpoint to
-`capacity-cache`; do not compare different models or prefill-logit modes.
+Run it again with `--solution tiny_llm_ref` to compare with the reference
+solution, and again with `--week2-checkpoint capacity-cache` to compare with
+Day 1. Don't change anything else between runs.
 
-Keep the vanilla matrix product callable as an inspectable Metal control. The
-Python `mlx.core` equation remains the correctness oracle, while decode
-integrates only the SIMD matvec.
-
-## Verify Quantization in the Complete Model
-
-Before moving on, confirm that model inference actually calls the quantized
-matvec kernel instead of merely registering and testing it in isolation.
-
-The checkpoint is complete when the model's projection dispatcher is wired to
-your custom primitive. Decode-shaped work must route through
-`quantized_linear` → `quantized_matvec_custom` → the extension primitive → the
-Metal matvec. Matrix-shaped work must route through `quantized_linear` →
-`quantized_matmul` → the extension primitive → its Metal matrix schedule. The
-supplied tests compare public `quantized-matvec` checkpoint outputs and direct
-operator results with MLX controls; they do not assert private routing. Use
-the live model command to verify that those pieces compose.
-
-Measure the cumulative model and the real projection shapes:
+To see the whole progression and where the time goes inside a decode step:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
@@ -730,24 +684,76 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --json-output week2-day2-attribution.json
 ```
 
-Keep one cumulative model row and one representative real-shape projection
-comparison. In the checked M4 Pro example, packed W4 reduced attributed
-projection time by 69.0% and fixed-workload decode rose from 24.38 to 58.90
-tokens/s. The re-profile then exposed normalization, position, and activation
-at 33.5% of attributed time, pointing to later fusion work. These are
-historical Qwen3-4B observations from one machine and two product samples,
-not results to expect from the required 0.6B run or portable timing thresholds.
-For an optional 4B comparison, first cache the model with
-`hf download Qwen/Qwen3-4B-MLX-4bit`, then rerun every compared row with
-`--model qwen3-4b`; the dense `capacity-cache` control needs the memory
-recommended in the [model table](./preface.md#choose-a-model-for-your-mac).
-The complete historical campaign and attribution are in the
-[performance appendix](./appendix-performance.md).
+For a sense of scale, here is one older measurement of this step. It used
+Qwen3-4B on an M4 Pro, with an earlier version of the course code. Packing
+the weights cut the time spent in projections by 69.0%, and decode on a fixed
+workload went from 24.38 to 58.90 tokens per second. The profile then showed
+normalization, positional encoding, and activation taking 33.5% of the time,
+which is what Day 4 goes after. Your 0.6B numbers will differ, and these are
+not targets to hit. The [performance appendix](./appendix-performance.md)
+has the full history.
 
-If you need to continue without the custom Day 2 kernels, implement the same
-`quantized_linear` interface with `mx.quantized_matmul` and leave the rest of
-the course model unchanged. This is a local operator off-ramp, not
-`--solution mlx`: the latter runs a separate complete model and does not
-exercise your cache or model wiring.
+To compare at 4B yourself, download the model with
+`hf download Qwen/Qwen3-4B-MLX-4bit` and rerun **every** row with
+`--model qwen3-4b`. The dense `capacity-cache` control still needs the memory
+listed in the [model table](./preface.md#choose-a-model-for-your-mac).
+
+### Where Week 2 Ends Up
+
+Today's kernel is the first of several. Day 3 adds a SIMD matrix kernel for
+prefill, Day 4 adds RMSNorm, RoPE, and SwiGLU kernels, and Day 5 adds tiled
+prefill attention.
+The supplied reference adds further scheduling on top of those. The table
+compares that finished Week 2 reference with stock MLX running the same
+Qwen3-4B model. A value above 100% means the course model was faster.
+
+| Prompt / generated tokens | Total throughput vs. MLX | Worst paired run | Paired runs below 95% |
+|---|---:|---:|---:|
+| 128 / 128 | 95.1% | 91.6% | 5 of 8 |
+| 512 / 128 | 98.5% | 95.0% | 0 of 8 |
+| 2,048 / 128 | 97.9% | 97.3% | 0 of 8 |
+| 8,192 / 128 | 96.2% | 90.4% | 2 of 8 |
+| 2,048 / 16 | 97.9% | 95.5% | 0 of 8 |
+| 2,048 / 512 | 96.8% | 95.6% | 0 of 8 |
+| 32,640 / 128 | 97.7% | 96.6% | 0 of 8 |
+| 8,192 / 8,192 | 101.3% | 97.3% | 0 of 8 |
+
+*Where these numbers come from:* separate measurement runs on one
+Apple-silicon Mac, made on an earlier development revision of the reference
+before it was merged in [PR #328](https://github.com/skyzh/tiny-llm/pull/328).
+They are not a fresh timing of the merged code. Each case ran eight times on
+each model, with each course-model run paired with one MLX run. The
+throughput column is the ratio of the two medians (MLX's median total time
+divided by the course model's), not a median of the paired ratios. All runs
+used BF16 activations, W4 weights with group size 128, one request at a time,
+and the same fixed number of generated tokens. PR #328 records the
+remaining limits:
+
+- in the 128 / 128 and 8,192 / 128 rows, several paired runs fell below 95%
+  even though the medians did not;
+- one long measurement campaign was interrupted twice, and the runs on both
+  sides of each interruption are kept in the results;
+- the course model's outputs differ numerically from MLX's;
+- the course model failed a biology-answer check, and MLX's answer to a
+  factual check had its own problem;
+- runs keep generating past a natural end-of-sequence token to reach the fixed
+  count, so they say nothing about output quality over the full length.
+
+These are whole-request times, including the CPU work of preparing and
+submitting GPU commands, not isolated kernel timings. The course model was
+slower than MLX to produce the first token in every case. Decode speed was
+mixed: faster at 2,048 / 16 and 8,192 / 8,192, slower in the rest. Its peak
+allocated memory was higher than MLX's in every case except 128 / 128, by up
+to about 0.9 GB at 32,640 / 128. So the result is close to MLX, not uniformly
+faster. Your own runs will vary with your machine and model.
+
+## If You Get Stuck
+
+If you need to move on before your kernels work, you can implement
+`quantized_linear` with `mx.quantized_matmul`, in the same way as
+`mlx_quantized_linear`, and leave the rest of your model unchanged. That
+swaps out one operator and keeps your cache and model wiring. It is not the
+same as `--solution mlx`, which runs a separate, complete MLX model and
+exercises none of your code.
 
 {{#include copyright.md}}
