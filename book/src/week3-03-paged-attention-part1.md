@@ -2,34 +2,11 @@
 
 > 🚧 This chapter is under review and may change.
 
-In this chapter, we will design the **paged KV cache**, the storage abstraction
-behind paged attention. Continuous batching creates many request-owned caches
-with different lifetimes and sequence lengths. Storing each cache as one
-growing tensor makes every append depend on a contiguous allocation and makes
-batch construction revisit historical K/V.
-
-Fixed-size pages separate a sequence's logical order from its physical
-placement. The runtime can append, release, and reuse storage without moving a
-request's complete history. This chapter changes the storage layout first and
-uses dense attention as a correctness checkpoint. Day 4 will read the pages
-directly.
-
-**📚 Readings**
-
-- [vLLM Paged Attention Design](https://docs.vllm.ai/en/v0.18.0/design/paged_attention/)
-- [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)
-
-## Why the Dense KV Layout Becomes Expensive
-
-Right now, the mental model looks like this:
-
-```plain
-request A -> one dense KV tensor
-request B -> one dense KV tensor
-request C -> one dense KV tensor
-```
-
-Before attention, the runtime repacks them into:
+After Day 2, your server keeps several requests in flight. Each one has its own
+K/V cache for every layer, stored as one dense tensor, and requests start,
+grow, and finish at different times. At every decode step,
+`BatchingKvCache` copies each request's cached keys and values into one batch
+tensor shaped for the longest request:
 
 ```plain
 keys:   [B, H, S_max, D]
@@ -37,351 +14,440 @@ values: [B, H, S_max, D]
 mask:   [B, 1, L, S_max]
 ```
 
-The trouble is that decode only adds a tiny amount of new information each step, but the dense layout keeps revisiting old KV.
+Open the `BatchingKvCache.update_and_fetch` you wrote on Day 1 and you can see
+it happen: the method allocates fresh `keys` and `values` tensors and copies
+every active request's cache into them. Decode adds one token per request, but
+this step copies the full history of every request. A request with 500 cached
+tokens has 501 positions copied to produce one new token. (The reference
+solution counts these bytes, and the batch benchmark prints them as
+`Dense KV bytes copied into batch tensors`.)
 
-For example, if a request already has 17 cached tokens and we decode 1 more token:
+The storage itself is awkward too. A dense cache either reserves room for
+the longest sequence a request might reach, which wastes memory on requests
+that finish early, or grows as it goes, which means copying everything it has
+stored so far.
 
-```plain
-new useful work: append 1 token
-dense repack view: rebuild 18 logical positions
-```
+Operating systems solved the same problem for process memory long ago: hand
+out memory in small fixed-size pages, and keep a table that says where each
+page lives. Today you do the same for K/V. You will:
 
-For one request this is fine. For many live requests, the runtime spends more and more time moving previously computed KV instead of doing actual model work.
+1. store K/V in fixed-size **pages** inside one shared pool per layer;
+2. give every request a small **page table** that records which pages hold its
+   tokens, in order;
+3. append new tokens by writing only into the request's last page, or a fresh
+   page when the last one is full; and
+4. return a finished request's pages to the pool so the next request can reuse
+   them.
 
-## The Page Abstraction
+Attention does not change yet. In this chapter, each layer cache copies its
+pages back into an ordinary dense tensor before attention runs, so you can
+check the new storage against the old cache token for token. Day 4 teaches
+attention to read the pages directly and removes that copy.
 
-Instead of storing each layer's KV for a request as one long tensor, we divide storage into fixed-size **pages**:
+**📚 Readings**
 
-```plain
-key_pages:   pages with up to page_size token slots
-value_pages: pages with up to page_size token slots
-```
+- [vLLM Paged Attention Design](https://docs.vllm.ai/en/v0.18.0/design/paged_attention/)
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)
 
-Each layer cache keeps a small page table:
+## Pages by Example
 
-```plain
-page_ids = [12, 5, 3]
-context_len = 10
-```
+Use a page size of 4 tokens to keep the numbers small. (The model uses 128 by
+default. The tests use 4.) Everything below happens inside the pool for one
+transformer layer.
 
-That means:
-
-```plain
-page 12 -> tokens 0..3
-page  5 -> tokens 4..7
-page  3 -> tokens 8..9
-```
-
-The logical sequence is still length 10. The difference is that the runtime is no longer forced to represent it as one contiguous tensor.
-
-The model owns one physical **page
-pool per transformer layer**. Request caches for the same layer share its pool,
-while every request-and-layer cache keeps its own `page_ids`, `page_lens`, and
-`offset`. A page id is therefore local to one layer, matching the K/V storage
-buffer that the attention kernel receives.
-
-`page_size` is the physical page capacity. Unused tail slots are not part of
-the logical sequence; `page_lens` decides which prefix of each page is valid.
-
-## Why Fixed-Size Pages Help
-
-The page abstraction gives us two immediate wins:
-
-1. Appending a token usually updates only the current tail page in the pool.
-2. Finished requests can return their pages to the layer's shared free list.
-
-This is the key memory-management idea behind paged attention systems such as vLLM.
-
-## Data Structures We Need
-
-### 1. `PagePool`
-
-The model should own one pool per layer, each with a free-page allocator and
-flat K/V page storage:
+**Request A arrives with a 6-token prompt.** The pool is empty, so it hands out
+pages 0 and 1:
 
 ```plain
-free_pages: available page ids for this layer
-keys[page_id]:   physical key page
-values[page_id]: physical value page
+page 0: [a0 a1 a2 a3]
+page 1: [a4 a5 __ __]       2 of 4 slots used
+
+A: page_ids = [0, 1]   page_lens = [4, 2]   offset = 6
 ```
 
-Requests share physical storage only when they are executing the same layer.
-Layer 0 and layer 1 may both use page ids `[0, 1]` because those ids address
-different buffers. Keeping the layer dimension outside `page_id` prevents a
-one-token write in one layer from copying or serializing the page storage for
-every other layer.
+`page_ids` lists A's pages in logical order. `page_lens` says how many slots of
+each page hold real tokens. `offset` is the number of tokens A has cached.
 
-The backing slab should grow geometrically rather than by exactly one page.
-Keep logical `num_pages` separate from physical capacity so callers still see
-only allocated pages while pool growth copies old storage logarithmically many
-times.
+**Request B arrives with a 3-token prompt.** It gets the next new page:
 
-Growing an exact-size slab from `p` to `p + 1` pages copies approximately
-`1 + 2 + ... + p` old pages, which is quadratic in the final page count.
-Starting with four pages and doubling capacity copies fewer than twice the
-eventual capacity across all growth events. Splitting the slab by transformer
-layer also prevents a new page in layer 0 from replacing the storage object
-used by every other layer. These two changes amortize allocator-copy work so
-most new-page allocations do not copy old pages, without changing the logical
-page table.
+```plain
+page 2: [b0 b1 b2 __]
 
-Implement this abstraction as `TinyKvPagedPool`.
+B: page_ids = [2]   page_lens = [3]   offset = 3
+```
 
-### 2. `PagedRequestCache`
+**A decodes three tokens.** The first two fit in the empty slots of page 1.
+The third finds page 1 full, so A takes a new page:
 
-A layer cache for one request should track:
+```plain
+page 1: [a4 a5 a6 a7]
+page 3: [a8 __ __ __]
 
-- `page_ids`
-- `page_lens`
-- `offset`
-- `page_size`
+A: page_ids = [0, 1, 3]   page_lens = [4, 4, 1]   offset = 9
+```
 
-Derived values:
+None of these appends touched page 0, or any of A's earlier tokens.
 
-- `num_pages = len(page_ids)`
-- `context_len = offset`
-- `last_page_fill = page_lens[-1]` when at least one page exists
+**B finishes.** Its page goes back on the free list. The data in page 2 stays
+where it is, but nothing points to it anymore:
 
-Implement the request view as `TinyKvPagedCache`. Create it with a pool from
-the model; it should not allocate its own pool,
-because that would isolate one request from the shared page allocator.
+```plain
+free list: [2]
+```
 
-Create one `TinyKvPagedCache` per transformer layer. Caches for different
-requests share a layer pool, but they do not share metadata: each cache owns
-its own `page_ids`, `page_lens`, and `offset`.
+**Request C arrives with a 5-token prompt.** The pool reuses page 2 before
+creating anything new, then adds page 4 for the fifth token:
 
-### 3. Tail-Append Logic
+```plain
+page 2: [c0 c1 c2 c3]
+page 4: [c4 __ __ __]
 
-When new K/V arrives for one layer:
+C: page_ids = [2, 4]   page_lens = [4, 1]   offset = 5
+```
 
-1. look at that layer cache's last page
-2. if there is room, append only the new slice into the tail page
-3. otherwise allocate a new page and continue writing
-4. update cache metadata such as `page_lens` and `offset`
+A's pages are 0, 1, and 3, which are not next to each other in memory. That
+is fine, because the page table records the order. To find token `t` of a
+request:
 
-This replaces the dense-cache pattern of repeatedly concatenating along the sequence dimension.
+```plain
+page = page_ids[t // page_size]
+slot = t % page_size
 
-#### Make write cost proportional to the appended slice
+A, token 7: page_ids[7 // 4] = page_ids[1] = 1, slot 7 % 4 = 3
+A, token 8: page_ids[8 // 4] = page_ids[2] = 3, slot 8 % 4 = 0
+```
 
-MLX arrays are functional and lazily evaluated. Writing
-`pages[page_id, :, start:end, :] = values` may build an update whose output is
-the entire page tensor; a small slice in Python does not guarantee a
-slice-sized device update.
+That lookup is the whole idea. Everything else in this chapter is
+bookkeeping to keep the tables and the pool consistent.
 
-Implement `paged_cache_update` as a small extension primitive in your solution.
-Its output aliases the existing page buffer, and its Metal grid
-covers only `H * new_tokens * D` elements. Page storage is request state, so
-this mutation boundary is explicit and safe as long as the cache owns its page
-and attention depends on the returned array. Full-buffer copies remain only
-when geometric capacity grows.
+## The Two Objects
 
-The learner extension already contains the C++ and Metal source files, CMake
-entries, header declaration, and Python binding. Replace the
-`paged_cache_update` stubs in `src/extensions/src/paged_attention.cpp` and
-`src/extensions/src/paged_attention.metal`; do not create or register a second
-primitive.
+### `TinyKvPagedPool`: One per Layer
 
-Then rebuild:
+The pool owns the actual memory for one transformer layer: one tensor for
+keys and one for values, each shaped
+
+```plain
+[capacity, H, page_size, D]
+```
+
+so `key_pages[page_id]` is one page of keys for all `H` K/V heads. The pool
+also keeps the free list of page ids.
+
+Every request's cache for layer 0 shares layer 0's pool. Layer 1 has its own
+pool, so the page ids in the two layers are unrelated: page 3 in layer 0 and
+page 3 in layer 1 are different memory. Keeping layers in separate pools also
+means a write in one layer never touches another layer's storage. Layer-local
+ids also match what the attention kernel receives in Day 4: the K/V pages for
+one layer.
+
+The model creates the pools, one per layer, and keeps them in a list. Name it
+`page_pools`: the batch benchmark looks for that attribute to read the pool
+counters and to reset the pools after warmup.
+
+### `TinyKvPagedCache`: One per Request per Layer
+
+A request has one cache object per layer. Each holds its pool and its own
+metadata:
+
+- `page_ids`: its pages, in logical order;
+- `page_lens`: how many valid tokens each page holds;
+- `offset`: the total number of cached tokens;
+- `page_size`: copied from the pool.
+
+Two requests in the same layer share a pool but never share these lists. A
+cache must not create its own pool; the model passes one in. A private pool
+would cut the request off from pages other requests have freed.
+
+## Growing the Pool Without Copying Everything
+
+The pool's tensors have a fixed `capacity`. When the pool runs out of
+capacity, it has to allocate a bigger tensor and copy the old pages into it.
+
+If capacity grows by exactly one page each time, the copies add up fast. Going
+from 1 to `p` pages copies `1 + 2 + ... + (p - 1)` pages, which is roughly
+`p² / 2`. Instead, start with four pages and double the capacity whenever the
+pool is full:
+
+```plain
+pages in use:   1-4    5    6-8    9    10-16   17 ...
+capacity:        4     8     8    16      16    32
+pages copied:    -     4     -     8       -    16
+```
+
+Each growth copies only the pages that already exist, and growths become
+rarer as the pool gets bigger. In total, the copies add up to less than the
+final capacity, and most allocations copy nothing.
+
+Keep two numbers apart:
+
+- `num_pages`: page ids handed out so far, including ones now on the free
+  list;
+- `capacity`: how many pages the tensors can hold.
+
+After the fifth allocation, `num_pages` is 5 and `capacity` is 8. Whatever you
+expose to attention as `key_pages` and `value_pages` should contain only the
+`num_pages` pages that have been handed out, not the unused capacity.
+
+## Writing Only the New Slice
+
+When a token is appended, the pool should write `H × 1 × D` numbers into one
+page. The obvious way to do that in MLX is a slice assignment:
+
+```python
+pages[page_id, :, start:end, :] = new_values
+```
+
+MLX arrays behave as values, though, and evaluation is lazy. That assignment
+may be carried out by producing a whole new page tensor, which for a big pool
+means copying every page to change a few numbers.
+
+You will fix this with a small custom primitive, `paged_cache_update`. Its
+output shares the input's memory instead of copying it, and its Metal kernel
+launches one thread per element of the new slice: `H × new_tokens × D`
+threads, no matter how big the pool is. Normally MLX assumes an array's
+contents never change after it is computed. This primitive breaks that
+assumption on purpose. It is safe here because the pool is the only owner of
+its page tensors, and it replaces its reference with the returned array right
+away, so later reads depend on the updated array. The only full copies left
+are the doubling steps from the previous section.
+
+## Appending a Chunk
+
+Here is the append for one request in one layer, with a chunk of `S` new
+tokens:
+
+1. If the last page has free slots, write as many tokens as fit into it, and
+   increase its `page_lens` entry.
+2. While tokens remain, allocate a page, write up to `page_size` tokens into
+   it starting at slot 0, and append its id and length.
+3. Add `S` to `offset`.
+
+A 6-token prompt with page size 4 becomes one full page and one page with two
+tokens. The next decode token lands in the second page's slot 2, with no new
+allocation. Allocate a page only when the last one is full. Allocating early
+leaves empty slots in the middle of a request, and the pool has to grow
+sooner than it needs to.
+
+### Make Appends All-or-Nothing
+
+An append can fail partway. A 7-token chunk with page size 4 needs two or
+three writes, and the second write might fail. If the first write has already
+updated `page_lens` and claimed a page, the cache now describes tokens it does
+not hold, and the next attention step reads garbage.
+
+Make every append succeed completely or change nothing:
+
+- **Check first.** Before touching anything, reject a key and value that
+  differ in shape, are not 4D `[1, H, S, D]`, use a dtype other than float32 or
+  bfloat16, or do not match the pool's existing page shape and dtype. Raise
+  `ValueError`.
+- **Save, then restore.** Before writing, save the cache's lists and offset and
+  the pool's state: its tensors, free list, and counters. If anything raises
+  during the append, put all of it back and re-raise.
+
+Restoring the pool's old tensors works even though `paged_cache_update` wrote
+into shared memory. The slots written before the failure lie past the
+restored `page_lens`, so nothing reads them, just like the leftover data in a
+freed page.
+
+## Releasing, Rewinding, and Resetting
+
+**`release()`** returns every page the cache holds to the pool's free list and
+clears its metadata. Freeing a page does not erase it. `page_ids` and
+`page_lens` decide which slots are live, and the next owner overwrites the
+slots it uses.
+
+**`rewind(n)`** removes the newest `n` tokens, keeping the rest in place:
+
+```plain
+A before: page_ids = [0, 1, 3]   page_lens = [4, 4, 1]   offset = 9
+rewind(3)
+A after:  page_ids = [0, 1]      page_lens = [4, 2]      offset = 6
+          page 3 goes back to the free list
+```
+
+Free each page that no longer holds any token, then shorten the last
+remaining page's length. Treat the edges carefully: `rewind(0)` changes
+nothing, rewinding the whole length is the same as `release()`, and a value
+that is negative, larger than `offset`, or not an `int` (including `True`)
+must raise `ValueError` without changing anything. Week 2 Day 1 gave the dense
+cache the same rule, and the tests check both caches. The optional
+[speculative decoding chapter](./week3-optional-speculative-decoding.md) uses
+rewind to discard rejected draft tokens.
+
+**`TinyKvPagedPool.reset()`** drops the pool's storage completely: capacity,
+page count, and free list all go back to zero. Refuse to reset while any page
+is still in use. The benchmark calls `reset()` after its warmup runs, so the
+measured run starts from an empty pool.
+
+## Batching Requests With Pages
+
+`BatchingKvCache` holds one layer cache per decode slot. Add
+`update_and_fetch_paged`. It takes a batch of new keys and values, appends
+each active row to its request's cache, and returns a `PagedKvMetadata` that
+describes the whole batch:
+
+- `key_pages`, `value_pages`: the layer pool's page tensors;
+- `block_table`: one row of page ids per slot, padded with `-1` to the
+  longest row;
+- `context_lens`: each slot's `offset` after the append;
+- `page_size` and `mask`.
+
+For requests A and C from the example:
+
+```plain
+block_table  = [[0, 1,  3],
+                [2, 4, -1]]
+context_lens =  [9, 5]
+```
+
+This is the input Day 4's attention kernel reads. For now, the tests use it to
+check that each row maps back to the right tokens.
+
+The batch append must be all-or-nothing as well, across all rows. Before
+appending anything, check that every active cache is a `TinyKvPagedCache`,
+that they all share one pool, and that each row's append is valid. Then save
+the pool and every active cache, append row by row, and restore everything if
+any row fails. A batch whose rows use different pools should fail before row 0
+changes.
+
+`TinyKvPagedCache` itself gets matching single-request methods:
+`block_table(max_pages=None)`, `context_lens()`, `paged_metadata(...)`, and
+`update_and_fetch_paged(...)`, which appends and then returns the metadata.
+
+## Checking Against the Dense Cache
+
+Your Week 2 `TinyKvFullCache` already produces correct K/V, so use it as the
+answer key. Add `gather_dense()`, which walks `page_ids`, takes the first
+`page_lens[i]` slots of each page, and concatenates them into a
+`[1, H, offset, D]` tensor. Then `update_and_fetch` (the old dense interface)
+can append and return the gathered tensors. Any caller that worked with the
+dense cache keeps working, and you can compare the two caches after every
+append.
+
+This copies a request's history before every attention call, which is the
+same cost you started the chapter with. That is deliberate: this checkpoint
+only changes how K/V is stored, so any bug you find is a storage bug. Day 4
+removes the gather by passing `block_table` and `context_lens` to attention
+instead.
+
+## Task 1: Pages, Pool, and Request Cache
+
+```
+src/tiny_llm/paged_kv_cache.py
+src/tiny_llm/kv_cache.py
+```
+
+Implement `TinyKvPagedPool` and `TinyKvPagedCache` in `paged_kv_cache.py`, and
+`BatchingKvCache.update_and_fetch_paged` in `kv_cache.py`.
+
+The starter lists most of the methods. The tests also use a few attributes it
+does not declare, so add them as well:
+
+| Object | What the tests use |
+|---|---|
+| `TinyKvPagedPool` | `page_size`, `num_pages`, `num_free_pages`, `capacity`, `storage_nbytes`, `allocate_page()`, `read_page(page_id)`, `write_page_slice(page_id, start, key, value)`, `free_page(page_id)`, `reset()` |
+| `TinyKvPagedCache` | `pool`, `page_ids`, `page_lens`, `offset`, `num_pages`, `key_values` (the gathered dense pair, or `None` when empty), `gather_dense()`, `update_and_fetch(...)`, `update_and_fetch_paged(...)`, `block_table(...)`, `context_lens()`, `paged_metadata(...)`, `materialize()`, `rewind(n)`, `release()` |
+
+`materialize()` evaluates the pool's page tensors. Day 2's scheduler already
+calls it after each prefill chunk, which keeps MLX's lazy graph from growing
+without bound.
+
+For this task, `write_page_slice` may use plain MLX slice assignment. It is
+correct, just not cheap. Task 2 replaces it.
+
+The benchmark also prints a few optional pool counters if your pool defines
+them: `reused_page_allocations`, `storage_growths`,
+`copied_pages_on_growth`, and `copied_bytes_on_growth`. They are a good way
+to see the doubling schedule at work.
+
+```bash
+pdm run test --week 3 --day 3 -- -k task_1
+```
+
+These tests compare your cache with `TinyKvFullCache` across appends that
+cross page boundaries; check page reuse after release, doubling growth, and
+`reset()`; and check that rejected or failed appends, including batch appends
+and mixed pools, leave every cache and the pool unchanged. They also cover
+rewind against the dense cache, `block_table`, `materialize`, and independent
+metadata for two requests that share a pool.
+
+## Task 2: Write Only the New Slice
+
+```
+src/extensions/src/paged_attention.cpp
+src/extensions/src/paged_attention.metal
+src/tiny_llm/paged_kv_cache.py
+```
+
+The C++ and Metal files, the header declaration, the Python binding, and the
+CMake entries for `paged_cache_update` already exist. Replace the stubs:
+
+- `tiny_llm_ext::paged_cache_update(pages, values, page_id, start)` checks its
+  inputs and returns a lazy array with the same shape and dtype as `pages`.
+  Require `pages` to be `[P, H, page_size, D]` and `values` to be
+  `[1, H, length, D]`, with matching `H`, `D`, and dtype (float32 or
+  bfloat16). Require `0 <= page_id < P` and
+  `0 <= start` with `start + length <= page_size`. Throw on anything else.
+- `PagedCacheUpdate::eval_cpu` throws. The operator is GPU-only.
+- `PagedCacheUpdate::eval_gpu` checks that both inputs are row-contiguous,
+  makes the output share the `pages` buffer, and launches
+  `paged_cache_update_kernel` over the `H × length × D` new elements.
+- `paged_cache_update_kernel` in `paged_attention.metal` copies each element
+  of `values` to its slot in page `page_id`, starting at `start`.
+
+Do not add a second primitive or binding. Rebuild, then switch
+`TinyKvPagedPool.write_page_slice` to call the extension for keys and for
+values, passing contiguous chunks:
 
 ```bash
 pdm run build-ext
+pdm run test --week 3 --day 3 -- -k task_2
 ```
 
-Test this behavior through the cache interface: append across a tail-page
-boundary, grow the slab, release and reuse page ids, and compare the gathered
-logical sequence with `TinyKvFullCache`.
+The Task 2 tests check that only the requested slice changes, for float32 and
+bfloat16; that bad shapes, dtypes, page ids, and slot ranges are rejected; and
+that removing a request from `BatchingKvCache` returns its pages, so the next
+request reuses them without growing the pool.
 
-## Prefill with Pages
-
-Suppose `page_size = 4` and one prefill chunk contains 6 tokens:
-
-```plain
-chunk = [t0 t1 t2 t3 t4 t5]
-```
-
-One possible layout is:
-
-```plain
-page 7 <- [t0 t1 t2 t3]
-page 2 <- [t4 t5]        # 2 valid tokens, 2 unused slots of capacity
-```
-
-That layer cache's metadata becomes:
-
-```plain
-page_ids = [7, 2]
-context_len = 6
-```
-
-The important property is that a later decode token can be appended to page `2` without touching page `7`.
-
-## Decode with Pages
-
-During decode, each live request adds one token at a time.
-
-With paged storage:
-
-1. compute one-token `k` and `v`
-2. check whether the tail page still has space
-3. write into that page if possible
-4. allocate a new page only when the old one is full
-
-So if `page_size = 4` and `context_len = 9`:
-
-```plain
-page_ids = [12, 5, 3]
-```
-
-Appending token 9 only updates the last page instead of rebuilding all earlier KV.
-
-## Correctness Checkpoint: Gather Pages for Dense Attention
-
-The cleanest first implementation is **paged storage with dense gather**.
-
-That means:
-
-- pages in each layer pool are the source of truth,
-- layer caches stop owning one monolithic K/V tensor,
-- layer caches only track page metadata,
-- attention still receives dense K/V reconstructed from pages.
-
-This checkpoint isolates the storage and lifecycle work before adding indirect
-GPU reads:
-
-- page allocation and reuse can be tested independently;
-- the gathered sequence can be compared directly with `TinyKvFullCache`;
-- copy counters establish the cost that direct page traversal should remove.
-
-## How This Maps to `tiny-llm`
-
-### `src/tiny_llm/paged_kv_cache.py`
-
-Add:
-
-- `TinyKvPagedPool`
-- `TinyKvPagedCache`
-
-Keep `TinyKvFullCache` in `src/tiny_llm/kv_cache.py` as a baseline and test
-oracle.
-
-The chapter's execution path is:
-
-1. write new K/V into the layer cache's tail page or newly allocated pages,
-2. gather the layer cache's pages back into dense K/V,
-3. feed that dense K/V into the readable dense attention equation.
-
-This chapter changes the storage model while preserving the dense attention
-equation as a correctness oracle.
-
-### `src/tiny_llm/batch.py`
-
-Requests should own per-layer cache handles instead of long dense K/V tensors.
-
-The scheduler should still:
-
-- perform chunked prefill,
-- hold active requests,
-- free cache pages when a slot finishes.
-
-The difference is that freeing a request now means releasing all pages owned by its layer caches back to the pool.
-
-Add a small `rewind(n)` lifecycle hook. Rewind lets a caller remove the newest
-logical tokens without rebuilding the retained prefix. It frees whole pages
-that are no longer needed and shortens the valid length of the final remaining
-page. The optional speculative-decoding chapter will use this operation when
-drafted tokens are rejected.
-
-## Design Questions
-
-Before implementing, make sure the following are clear:
-
-1. What page size should this repo use for teaching?
-2. How do we represent the free-page allocator?
-3. How do we prove that paged storage reconstructs the same logical KV as `TinyKvFullCache`?
-4. How do request cache handles share a layer pool while keeping their own page metadata?
-5. When do we materialize page writes to avoid MLX lazy-graph growth?
-6. How do we grow physical capacity without copying all old pages on every allocation?
-
-## Task 1: Design `PagePool`
+## Task 3: Put the Pages in the Model
 
 ```
-src/tiny_llm/paged_kv_cache.py
-```
-
-Modify `TinyKvPagedPool.__init__`, `allocate_page`, `write_page_slice`, and
-`free_page` in this task. For the slice-sized device
-write, replace the Week 3 Day 3 stubs `tiny_llm_ext::paged_cache_update`,
-`PagedCacheUpdate::eval_cpu`, and `PagedCacheUpdate::eval_gpu` in
-`src/extensions/src/paged_attention.cpp`, and implement
-`paged_cache_update_kernel` in `src/extensions/src/paged_attention.metal`.
-Their declaration, binding, source/Metal files, and CMake registration already
-exist; do not create a second paged-cache API.
-
-Design layer-owned page pools that:
-
-- own a free-page allocator,
-- store flat fixed-size K/V pages,
-- allocates and frees page ids,
-- supports writing a chunk into page storage,
-- grows backing capacity geometrically,
-- updates only the appended physical slice between growth events,
-- is shared by all request caches for that layer, but not by other layers.
-
-Test logical size and physical capacity separately. Allocating the fifth page,
-for example, may create capacity for eight pages, but `key_pages` and
-`value_pages` exposed to the attention runtime should contain only the five
-allocated page ids.
-
-## Task 2: Design `PagedRequestCache`
-
-```
-src/tiny_llm/paged_kv_cache.py
-```
-
-Modify `TinyKvPagedCache.__init__`, `update_and_fetch`, `release`, and
-`rewind`. Use `TinyKvPagedPool.write_page_slice` from Task 1 for
-every physical append.
-
-Replace the "one layer cache = one dense KV tensor" model with:
-
-- `page_ids`
-- `context_len`
-- append logic over fixed-size pages
-- `release()` for returning pages on request completion
-- `rewind(n)` for dropping the newest `n` logical tokens
-
-## Task 3: Add a Dense-Gather Compatibility Path
-
-```
-src/tiny_llm/paged_kv_cache.py
 src/tiny_llm/qwen3_week3.py
 ```
 
-Modify `TinyKvPagedCache.gather_dense` in
-`src/tiny_llm/paged_kv_cache.py`, plus `Qwen3ModelWeek3.__init__`,
-`Qwen3ModelWeek3.create_kv_cache`, and `Qwen3MultiHeadAttention.__call__` in
-`src/tiny_llm/qwen3_week3.py`. This checkpoint deliberately does not implement
-`paged_attention`; Day 4 owns that function.
+Update `Qwen3ModelWeek3.__init__`, `Qwen3ModelWeek3.create_kv_cache`, and
+`Qwen3MultiHeadAttention.__call__`:
 
-Carry forward Day 1's projection boundary when constructing the dense Qwen3
-model: quantized projections use the `mx.quantized_matmul` seam, while the
-embedding lookup, normalization, activation, RoPE, cache, and attention paths
-remain course-owned. Keep `use_mlx_quantized_linear=True` as the dense Week 3
-default and retain the opt-out only as a benchmark/correctness ablation. The
-optional MoE extension keeps its separately taught router/expert projection
-contract; do not silently broaden this dense-model seam into that chapter.
+- In `__init__`, create one `TinyKvPagedPool(page_size=page_size)` per layer
+  and keep them in `self.page_pools`.
+- `create_kv_cache()` returns one new `TinyKvPagedCache` per layer, each
+  attached to that layer's pool.
+- When the model is built with `enable_paged_attention=False`, attention calls
+  the cache's dense `update_and_fetch` and runs the same dense attention as
+  before on the gathered K/V. Leave `paged_attention` alone; it belongs to
+  Day 4.
 
-Build a compatibility path that reconstructs dense K/V from pages and compares it against `TinyKvFullCache`.
-
-This gives us a correctness check before we change the attention path itself.
-Instantiate the Week 3 model with `enable_paged_attention=False` in this
-chapter so its attention reads the gathered dense tensors. Day 4 switches the
-same model to page-table metadata and the paged kernel.
-
-Run that cumulative checkpoint through the normal generation and benchmark
-entry points:
+Keep the projection setup from Day 1: `use_mlx_quantized_linear=True` stays
+the Week 3 default, so the projections run through `mx.quantized_matmul`,
+while embedding, normalization, activation, RoPE, cache, and attention stay
+your own code.
 
 ```bash
+pdm run test --week 3 --day 3 -- -k task_3
+```
+
+The Task 3 tests compare the Week 3 model with your Week 2 model on a full
+prompt and token by token during decode, with tied and untied output heads.
+They also build two requests from one model, batch them, and check the
+returned `block_table` and `context_lens`.
+
+Then run the whole day's tests and the full model:
+
+```bash
+pdm run test --week 3 --day 3
+
 pdm run main --solution tiny_llm --loader week3 \
   --disable-paged-attention --model qwen3-0.6b
 
@@ -389,28 +455,47 @@ pdm run bench --solution tiny_llm --loader week3 \
   --disable-paged-attention --batch-decode --model qwen3-0.6b
 ```
 
-In the next chapter, we will take the next step: instead of gathering dense K/V before attention, we will pass runtime metadata such as `block_table` directly into a paged attention path.
+## What to Look For in the Benchmark
 
-## What Paging Changes
+The batch benchmark reads your caches' `page_ids`, `page_lens`, `page_size`,
+and `pool`, and your model's `page_pools`, so it can report on paging without
+any extra code from you. Run the same command with `--solution tiny_llm_ref`
+to see the reference numbers next to yours.
 
-Apple silicon's unified memory removes the discrete-device transfer boundary,
-but it does not remove allocation, fragmentation, or copying inside the
-GPU-visible heap.
-Fixed-size pages still let a server reuse freed capacity, grow requests without
-reserving their maximum sequence length, and batch requests with different
-context lengths. These are useful lifecycle mechanisms, but a fixed-batch trace
-measures KV-storage headroom rather than admission capacity. Claiming that more
-requests can be admitted requires a separate memory-capped sweep.
+**Reuse.** `Reused page allocations` counts pages handed to a new request
+after an earlier one released them. `Peak live KV pages` and
+`Peak KV capacity pages` show how many pages were in use, and how many the
+pool had room for, at their peaks. If live pages keep climbing while requests
+finish, something is not releasing its pages.
 
-Report fragmentation with an aligned numerator and denominator. The benchmark
-finds the snapshot with the largest sum of unused slots in the final live page
-of every request/layer cache, then divides that sum by all token slots in live
-pages at the same snapshot. It reports the unused-slot bytes as well. Unused
-physical pool capacity is excluded from that fraction and remains visible in
-the separate live-page and capacity-page counters.
+**Growth.** `Page-pool growths` and `Pages copied during pool growth` should
+show a handful of doubling steps, not one growth per page. These come from the
+optional pool counters in Task 1, so they read 0 if you did not add them.
 
-```bash
-pdm run test --week 3 --day 3
-```
+**Wasted slots.** Only a request's last page can be partly empty, so each
+request-layer cache wastes at most `page_size - 1` slots. The benchmark finds
+the moment when the sum of those unused last-page slots was largest, and
+reports it as a fraction of all slots in live pages at that same moment
+(`Tail-waste snapshot fraction`), along with its size in bytes. Spare pool
+capacity is not counted in that fraction; it shows up in the capacity
+counter instead.
+
+**Copies that remain.** Attention still receives gathered dense K/V in this
+checkpoint, so the batch staging copy from the start of the chapter is still
+there. Day 4 removes it.
+
+Paging does not make a single request faster. A page table adds a lookup,
+and this checkpoint still copies K/V for attention. What it gives a server is
+memory that is handed out as requests grow, returned when they finish, and
+reused by the next request. Apple silicon's unified memory removes the copy
+between CPU and GPU memory, but not allocation, fragmentation, or copying
+inside GPU-visible memory, so these savings still apply.
+
+One run with a fixed batch shows how much K/V memory you saved. It does not
+show that the server can accept more requests at once. To claim that, you
+would need to cap memory and measure how many requests fit.
+
+Next, in Day 4, attention reads `block_table` and `context_lens` directly and
+the dense gather goes away.
 
 {{#include copyright.md}}
