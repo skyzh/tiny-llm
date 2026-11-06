@@ -168,6 +168,7 @@ def workload_record(model, case, warmup, iterations, *, prefill_logits=None, cac
         "request_bound": bound, "prompt_rule": PROMPT_RULE, "fixture_seed": 0,
         "prefill_logits": logits, "warmup": warmup, "iterations": iterations,
         "profile_kind": adapter.PROFILE_KIND, "adapter_version": adapter.ADAPTER_VERSION,
+        "rope_offset_preparation": adapter.OFFSET_PREPARATION,
     }
 
 
@@ -214,6 +215,7 @@ def benchmark_groups(builders, warmup, iterations, *, evaluator=None, clock=None
     for round_index in range(warmup + iterations):
         for group in orders[round_index % len(orders)]:
             outputs = None
+            primary = None
             try:
                 group.prepare()
                 start = clock() if round_index >= warmup else None
@@ -223,9 +225,17 @@ def benchmark_groups(builders, warmup, iterations, *, evaluator=None, clock=None
                 group.finish()
                 if elapsed is not None:
                     timings[group.name].append(elapsed)
+            except BaseException as error:
+                primary = error
+                raise
             finally:
                 outputs = None
-                group.cleanup()
+                try:
+                    group.cleanup()
+                except Exception as cleanup:
+                    if primary is None:
+                        raise
+                    raise adapter.ReplayCleanupError(primary, cleanup) from primary
     return {name: median(samples) * 1_000_000 for name, samples in timings.items()}
 
 
@@ -262,6 +272,7 @@ def profile_case(implementation, mlx_model, model_name, case, warmup, iterations
         "cache": replay.cache.observation,
         "replay_total_us": total,
         "share_denominator": "sum-of-synchronized-public-group-medians",
+        "rope_offset_preparation": adapter.OFFSET_PREPARATION,
         "categories": [{"name": name, "median_us": value, "share": value / total}
                        for name, value in timings.items()],
     }

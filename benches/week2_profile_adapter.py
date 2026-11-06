@@ -12,7 +12,8 @@ from types import MappingProxyType
 
 
 PROFILE_KIND = "public-operator-replay"
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
+OFFSET_PREPARATION = "once-per-pointwise-sample-inside-timing"
 PUBLIC_FEATURES = (
     "bounded_kv_capacity", "quantized_weights", "fast_rms_norm", "fast_rope",
     "fast_swiglu", "simdgroup_matmul", "tiled_prefill_attention",
@@ -25,6 +26,27 @@ COUNTERS = (
 
 class UnsupportedCoverage(ValueError):
     """The requested checkpoint cannot have a complete public replay."""
+
+
+class CleanupError(RuntimeError):
+    """Ordered release causes, compatible with the declared Python 3.10 floor."""
+    def __init__(self, causes):
+        self.causes = tuple(causes)
+        details = "; ".join(
+            f"[{index}] {type(cause).__name__}: {cause}"
+            for index, cause in enumerate(self.causes, 1)
+        )
+        super().__init__(f"cache cleanup failures: {details}")
+
+
+class ReplayCleanupError(RuntimeError):
+    """Retain the primary operation failure and the complete cleanup failure."""
+    def __init__(self, primary, cleanup):
+        self.primary = primary
+        self.cleanup = cleanup
+        super().__init__(
+            f"operation failed ({type(primary).__name__}: {primary}); {cleanup}"
+        )
 
 
 @dataclass(frozen=True)
@@ -129,6 +151,10 @@ def packed_weight_options(features):
     return {"use_simdgroup_matmul": features["simdgroup_matmul"]}
 
 
+def _identity_offset(offset, batch_size):
+    return offset
+
+
 @dataclass(frozen=True)
 class PublicBindings:
     """Callables bind existing solution operators, never a model object graph."""
@@ -138,6 +164,7 @@ class PublicBindings:
     attention: Callable[..., Any]
     cache_factory: Callable[[int | None], Any]
     evaluate: Callable[[list], None]
+    prepare_pointwise: Callable[[int, int], Any] = _identity_offset
 
 
 def _noop():
@@ -211,7 +238,7 @@ class CacheReplay:
         self.observation = {
             "before_offset": self.plan.prefix, "after_offset": self.plan.case.tokens,
             "capacity": self.plan.capacity, "request_bound": self.plan.bound,
-            "first_allocation_in_update": self.plan.prefix == 0,
+            "first_update_from_empty": self.plan.prefix == 0,
             "counter_kind": "nominal-python-accounting", "counter_deltas": totals,
         }
 
@@ -225,7 +252,7 @@ class CacheReplay:
             except Exception as error:
                 errors.append(error)
         if errors:
-            raise ExceptionGroup("cache cleanup failures", errors)
+            raise CleanupError(errors) from errors[0]
 
 
 class PublicReplay:
@@ -279,15 +306,17 @@ class PublicReplay:
         ) for _ in range(self.plan.shape.layers)]
 
     def pointwise(self):
+        """Normalize offsets once per sample, inside this timed group."""
         call = self.bindings.pointwise
         out = [call(None, "embedding", self.tokens)]
+        rope_offset = self.bindings.prepare_pointwise(self.plan.prefix, self.tokens.shape[0])
         for layer in range(self.plan.shape.layers):
             for role, value in (("input_norm", self.hidden), ("post_norm", self.hidden),
                                 ("q_norm", self.query_rows), ("k_norm", self.key_rows)):
                 out.append(call(layer, role, value))
             out.extend((
-                call(layer, "rope", self.query_rows, offset=self.plan.prefix),
-                call(layer, "rope", self.key_rows, offset=self.plan.prefix),
+                call(layer, "rope", self.query_rows, offset=rope_offset),
+                call(layer, "rope", self.key_rows, offset=rope_offset),
                 call(layer, "swiglu", self.gate, self.up),
                 call(layer, "residual", self.hidden, self.hidden),
                 call(layer, "residual", self.hidden, self.hidden),
@@ -333,7 +362,8 @@ def load_implementation(name):
     )
 
 
-def make_runtime_replay(implementation, source, case, *, prefill_logits="last", cache_capacity=None):
+def make_runtime_replay(implementation, source, case, *, prefill_logits="last",
+                        cache_capacity=None, backend=None):
     """Normalize the loaded Qwen input; never construct the learner model."""
     args = source.args
     shape = ModelShape(args.num_hidden_layers, args.hidden_size, args.intermediate_size,
@@ -341,7 +371,9 @@ def make_runtime_replay(implementation, source, case, *, prefill_logits="last", 
                        args.head_dim, args.vocab_size)
     features = asdict(implementation.features[case.checkpoint])
     plan = ReplayPlan(case, shape, features, implementation.name, prefill_logits, cache_capacity)
-    import mlx.core as mx
+    if backend is None:
+        import mlx.core as backend
+    mx = backend
 
     modules = implementation.modules
     quantize, kernels = modules["quantize"], modules["week2_kernels"]
@@ -412,8 +444,7 @@ def make_runtime_replay(implementation, source, case, *, prefill_logits="last", 
         if role == "embedding":
             result = embedding(values[0])
         elif role == "rope":
-            position = offset if features["fast_rope"] else slice(offset, offset + plan.rows)
-            result = rope(values[0], offset=position)
+            result = rope(values[0], offset=offset)
         elif role == "swiglu":
             activation = choose_operator(
                 features, "fast_swiglu",
@@ -427,6 +458,12 @@ def make_runtime_replay(implementation, source, case, *, prefill_logits="last", 
         if result is None:
             raise RuntimeError(f"implement the selected public operator ({role})")
         return result
+
+    def prepare_pointwise(offset, batch_size):
+        # Called by pointwise() for every warmup/formal sample, within its clock.
+        if features["fast_rope"]:
+            return mx.full((batch_size,), offset, dtype=mx.int32)
+        return slice(offset, offset + plan.rows)
 
     route = attention_path(rows=plan.rows, context=case.tokens, head_dim=shape.head_dim,
                            dtype=shape.dtype, mask=plan.mask,
@@ -448,5 +485,6 @@ def make_runtime_replay(implementation, source, case, *, prefill_logits="last", 
 
     bindings = PublicBindings(array, project, pointwise, attention,
                               lambda capacity: modules["kv_cache"].TinyKvFullCache(capacity=capacity),
-                              lambda outputs: mx.eval(*outputs) if outputs else None)
+                              lambda outputs: mx.eval(*outputs) if outputs else None,
+                              prepare_pointwise)
     return PublicReplay(plan, bindings)
