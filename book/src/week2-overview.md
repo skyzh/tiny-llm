@@ -74,10 +74,12 @@ times whole requests through your model. The profiler replays one prefill or
 decode step's work through the course's public operators and your cache, one
 group at a time (projections, attention, normalization and activation, and
 the cache update), and reports each group's share of that replay. It builds
-the work from the model weights and your public functions, so it never needs
-a particular layout inside your model, an extra TODO, or counters of your
-own. It also cannot tell you whether your model actually calls those
-operators; your tests and wiring do that. [Day 1](./week2-01-kv-cache.md)
+the work from the model weights and your public functions, so it needs no
+additional model layout, TODO, or counter interface. It does use what Day 1
+already asks of your cache: its offset, capacity, update behavior, and four
+byte counters. It also cannot tell you whether your model actually calls
+those operators; reading your wiring does that, while your tests check
+behavior and the benchmark times whole requests. [Day 1](./week2-01-kv-cache.md)
 explains the replay's settings.
 
 The chapters use Qwen3-0.6B for every required comparison, so the work fits
