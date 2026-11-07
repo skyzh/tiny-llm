@@ -544,6 +544,19 @@ def test_task_4_batch_generate_reuses_capacity_and_returns_completion_order(
     assert result == [(1, "5"), (2, "6"), (0, "1234")]
 
 
+def test_task_4_single_slot_keeps_the_last_waiting_request(monkeypatch):
+    monkeypatch.setattr(batch_runtime, "_print_progress", lambda *args: None)
+
+    result = batch_runtime.batch_generate(
+        SchedulerFakeModel(),
+        SchedulerFakeTokenizer(),
+        ["long", "later"],
+        batch_size=1,
+    )
+
+    assert result == [(0, "1234"), (1, "6")]
+
+
 @pytest.mark.skipif(
     not qwen3_1_7b_model_exists(), reason="Qwen3-1.7B-4bit model not found"
 )
