@@ -1,5 +1,4 @@
 import mlx.core as mx
-from extensions.tiny_llm_ext import _ext as tiny_llm_ext_private
 
 
 _NO_ATTENTION_MASK = mx.zeros((1,), dtype=mx.float32)
@@ -109,6 +108,8 @@ def dense_prefill_attention_mma(
     mask: mx.array | str | None = None,
 ) -> mx.array:
     """Run the learner-owned BQ32/BK16 online-softmax prefill kernel."""
+    from extensions.tiny_llm_ext import _ext as tiny_llm_ext_private
+
     if query.ndim != 4 or key.ndim != 4 or value.ndim != 4:
         raise ValueError("dense attention expects [B,H,L,D] query, key, and value")
     expected_shape = query.shape
