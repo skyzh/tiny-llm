@@ -304,10 +304,19 @@ through `BatchingKvCache.update_and_fetch_paged`, and checks their
 pdm run test --week 3 --day 3 -- -k task_3_model_request_caches_keep_independent_metadata
 ```
 
-That is a prerequisite check on your Day 3 code, not new Day 4 feedback. Both of
-its rows are active, so nothing checks the idle-slot row before the attention
-task: Task 2's batched test is the first to do so. Day 4's own Task 1 test also
-calls `paged_attention`, so it turns green with Task 2:
+That is a prerequisite check on your Day 3 code. Both of its rows are active,
+so it does not cover the boundary Day 4's kernel depends on. This Day 4 check
+does: two active slots around an idle one, rows of different lengths, and the
+written length after a one-token append. It also checks the page tensors, page
+size and mask that `update_and_fetch_paged` returns. It does not call
+`paged_attention`, so run it before you write the kernel:
+
+```bash
+pdm run test --week 3 --day 4 -- -k task_1_batch_metadata
+```
+
+Day 4's other Task 1 test compares `paged_attention` with dense attention, so
+it turns green with Task 2:
 
 ```bash
 pdm run test --week 3 --day 4 -- -k task_1
