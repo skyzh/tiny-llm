@@ -62,7 +62,7 @@ In addition to grouped heads, this function supports different query and key/val
 while K and V use length `S`. `H_q = H` gives ordinary multi-head attention, while `H = 1` gives multi-query
 attention. The leading `N..` batch shape may contain any number of positive-sized dimensions, and `D` is an independent
 head dimension rather than necessarily `hidden_size // H_q`. An array mask is additive and must be forwarded to the
-attention scores.
+attention scores. If `H_q` is not a multiple of `H`, there is no valid grouping: raise an error rather than guessing one.
 
 You can test your implementation by running the following command:
 
@@ -126,6 +126,10 @@ x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, H_q, L, D  
 (transpose as needed)
 x = linear(x, wo) -> B, L, E
 ```
+
+In `__init__`, keep the weights and head counts, and build one `RoPE(head_dim, max_seq_len, theta)`. Its default
+non-traditional layout from Day 2 is the one Qwen3 uses, and `theta` is its frequency base. The attention scale is
+`1 / sqrt(head_dim)`, and `rms_norm_eps` is the epsilon for both per-head norms.
 
 Qwen3 attention has no Q/K/V projection biases. Apply RMSNorm to each Q and K head before applying non-traditional RoPE;
 the order matters when the normalization weights are nonuniform. We will implement the reusable `RMSNorm` layer on Day 4,
