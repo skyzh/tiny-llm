@@ -184,6 +184,38 @@ def _fake_qwen3_mlx_model(head_dim: int = 32) -> SimpleNamespace:
     )
 
 
+def test_task_1_batch_metadata_preserves_slots_and_logical_lengths():
+    """Check metadata before implementing the paged-attention operator."""
+    page_size = 4
+    pool = TinyKvPagedPool(page_size=page_size)
+    first = TinyKvPagedCache(pool=pool)
+    second = TinyKvPagedCache(pool=pool)
+    try:
+        first_chunk = mx.zeros((1, 2, 2, 4), dtype=mx.float32)
+        second_chunk = mx.zeros((1, 2, 5, 4), dtype=mx.float32)
+        first.update_and_fetch(first_chunk, first_chunk)
+        second.update_and_fetch(second_chunk, second_chunk)
+
+        batch = BatchingKvCache(max_active_requests=3, max_seq_len=16)
+        batch.add_request(first, 0)
+        batch.add_request(second, 2)
+        chunk = mx.zeros((3, 2, 1, 4), dtype=mx.float32)
+        metadata = batch.update_and_fetch_paged(
+            chunk, chunk, mask_length=1, mask="causal"
+        )
+
+        assert metadata.block_table.shape == (3, 2)
+        assert metadata.block_table.tolist() == [[0, -1], [-1, -1], [1, 2]]
+        assert metadata.context_lens.tolist() == [3, 0, 6]
+        assert metadata.key_pages.shape == (3, 2, page_size, 4)
+        assert metadata.value_pages.shape == (3, 2, page_size, 4)
+        assert metadata.page_size == page_size
+        assert metadata.mask == "causal"
+    finally:
+        first.release()
+        second.release()
+
+
 def test_task_1_paged_attention_matches_dense_attention():
     page_size = 4
     pool = TinyKvPagedPool(page_size=page_size)
