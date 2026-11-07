@@ -57,7 +57,11 @@ For a five-token prefix and a three-token chunk, the mask is `3 x 8`:
 ```
 
 Use the absolute cache offset for RoPE and `S - L` as the causal diagonal
-offset. Compare chunked prefill logits with one-shot prefill logits:
+offset. Chunked prefill should then produce the same logits as one-shot
+prefill. The focused test below does not run the model; it checks the mask
+itself. `causal_mask(L=2, S=5)` must keep the earlier positions visible, and
+attending through that mask must give the final query the same result as
+attending over the whole sequence at once:
 
 ```bash
 pdm run test --week 3 --day 2 -- -k rectangular_mask
