@@ -151,10 +151,25 @@ src/tiny_llm/batch.py
 First implement `Request.try_prefill` by prefilling the complete prompt in one
 call. The visible `prefill_max_step` input is reserved for Day 2; on Day 1, give
 this call a budget that covers the complete remaining prompt. Then complete the
-scheduler in `batch_generate`: move finished prefills into idle decode slots,
-collect the next token and offset for each slot, and remove requests that reach
-EOS or `max_seq_len`. A prompt longer than `max_seq_len` must fail before model
-or cache work, and a generated token that would cross the limit is not emitted.
+scheduler in `batch_generate`. Each request passes through three states:
+
+- **Pending.** `pending_prefill_request` holds at most one request. When its
+  prefill finishes, it may already be complete: its first generated token is
+  EOS, or it has reached `max_seq_len`. Record its result and clear
+  `pending_prefill_request` without giving it a decode slot. Otherwise find an idle slot `i`, add the request's cache for each
+  layer to slot `i` of that layer's `BatchingKvCache` with `add_request`, place
+  the request in `decode_requests[i]`, and clear `pending_prefill_request`. If
+  every slot is busy, leave it pending. The supplied loop keeps running while a
+  request is pending, so it is admitted as soon as a slot frees.
+- **Decoding.** Every iteration, collect the next token and offset of each
+  active slot, using a placeholder token and offset 0 for idle slots; the batch
+  mask already hides them.
+- **Complete.** When a slot's request reaches EOS or `max_seq_len`, call
+  `remove_request(i)` on every layer's cache, record its result, and set
+  `decode_requests[i]` back to `None` so the next pending request can use it.
+
+A prompt longer than `max_seq_len` must fail before model or cache work, and a
+generated token that would cross the limit is not emitted.
 
 Results are returned in **completion order**, because short requests can leave
 the batch before earlier long requests. Each result's `prompt_idx` maps it back

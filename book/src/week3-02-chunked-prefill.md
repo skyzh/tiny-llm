@@ -29,6 +29,19 @@ for start in range(0, len(prompt_tokens), prefill_max_step):
 The final chunk may be smaller than the configured budget. Test prompts shorter
 than one chunk, exactly one chunk, and one token longer than a chunk.
 
+Day 2's supplied tests are named by behavior rather than task number. This one
+checks chunk boundaries against one-shot prefill, together with Task 3's
+materialization:
+
+```bash
+pdm run test --week 3 --day 2 -- -k chunk_boundaries
+```
+
+With chunked prefill in place, the Day 1 loop already interleaves: a long
+prompt advances one chunk per iteration while active requests keep decoding.
+The test for that order, `-k active_decode_advances`, also checks that every
+request cache is released, so it turns green with Task 4.
+
 ## Task 2: Build Rectangular Causal Masks
 
 When a cache already holds `S - L` tokens and a chunk contributes `L` new
@@ -44,21 +57,56 @@ For a five-token prefix and a three-token chunk, the mask is `3 x 8`:
 ```
 
 Use the absolute cache offset for RoPE and `S - L` as the causal diagonal
-offset. Compare chunked prefill logits with one-shot prefill logits.
+offset. Compare chunked prefill logits with one-shot prefill logits:
+
+```bash
+pdm run test --week 3 --day 2 -- -k rectangular_mask
+```
 
 ## Task 3: Materialize Between Chunks
 
 MLX is lazy. Extending an unevaluated cache repeatedly creates a long graph and
 can grow memory usage. Call each layer cache's `materialize()` hook after every
-chunk so the next scheduler iteration starts from materialized state. A dense
-cache evaluates its key/value tuple; a paged cache evaluates the page pool
+chunk so the next scheduler iteration starts from materialized state. For the
+dense cache, implement `TinyKvFullCache.materialize` to evaluate its key/value
+tuple. The paged cache that arrives on Day 3 will evaluate its page pool
 storage without first gathering it into a dense tensor.
 
 The hook is part of the cache lifecycle rather than the scheduler's storage
 logic. This lets the scheduler use dense and paged caches without inspecting
 their internal representation.
 
-## Task 4: Measure the Fairness Tradeoff
+## Task 4: Release Every Request Cache
+
+Each request owns one cache per layer from the moment `Request` is constructed.
+The scheduler must release each of those caches exactly once, however the
+request ends:
+
+- A request that completes during prefill, from an immediate EOS or by
+  reaching `max_seq_len`, never enters a slot: release its caches directly.
+- A request that completes in a slot is released by `remove_request(i)`, so
+  your `BatchingKvCache.remove_request` must call the request cache's
+  `release()` before clearing the slot.
+- A prompt longer than `max_seq_len` never gets caches: Day 1 already rejects
+  it before `create_kv_cache()` is called, and its Task 4 test still requires
+  that.
+- If prefill, materialization, decoding or detokenization raises, the error
+  should still reach the caller, but first release every cache that is still
+  live, whether it belongs to the pending request or to a slot. Wrap the
+  scheduler loop in `try`/`finally` for this. A cache can be referenced from
+  both places while a request is being admitted, so release each cache object
+  only once.
+
+These tests count live caches through normal completion, an oversized prompt
+and an injected failure at each of those four points. Then rerun the
+interleaving test from Task 1, which also checks release:
+
+```bash
+pdm run test --week 3 --day 2 -- -k "release or oversized"
+pdm run test --week 3 --day 2 -- -k active_decode_advances
+```
+
+## Task 5: Measure the Fairness Tradeoff
 
 Run the same request trace with several `prefill_max_step` values. Report total
 throughput and the longest interval between consecutive decode steps. Smaller
