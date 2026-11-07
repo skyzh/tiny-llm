@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 2: Keep W4 Packed
+# 🚧 Week 2 Day 2: Keep W4 Packed — Decode Waits on Weights
 
 At the end of [Day 1](./week2-01-kv-cache.md) your model reuses its K/V cache,
 so each decode step feeds only one new token through the network. That token
@@ -6,6 +6,16 @@ is cheap to compute, but it still has to visit every projection weight in the
 model. Day 1's roofline showed what that costs: for Qwen3-4B, one decode step
 streams about 8 GB of BF16 weights and does only one floating-point operation
 per byte it reads. Decode spends its time waiting on memory.
+
+That is today's hypothesis, and you can check it on your own model first.
+After Day 1 you saved a request benchmark and a decode replay of
+`capacity-cache` (see [Find the Next Bottleneck](./week2-profile-guided.md)).
+If decode takes most of the request and the projections group leads the
+decode replay, the hypothesis fits your machine: each decode step's time is
+set by the weight bytes it reads, so reading fewer bytes should shrink the
+projections group and speed up decode. If another group leads, write down
+which one. You still need today's packed weights for Days 3 to 5, and the
+comparison at the end of the day will show what packing actually did.
 
 The checkpoint you download is already much smaller than that. The
 `Qwen3-4B-MLX-4bit` files store each weight as a 4-bit code. Up to now the
@@ -670,7 +680,7 @@ Run it again with `--solution tiny_llm_ref` to compare with the reference
 solution, and again with `--week2-checkpoint capacity-cache` to compare with
 Day 1. Don't change anything else between runs.
 
-To see the whole progression and where the time goes inside a decode step:
+To see the whole progression, and how the replayed decode work changes:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
@@ -684,12 +694,42 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --json-output week2-day2-attribution.json
 ```
 
+The profiler replays one decode step that ends at 128 cached tokens through
+the public operators each checkpoint selects, as described in
+[Day 1](./week2-01-kv-cache.md). Both checkpoints use the same bounded cache,
+and in one command both cases share the same context, cache bound
+(`C = S = 128` by default), and logit setting. The only thing that changes is
+the packed-weight path: projections and the embedding. If you change
+`--cache-capacity` or `--prefill-logits`, change it for both.
+
+Then answer three questions from your own runs. Did packing change the
+replayed projections group, and by how much? Did the whole-request decode
+result in the progression run improve, and by how much? Does your model
+actually route its projections through `quantized_linear` (the wiring check
+earlier in this chapter)? Any of these can come out differently from what you
+expect: a kernel can be slower than the dense path, and a smaller replay group
+can still sit next to a worse whole-request result. Keep whatever you get.
+
+Then look for the next bottleneck. Decode now runs your matvec, but a prompt
+with more than eight rows still goes to today's readable matrix kernel. Replay
+one prefill as well:
+
+```bash
+pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
+  --case quantized-matvec:prefill:128 --warmup 4 --iterations 12 \
+  --json-output week2-day2-prefill.json
+```
+
+If the projections group leads that prefill replay, you have Day 3's starting
+point. If something else does, note it before you go on.
+
 For a sense of scale, here is one older measurement of this step. It used
-Qwen3-4B on an M4 Pro, with an earlier version of the course code. Packing
-the weights cut the time spent in projections by 69.0%, and decode on a fixed
-workload went from 24.38 to 58.90 tokens per second. The profile then showed
-normalization, positional encoding, and activation taking 33.5% of the time,
-which is what Day 4 goes after. Your 0.6B numbers will differ, and these are
+Qwen3-4B on an M4 Pro, with an earlier version of the course code and an
+earlier version of the profiler whose numbers are not comparable with today's
+replay. Packing the weights cut the time spent in projections by 69.0%, and
+decode on a fixed workload went from 24.38 to 58.90 tokens per second. That
+older profile then showed normalization, positional encoding, and activation
+taking 33.5% of the time, which is what Day 4 goes after. Your 0.6B numbers will differ, and these are
 not targets to hit. The [performance appendix](./appendix-performance.md)
 has the full history.
 

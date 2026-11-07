@@ -6,16 +6,12 @@ import json
 import platform
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from statistics import median
 from time import perf_counter
-from typing import Any, Callable
 
-import mlx.core as mx
-from mlx_lm import load
-
-from model_names import shortcut_name_to_full_name
+from benches import week2_profile_adapter as adapter
 
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
@@ -34,64 +30,22 @@ DEFAULT_CASES = (
     "tiled-prefill:prefill:128",
     "selected:prefill:128",
 )
-PROMPT_RULE = "synthetic-token-ids"
-PREFILL_LOGITS = "all"
+PROMPT_RULE = "seed-0-independent-operands-and-zero-token-ids"
+PREFILL_LOGITS = "last"
 
 
-@dataclass(frozen=True)
-class ProfileCase:
-    checkpoint: str
-    phase: str
-    tokens: int
+ProfileCase = adapter.ProfileCase
+load_implementation = adapter.load_implementation
 
 
-@dataclass(frozen=True)
-class CategoryResult:
-    name: str
-    median_us: float
-    share: float
+def load_model(name):
+    from mlx_lm import load
+    return load(name)
 
 
-@dataclass(frozen=True)
-class KernelImplementation:
-    name: str
-    model_type: Any
-    checkpoints: tuple[str, ...]
-    quantized_weights_type: Any
-    grouped_attention: Callable[..., mx.array]
-    linear: Callable[..., mx.array]
-    silu: Callable[[mx.array], mx.array]
-    quantized_linear: Callable[..., mx.array]
-    decode_attention: Callable[..., mx.array]
-    swiglu: Callable[[mx.array, mx.array], mx.array]
-    decode_attention_max_query: int
-    decode_attention_max_context: int
-    tiled_attention: Callable[..., mx.array] | None = None
-    tiled_attention_min_query: int = 9
-
-
-def load_implementation(name: str) -> KernelImplementation:
-    attention = importlib.import_module(f"{name}.attention")
-    basics = importlib.import_module(f"{name}.basics")
-    model = importlib.import_module(f"{name}.qwen3_week2")
-    quantize = importlib.import_module(f"{name}.quantize")
-    kernels = importlib.import_module(f"{name}.week2_kernels")
-    return KernelImplementation(
-        name=name,
-        model_type=model.Qwen3ModelWeek2,
-        checkpoints=tuple(model.WEEK2_CHECKPOINTS),
-        quantized_weights_type=quantize.QuantizedWeights,
-        grouped_attention=attention.scaled_dot_product_attention_grouped,
-        linear=basics.linear,
-        silu=basics.silu,
-        quantized_linear=quantize.quantized_linear,
-        decode_attention=kernels.decode_attention_custom,
-        swiglu=kernels.swiglu,
-        decode_attention_max_query=getattr(model, "DECODE_ATTENTION_MAX_QUERY", 0),
-        decode_attention_max_context=getattr(model, "DECODE_ATTENTION_MAX_CONTEXT", 0),
-        tiled_attention=kernels.dense_prefill_attention_mma,
-        tiled_attention_min_query=kernels.DENSE_PREFILL_MIN_QUERY,
-    )
+def resolve_model(name):
+    from model_names import shortcut_name_to_full_name
+    return shortcut_name_to_full_name(name)
 
 
 def parse_case(value: str) -> ProfileCase:
@@ -110,8 +64,7 @@ def parse_case(value: str) -> ProfileCase:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Attribute Week 2 time by replaying each real kernel group at its "
-            "Qwen model shape and dispatch count."
+            "Replay public Week 2 operators at Qwen model shapes and API-call counts."
         )
     )
     parser.add_argument("--model", default="qwen3-4b")
@@ -132,6 +85,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--warmup", type=int, default=4)
     parser.add_argument("--iterations", type=int, default=12)
+    parser.add_argument("--prefill-logits", choices=("last", "all"), default=PREFILL_LOGITS)
+    parser.add_argument("--cache-capacity", type=int)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--decision-output", type=Path)
     parser.add_argument("--baseline-checkpoint")
@@ -146,6 +101,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("warmup cannot be negative and iterations must be positive")
     if args.case is None:
         args.case = [parse_case(value) for value in DEFAULT_CASES]
+    if args.cache_capacity is not None and any(args.cache_capacity < case.tokens for case in args.case):
+        parser.error("cache capacity must be at least every case context")
     decision_fields = (
         args.baseline_checkpoint,
         args.candidate_checkpoint,
@@ -197,305 +154,127 @@ def source_metadata(root: Path) -> dict[str, object]:
     }
 
 
-def workload_record(
-    model: str, case: ProfileCase, warmup: int, iterations: int
-) -> dict[str, object]:
+def workload_record(model, case, warmup, iterations, *, prefill_logits=None, cache_capacity=None):
+    logits = PREFILL_LOGITS if prefill_logits is None else prefill_logits
+    if logits not in ("last", "all"):
+        raise ValueError("prefill_logits must be last or all")
+    bound = case.tokens if cache_capacity is None else cache_capacity
+    if type(bound) is not int or bound < case.tokens:
+        raise ValueError("cache capacity must be at least context")
     return {
-        "model": model,
-        "phase": case.phase,
-        "tokens": case.tokens,
-        "prompt_rule": PROMPT_RULE,
-        "prefill_logits": PREFILL_LOGITS,
-        "warmup": warmup,
-        "iterations": iterations,
+        "model": model, "phase": case.phase, "tokens": case.tokens,
+        "query_length": case.tokens if case.phase == "prefill" else 1,
+        "position_offset": 0 if case.phase == "prefill" else case.tokens - 1,
+        "request_bound": bound, "prompt_rule": PROMPT_RULE, "fixture_seed": 0,
+        "prefill_logits": logits, "warmup": warmup, "iterations": iterations,
+        "profile_kind": adapter.PROFILE_KIND, "adapter_version": adapter.ADAPTER_VERSION,
+        "rope_offset_preparation": adapter.OFFSET_PREPARATION,
     }
 
 
-def build_decision(
-    baseline: dict[str, object],
-    candidate: dict[str, object],
-    *,
-    dominant_category: str,
-    hypothesis: str,
-    observed_effect: str,
-    decision: str,
-    next_experiment: str,
-) -> dict[str, object]:
-    for field in ("source", "solution", "model", "workload_id"):
+def build_decision(baseline, candidate, *, dominant_category, hypothesis,
+                   observed_effect, decision, next_experiment):
+    for record in (baseline, candidate):
+        if record.get("schema_version") != 3 or not record.get("coverage", {}).get("complete"):
+            raise ValueError("decision requires complete schema v3 public replay coverage")
+    for field in ("source", "solution", "model", "workload_id", "software", "host", "profile_kind"):
         if baseline[field] != candidate[field]:
             raise ValueError(f"decision {field} mismatch")
     if decision not in {"keep", "reject", "inconclusive"}:
         raise ValueError("decision must be keep, reject, or inconclusive")
     return {
-        "schema_version": 1,
-        "source": baseline["source"],
-        "solution": baseline["solution"],
-        "model": baseline["model"],
+        "schema_version": 3, "source": baseline["source"],
+        "solution": baseline["solution"], "model": baseline["model"],
         "workload_id": baseline["workload_id"],
+        "profile_kind": baseline["profile_kind"],
         "baseline_checkpoint": baseline["checkpoint"],
         "candidate_checkpoint": candidate["checkpoint"],
-        "dominant_category": dominant_category,
-        "hypothesis": hypothesis,
-        "observed_effect": observed_effect,
-        "decision": decision,
+        "dominant_category": dominant_category, "hypothesis": hypothesis,
+        "observed_effect": observed_effect, "decision": decision,
         "next_experiment": next_experiment,
     }
 
 
-def evaluate(outputs: list[mx.array]) -> None:
-    mx.eval(*outputs)
+def evaluate(outputs):
+    if outputs:
+        import mlx.core as mx
+        mx.eval(*outputs)
 
 
-def benchmark_groups(
-    builders: tuple[tuple[str, Callable[[], list[mx.array]]], ...],
-    warmup: int,
-    iterations: int,
-) -> dict[str, float]:
-    orders = [builders[offset:] + builders[:offset] for offset in range(len(builders))]
-    for round_index in range(warmup):
-        for _, build in orders[round_index % len(orders)]:
-            evaluate(build())
-
-    timings = {name: [] for name, _ in builders}
-    for round_index in range(iterations):
-        order = orders[(warmup + round_index) % len(orders)]
-        for name, build in order:
-            start = perf_counter()
-            evaluate(build())
-            timings[name].append(perf_counter() - start)
+def benchmark_groups(builders, warmup, iterations, *, evaluator=None, clock=None):
+    if warmup < 0 or iterations <= 0 or not builders:
+        raise ValueError("require groups, nonnegative warmup and positive iterations")
+    groups = tuple(item if isinstance(item, adapter.ReplayGroup)
+                   else adapter.ReplayGroup(*item) for item in builders)
+    if len({group.name for group in groups}) != len(groups):
+        raise ValueError("group names must be unique")
+    evaluator = evaluate if evaluator is None else evaluator
+    clock = perf_counter if clock is None else clock
+    orders = [groups[offset:] + groups[:offset] for offset in range(len(groups))]
+    timings = {group.name: [] for group in groups}
+    for round_index in range(warmup + iterations):
+        for group in orders[round_index % len(orders)]:
+            outputs = None
+            primary = None
+            try:
+                group.prepare()
+                start = clock() if round_index >= warmup else None
+                outputs = group.build()
+                evaluator(outputs)
+                elapsed = clock() - start if start is not None else None
+                group.finish()
+                if elapsed is not None:
+                    timings[group.name].append(elapsed)
+            except BaseException as error:
+                primary = error
+                raise
+            finally:
+                outputs = None
+                try:
+                    group.cleanup()
+                except Exception as cleanup:
+                    if primary is None:
+                        raise
+                    raise adapter.ReplayCleanupError(primary, cleanup) from primary
     return {name: median(samples) * 1_000_000 for name, samples in timings.items()}
 
 
-def project(implementation: KernelImplementation, x: mx.array, weight: Any) -> mx.array:
-    if isinstance(weight, implementation.quantized_weights_type):
-        return implementation.quantized_linear(x, weight)
-    return implementation.linear(x, weight)
+def should_use_decode_attention(implementation, enabled, query_length, context_length, mask):
+    return adapter.attention_path(
+        rows=query_length, context=context_length, head_dim=1, dtype="float32", mask=mask,
+        decode=enabled, max_query=implementation.decode_attention_max_query,
+        max_context=implementation.decode_attention_max_context,
+    ) == "custom"
 
 
-def should_use_decode_attention(
-    implementation: KernelImplementation,
-    enabled: bool,
-    query_length: int,
-    context_length: int,
-    mask: mx.array | str | None,
-) -> bool:
-    return (
-        enabled
-        and query_length <= implementation.decode_attention_max_query
-        and context_length <= implementation.decode_attention_max_context
-        and not isinstance(mask, mx.array)
-    )
-
-
-class KernelReplay:
-    def __init__(
-        self,
-        implementation: KernelImplementation,
-        model: Any,
-        phase: str,
-        tokens: int,
-    ):
-        self.implementation = implementation
-        self.model = model
-        self.phase = phase
-        self.rows = 1 if phase == "decode" else tokens
-        self.context = tokens
-        first = model.layers_inner[0]
-        self.hidden_size = first.hidden_size
-        self.num_heads = first.num_attention_heads
-        self.num_kv_heads = first.self_attn.num_kv_heads
-        self.head_dim = first.self_attn.head_dim
-        self.intermediate_size = first.mlp.hidden_dim
-        self.dtype = model.precision
-
-        self.hidden = mx.random.normal((1, self.rows, self.hidden_size)).astype(
-            self.dtype
-        )
-        self.query = mx.random.normal(
-            (1, self.num_heads, self.rows, self.head_dim)
-        ).astype(self.dtype)
-        self.key = mx.random.normal(
-            (1, self.num_kv_heads, self.context, self.head_dim)
-        ).astype(self.dtype)
-        self.value = mx.random.normal(self.key.shape).astype(self.dtype)
-        self.query_rows = self.query.transpose(0, 2, 1, 3)
-        self.key_rows = mx.random.normal(
-            (1, self.rows, self.num_kv_heads, self.head_dim)
-        ).astype(self.dtype)
-        self.gate = mx.random.normal((1, self.rows, self.intermediate_size)).astype(
-            self.dtype
-        )
-        self.up = mx.random.normal(self.gate.shape).astype(self.dtype)
-        self.tokens = mx.zeros((1, self.rows), dtype=mx.int32)
-        evaluate(
-            [
-                self.hidden,
-                self.query,
-                self.key,
-                self.value,
-                self.query_rows,
-                self.key_rows,
-                self.gate,
-                self.up,
-                self.tokens,
-            ]
-        )
-
-    def projections(self) -> list[mx.array]:
-        outputs = []
-        hidden = self.hidden
-        for layer in self.model.layers_inner:
-            attention = layer.self_attn
-            query = project(self.implementation, hidden, attention.wq)
-            key = project(self.implementation, hidden, attention.wk)
-            value = project(self.implementation, hidden, attention.wv)
-            attention_input = mx.concatenate(
-                (key, value, query[..., key.shape[-1] + value.shape[-1] :]),
-                axis=-1,
-            )
-            attention_output = project(
-                self.implementation, attention_input, attention.wo
-            )
-            mlp_input = hidden + attention_output
-            gate = project(self.implementation, mlp_input, layer.mlp.w_gate)
-            up = project(self.implementation, mlp_input, layer.mlp.w_up)
-            mlp_output = project(self.implementation, gate + up, layer.mlp.w_down)
-            hidden = mlp_input + mlp_output
-            outputs.extend((key, value))
-        final_hidden = hidden[:, -1:, :]
-        if self.model.w_lm_head is not None:
-            outputs.append(
-                project(self.implementation, final_hidden, self.model.w_lm_head)
-            )
-        else:
-            outputs.append(self.model.embedding.as_linear(final_hidden))
-        return outputs
-
-    def attention(self) -> list[mx.array]:
-        outputs = []
-        mask = "causal" if self.phase == "prefill" else None
-        for layer in self.model.layers_inner:
-            attention = layer.self_attn
-            if (
-                getattr(attention, "use_tiled_prefill_attention", False)
-                and self.rows
-                >= getattr(self.implementation, "tiled_attention_min_query", 9)
-                and self.dtype == mx.bfloat16
-                and attention.head_dim == 128
-            ):
-                output = self.implementation.tiled_attention(
-                    self.query,
-                    self.key,
-                    self.value,
-                    scale=attention.scale,
-                    mask=mask,
-                )
-            elif should_use_decode_attention(
-                self.implementation,
-                getattr(attention, "use_decode_attention", False),
-                self.rows,
-                self.context,
-                mask,
-            ):
-                output = self.implementation.decode_attention(
-                    self.query,
-                    self.key,
-                    self.value,
-                    scale=attention.scale,
-                    mask=mask,
-                )
-            else:
-                output = self.implementation.grouped_attention(
-                    self.query.astype(mx.float32),
-                    self.key.astype(mx.float32),
-                    self.value.astype(mx.float32),
-                    scale=attention.scale,
-                    mask=mask,
-                ).astype(self.dtype)
-            outputs.append(output)
-        return outputs
-
-    def pointwise(self) -> list[mx.array]:
-        outputs = [self.model.embedding(self.tokens)]
-        for layer in self.model.layers_inner:
-            attention = layer.self_attn
-            outputs.extend(
-                (
-                    layer.input_layernorm(self.hidden),
-                    layer.post_attention_layernorm(self.hidden),
-                    attention.q_norm(self.query_rows),
-                    attention.k_norm(self.key_rows),
-                )
-            )
-            rope_offset = 0 if attention.use_fast_rope else slice(0, self.rows)
-            outputs.extend(
-                (
-                    attention.rope(self.query_rows, offset=rope_offset),
-                    attention.rope(self.key_rows, offset=rope_offset),
-                )
-            )
-            if layer.mlp.use_fast_swiglu:
-                outputs.append(self.implementation.swiglu(self.gate, self.up))
-            else:
-                outputs.append(self.implementation.silu(self.gate) * self.up)
-            outputs.extend((self.hidden + self.hidden, self.hidden + self.hidden))
-        outputs.append(self.model.norm(self.hidden[:, -1:, :]))
-        return outputs
-
-    def cache(self) -> list[mx.array]:
-        if self.phase == "prefill":
-            return [self.key, self.value]
-        previous_key = self.key[:, :, :-1, :]
-        previous_value = self.value[:, :, :-1, :]
-        new_key = self.key[:, :, -1:, :]
-        new_value = self.value[:, :, -1:, :]
-        outputs = []
-        for _ in self.model.layers_inner:
-            outputs.extend(
-                (
-                    mx.concat((previous_key, new_key), axis=2),
-                    mx.concat((previous_value, new_value), axis=2),
-                )
-            )
-        return outputs
-
-
-def profile_case(
-    implementation: KernelImplementation,
-    mlx_model: object,
-    model_name: str,
-    case: ProfileCase,
-    warmup: int,
-    iterations: int,
-) -> dict[str, object]:
-    model = implementation.model_type(mlx_model, checkpoint=case.checkpoint)
-    replay = KernelReplay(implementation, model, case.phase, case.tokens)
-    builders = (
-        ("projections", replay.projections),
-        ("attention", replay.attention),
-        ("normalization, position, and activation", replay.pointwise),
-    )
-    if case.phase == "decode":
-        builders += (("KV growth", replay.cache),)
-    timings = benchmark_groups(builders, warmup, iterations)
-    measured = [(name, timings[name]) for name, _ in builders]
-    total = sum(value for _, value in measured)
-    categories = [
-        CategoryResult(name, value, value / total) for name, value in measured
-    ]
-    print(f"{case.checkpoint:<18} {case.phase:<7} tokens={case.tokens:<4}")
-    for category in categories:
-        print(
-            f"  {category.name:<40} {category.median_us:>10.1f} us "
-            f"{category.share:>6.1%}"
-        )
-    workload = workload_record(model_name, case, warmup, iterations)
+def profile_case(implementation, mlx_model, model_name, case, warmup, iterations,
+                 *, prefill_logits=None, cache_capacity=None):
+    logits = PREFILL_LOGITS if prefill_logits is None else prefill_logits
+    workload = workload_record(model_name, case, warmup, iterations,
+                               prefill_logits=logits, cache_capacity=cache_capacity)
+    common = {"schema_version": 3, "profile_kind": adapter.PROFILE_KIND,
+              "checkpoint": case.checkpoint, "workload": workload,
+              "workload_id": canonical_hash(workload)}
+    try:
+        replay = adapter.make_runtime_replay(implementation, mlx_model, case,
+                                            prefill_logits=logits, cache_capacity=cache_capacity)
+    except adapter.UnsupportedCoverage as error:
+        return {**common, "coverage": {"complete": False, "reason": str(error)},
+                "categories": []}
+    timings = benchmark_groups(replay.groups(), warmup, iterations,
+                               evaluator=replay.bindings.evaluate)
+    total = sum(timings.values())
+    if total <= 0:
+        raise ValueError("replay total must be positive")
     return {
-        "checkpoint": case.checkpoint,
-        "workload": workload,
-        "workload_id": canonical_hash(workload),
-        "attributed_us": total,
-        "categories": [asdict(category) for category in categories],
+        **common, "coverage": {"complete": True},
+        "shape": asdict(replay.plan.shape), "effective_features": dict(replay.plan.features),
+        "cache": replay.cache.observation,
+        "replay_total_us": total,
+        "share_denominator": "sum-of-synchronized-public-group-medians",
+        "rope_offset_preparation": adapter.OFFSET_PREPARATION,
+        "categories": [{"name": name, "median_us": value, "share": value / total}
+                       for name, value in timings.items()],
     }
 
 
@@ -520,17 +299,14 @@ def main() -> None:
     ]
     if unknown:
         raise ValueError(f"unknown Week 2 checkpoint for {args.solution}: {unknown[0]}")
-    model_name = shortcut_name_to_full_name(args.model)
-    mlx_model, _ = load(model_name)
+    model_name = resolve_model(args.model)
+    mlx_model, _ = load_model(model_name)
     print(
         f"Solution={implementation.name} Model={model_name} "
         f"MLX={importlib.metadata.version('mlx')} "
         f"mlx-lm={importlib.metadata.version('mlx-lm')}"
     )
-    print(
-        "Median synchronized kernel-group replay; shares are normalized across "
-        "the measured groups."
-    )
+    print("Synchronized public-operator replay; shares are not a model timeline.")
     profiles = [
         profile_case(
             implementation,
@@ -539,9 +315,16 @@ def main() -> None:
             case,
             args.warmup,
             args.iterations,
+            prefill_logits=args.prefill_logits, cache_capacity=args.cache_capacity,
         )
         for case in args.case
     ]
+    for record in profiles:
+        print(f"{record['checkpoint']} {record['workload']['phase']} tokens={record['workload']['tokens']}")
+        if not record["coverage"]["complete"]:
+            print(f"  unsupported: {record['coverage']['reason']}")
+        for category in record["categories"]:
+            print(f"  {category['name']}: {category['median_us']:.1f} us ({category['share']:.1%} of replay)")
     root = Path(__file__).resolve().parents[1]
     source = source_metadata(root)
     software = {
@@ -549,6 +332,7 @@ def main() -> None:
         "mlx_lm": importlib.metadata.version("mlx-lm"),
         "python": platform.python_version(),
     }
+    import mlx.core as mx
     host = {
         "machine": platform.machine(),
         "platform": platform.platform(),
@@ -565,7 +349,8 @@ def main() -> None:
             iterations=args.iterations,
         )
     result = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "profile_kind": adapter.PROFILE_KIND,
         "source": source,
         "solution": implementation.name,
         "model": model_name,
@@ -577,7 +362,8 @@ def main() -> None:
     }
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
-        args.json_output.write_text(json.dumps(result, indent=2) + "\n")
+        with args.json_output.open("x") as output:
+            output.write(json.dumps(result, indent=2) + "\n")
     if args.decision_output is not None:
         matches = {
             profile["checkpoint"]: profile
@@ -603,7 +389,8 @@ def main() -> None:
             next_experiment=args.next_experiment,
         )
         args.decision_output.parent.mkdir(parents=True, exist_ok=True)
-        args.decision_output.write_text(json.dumps(decision, indent=2) + "\n")
+        with args.decision_output.open("x") as output:
+            output.write(json.dumps(decision, indent=2) + "\n")
 
 
 if __name__ == "__main__":
