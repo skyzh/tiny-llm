@@ -3,6 +3,22 @@
 This week, we will start with basic array and matrix operations and use them to turn Qwen3 model parameters into a model
 that generates text. We will implement the neural network layers used by Qwen3 with MLX's array APIs.
 
+## Where You Start
+
+After [setup](./setup.md), you have run the reference model and watched it
+generate text. Your own package, `src/tiny_llm`, has the same files and
+function signatures, but the functions you will write are stubs whose bodies
+are just `pass`. Each day, you fill in a few of them, copy that day's tests
+with `pdm run test --week 1 --day N`, and work until they pass.
+
+Days 1 to 4 build the layers one at a time. Day 5 assembles them into the
+Qwen3 model and loads the real weights. Day 6 adds the generation loop, and
+`pdm run main --solution tiny_llm --loader week1` then generates text with
+your code. Day 7 adds sampling and prepares the toolchain for Week 2.
+[Day 1](./week1-01-attention.md) starts with attention.
+
+## Model and Precision
+
 We will use `Qwen/Qwen3-0.6B-MLX-4bit`. The course model uses BF16 weights and
 activations by default, so start with the 0.6B model before trying larger Qwen3
 models. The required model path runs on the GPU. Small operator fixtures may

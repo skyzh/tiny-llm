@@ -38,12 +38,15 @@ pdm install -v
 pdm run check-installation
 ```
 
-## Build the Native Extensions Before Tests
+<a id="build-the-native-extensions-before-tests"></a>
 
-Week 1 test collection reaches the learner and reference native extensions
-through package imports, even though the Day 1 attention exercise is in
-Python. Before running either test command on a fresh checkout, prepare full
-Xcode, its Metal compiler, and CMake 3.27 or newer; the
+## Build the Native Extensions
+
+Most of the Week 1 exercises are in Python, but your `tiny_llm` package also
+loads a native Week 2 kernel module as soon as it is imported. Every test
+imports the package, so the extension has to be built before the first test
+can even be collected. Building it needs full Xcode, its Metal compiler, and
+CMake 3.27 or newer; the
 [toolchain steps in Week 1 Day 7](./week1-07-sampling-prepare.md#task-2-prepare-for-week-2)
 give the installation checks. Then, from the repository root, build both
 extensions:
@@ -53,24 +56,9 @@ pdm run build-ext
 pdm run build-ext-ref
 ```
 
-The reference build supplies its native import; it does not implement the
-learner TODOs in `src/tiny_llm`.
-
-Check the completed Day 1 reference exercise before working on your starter:
-
-```bash
-pdm run test-refsol --week 1 --day 1 -- -k task_1
-# The reference solution should pass all Week 1 tests.
-pdm run test-refsol -- -- -k week_1
-```
-
-## Run Unit Tests
-
-Your code is in `src/tiny_llm`. You can run the unit tests with:
-
-```bash
-pdm run test
-```
+`build-ext` builds the extension your package imports. `build-ext-ref` builds
+the reference package's extension, which the reference model and reference
+tests below need. Neither build fills in the learner TODOs in `src/tiny_llm`.
 
 ## Download the Model Parameters
 
@@ -90,15 +78,43 @@ hf download Qwen/Qwen3-1.7B-MLX-4bit
 hf download Qwen/Qwen3-4B-MLX-4bit
 ```
 
-Then, you can run:
+## Run the Reference Model
+
+Now run the model you are going to build:
 
 ```bash
 pdm run main --solution ref --loader week1
 ```
 
-The command should load the reference model and print generated text.
+The command loads the reference implementation and prints generated text. By
+the end of Week 1 Day 6, the same command with `--solution tiny_llm` will run
+your own implementation instead.
 
-Week 1 Day 7 revisits this toolchain before the Week 2 C++ and Metal kernel
+The reference tests should also pass. The Week 1 Day 5 tests load the 0.6B
+model, so run them after the download:
+
+```bash
+pdm run test-refsol --week 1 --day 1 -- -k task_1
+# The reference solution should pass all Week 1 tests.
+pdm run test-refsol -- -- -k week_1
+```
+
+## Run Your Tests
+
+Your code is in `src/tiny_llm`, and its tests start out absent: `tests/` holds
+only shared helpers. Each day's command copies that day's tests from
+`tests_refsol/` into `tests/` and runs them:
+
+```bash
+pdm run test --week 1 --day 1
+```
+
+On the untouched starter, the supplied `softmax` tests pass and the attention
+and `linear` tests fail. That red result is your starting point for
+[Week 1 Day 1](./week1-01-attention.md). Once you have copied a few days,
+`pdm run test` with no arguments reruns every test file in `tests/`.
+
+Week 1 Day 7 revisits the toolchain before the Week 2 C++ and Metal kernel
 lessons.
 
 {{#include copyright.md}}
