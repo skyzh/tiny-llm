@@ -47,8 +47,8 @@ Qwen3 uses the following Transformer block structure:
 output
 ```
 
-Read `head_dim` independently from the model configuration rather than deriving it from `hidden_size` and the number of
-attention heads. Match the reference block's output dtype.
+Pass the block's own `head_dim` argument to attention rather than computing `hidden_size // num_attention_heads`; in
+Qwen3 the two can differ. The test compares your block with mlx-lm's Qwen3 block, including its output dtype.
 
 Run the tests for this task with:
 

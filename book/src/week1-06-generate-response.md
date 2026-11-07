@@ -29,8 +29,9 @@ from the output logits.
 logits = output_logits[:, -1, :]
 ```
 
-You may normalize these logits into log probabilities with the log-sum-exp trick. This normalization does not change
-the result of `argmax`, but the sampler introduced on Day 7 expects log probabilities. If `sampler` is `None`, use
+Normalize these logits into log probabilities with the log-sum-exp trick. This does not change the result of `argmax`,
+but the sampler introduced on Day 7 expects log probabilities, and the Day 6 tests check that a supplied sampler receives
+finite values whose probabilities sum to 1. If `sampler` is `None`, use
 `mx.argmax` along the final, vocabulary dimension. Otherwise, pass the `(1, vocab_size)` log-probability array to
 `sampler`, which returns one token ID in an integer array with shape `(1,)`. Selecting the highest-scoring token at every
 step is called greedy decoding.
