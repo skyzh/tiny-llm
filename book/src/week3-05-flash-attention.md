@@ -186,7 +186,11 @@ page identifiers chosen by an implementation, kernel names, or routing state.
 Force `mx.eval` immediately after each operator so compilation, dispatch, and
 addressing failures are reported at the responsible call.
 
+The new kernel and dispatch live in the extension, so rebuild it before every
+test run; otherwise the tests still exercise your previous Day 4 build:
+
 ```bash
+pdm run build-ext
 pdm run test --week 3 --day 5
 ```
 
