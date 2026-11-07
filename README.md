@@ -144,3 +144,7 @@ cross-request prefix caching, fine-tuning, and long-context techniques.
 Join skyzh's Discord server to study with the tiny-llm community.
 
 [![Join skyzh's Discord Server](book/src/discord-badge.svg)](https://skyzh.dev/join/discord)
+
+Community port: [amagilabs/tiny-llm-cuda](https://github.com/amagilabs/tiny-llm-cuda)
+is an unofficial CUDA (NVIDIA GPU) backend for the reference solution kernels,
+via MLX's CUDA backend.
