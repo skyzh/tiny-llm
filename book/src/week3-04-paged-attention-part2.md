@@ -287,7 +287,8 @@ Day 4's attention reads the `block_table` and `context_lens` you already built
 on [Day 3](./week3-03-paged-attention-part1.md#batching-requests-with-pages):
 `TinyKvPagedCache.block_table`, `context_lens`, `paged_metadata` and
 `update_and_fetch_paged`, plus `BatchingKvCache.update_and_fetch_paged`. Task 1
-adds no new methods and no scheduler change. The metadata reaches attention
+adds no new methods and no scheduler change: `Request.try_prefill` and `_step`
+keep passing caches to the model as before, and the metadata reaches attention
 through the model's cache call, which Task 3 wires up. Before writing the
 kernel, make sure those arrays hold exactly what it will read:
 
