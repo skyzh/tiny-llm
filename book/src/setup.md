@@ -42,11 +42,12 @@ pdm run check-installation
 
 ## Build the Reference Extension
 
-Your own Week 1 code is plain Python, and your `tiny_llm` package loads its
-native extension only when its Week 2 tiled attention kernel is called, so you
-can do every Week 1 exercise without building anything. The reference package
-is different: it loads its native extension as soon as it is imported, so the
-reference model and reference tests below need it built first.
+Your own Week 1 code is Python on top of MLX, and your `tiny_llm` package
+loads its native extension only when its Week 2 tiled attention kernel is
+called, so you can do Week 1's Python exercises without building the project
+extension. The reference package is different: it loads its native extension
+as soon as it is imported, so the reference model and reference tests below
+need it built first.
 
 Building it needs full Xcode, its Metal compiler, and CMake 3.27 or newer; the
 [toolchain steps in Week 1 Day 7](./week1-07-sampling-prepare.md#task-2-prepare-for-week-2)

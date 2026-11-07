@@ -6,7 +6,7 @@ complete `scaled_dot_product_attention_simple` and `SimpleMultiHeadAttention` in
 of this chapter.
 
 You need a checkout where you have finished [setup](./setup.md). Today's tests
-are plain Python and need no native build.
+are MLX-backed Python and need no project-extension build.
 
 Start by running the focused Task 1 tests. The command copies the supplied Day 1 test into `tests/` before running it:
 
