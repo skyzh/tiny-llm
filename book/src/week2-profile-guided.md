@@ -39,7 +39,7 @@ questions, and the most common mistake is to read one as if it were another.
 
 | View | What it measures | Answers | Cannot answer |
 |---|---|---|---|
-| Request clock | Wall time for a whole request: time to first token, decode speed, peak memory | Did the request get faster or use less memory? | Which operator caused it |
+| Request clock | Wall time for a whole request: time to first token, decode speed, peak MLX allocation | Did the request get faster or use less memory? | Which operator caused it |
 | System timeline | CPU and GPU activity on one shared clock | Is the GPU idle while Python prepares work? Do CPU and GPU overlap? | How expensive one kernel is inside |
 | Operator replay | Synchronized, repeated timing of groups of operators at one fixed shape | Which group of operators costs the most at this shape? | Whether your model actually calls them, or what a full request costs |
 | GPU capture, counters and source lines | One captured stretch of GPU work, with per-kernel cost, hardware limiters and weighted cost per source line | Which kernel dominates, what limits it, which line inside it is expensive | Anything about the CPU, the full request, or other shapes |
@@ -88,9 +88,22 @@ Look at three things:
   weight still has to be read from memory once per step. If the step time is
   close to "weight bytes divided by memory bandwidth", the step is limited by
   reading weights, not by arithmetic.
-- **Peak memory.** Note it now. Day 2 changes how weights are stored, so
-  check it again there. If a later change raises it, that is a cost you must
-  report.
+- **Peak allocation.** The benchmark's peak-allocation column (and
+  `peak_mlx_bytes` in the JSON) is the most memory MLX had allocated at
+  once during each measured request. It is reset just before that request,
+  after loading and warmup, so it covers that request alone. It still
+  includes the model weights MLX keeps resident, so it is not "the extra
+  memory this request needed", and it is not the physical memory your Mac
+  is using. Note it now. Day 2 changes how weights are stored, so check it
+  again there. If a later change raises it, that is a cost you must report.
+  A result file from before this column existed has no value for it; treat
+  that as missing, not zero.
+
+The memory check itself (synchronizing the GPU, then resetting and reading
+the counter) runs outside the request clocks. Whole-request throughput adds
+up each request's full interval, including setting up its input and cache
+and releasing them afterwards; prefill and decode keep their own, narrower
+clocks.
 
 Two short runs on a busy laptop can differ by several percent. If two
 variants are within that noise, rerun them before you draw a conclusion, and

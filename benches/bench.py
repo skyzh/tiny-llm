@@ -13,6 +13,13 @@ from tqdm.auto import tqdm
 
 from model_names import shortcut_name_to_full_name
 
+from benches.bench_request_metrics import (
+    PEAK_MLX_SCOPE,
+    REQUEST_ELAPSED_SCOPE,
+    measure_request,
+    request_cache_capacity,
+)
+
 
 @dataclass
 class BenchRequest:
@@ -295,8 +302,13 @@ def run_one_request_week2(
     model,
     request: BenchRequest,
     prefill_logits_to_keep: int | None = None,
+    cache_capacity: int | None = None,
 ) -> tuple[int, float, float]:
-    kv_cache = model.create_kv_cache()
+    kv_cache = (
+        model.create_kv_cache()
+        if cache_capacity is None
+        else model.create_kv_cache(capacity=cache_capacity)
+    )
     try:
         context = mx.array(request.prompt_token_ids, dtype=mx.int32)
         offset = 0
@@ -709,6 +721,9 @@ def main() -> None:
                         model,
                         request,
                         prefill_logits_to_keep=prefill_logits_to_keep,
+                        cache_capacity=request_cache_capacity(
+                            args.loader, args.week2_checkpoint, request
+                        ),
                     )
 
         requests = build_requests(
@@ -750,6 +765,8 @@ def main() -> None:
         total_prefill_time = 0.0
         total_decode_time = 0.0
         serving_metrics = None
+        request_peak_mlx_bytes = []
+        request_elapsed_seconds = 0.0
 
         t0 = perf_counter()
         if args.batch_decode:
@@ -770,12 +787,17 @@ def main() -> None:
             )
         else:
             for request in requests:
-                generated_tokens, prefill_time, decode_time = run_one_request(request)
+                result, request_elapsed, peak_bytes = measure_request(
+                    run_one_request, request, memory=mx
+                )
+                generated_tokens, prefill_time, decode_time = result
+                request_elapsed_seconds += request_elapsed
+                request_peak_mlx_bytes.append(peak_bytes)
                 total_generated_tokens += generated_tokens
                 total_decode_tokens += max(0, generated_tokens - 1)
                 total_prefill_time += prefill_time
                 total_decode_time += decode_time
-                elapsed = perf_counter() - t0
+                elapsed = request_elapsed_seconds
                 progress.update(1)
                 progress.set_postfix(
                     {
@@ -785,9 +807,15 @@ def main() -> None:
                         ),
                     }
                 )
-        total_time = perf_counter() - t0
+        total_time = (
+            perf_counter() - t0 if args.batch_decode else request_elapsed_seconds
+        )
         progress.close()
 
+    peak_mlx_bytes = max(request_peak_mlx_bytes, default=None)
+    if peak_mlx_bytes is not None:
+        print(f"Peak MLX allocation bytes: {peak_mlx_bytes}")
+        print(f"Peak MLX allocation scope: {PEAK_MLX_SCOPE}")
     total_model_tokens = total_prompt_tokens + total_generated_tokens
     print(
         f"Requests: {args.num_seqs}, Prompt tokens: {total_prompt_tokens}, "
@@ -861,6 +889,7 @@ def main() -> None:
                 "model": args.model,
                 "solution": args.solution,
                 "loader": args.loader,
+                "week2_checkpoint": args.week2_checkpoint,
                 "num_seqs": args.num_seqs,
                 "min_input_len": args.min_input_len,
                 "max_input_len": args.max_input_len,
@@ -884,6 +913,12 @@ def main() -> None:
             ],
             "metrics": {
                 "elapsed_seconds": total_time,
+                "elapsed_scope": (
+                    "batch wall time" if args.batch_decode else REQUEST_ELAPSED_SCOPE
+                ),
+                "request_peak_mlx_bytes": request_peak_mlx_bytes,
+                "peak_mlx_bytes": peak_mlx_bytes,
+                "peak_mlx_scope": PEAK_MLX_SCOPE if not args.batch_decode else None,
                 "output_tokens_per_second": safe_div(
                     total_generated_tokens, total_time
                 ),
