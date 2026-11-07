@@ -40,25 +40,30 @@ pdm run check-installation
 
 <a id="build-the-native-extensions-before-tests"></a>
 
-## Build the Native Extensions
+## Build the Reference Extension
 
-Most of the Week 1 exercises are in Python, but your `tiny_llm` package also
-loads a native Week 2 kernel module as soon as it is imported. Every test
-imports the package, so the extension has to be built before the first test
-can even be collected. Building it needs full Xcode, its Metal compiler, and
-CMake 3.27 or newer; the
+Your own Week 1 code is plain Python, and your `tiny_llm` package loads its
+native extension only when its Week 2 tiled attention kernel is called, so you
+can do every Week 1 exercise without building anything. The reference package
+is different: it loads its native extension as soon as it is imported, so the
+reference model and reference tests below need it built first.
+
+Building it needs full Xcode, its Metal compiler, and CMake 3.27 or newer; the
 [toolchain steps in Week 1 Day 7](./week1-07-sampling-prepare.md#task-2-prepare-for-week-2)
-give the installation checks. Then, from the repository root, build both
-extensions:
+give the installation checks. Then, from the repository root, run:
 
 ```bash
-pdm run build-ext
 pdm run build-ext-ref
 ```
 
-`build-ext` builds the extension your package imports. `build-ext-ref` builds
-the reference package's extension, which the reference model and reference
-tests below need. Neither build fills in the learner TODOs in `src/tiny_llm`.
+The build does not fill in the learner TODOs in `src/tiny_llm`. You build your
+own extension with `pdm run build-ext` on Week 1 Day 7, before Week 2.
+
+If you do not have the toolchain yet, you can still start. Download the model,
+skip [Run the Reference Model](#run-the-reference-model), and go on to
+[Run Your Tests](#run-your-tests). To see the finished model generate text
+without any native build, run `pdm run main --solution mlx`, which uses plain
+MLX instead of the reference implementation.
 
 ## Download the Model Parameters
 
