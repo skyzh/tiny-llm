@@ -292,6 +292,24 @@ Extend the batch cache and scheduler so they can prepare:
 
 for all active requests.
 
+The batch arrays have one row per decode slot, including idle ones:
+
+- an active row lists that request's page ids in logical order, padded with
+  `-1` up to the longest active request's page count;
+- an idle slot has `context_lens` 0 and a row of all `-1`;
+- each `context_lens` entry counts the request's written tokens, including the
+  chunk just appended.
+
+Day 4 has no metadata-only test. This focused metadata test also calls
+`paged_attention`, so it turns green with Task 2:
+
+```bash
+pdm run test --week 3 --day 4 -- -k task_1
+```
+
+It checks a single request's metadata. Task 2's batched test then checks the
+padded rows and the idle slot.
+
 ## Task 2: Define `paged_attention`
 
 ```
@@ -374,6 +392,30 @@ require the quantized embedding, model dispatch, continuous batching, or the
 Day 5 kernel. Kernel names and implementation structure are not part of the
 test contract; only the public numerical, metadata, and dtype behavior is.
 
+`paged_attention` must also reject bad metadata with `ValueError` before it
+dispatches any kernel, because a kernel given a wrong page id reads another
+request's K/V or memory outside the pool. Check that:
+
+- `page_size` is positive;
+- every `context_lens` entry is nonnegative and fits in its row:
+  `ceil(context_len / page_size)` must not exceed the table width;
+- each of those live entries is a page id inside the page storage, and no live
+  page id appears twice anywhere in the table;
+- every entry after the live ones is exactly `-1`;
+- an active row (`context_len > 0`) holds at least as many tokens as the query
+  has rows, `L`.
+
+With the batch metadata from Task 1, run the remaining Task 2 checks, the
+metadata validation, and the Week 3 quantized embedding:
+
+```bash
+pdm run test --week 3 --day 4 -- -k task_2
+pdm run test --week 3 --day 4 -- -k rejects
+pdm run test --week 3 --day 4 -- -k custom_embedding
+```
+
+Rerun `-k task_1` from Task 1 now as well; it needs this operator.
+
 For the reference Qwen decode schedule, specialize BF16 `D = 128`: each lane owns
 four contiguous dimensions of Q, K, V, and the output. After all context
 positions are visited, transpose the 32 partial output vectors through one
@@ -430,6 +472,13 @@ Day 5 replaces the long-query schedule with paged FlashAttention without
 changing this model-facing policy. `--disable-paged-attention` is a Day 4
 dense-gather teaching ablation, not the completed serving path.
 
+This test decodes incrementally through the Week 3 model and compares each
+step with the Week 2 dense model:
+
+```bash
+pdm run test --week 3 --day 4 -- -k task_3
+```
+
 ## Task 4: Connect It to Continuous Batching
 
 ```
@@ -446,6 +495,14 @@ Update request admission, slot reuse, and request removal so that:
 - in this teaching implementation, that means freeing pages from every layer cache,
 - new requests allocate from the corresponding layer pool,
 - active decode steps reuse page metadata instead of rebuilding dense K/V.
+
+Day 4's tests do not exercise this scheduler wiring. To see it end to end,
+run the real model through your paged scheduler and watch requests enter,
+decode, finish, and free their slots:
+
+```bash
+pdm run batch-main --solution tiny_llm --loader week3
+```
 
 After this chapter, the serving stack has the right structure for a real high-throughput runtime: paging is no longer just a storage trick, but part of the execution model itself.
 
