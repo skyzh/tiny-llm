@@ -35,7 +35,19 @@ def canonical_hash(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def workload_record(checkpoint: str, phase: str, tokens: int) -> dict[str, Any]:
+def workload_record(
+    checkpoint: str,
+    phase: str,
+    tokens: int,
+    *,
+    prefill_logits: str = PREFILL_LOGITS,
+    cache_capacity: int | None = None,
+) -> dict[str, Any]:
+    bound = tokens if cache_capacity is None else cache_capacity
+    if type(bound) is not int or bound < tokens:
+        raise ValueError("cache capacity must be at least the context length")
+    if prefill_logits not in ("last", "all"):
+        raise ValueError("prefill_logits must be last or all")
     return {
         "checkpoint": checkpoint,
         "phase": phase,
@@ -43,7 +55,10 @@ def workload_record(checkpoint: str, phase: str, tokens: int) -> dict[str, Any]:
         "output_tokens": 1,
         "seed": 0,
         "prompt_rule": PROMPT_RULE,
-        "prefill_logits": PREFILL_LOGITS,
+        "prefill_logits": prefill_logits,
+        "request_bound": bound,
+        "cache_capacity": None if checkpoint == "kv-cache" else bound,
+        "prefix_preparation": "outside-capture-last-row-logits",
         "warmup": 1,
         "captured_region": "one-synchronized-forward",
     }
@@ -247,11 +262,69 @@ def summarize_gpudebug(objects: list[Any], commands: list[Any]) -> dict[str, Any
     }
 
 
+def capture_forward(
+    model, inputs, *, phase, capacity, logits_to_keep, evaluate, metal=None, trace=None
+):
+    """Use only the model's public forward/cache API; release every owned cache."""
+    from benches.week2_profile_adapter import CleanupError, ReplayCleanupError
+
+    cache = model.create_kv_cache(capacity=capacity)
+    primary = None
+    try:
+        if phase == "decode":
+            if inputs.shape[1] > 1:
+                evaluate(model(inputs[:, :-1], 0, cache, logits_to_keep=1))
+            query, offset = inputs[:, -1:], inputs.shape[1] - 1
+        else:
+            query, offset = inputs, 0
+        if trace is None:
+            evaluate(model(query, offset, cache, logits_to_keep=logits_to_keep))
+        else:
+            metal.start_capture(str(trace))
+            operation_error = None
+            try:
+                evaluate(model(query, offset, cache, logits_to_keep=logits_to_keep))
+            except BaseException as error:
+                operation_error = error
+                raise
+            finally:
+                try:
+                    metal.stop_capture()
+                except Exception as error:
+                    if operation_error is not None:
+                        raise ReplayCleanupError(
+                            operation_error, error
+                        ) from operation_error
+                    raise
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        errors = []
+        for layer_cache in cache:
+            try:
+                layer_cache.release()
+            except Exception as error:
+                errors.append(error)
+        if errors:
+            cleanup = CleanupError(errors)
+            if primary is not None:
+                raise ReplayCleanupError(primary, cleanup) from primary
+            raise cleanup
+
+
 def capture(args: argparse.Namespace) -> None:
     raw_outputs = (args.trace, args.metadata, args.manifest)
     ensure_outputs_absent(raw_outputs)
     args.trace, args.metadata, args.manifest = normalize_capture_outputs(*raw_outputs)
     ensure_outputs_absent((args.trace, args.metadata, args.manifest))
+    workload = workload_record(
+        args.checkpoint,
+        args.phase,
+        args.tokens,
+        prefill_logits=getattr(args, "prefill_logits", PREFILL_LOGITS),
+        cache_capacity=getattr(args, "cache_capacity", None),
+    )
     if sys.platform != "darwin":
         raise RuntimeError("capture-week2 requires macOS and Apple Metal")
     if os.environ.get("MTL_CAPTURE_ENABLED") != "1":
@@ -272,37 +345,23 @@ def capture(args: argparse.Namespace) -> None:
         resolved_model, mlx_model, week=2, checkpoint=args.checkpoint
     )
     inputs = mx.arange(args.tokens, dtype=mx.int32).reshape(1, args.tokens)
-    if args.phase == "decode":
-        cache = model.create_kv_cache()
-        if args.tokens > 1:
-            mx.eval(model(inputs[:, :-1], 0, cache))
-        capture_inputs = inputs[:, -1:]
-        offset = args.tokens - 1
-    else:
-        cache = model.create_kv_cache()
-        capture_inputs = inputs
-        offset = 0
-    mx.eval(model(capture_inputs, offset, cache, logits_to_keep=None))
-
-    cache = model.create_kv_cache()
-    if args.phase == "decode" and args.tokens > 1:
-        mx.eval(model(inputs[:, :-1], 0, cache))
-
+    keep = 1 if workload["prefill_logits"] == "last" else None
+    settings = dict(
+        phase=args.phase,
+        capacity=workload["cache_capacity"],
+        logits_to_keep=keep,
+        evaluate=mx.eval,
+    )
+    capture_forward(model, inputs, **settings)
     args.trace.parent.mkdir(parents=True, exist_ok=True)
-    mx.metal.start_capture(str(args.trace))
-    try:
-        result = model(capture_inputs, offset, cache, logits_to_keep=None)
-        mx.eval(result)
-    finally:
-        mx.metal.stop_capture()
+    capture_forward(model, inputs, **settings, metal=mx.metal, trace=args.trace)
 
     manifest, package_bytes, file_count = package_manifest(args.trace)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(manifest)
     manifest_hash = hashlib.sha256(manifest.encode()).hexdigest()
-    workload = workload_record(args.checkpoint, args.phase, args.tokens)
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "artifact_kind": "week2-metal-capture",
         "source": source_metadata(),
         "solution": args.solution,
@@ -387,6 +446,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     capture_parser.add_argument("--phase", required=True, choices=("decode", "prefill"))
     capture_parser.add_argument("--tokens", required=True, type=int)
+    capture_parser.add_argument(
+        "--prefill-logits", choices=("last", "all"), default=PREFILL_LOGITS
+    )
+    capture_parser.add_argument("--cache-capacity", type=int)
     capture_parser.add_argument("--trace", required=True, type=Path)
     capture_parser.add_argument("--metadata", required=True, type=Path)
     capture_parser.add_argument("--manifest", required=True, type=Path)
@@ -406,6 +469,11 @@ def main() -> None:
     args = parser.parse_args()
     if hasattr(args, "tokens") and args.tokens <= 0:
         parser.error("--tokens must be positive")
+    if (
+        getattr(args, "cache_capacity", None) is not None
+        and args.cache_capacity < args.tokens
+    ):
+        parser.error("--cache-capacity must be at least --tokens")
     args.handler(args)
 
 

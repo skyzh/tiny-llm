@@ -103,22 +103,14 @@ def test_kernel_replay_routes_attention_with_production_guard(
         decode_attention_max_query=2,
         decode_attention_max_context=256,
     )
-    attention = SimpleNamespace(
-        num_kv_heads=1,
-        head_dim=4,
-        scale=0.5,
-        use_decode_attention=enabled,
+    route = profile.adapter.attention_path(
+        rows=1 if phase == "decode" else tokens, context=tokens,
+        head_dim=4, dtype="float32", mask="causal" if phase == "prefill" else None,
+        decode=enabled, max_query=implementation.decode_attention_max_query,
+        max_context=implementation.decode_attention_max_context,
     )
-    layer = SimpleNamespace(
-        hidden_size=4,
-        num_attention_heads=1,
-        self_attn=attention,
-        mlp=SimpleNamespace(hidden_dim=8),
-    )
-    model = SimpleNamespace(layers_inner=[layer], precision=mx.float32)
-
-    replay = profile.KernelReplay(implementation, model, phase, tokens)
-    replay.attention()
+    call = implementation.decode_attention if route == "custom" else implementation.grouped_attention
+    call(None, None, None, scale=0.5, mask="causal" if phase == "prefill" else None)
 
     assert calls == [(expected_path, 0.5, expected_mask)]
 
@@ -130,27 +122,40 @@ def test_student_and_reference_profiles_share_the_production_guard():
         assert implementation.decode_attention_max_context == 0
 
 
-def test_selected_prefill_attribution_uses_the_tiled_operator():
+def test_tiled_prefill_attribution_uses_the_tiled_operator():
     implementation = profile.load_implementation("tiny_llm_ref")
-    model = implementation.model_type(
-        tiny_qwen3_mlx_model(head_dim=128), checkpoint="selected"
-    )
+    source = tiny_qwen3_mlx_model(head_dim=128)
     calls = []
 
     def record(query, _key, _value, *, scale, mask):
         calls.append((query.shape[-2], scale, mask))
         return query
 
-    replay = profile.KernelReplay(
-        replace(implementation, tiled_attention=record), model, "prefill", 9
+    replay = profile.adapter.make_runtime_replay(
+        replace(implementation, tiled_attention=record), source,
+        profile.ProfileCase("tiled-prefill", "prefill", 9),
     )
     outputs = replay.attention()
-    assert len(outputs) == len(model.layers_inner)
-    assert calls == [(9, model.layers_inner[0].self_attn.scale, "causal")]
+    assert len(outputs) == source.args.num_hidden_layers
+    assert calls == [(9, source.args.head_dim ** -0.5, "causal")]
+
+
+def test_reference_selected_refuses_complete_public_attribution():
+    implementation = profile.load_implementation("tiny_llm_ref")
+    with pytest.raises(profile.adapter.UnsupportedCoverage, match="selected"):
+        profile.adapter.make_runtime_replay(
+            implementation, tiny_qwen3_mlx_model(head_dim=128),
+            profile.ProfileCase("selected", "prefill", 9),
+        )
 
 
 def test_decision_requires_exact_source_solution_model_and_workload_identity():
     baseline = {
+        "schema_version": 3,
+        "coverage": {"complete": True},
+        "software": {"mlx": "version"},
+        "host": {"machine": "machine"},
+        "profile_kind": profile.adapter.PROFILE_KIND,
         "source": {"tree": "tree"},
         "solution": "tiny_llm",
         "model": "model",
@@ -174,7 +179,7 @@ def test_decision_requires_exact_source_solution_model_and_workload_identity():
     assert result["candidate_checkpoint"] == "simd-matmul"
     assert result["decision"] == "keep"
 
-    for field in ("source", "solution", "model", "workload_id"):
+    for field in ("source", "solution", "model", "workload_id", "software", "host", "profile_kind"):
         mismatch = dict(candidate)
         mismatch[field] = "different"
         with pytest.raises(ValueError, match=field.replace("_", ".*")):
@@ -210,7 +215,7 @@ def test_profile_workload_identity_covers_every_workload_field(monkeypatch):
         patch.setattr(profile, "PROMPT_RULE", "other-prompt-rule")
         variants.append(profile.workload_record("model", baseline, 2, 4))
     with monkeypatch.context() as patch:
-        patch.setattr(profile, "PREFILL_LOGITS", "last")
+        patch.setattr(profile, "PREFILL_LOGITS", "all")
         variants.append(profile.workload_record("model", baseline, 2, 4))
 
     original_hash = profile.canonical_hash(original)
@@ -220,8 +225,8 @@ def test_profile_workload_identity_covers_every_workload_field(monkeypatch):
         for variant in variants
     ] == [
         {"model"},
-        {"phase"},
-        {"tokens"},
+        {"phase", "query_length", "position_offset"},
+        {"tokens", "query_length", "request_bound"},
         {"warmup"},
         {"iterations"},
         {"prompt_rule"},
