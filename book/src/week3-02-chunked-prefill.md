@@ -87,8 +87,9 @@ request ends:
 - A request that completes in a slot is released by `remove_request(i)`, so
   your `BatchingKvCache.remove_request` must call the request cache's
   `release()` before clearing the slot.
-- A prompt longer than `max_seq_len` must leave no cache behind: reject it
-  before creating its caches, or release them before raising.
+- A prompt longer than `max_seq_len` never gets caches: Day 1 already rejects
+  it before `create_kv_cache()` is called, and its Task 4 test still requires
+  that.
 - If prefill, materialization, decoding or detokenization raises, the error
   should still reach the caller, but first release every cache that is still
   live, whether it belongs to the pending request or to a slot. Wrap the
