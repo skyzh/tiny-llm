@@ -118,10 +118,11 @@ reused for active Days 1–5 in the
 `--solution mlx` runs a separate complete model, not a hybrid that completes
 learner cache TODOs.
 
-Build both the learner and reference extensions during
-[setup](./setup.md#build-the-native-extensions-before-tests), before the first
-test command. Even Day 1 test collection reaches native modules through package
-imports; the reference build does not fill your learner TODOs.
+Build the reference extension during
+[setup](./setup.md#build-the-native-extensions-before-tests): the reference
+package and its tests load it on import. Your own extension is built on Week 1
+Day 7, before the first Week 2 kernel needs it. The reference build does not
+fill your learner TODOs.
 
 To run a completed checkpoint without solving it first:
 

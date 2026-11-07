@@ -38,8 +38,8 @@ You will write four pieces:
 
 The starter supplies the Week 1 operators and the model loader. Finish the
 [Week 1 Day 7](./week1-07-sampling-prepare.md) setup first. Today's work is
-all Python, but the Day 1 tests import the native Week 2 extension, so build
-it before the first test:
+all Python, and today's tests do not call the native extension. Later Week 2
+days do, so if you have not built it since Day 7, build it now:
 
 ```bash
 pdm run build-ext

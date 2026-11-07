@@ -5,10 +5,8 @@ complete `scaled_dot_product_attention_simple` and `SimpleMultiHeadAttention` in
 `linear` helper in `src/tiny_llm/basics.py`. Other attention functions in the starter are for later days and are not part
 of this chapter.
 
-You need a checkout where you have finished [setup](./setup.md). In
-particular, `pdm run build-ext` must have succeeded: importing `tiny_llm` loads
-its native Week 2 module, so even these Python tests fail to collect without
-it. The build does not fill in your attention or `linear` TODOs.
+You need a checkout where you have finished [setup](./setup.md). Today's tests
+are MLX-backed Python and need no project-extension build.
 
 Start by running the focused Task 1 tests. The command copies the supplied Day 1 test into `tests/` before running it:
 
