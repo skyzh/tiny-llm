@@ -88,7 +88,8 @@ DOC_TASK_MARKERS = {
         "Task 3": {"Qwen3ModelWeek3.create_kv_cache"},
     },
     "book/src/week3-04-paged-attention-part2.md": {
-        "Task 1": {"TinyKvPagedCache.block_table", "Request.try_prefill"},
+        # Task 1 verifies Day 3 metadata; no functions are assigned to modify.
+        "Task 1": set(),
         "Task 2": {
             "tiny_llm_ext::paged_attention",
             "PagedAttention::eval_gpu",
