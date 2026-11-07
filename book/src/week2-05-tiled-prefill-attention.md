@@ -1,17 +1,44 @@
-# 🚧 Week 2 Day 5: Tiled Dense Prefill Attention
+# 🚧 Week 2 Day 5: Tiled Dense Prefill Attention — No Full Score Matrix
 
-Complete [Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md)
-first. You have a cached, packed-W4 Qwen3 model whose `swiglu` checkpoint
-already includes SIMD matrix prefill, RMSNorm, RoPE, and SwiGLU. Day 5 changes
-the dense attention computation for a prompt with at least nine query tokens.
-The learner implementation and `tiled-prefill` checkpoint keep readable grouped
-attention for one-token decode.
+After [Day 4](./week2-04-fused-model-kernels.md), your `swiglu` checkpoint runs
+projections, RMSNorm, RoPE, and SwiGLU on kernels you wrote. One large piece is
+still the readable Week 1 code: attention.
 
-Keep the same cached 0.6B model and request while you work. Save the Day 4
-`swiglu` product result before editing attention; later compare it with
-`tiled-prefill` and the completed `selected` model under that same workload.
-The progression runner uses fresh processes and balanced order. Its `--offline`
-mode needs the model files cached already:
+Look at what readable attention does with a prompt. It multiplies every query
+row by every key to build a full score matrix, applies the mask, runs softmax
+over each row, and multiplies by the values. For a prompt of `L` tokens over
+`S` cached positions, that score matrix has `L × S` entries for every query
+head. With Qwen3-4B's 32 query heads, a 2,048-token prompt produces about 134
+million scores per layer, each written to memory and read back before any
+output exists.
+
+Today you write attention that never builds that matrix. It walks over the
+keys in small tiles and keeps a running summary for each query row, an
+approach usually called FlashAttention. The kernel runs for prompts of nine
+or more tokens. One-token decode keeps the readable path, which is already
+cheap at that size.
+
+That is the starting hypothesis for today: in your `swiglu` prefill replay
+from Day 4, the attention group should have grown into a large share, and it
+should grow faster than the others as prompts get longer, because the score
+matrix grows with `L × S`. If your replay shows that, tiled attention should
+shrink the attention group without changing the result. If attention is still
+small at 128 tokens on your machine, write that down; the kernel still
+matters for longer prompts, and the comparison at the end will show what it
+did at this length.
+
+Two checkpoints finish Week 2:
+
+- **`tiled-prefill`** adds your tiled attention to the `swiglu` model;
+- **`selected`** is the name of the finished Week 2 model. It turns on the same
+  features as `tiled-prefill` and adds no new kernel.
+
+## Save a Control First
+
+Keep the cached 0.6B model and the same request for the whole day. Save the
+`swiglu` result before you touch attention. The progression runner uses fresh
+processes and alternates the order of variants. `--offline` needs the model
+cached already:
 
 ```bash
 pdm run build-ext
@@ -21,72 +48,43 @@ pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --re
   --prefill-logits last --json-output week2-day5-control.json
 ```
 
-The `mlx` row is a separate full-model baseline. Your course model and its
-cache remain the subject of the Day 5 work. Build the supplied reference
-extension and run its completed Day 5 checks to see the target behavior; the
-learner extension retains its own TODOs:
+The `mlx` row is a separate complete model, there for scale. Build the
+reference extension and run its Day 5 tests to see the finished behavior;
+your own extension still has its TODOs:
 
 ```bash
 pdm run build-ext-ref
 pdm run test-refsol --week 2 --day 5
 ```
 
-## Task 1: Make Tiled Attention Match the Readable Result
+## Softmax One Tile at a Time
 
-The supplied `dense_prefill_attention_mma` adapter in
-`src/tiny_llm/week2_kernels.py` prepares the model-facing arrays and calls
-the learner-owned private `tiny_llm_ext::_dense_attention_prefill_mma` binding.
-Implement that binding and `Week2DensePrefillMMA::eval_gpu` in
-`src/extensions/src/week2_kernels.cpp`, plus
-`week2_dense_prefill_mma_bf16_d128` in
-`src/extensions/src/week2_kernels.metal`. Keep the supplied Python adapter and
-header interface. Replace the `Week2DensePrefillMMA::eval_cpu` starter TODO in
-`src/extensions/src/week2_kernels.cpp` with a GPU-only error. The adapter
-validates the shape, prepares contiguous inputs
-and an optional mask, invokes the native primitive, and restores the
-model-facing shape.
+The trick that makes tiling possible is that softmax can be computed in
+pieces. Take one query row whose scores against four keys are
+`[1, 3, 2, 0]`, with values `[10, 20, 30, 40]` (one number per key, to keep it
+small). The answer is the softmax-weighted average of the values: 22.1386.
 
-The operator accepts grouped-query attention in this layout:
+Now pretend the kernel sees the keys two at a time. For each tile it keeps
+three numbers: the largest score so far `m`, the sum of `exp(score - m)`
+called `l`, and the sum of `exp(score - m) × value` called `a`:
 
-```text
-Q:      B, Hq,  L, 128
-K, V:   B, Hkv, S, 128
-output: B, Hq,  L, 128
+```plain
+tile 1, scores [1, 3]:  m = 3,  l = e^-2 + e^0 = 1.1353,  a = 10e^-2 + 20 = 21.3534
+tile 2, scores [2, 0]:  m = 2,  l = e^0 + e^-2 = 1.1353,  a = 30 + 40e^-2 = 35.4134
 ```
 
-Here `L` is the new prompt length and `S` includes the cached source prefix.
-Require BF16 Q/K/V, equal K/V shapes, matching batch and head dimensions,
-and `Hq % Hkv == 0`. For query head `h`, use KV head
-`floor(h / (Hq / Hkv))`; copying K/V into `Hq` heads would spend the bandwidth
-the grouped layout is meant to save. The model selects the tiled path for a
-supported BF16/D128 prefill with `L >= 9`. The direct operator rejects shorter
-queries; model attention routes them to the readable fallback.
+The two tiles used different reference maxima, so before adding them, rescale
+each to the larger one, `m' = 3`:
 
-Start with the supplied causal GQA witness. Its 33 query rows and 47 source
-positions cross both tile boundaries, so a result that only handles complete
-tiles cannot pass:
-
-```bash
-pdm run build-ext
-pdm run test --week 2 --day 5 -- -k task_1
+```plain
+l' = e^(3-3) × 1.1353 + e^(2-3) × 1.1353 = 1.5530
+a' = e^(3-3) × 21.3534 + e^(2-3) × 35.4134 = 34.3812
+output = a' / l' = 22.1386
 ```
 
-The direct attention comparison checks BF16 output against the readable
-result with `atol=0.02, rtol=0.02`; passing it does not measure speed.
-
-The intended computation is the same scaled dot-product attention as the
-readable control. Process **BQ32** query rows and **BK16** source positions at a
-time with four 32-lane SIMD groups. Cooperatively load a 32×128 Q tile and a
-16×128 K tile, accumulate score fragments, then reuse the K/V storage for the
-matching V tile. The source layout uses 128 threads and 12,928 bytes of Q and
-K/V threadgroup storage; those sizes describe the implementation, not its
-speed. Two padding elements per shared-tile row account for the storage above
-the raw Q plus K/V payload. Guard both partial tails before any load or output
-write.
-
-For each query row, keep an FP32 running maximum `m`, exponential sum `l`, and
-weighted value accumulator `a`. If the next source tile contributes maximum
-`m_b`, sum `l_b`, and accumulator `a_b`, merge them as follows:
+Same answer, and at no point did the whole row of scores exist at once. In
+general, merging a running state `(m, l, a)` with a new tile's `(m_b, l_b, a_b)`
+is:
 
 $$
 m' = \max(m,m_b), \qquad
@@ -98,56 +96,118 @@ a' = e^{m-m'}a + e^{m_b-m'}a_b,
 \qquad \mathrm{output} = a'/l'.
 $$
 
-In words, choose the larger of the old and tile maxima. Multiply the old sum
-and accumulator by the exponential of old maximum minus new maximum; multiply
-the tile sum and accumulator by the exponential of tile maximum minus new
-maximum. Add each pair, then divide the new accumulator by the new sum.
-Rescale the old numerator **and** denominator when a later tile raises the
-maximum. Padded score cells contribute no probability mass. Return BF16 only
-after the final FP32 normalization. This avoids an allocated `L × S` score
-workspace, but it still reads dense K/V; a caller-supplied additive mask can
-itself have `L × S` entries.
+Subtracting the maximum keeps every exponent at or below zero, so nothing
+overflows. The one thing that is easy to get wrong: when a later tile raises
+the maximum, you must rescale **both** the old sum `l` and the old accumulator
+`a`.
+
+## Task 1: Make Tiled Attention Match the Readable Result
+
+The supplied `dense_prefill_attention_mma` adapter in
+`src/tiny_llm/week2_kernels.py` prepares the arrays and calls the private
+`tiny_llm_ext::_dense_attention_prefill_mma` binding, which is yours to write.
+Implement that binding and `Week2DensePrefillMMA::eval_gpu` in
+`src/extensions/src/week2_kernels.cpp`, plus
+`week2_dense_prefill_mma_bf16_d128` in
+`src/extensions/src/week2_kernels.metal`. Keep the supplied Python adapter and
+header interface. Replace the `Week2DensePrefillMMA::eval_cpu` starter TODO in
+`src/extensions/src/week2_kernels.cpp` with a GPU-only error. The adapter
+checks shapes, makes the inputs and optional mask contiguous, calls your
+primitive, and reshapes the result for the model.
+
+The operator handles grouped-query attention in this layout:
+
+```text
+Q:      B, Hq,  L, 128
+K, V:   B, Hkv, S, 128
+output: B, Hq,  L, 128
+```
+
+`L` is the number of new prompt tokens and `S` includes any cached tokens
+before them. Require BF16 Q, K, and V, equal K and V shapes, matching batch
+sizes, and `Hq % Hkv == 0`. Query head `h` reads KV head
+`floor(h / (Hq / Hkv))`; do not copy K and V out to `Hq` heads, which would
+spend exactly the memory traffic grouped attention exists to save. The
+operator itself rejects queries shorter than nine tokens; the model sends
+those to the readable path instead.
+
+### The Tile Schedule
+
+Each threadgroup handles **32 query rows** (BQ32) and walks the source **16
+positions at a time** (BK16), using four 32-lane SIMD groups, 128 threads in
+all. First, load the threadgroup's 32 × 128 Q tile into threadgroup memory
+once; it stays there for the whole walk. Then, for each source tile:
+
+1. load a 16 × 128 K tile into threadgroup memory;
+2. compute the 32 × 16 block of scores with SIMD-group matrix fragments;
+3. reuse the same threadgroup storage to load the matching 16 × 128 V tile;
+4. update each query row's running `m`, `l`, and `a` in FP32, as above.
+
+After the last source tile, divide `a` by `l` and write BF16 once. In the
+reference layout, the Q and K/V tiles take 12,928 bytes of threadgroup memory,
+including two padding elements per row; those sizes describe the layout, not
+its speed.
+
+Guard both edges. Score cells for padding positions must add nothing to `l`
+or `a`, and no load or store may run past the real rows or source positions.
+The first test makes that unavoidable: it uses 33 query rows and 47 source
+positions, so both the last query tile and the last source tile are partial:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 5 -- -k task_1
+```
+
+It compares your BF16 output with MLX's causal grouped attention. Passing it
+says the numbers are right, not that the kernel is fast.
+
+This kernel never allocates an `L × S` score buffer, but it still reads all of
+the dense K and V, and an additive mask passed in by a caller can itself be
+`L × S`.
 
 ## Task 2: Preserve Masks and the Readable Fallback
 
-Accept no mask, the string `"causal"`, or a broadcastable additive array mask.
-Causality is aligned to the end of the cached prefix: query row `i` may see
-source positions through `S - L + i`. For `L = 3` and `S = 7`, the first new
-query can see positions 0–4. Applying a triangle as if the source length were
-three would erase useful cached context. Broadcast an explicit mask over batch
-and query-head dimensions, then apply it before the online-softmax update.
+Accept no mask, the string `"causal"`, or an additive mask array that
+broadcasts over batch and query heads. Apply the mask to the scores before the
+running-softmax update.
 
-A fully masked row has no probability mass. Skip tiles with no valid scores
-and make the row's output finite and all zero; do not divide by zero or
-propagate `NaN`. The focused mask witness uses
-nine BF16 query rows, 17 source positions, and an all-negative-infinity
-additive mask:
+**Causal masks line up with the end of the cache.** Query row `i` may see
+source positions up to `S - L + i`. With `L = 3` new tokens and `S = 7`, the
+first new token sits at position 4 and can see positions 0 to 4. Drawing the
+triangle as if the source were only three long would hide cached context the
+model needs.
+
+**A fully masked row must come out as zeros.** If every score in a row is
+`-inf`, there is no probability mass: skip tiles with no valid score, and
+write a finite zero row instead of dividing by zero and producing `NaN`. The
+test for this uses nine BF16 query rows, 17 source positions, and a mask that
+is `-inf` everywhere:
 
 ```bash
 pdm run build-ext
 pdm run test --week 2 --day 5 -- -k task_2
 ```
 
-In `Qwen3MultiHeadAttention.__call__`, keep readable grouped attention for
-one-token decode, `L <= 8`, and any model shape outside the tiled BF16/D128
-boundary. The readable path must receive the same cache update, scale, mask,
-query-to-KV-head mapping, and output dtype. Keep separate diagnostic counts
-for `tiled_prefill`, `tiled_prefill_fallback`, and `readable`: the fallback count
-records that the tiled feature was enabled but ineligible, while `readable`
-records the actual computation. These are reference diagnostics to inspect;
-the supplied learner tests check public output rather than internal counter
-values. A green long-query operator comparison alone does not verify decode.
+**Keep the readable path.** In `Qwen3MultiHeadAttention.__call__`, use the
+readable grouped attention for one-token decode, for `L <= 8`, and for any
+shape outside BF16 with head size 128. It must receive the same cache update,
+scale, mask, head mapping, and output dtype as the tiled path. The reference
+keeps three diagnostic counters: `tiled_prefill` (the tiled kernel ran),
+`tiled_prefill_fallback` (the feature was on, but this call did not qualify),
+and `readable` (the readable code ran). They help when you check routing. The
+supplied tests compare outputs, not counters, so a passing long-prompt test
+does not tell you decode is still correct.
 
-If you choose the operator off-ramp, keep this model and cache interface and
-substitute the equivalent MLX attention operator or readable grouped equation
-at this boundary. `--solution mlx` instead runs a separate complete model.
+If you need to move on without this kernel, keep the model and cache
+interface and use the matching MLX attention operator, or the readable
+grouped equation, at this one boundary. `--solution mlx` instead runs a
+separate complete model.
 
 ## Task 3: Run `tiled-prefill` in the Model
 
-Wire the eligible attention call through `Qwen3ModelWeek2` and its transformer
-layers. The `tiled-prefill` checkpoint retains every Day 4 operator, bounded
-cache, and packed projection; it changes only supported dense prefill
-attention. Check its focused model behavior and run the live model:
+Route eligible attention calls through your kernel inside `Qwen3ModelWeek2`.
+The `tiled-prefill` checkpoint keeps the bounded cache, packed projections,
+and all three Day 4 kernels; only supported prefill attention changes:
 
 ```bash
 pdm run build-ext
@@ -156,26 +216,21 @@ pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint tiled-prefill --model qwen3-0.6b --max-tokens 16
 ```
 
-The supplied three-token model witness guards the readable branch. The
-ten-token BF16/D128 model witness is eligible for tiled attention; the 33×47
-operator witness also crosses both tile tails. Inspect the reference fallback
-and tiled dispatch counts separately. The matched 128-token product workload exercises
-the tiled branch in the real model; a matching output alone cannot tell you
-which kernel ran.
+This test runs `tiled-prefill` and `swiglu` on a tiny model with a 3-token
+input, which must take the readable path, and a 10-token input, which
+qualifies for the tiled kernel, and compares the outputs. Matching outputs do
+not show which kernel ran. The 128-token benchmark below uses the tiled path
+in the real model.
 
 ## Finish the Cumulative `selected` Model
 
-`selected` is the named final Week 2 checkpoint, not an additional Metal
-kernel. Its public functionality keeps the `tiled-prefill` feature set:
-request-bounded KV capacity,
-register-cached RMSNorm, the tiled prefill selector, packed W4 projections,
-SIMD matrix prefill, RoPE, and SwiGLU. Each of the capacity, RMSNorm, and tiled
-attention controls can also be switched off independently for a matched
-counterfactual. The short attention fallback and wider-row RMSNorm fallback
-remain part of this model.
-
-First verify the supplied selected-model controls, then run the same completed
-course model through the public CLI:
+`selected` has the same features as `tiled-prefill`: request-bounded KV
+capacity, packed W4 projections, SIMD matrix prefill, register-cached
+RMSNorm, RoPE, SwiGLU, and tiled prefill attention, with the short-query and
+wide-row fallbacks. Three of these can be switched off one at a time through
+the constructor (`use_bounded_kv_capacity`, `use_register_cached_rms_norm`,
+`use_tiled_prefill_attention`), so you can measure what each one is worth.
+`selected` is also the model's default checkpoint.
 
 ```bash
 pdm run test --week 2 --day 5 -- -k selected
@@ -183,40 +238,35 @@ pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint selected --model qwen3-0.6b --max-tokens 16
 ```
 
-The test checks the cumulative model and its independently disabled controls;
-the model comparison uses `atol=0.75, rtol=0.05`. Its observable assertions
-do not prove a particular private dispatch. The CLI run shows that the named
-final checkpoint can answer a request. Then run the complete Day 5 learner gate:
+The test checks that `selected` is the default, and that switching off each of
+the three controls still gives close outputs. Then run the whole day:
 
 ```bash
 pdm run test --week 2 --day 5
 ```
 
-Once complete, `selected` is the
-default Week 2 checkpoint, but name it explicitly in measurements so the
-comparison remains legible.
+Even though `selected` is the default, name it explicitly in measurements so
+each row says what it is.
 
-The supplied **reference** implementation adds guarded performance scheduling
-only to `selected`: native online decode, four-head Q/K normalization with
-RoPE for its supported shape, and midpoint submission of an ordinary 36-layer
-decode graph. These are reference optimizations, not additional learner tasks.
-The reference `tiled-prefill` checkpoint retains readable one-token decode,
-and unsupported optimized shapes keep their fallbacks. No experiment flags
-are needed for the reference default:
+The supplied **reference** solution adds extra scheduling to `selected` only:
+native online decode, fused Q/K normalization with RoPE for four heads at its
+supported shape, and submitting the first 18 layers of the 36-layer decode
+graph to the GPU early, before the rest is built. These are reference optimizations, not tasks for you. The reference
+`tiled-prefill` checkpoint keeps readable one-token decode, and unsupported
+shapes keep their fallbacks. Run the finished reference with:
 
 ```bash
 pdm run main-week2 --solution tiny_llm_ref --model qwen3-0.6b --max-tokens 16
 ```
 
-This command runs the supplied reference; the earlier `--solution tiny_llm`
-commands run your implementation. It does not require your starter to reproduce
-the reference scheduling internals.
+This runs the reference, not your code, and your solution does not need to
+reproduce those internals.
 
 ## Measure the Matched Product
 
-Compare the saved pre-edit `swiglu` row with a new `swiglu` row first. Then
-compare `swiglu`, `tiled-prefill`, `selected`, and the full MLX model under one
-cached 0.6B request, device, prefill-logit mode, and warmup count:
+First compare a new `swiglu` row with the one you saved before editing. Then
+compare `swiglu`, `tiled-prefill`, `selected`, and MLX with the same cached
+0.6B request, machine, logit mode, and warmups:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
@@ -226,14 +276,17 @@ pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --re
   --prefill-logits last --json-output week2-day5-product.json
 ```
 
-A 128-token prompt crosses the `L >= 9` selector boundary. Report the prefill
-and complete-request results separately. With `--solution tiny_llm`, the
-`selected` and `tiled-prefill` rows share the course feature set; do not count
-their difference as a second mechanism gain. With `--solution tiny_llm_ref`,
-`selected` also enables the reference scheduling above, so report those rows
-separately and do not attribute that difference to tiled prefill. Inspect which
-kernel category dominates under
-the same 0.6B model and 128-token prefill shape:
+A 128-token prompt is above the nine-token threshold, so prefill uses your
+kernel. Report prefill and whole-request results separately. With
+`--solution tiny_llm`, `tiled-prefill` and `selected` turn on the same
+features, so do not count a difference between them as a second
+improvement. With
+`--solution tiny_llm_ref`, `selected` also includes the reference scheduling
+above; report those rows separately and do not credit the difference to tiled
+attention.
+
+To see which kind of work dominates prefill now, replay the same step for the
+three checkpoints:
 
 ```bash
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
@@ -242,17 +295,43 @@ pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --json-output week2-day5-attribution.json
 ```
 
-This attribution replays kernel groups on synthetic token IDs; it does not
-replace the complete-request comparison. Record whether the tiled path ran
-and what later category dominates. An operator result or a historical 4B number
-cannot establish a speedup for this 0.6B checkout. The
-[performance appendix](./appendix-performance.md) keeps earlier measurements
-and unavailable rows as historical evidence. A matched 4B follow-up is
-optional after caching that model; repeat every compared row at 4B rather than
-mixing model sizes.
+Each case replays one 128-token prefill through the public operators that
+checkpoint selects, with the same cache bound and logit setting (see
+[Day 1](./week2-01-kv-cache.md) for what the replay does and does not
+include). Your tiled attention is replayed in the attention group of the
+`tiled-prefill` case. For your solution, `selected` selects the same
+operators as `tiled-prefill`, so there is no further operator change to
+credit between those two cases. If their timings still differ, keep the gap
+in your notes and look into it (rerun both, check that the machine was idle,
+compare the per-group medians) rather than calling it an improvement or
+assuming it is noise.
 
-Week 2 now supplies a tested single-request model boundary for
-[Week 3](./week3-overview.md), where paging and batching add new state and
-scheduling work. It does not turn one request into a production serving policy.
+The replay times operators on prepared inputs. It does not show that your
+model sends 128-token prompts to the tiled kernel; check that by reading the
+attention dispatch you wrote in Task 2 and Task 3. It also does not replace
+the whole-request comparison above.
+
+If you profile `--solution tiny_llm_ref` with `selected`, the profiler
+reports that case as unsupported (`coverage.complete` is false, with a
+reason) and gives no total or shares. That is because the reference adds
+scheduling to `selected` that a public-operator replay cannot represent. It
+is a missing measurement, not a zero; use `tiled-prefill` if you want a
+reference replay to compare with.
+
+An operator result, or an older 4B number, cannot show a speedup for your
+0.6B checkout. Results from earlier versions of the profiler are not
+comparable with this replay. The
+[performance appendix](./appendix-performance.md) keeps earlier measurements,
+including rows that could not be run, as history. A 4B comparison is
+optional: cache the model and rerun every row at 4B.
+
+Look at the `selected` replay one last time and write down which group leads
+it now. That is the open question you carry into Week 3.
+[Find the Next Bottleneck](./week2-profile-guided.md) ends with a case study
+of a later build where prefill was led by the MLP's matrix multiply.
+
+That completes Week 2: a tested model that serves one request at a time.
+[Week 3](./week3-overview.md) starts from it and adds what serving many
+requests needs: batching, chunked prefill, and paged K/V storage.
 
 {{#include copyright.md}}

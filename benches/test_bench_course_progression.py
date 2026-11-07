@@ -130,9 +130,9 @@ def test_week2_live_labels_follow_the_five_day_book():
 
     chapter_headings = {
         "week2-01-kv-cache.md": "# 🚧 Week 2 Day 1: Reuse the Prefix, Then Bound the Cache",
-        "week2-02-quantize-model.md": "# 🚧 Week 2 Day 2: Keep W4 Packed",
-        "week2-03-simd-matrix-prefill.md": "# 🚧 Week 2 Day 3: SIMD Matrix Prefill",
-        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Primitives",
+        "week2-02-quantize-model.md": "# 🚧 Week 2 Day 2: Keep W4 Packed — Decode Waits on Weights",
+        "week2-03-simd-matrix-prefill.md": "# 🚧 Week 2 Day 3: SIMD Matrix Prefill — Stop Re-reading Weights per Row",
+        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Primitives — Fewer Small Passes",
     }
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
@@ -141,7 +141,7 @@ def test_week2_live_labels_follow_the_five_day_book():
     if day5_doc.exists():
         assert (
             day5_doc.read_text().splitlines()[0]
-            == "# 🚧 Week 2 Day 5: Tiled Dense Prefill Attention"
+            == "# 🚧 Week 2 Day 5: Tiled Dense Prefill Attention — No Full Score Matrix"
         )
 
     readme = (ROOT / "README.md").read_text()

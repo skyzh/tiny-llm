@@ -12,6 +12,8 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from benches.bench_request_metrics import PEAK_MLX_SCOPE, REQUEST_ELAPSED_SCOPE
+
 
 @dataclass(frozen=True)
 class Variant:
@@ -27,6 +29,7 @@ class Throughput:
     prefill: float
     decode: float
     output: float
+    peak_mlx_bytes: int | float | None = None
 
 
 WEEK1_VARIANT = Variant("week1", "Week 1 readable", "ref", "week1")
@@ -229,10 +232,12 @@ def parse_throughput(output: str) -> Throughput:
     missing = {"prefill", "decode", "output"} - metrics.keys()
     if missing:
         raise ValueError(f"benchmark output is missing metrics: {sorted(missing)}")
+    peak = re.search(r"^Peak MLX allocation bytes: ([0-9]+)$", output, re.MULTILINE)
     return Throughput(
         prefill=metrics["prefill"],
         decode=metrics["decode"],
         output=metrics["output"],
+        peak_mlx_bytes=int(peak.group(1)) if peak else None,
     )
 
 
@@ -305,6 +310,11 @@ def median_throughput(samples: list[Throughput]) -> Throughput:
         prefill=statistics.median(sample.prefill for sample in samples),
         decode=statistics.median(sample.decode for sample in samples),
         output=statistics.median(sample.output for sample in samples),
+        peak_mlx_bytes=(
+            statistics.median(sample.peak_mlx_bytes for sample in samples)
+            if all(sample.peak_mlx_bytes is not None for sample in samples)
+            else None
+        ),
     )
 
 
@@ -403,19 +413,24 @@ def print_table(
     print()
     print(
         "| Checkpoint | Prefill tok/s | vs Week 1 | vs MLX | "
-        "Decode tok/s | vs Week 1 | vs MLX |"
+        "Decode tok/s | vs Week 1 | vs MLX | Peak MLX MiB |"
     )
-    print("|---|---:|---:|---:|---:|---:|---:|")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for variant in variants:
         result = medians[variant.key]
         prefill_week1 = relative_to(result.prefill, week1.prefill) if week1 else "n/a"
         prefill_mlx = gap_to(result.prefill, mlx.prefill) if mlx else "n/a"
         decode_week1 = relative_to(result.decode, week1.decode) if week1 else "n/a"
         decode_mlx = gap_to(result.decode, mlx.decode) if mlx else "n/a"
+        peak_mib = (
+            f"{result.peak_mlx_bytes / (1024 * 1024):.2f}"
+            if result.peak_mlx_bytes is not None
+            else "missing"
+        )
         print(
             f"| {variant.label} | {result.prefill:.2f} | {prefill_week1} | "
             f"{prefill_mlx} | {result.decode:.2f} | {decode_week1} | "
-            f"{decode_mlx} |"
+            f"{decode_mlx} | {peak_mib} |"
         )
 
 
@@ -463,6 +478,7 @@ def main() -> None:
         variant.key: median_throughput(samples[variant.key]) for variant in variants
     }
     print_table(variants, medians)
+    print(f"Peak MLX allocation scope: {PEAK_MLX_SCOPE}")
 
     if args.json_output:
         workload = {
@@ -474,9 +490,11 @@ def main() -> None:
             "prefill_logits": args.prefill_logits,
             "warmup": args.warmup,
             "repeats": args.repeats,
+            "request_elapsed_scope": REQUEST_ELAPSED_SCOPE,
         }
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
+            "peak_mlx_scope": PEAK_MLX_SCOPE,
             "source": collect_source_metadata(root),
             "host": host,
             "workload": workload,
