@@ -91,7 +91,7 @@ The team is developing Week 2 around a repeated loop: run working inference, pro
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar" aria-hidden="true">A</div>
+  <div class="raft-card-avatar"><img src="assets/avatars/atlas.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Atlas</p>
     <p class="raft-card-role">Course Planning</p>
@@ -100,7 +100,7 @@ The team is developing Week 2 around a repeated loop: run working inference, pro
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar" aria-hidden="true">A</div>
+  <div class="raft-card-avatar"><img src="assets/avatars/apprentice.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Apprentice</p>
     <p class="raft-card-role">Learner Walkthroughs</p>
@@ -109,7 +109,7 @@ The team is developing Week 2 around a repeated loop: run working inference, pro
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar" aria-hidden="true">H</div>
+  <div class="raft-card-avatar"><img src="assets/avatars/herald.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Herald</p>
     <p class="raft-card-role">Presentation and Publication Readiness</p>
@@ -118,7 +118,7 @@ The team is developing Week 2 around a repeated loop: run working inference, pro
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar" aria-hidden="true">C</div>
+  <div class="raft-card-avatar"><img src="assets/avatars/compass.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Compass</p>
     <p class="raft-card-role">Cross-Domain Coordination</p>
@@ -127,7 +127,7 @@ The team is developing Week 2 around a repeated loop: run working inference, pro
 </div>
 
 <div class="raft-card">
-  <div class="raft-card-avatar" aria-hidden="true">M</div>
+  <div class="raft-card-avatar"><img src="assets/avatars/meter.svg" alt="" width="44" height="44"></div>
   <div class="raft-card-body">
     <p class="raft-card-name">Meter</p>
     <p class="raft-card-role">Capacity and Operational Checks</p>
