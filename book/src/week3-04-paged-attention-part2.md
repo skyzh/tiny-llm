@@ -227,11 +227,13 @@ silently fall back to dense attention.
 
 ### `src/tiny_llm/batch.py`
 
-The scheduler does not build the metadata itself. Each model call appends to
-the per-layer batch cache, whose `update_and_fetch_paged` (from Day 3) returns
-the padded `block_table` and `context_lens` that attention reads. The scheduler
-owns the request lifecycle around it: which slot each request occupies, and
-releasing every layer cache's pages when a request ends.
+The scheduler does not build the metadata itself. A prefill call passes the
+request's own layer caches, and each `TinyKvPagedCache.update_and_fetch_paged`
+(from Day 3) returns that one request's metadata. A batched decode call passes
+the per-layer `BatchingKvCache`, whose `update_and_fetch_paged` returns the
+padded `block_table` and `context_lens` for every slot. The scheduler owns the
+request lifecycle around both: which slot each request occupies, and releasing
+every layer cache's pages when a request ends.
 
 This is where continuous batching and paged attention finally connect. On Day 1, batching worked by repacking tensors. Here, batching should work by reusing page tables and updating only the new slots.
 
