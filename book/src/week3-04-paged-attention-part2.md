@@ -227,11 +227,13 @@ silently fall back to dense attention.
 
 ### `src/tiny_llm/batch.py`
 
-The scheduler now needs to prepare runtime metadata instead of only dense K/V:
-
-- per-layer page tables for each active request
-- padded batch `block_table`
-- `context_lens`
+The scheduler does not build the metadata itself. A prefill call passes the
+request's own layer caches, and each `TinyKvPagedCache.update_and_fetch_paged`
+(from Day 3) returns that one request's metadata. A batched decode call passes
+the per-layer `BatchingKvCache`, whose `update_and_fetch_paged` returns the
+padded `block_table` and `context_lens` for every slot. The scheduler owns the
+request lifecycle around both: which slot each request occupies, and releasing
+every layer cache's pages when a request ends.
 
 This is where continuous batching and paged attention finally connect. On Day 1, batching worked by repacking tensors. Here, batching should work by reusing page tables and updating only the new slots.
 
@@ -272,43 +274,55 @@ These are the invariants worth checking in tests:
    course pool grows instead of reporting exhaustion, so that waste can force
    backing storage to grow and copy earlier, increasing memory pressure.
 
-## Task 1: Add Batch Metadata
+<a id="task-1-add-batch-metadata"></a>
+
+## Task 1: Check the Batch Metadata
 
 ```
 src/tiny_llm/paged_kv_cache.py
 src/tiny_llm/kv_cache.py
-src/tiny_llm/batch.py
 ```
 
-Modify `TinyKvPagedCache.block_table`, `context_lens`, `paged_metadata`, and
-`update_and_fetch_paged` in `src/tiny_llm/paged_kv_cache.py`. Then update
-`Request.try_prefill` and `_step` in `src/tiny_llm/batch.py` to carry those
-arrays for every active request.
+Day 4's attention reads the `block_table` and `context_lens` you already built
+on [Day 3](./week3-03-paged-attention-part1.md#batching-requests-with-pages):
+`TinyKvPagedCache.block_table`, `context_lens`, `paged_metadata` and
+`update_and_fetch_paged`, plus `BatchingKvCache.update_and_fetch_paged`. Task 1
+adds no new methods and no scheduler change. The metadata reaches attention
+through the model's cache call, which Task 3 wires up. Before writing the
+kernel, make sure those arrays hold exactly what it will read:
 
-Extend the batch cache and scheduler so they can prepare:
-
-- `block_table`
-- `context_lens`
-
-for all active requests.
-
-The batch arrays have one row per decode slot, including idle ones:
-
+- one row per decode slot, including idle ones;
 - an active row lists that request's page ids in logical order, padded with
   `-1` up to the longest active request's page count;
 - an idle slot has `context_lens` 0 and a row of all `-1`;
 - each `context_lens` entry counts the request's written tokens, including the
   chunk just appended.
 
-Day 4 has no metadata-only test. This focused metadata test also calls
-`paged_attention`, so it turns green with Task 2:
+Your Day 3 metadata check still applies. It builds two request caches, appends
+through `BatchingKvCache.update_and_fetch_paged`, and checks their
+`context_lens` and page-to-token mapping without calling `paged_attention`:
+
+```bash
+pdm run test --week 3 --day 3 -- -k task_3_model_request_caches_keep_independent_metadata
+```
+
+That is a prerequisite check on your Day 3 code. Both of its rows are active,
+so it does not cover the boundary Day 4's kernel depends on. This Day 4 check
+does: two active slots around an idle one, rows of different lengths, and the
+written length after a one-token append. It also checks the page tensors, page
+size and mask that `update_and_fetch_paged` returns. It does not call
+`paged_attention`, so run it before you write the kernel:
+
+```bash
+pdm run test --week 3 --day 4 -- -k task_1_batch_metadata
+```
+
+Day 4's other Task 1 test compares `paged_attention` with dense attention, so
+it turns green with Task 2:
 
 ```bash
 pdm run test --week 3 --day 4 -- -k task_1
 ```
-
-It checks a single request's metadata. Task 2's batched test then checks the
-padded rows and the idle slot.
 
 ## Task 2: Define `paged_attention`
 
