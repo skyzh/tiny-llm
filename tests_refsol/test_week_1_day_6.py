@@ -51,6 +51,10 @@ class MinimalTokenizer(FakeTokenizer):
     def get_vocab(self) -> dict[str, int]:
         return {}
 
+    # TokenizerWrapper inspects this method even for plain-text generation.
+    def apply_chat_template(self, *args, **kwargs):
+        raise NotImplementedError("This test tokenizer only supports plain text.")
+
 
 class ScriptedModel:
     def __init__(self, next_tokens: list[int], decoy_token: int = 6):
