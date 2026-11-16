@@ -16,3 +16,7 @@ using namespace metal;
 // long-prefill region behind that stable boundary. Its behavior tests may
 // already pass through the Day 4 fallback; implementing and manually tracing
 // the reachable optimized region is the learner-owned Day 5 work.
+// In the supported prefill kernel, each lane owns two elements of every 8x8
+// fragment. Keep those elements in float2 / vec<bfloat, 2> values between
+// matrix multiplies; construct simdgroup_matrix operands only for the MMA
+// intrinsic. Preserve the lane mapping, row reductions and BF16 conversions.

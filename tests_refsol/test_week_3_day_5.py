@@ -236,3 +236,44 @@ def test_week3_attention_module_runs_long_prefill_through_paged_storage() -> Non
         rtol=3e-2,
         atol=3e-2,
     )
+
+
+@pytest.mark.parametrize(
+    ("query_length", "context_length", "page_size", "physical_orders"),
+    [
+        (128, 384, 128, [[3, 0, 2]]),
+        (256, 777, 128, [[6, 0, 3, 5, 2, 4, 1]]),
+        (
+            255,
+            513,
+            128,
+            [
+                [4, 1, 0, 3, 2],
+                [9, 6, 5, 8, 7],
+                [14, 11, 10, 13, 12],
+                [19, 16, 15, 18, 17],
+            ],
+        ),
+        (17, 65, 32, [[2, 0, 1]]),
+        (9, 13, 8, [[2, 0]]),
+    ],
+    ids=[
+        "full-128",
+        "full-256-tail",
+        "batched-query-tail",
+        "one-tile-pages",
+        "cross-page-tile",
+    ],
+)
+def test_long_prefill_at_serving_shapes(
+    query_length: int,
+    context_length: int,
+    page_size: int,
+    physical_orders: list[list[int]],
+) -> None:
+    _assert_paged_case(
+        query_length=query_length,
+        context_length=context_length,
+        page_size=page_size,
+        physical_orders=physical_orders,
+    )
