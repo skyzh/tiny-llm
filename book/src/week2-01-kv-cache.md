@@ -236,6 +236,21 @@ pdm run test --week 2 --day 1 -- -k 'rewind or overflow'
 These tests append, rewind, append again, then overflow on purpose,
 checking each time that only the right tokens are visible.
 
+<a id="why-not-allocate-the-whole-request"></a>
+
+### Why Not Allocate the Whole Request Up Front?
+
+An earlier version of this course did: it sized each cache for the prompt plus
+`max_tokens` on the first append. That needs to know how long a request will
+run, which a real server can't. It also doesn't buy speed. On one M4 Pro with
+Qwen3-4B, at six prompt/output sizes from 128/128 to 8,192/128 and 2,048/512,
+the whole-request time of that fixed-size cache and this chunked one differed
+by less than 0.2% either way, with no consistent winner; at 2,048/16 the
+chunked cache was 0.19% slower. Peak MLX allocation was the same at 128/128
+and 0.04% to 1.3% lower with chunks at the other sizes. Those are medians of
+six paired runs per size, on one machine, so measure your own before drawing
+a wider conclusion.
+
 ## Task 2: Build the Cached Week 2 Model
 
 ```
