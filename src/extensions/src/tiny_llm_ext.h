@@ -9,7 +9,8 @@ namespace tiny_llm_ext {
 
 void load_library(const char *path);
 
-// Week 2, Day 2: implement the wrapper and the initial vanilla/matvec paths.
+// Week 2, Day 2: implement the wrapper and the initial vanilla path.
+// Week 2, Day 3: add the decode matvec branch to the same operator.
 // Week 2, Day 4: extend the same interface with SIMD-matrix scheduling.
 mx::array quantized_matmul(const mx::array &scales, const mx::array &biases, const int group_size, const int bits,
                            const mx::array &a, const mx::array &b, const bool transpose_b,

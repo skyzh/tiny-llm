@@ -380,7 +380,7 @@ def test_task_1_paged_cache_rewind_matches_full_cache():
     full.rewind(3)
 
     paged_key, paged_value = paged.gather_dense()
-    full_key, full_value = full.key_values
+    full_key, full_value = full._logical_key_values()
     assert paged.offset == full.offset == 6
     assert paged.num_pages == 2
     assert paged.pool.num_free_pages == 1
@@ -407,7 +407,7 @@ def test_task_1_paged_cache_rewind_then_append_matches_full_cache():
 
 
 @pytest.mark.parametrize("cache_kind", ["dense", "paged"])
-def test_task_1_rewind_zero_and_full_length_are_symmetric(cache_kind):
+def test_task_1_rewind_keeps_logical_contents_and_releases_only_paged_storage(cache_kind):
     pool = TinyKvPagedPool(page_size=4)
     cache = TinyKvFullCache() if cache_kind == "dense" else TinyKvPagedCache(pool=pool)
     key, value = _random_chunk(5)
@@ -425,9 +425,14 @@ def test_task_1_rewind_zero_and_full_length_are_symmetric(cache_kind):
     cache.rewind(5)
 
     assert cache.offset == 0
-    assert cache.key_values is None
     if cache_kind == "paged":
+        assert cache.key_values is None
         assert pool.num_free_pages == pool.num_pages
+    else:
+        # Dense chunk storage is retained for reuse, while its logical prefix is empty.
+        assert cache.allocated_capacity == 256
+        empty_key, empty_value = cache._logical_key_values()
+        assert empty_key.shape[2] == empty_value.shape[2] == 0
 
 
 @pytest.mark.parametrize("cache_kind", ["dense", "paged"])
