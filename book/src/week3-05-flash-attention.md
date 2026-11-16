@@ -93,18 +93,17 @@ Use eight SIMD groups to cover a 64-row query block. Each SIMD group owns eight
 query rows and represents matrix operands as 8×8 fragments. Stage 32 logical
 K/V positions per iteration.
 
-Keep each lane's two fragment elements in ordinary vectors between matrix
-operations: `float2` for FP32 scores and output accumulators, and
+The reference keeps each lane's two fragment elements in ordinary vectors
+between matrix operations: `float2` for FP32 scores and output accumulators, and
 `vec<bfloat, 2>` for Q, K, V and the rounded probabilities. Build the
 `simdgroup_matrix` operands at the multiply-accumulate call, then copy its
 two result elements back. This changes how long the matrix objects live,
 not the attention equation. Keep the same lane coordinates, row-reduction
 order, mask and BF16 conversion points.
 
-The supplied reference uses this representation. It helped an earlier
-matched serving experiment, but that percentage belongs to its original
-revision and workload; measure your own complete request before claiming
-a gain for this checkout.
+This representation helped in an earlier matched serving experiment on a
+different revision and workload. Measure your own complete request before
+counting it as a gain here.
 
 For every logical key row in a tile:
 
@@ -124,8 +123,8 @@ therefore physically contiguous even when the logical sequence as a whole is
 not. Assign each thread contiguous elements through a cooperative block loader
 so adjacent lanes issue coalesced reads. Keep a generic loader for a tile that
 crosses a page boundary. The reference reuses the
-`CooperativeTileLoader` and direct `simdgroup_matrix` fragments from Week 2 so
-those mechanisms remain visible. You may choose a different internal helper or
+`CooperativeTileLoader` from Week 2 and the same 8×8 `simdgroup_matrix`
+multiply, so those mechanisms remain visible. You may choose a different internal helper or
 low-level library as long as the operator retains direct page-table semantics
 and equivalent public behavior.
 
