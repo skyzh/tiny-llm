@@ -160,21 +160,27 @@ METAL_FUNC void course_fragment_multiply_accumulate(
     accumulator[1] = result.thread_elements()[1];
 }
 
-// Four simdgroups cover the four 16x16 quadrants of one 32x32 output tile.
+// Four SIMD groups cover a 32-column tile with either 32 or 64 rows.
 // The wrapper only exposes the two operations the course kernel needs: add a
 // 32-wide reduction tile, then store the accumulated result with edge guards.
-template <typename T, typename OutT, int TILE_STRIDE>
+template <typename T, typename OutT, int TILE_STRIDE, int OUTPUT_ROWS = 32>
 struct CooperativeBlockMMA {
-    float2 accumulators[2][2];
+    static_assert(OUTPUT_ROWS == 32 || OUTPUT_ROWS == 64);
+    static constexpr int ROW_FRAGMENTS = OUTPUT_ROWS / 16;
+    float2 accumulators[ROW_FRAGMENTS][2];
     ushort simdgroup_index;
     ushort lane_index;
 
     METAL_FUNC CooperativeBlockMMA(ushort simdgroup, ushort lane) thread
-        : accumulators{
-              {float2(0.0f), float2(0.0f)},
-              {float2(0.0f), float2(0.0f)}},
-          simdgroup_index(simdgroup),
-          lane_index(lane) {}
+        : simdgroup_index(simdgroup), lane_index(lane) {
+        #pragma unroll
+        for (int row = 0; row < ROW_FRAGMENTS; ++row) {
+            #pragma unroll
+            for (int column = 0; column < 2; ++column) {
+                accumulators[row][column] = float2(0.0f);
+            }
+        }
+    }
 
     METAL_FUNC void multiply_accumulate(
         threadgroup const T* left_tile,
@@ -186,12 +192,12 @@ struct CooperativeBlockMMA {
         #pragma unroll
         for (int reduction_fragment = 0; reduction_fragment < 4;
              ++reduction_fragment) {
-            vec<T, 2> left[2];
+            vec<T, 2> left[ROW_FRAGMENTS];
             vec<T, 2> right[2];
 
             #pragma unroll
-            for (int row_fragment = 0; row_fragment < 2; ++row_fragment) {
-                const int left_row = simdgroup_row * 16 + row_fragment * 8;
+            for (int row_fragment = 0; row_fragment < ROW_FRAGMENTS; ++row_fragment) {
+                const int left_row = simdgroup_row * (OUTPUT_ROWS / 2) + row_fragment * 8;
                 const int offset = (left_row + coordinate.y) * TILE_STRIDE +
                     reduction_fragment * 8 + coordinate.x;
                 left[row_fragment] = vec<T, 2>(
@@ -210,7 +216,7 @@ struct CooperativeBlockMMA {
             }
 
             #pragma unroll
-            for (int row_fragment = 0; row_fragment < 2; ++row_fragment) {
+            for (int row_fragment = 0; row_fragment < ROW_FRAGMENTS; ++row_fragment) {
                 #pragma unroll
                 for (int column_fragment = 0; column_fragment < 2;
                      ++column_fragment) {
@@ -232,9 +238,9 @@ struct CooperativeBlockMMA {
         const ushort2 coordinate = course_matrix_coordinate(lane_index);
 
         #pragma unroll
-        for (int row_fragment = 0; row_fragment < 2; ++row_fragment) {
+        for (int row_fragment = 0; row_fragment < ROW_FRAGMENTS; ++row_fragment) {
             const int row =
-                simdgroup_row * 16 + row_fragment * 8 + coordinate.y;
+                simdgroup_row * (OUTPUT_ROWS / 2) + row_fragment * 8 + coordinate.y;
             if (row >= valid_shape.y) {
                 continue;
             }

@@ -94,7 +94,7 @@ template <typename T, typename IndexT>
 // each group then computes a 16x16 quadrant with four 8x8 matrix fragments.
 // This reuses each device-memory load across 32 output values without ever
 // materializing a full dequantized weight matrix.
-template <typename T, typename OutT>
+template <typename T, typename OutT, int OUTPUT_ROWS = 32>
 inline void quantized_matmul_block_w4a16_g128(
     device const T* scales,
     device const T* biases,
@@ -121,13 +121,13 @@ inline void quantized_matmul_block_w4a16_g128(
     constexpr int group_size = 128;
     constexpr int packs_per_item = 8;
     constexpr uint32_t mask = 0xf;
-    const int row_base = group_id.y * output_block_size;
+    const int row_base = group_id.y * OUTPUT_ROWS;
     const int column_base = group_id.x * output_block_size;
     const int packed_cols = N / packs_per_item;
     const int groups_per_row = N / group_size;
 
     using block_mma = tiny_llm::CooperativeBlockMMA<
-        T, OutT, padded_reduction_size>;
+        T, OutT, padded_reduction_size, OUTPUT_ROWS>;
     using activation_loader = tiny_llm::CooperativeTileLoader<
         T, output_block_size, reduction_block_size,
         padded_reduction_size, 128, false, true>;
@@ -165,19 +165,24 @@ inline void quantized_matmul_block_w4a16_g128(
          reduction_base < reduction_end;
          reduction_base += reduction_block_size) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        const int valid_rows = full_tiles ? output_block_size
-            : clamp(M - row_base, 0, output_block_size);
+
         const int valid_reduction = full_tiles ? reduction_block_size : clamp(
             min(N, reduction_end) - reduction_base,
             0,
             reduction_block_size);
-        activation_loader::load(
-            a + row_base * N + reduction_base,
-            N,
-            activation_tile,
-            thread_id,
-            valid_rows,
-            valid_reduction);
+        // Each 32-row slice retains the existing 16-byte cooperative load.
+        #pragma unroll
+        for (int row_offset = 0; row_offset < OUTPUT_ROWS; row_offset += 32) {
+            const int valid_rows = full_tiles ? 32
+                : clamp(M - row_base - row_offset, 0, 32);
+            activation_loader::load(
+                a + (row_base + row_offset) * N + reduction_base,
+                N,
+                activation_tile + row_offset * padded_reduction_size,
+                thread_id,
+                valid_rows,
+                valid_reduction);
+        }
 
         const uint32_t packed = valid_output ? *weight_source : 0;
         const float scale =
@@ -215,8 +220,8 @@ inline void quantized_matmul_block_w4a16_g128(
         }
     }
 
-    const short valid_rows = full_tiles ? output_block_size
-        : min(output_block_size, M - row_base);
+    const short valid_rows = full_tiles ? OUTPUT_ROWS
+        : min(OUTPUT_ROWS, M - row_base);
     const short valid_columns = full_tiles ? output_block_size
         : min(output_block_size, K - column_base);
     mma.store_result_safe(
@@ -555,3 +560,27 @@ instantiate_kernel("quantized_matvec_x8_w4a16_g128_f16", quantized_matvec_x8_w4a
 instantiate_kernel("quantized_matvec_x8_w4a16_g128_bf16", quantized_matvec_x8_w4a16_g128, bfloat16_t);
 instantiate_kernel("quantized_matvec_x4_fast_w4a16_g128_f16", quantized_matvec_x4_fast_w4a16_g128, half);
 instantiate_kernel("quantized_matvec_x4_fast_w4a16_g128_bf16", quantized_matvec_x4_fast_w4a16_g128, bfloat16_t);
+
+// Accepted M64 reuse schedule, implemented with the course-owned block math.
+// The selector admits only the two full 256-row BF16 Qwen3-4B MLP domains.
+[[kernel]] void mlp_qmm_m64_bf16(
+    device const uint32_t* weights [[buffer(0)]],
+    device const bfloat* scales [[buffer(1)]],
+    device const bfloat* biases [[buffer(2)]],
+    device const bfloat* inputs [[buffer(3)]],
+    device bfloat* output [[buffer(4)]],
+    constant int& reduction [[buffer(5)]],
+    constant int& columns [[buffer(6)]],
+    constant int& rows [[buffer(7)]],
+    uint3 group_id [[threadgroup_position_in_grid]],
+    uint thread_id [[thread_index_in_threadgroup]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    threadgroup bfloat activation_tile[64 * 40];
+    threadgroup bfloat weight_tile[32 * 40];
+    threadgroup bfloat parameters[2 * 32];
+    quantized_matmul_block_w4a16_g128<bfloat, bfloat, 64>(
+        scales, biases, inputs, weights, output, rows, reduction, columns,
+        0, reduction, 0, true, activation_tile, weight_tile, parameters,
+        group_id, thread_id, simdgroup, lane);
+}

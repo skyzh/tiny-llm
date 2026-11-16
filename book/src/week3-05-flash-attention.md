@@ -219,9 +219,20 @@ extension function.
 
 The Week 3 model should use the tiled paged path automatically for supported
 long prefills. Short queries continue through the vector paged-decode schedule.
-Neither path gathers a dense K/V tensor. The Week 3 model sends its
-projections to MLX, but the cache, paged attention, batching and scheduling are
-yours, so it is not the same as the full-MLX baseline.
+Neither path gathers a dense K/V tensor. Your Week 3 model sends its
+projections to MLX, while its cache, paged attention, batching and scheduling
+are yours, so it is not the same as the full-MLX baseline.
+
+The supplied reference has one additional MLP schedule for Qwen3-4B: a
+256-token BF16 chunk reuses each W4 weight tile across 64 rows, rather than
+32, in the gate, up and down projections. It uses the course's cooperative
+matrix code, keeps the BF16 projection results and separate SwiGLU, and
+falls back for decode, tail chunks, other model sizes and unsupported input
+layouts. This is supplied reference code, not a new learner interface or a
+Day 5 requirement. `use_mlp_prefill64=False` on the reference model restores
+the ordinary projection path for a matched comparison. The older accepted
+experiment used a different matrix implementation; its measured percentage
+does not certify this course-owned port.
 
 The course does not yet have a benchmark that compares today's tiled schedule
 with Day 4's kernel on the same long BF16 prompts, changing nothing else. The

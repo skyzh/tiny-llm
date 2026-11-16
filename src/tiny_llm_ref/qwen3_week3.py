@@ -1,6 +1,7 @@
 from typing import Any
 
 import mlx.core as mx
+from extensions_ref.tiny_llm_ext_ref import _ext as _mlp_m64_native
 
 from .attention import paged_attention
 from .embedding import QuantizedEmbedding
@@ -129,14 +130,41 @@ class Qwen3MLP:
         w_gate: QuantizedWeights,
         w_up: QuantizedWeights,
         w_down: QuantizedWeights,
+        use_mlp_prefill64: bool = True,
     ):
         self.dim = dim
         self.hidden_dim = hidden_dim
         self.w_gate = w_gate
         self.w_up = w_up
         self.w_down = w_down
+        self.use_mlp_prefill64 = use_mlp_prefill64
+
+    def _project_m64(self, x: mx.array, w: QuantizedWeights) -> mx.array:
+        if (
+            type(w) is QuantizedWeights
+            and w.use_mlx_quantized_linear
+            and w.biases is not None
+        ):
+            out = _mlp_m64_native._try_mlp_qmm_m64(
+                x, w.weight, w.scales, w.biases, w.group_size, w.bits
+            )
+            if out is not None:
+                return out
+        return quantized_linear(x, w)
 
     def __call__(self, x: mx.array) -> mx.array:
+        if (
+            self.use_mlp_prefill64
+            and type(self) is Qwen3MLP
+            and quantized_linear is _ORIGINAL_QUANTIZED_LINEAR
+            and swiglu is _ORIGINAL_SWIGLU
+        ):
+            return self._project_m64(
+                swiglu(
+                    self._project_m64(x, self.w_gate), self._project_m64(x, self.w_up)
+                ),
+                self.w_down,
+            )
         return quantized_linear(
             swiglu(
                 quantized_linear(x, self.w_gate),
@@ -144,6 +172,10 @@ class Qwen3MLP:
             ),
             self.w_down,
         )
+
+
+_ORIGINAL_QUANTIZED_LINEAR = quantized_linear
+_ORIGINAL_SWIGLU = swiglu
 
 
 class Qwen3TransformerBlock:
@@ -222,6 +254,7 @@ class Qwen3ModelWeek3:
         page_size: int = 128,
         enable_paged_attention: bool = True,
         use_mlx_quantized_linear: bool = True,
+        use_mlp_prefill64: bool = True,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         self.hidden_size = mlx_model.args.hidden_size
@@ -286,6 +319,7 @@ class Qwen3ModelWeek3:
                     week3_weights(mlx_model.model.layers[i].mlp.gate_proj),
                     week3_weights(mlx_model.model.layers[i].mlp.up_proj),
                     week3_weights(mlx_model.model.layers[i].mlp.down_proj),
+                    use_mlp_prefill64=use_mlp_prefill64,
                 )
 
             layer = Qwen3TransformerBlock(

@@ -2,8 +2,11 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/vector.h>
 
 #include "mlx/transforms.h"
+#include "src/mlp_qmm_m64.h"
 #include "tiny_llm_ext.h"
 
 namespace nb = nanobind;
@@ -80,4 +83,7 @@ NB_MODULE(_ext, m) {
         Returns:
             array: ``softmax(query @ paged_key.T * scale) @ paged_value``
       )");
+    m.def("_try_mlp_qmm_m64",&tiny_llm_ext_ref::_try_mlp_qmm_m64,"a"_a,"w"_a,"scales"_a,"biases"_a,"group_size"_a,"bits"_a,"stream"_a=nb::none());
+    m.def("_mlp_qmm_m64_route_counts",&tiny_llm_ext_ref::_mlp_qmm_m64_route_counts);
+    m.def("_mlp_qmm_m64_pipeline_state",&tiny_llm_ext_ref::_mlp_qmm_m64_pipeline_state);
 }
