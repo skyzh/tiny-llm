@@ -11,6 +11,7 @@ from tiny_llm_ref.qwen3_week2 import WEEK2_CHECKPOINTS
 
 from .tiny_llm_base import (
     Qwen3ModelWeek2,
+    quantized_matmul,
     quantized_matmul_vanilla,
     quantized_matvec_custom,
 )
@@ -21,20 +22,20 @@ def _fixed_fixture(seed: int):
     return tiny_qwen3_mlx_model(seed=seed)
 
 
-def test_task_1_optimized_matvec_matches_vanilla_gpu():
+def test_task_1_matvec_kernel_matches_vanilla_gpu():
     """The scalar baseline must remain callable for a decode-shaped input."""
     with mx.stream(mx.gpu):
         input = mx.random.normal((1, 256)).astype(mx.bfloat16)
         weight = mx.random.normal((96, 256)).astype(mx.bfloat16)
         packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
-        optimized = quantized_matvec_custom(
-            scales, biases, 128, 4, input, packed, transpose_b=True
+        optimized = quantized_matmul(
+            scales, biases, 128, 4, input, packed, transpose_b=True, use_simdgroup=True
         )
         vanilla = quantized_matmul_vanilla(
             scales, biases, 128, 4, input, packed, transpose_b=True
         )
         assert optimized is not None, (
-            "implement the quantized_matvec_custom learner seam"
+            "finish the Task 1 matvec kernel and native dispatch through the Day 2 operator"
         )
         assert vanilla is not None, (
             "implement the quantized_matmul_vanilla learner seam"

@@ -63,8 +63,8 @@ DOC_TASK_MARKERS = {
         "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MultiHeadAttention.__call__"},
     },
     "book/src/week2-03-decode-matvec.md": {
-        "Task 1": {"quantized_matvec_x4_fast_w4a16_g128"},
-        "Task 2": {"QuantizedMatmul::eval_gpu", "quantized_matvec_custom"},
+        "Task 1": {"quantized_matvec_x4_fast_w4a16_g128", "QuantizedMatmul::eval_gpu"},
+        "Task 2": {"quantized_matvec_custom", "quantized_linear"},
         "Task 3": {"Qwen3ModelWeek2.__init__"},
     },
     "book/src/week2-05-fused-model-kernels.md": {
@@ -141,13 +141,8 @@ EXTENSION_TASK_PAIRS = {
     },
     "book/src/week2-03-decode-matvec.md": {
         "Task 1": {
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matvec_x4_fast_w4a16_g128",
-            )
-        },
-        "Task 2": {
-            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu")
+            ("src/extensions/src/quantized_matmul.metal", "quantized_matvec_x4_fast_w4a16_g128"),
+            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
         },
     },
     "book/src/week2-05-fused-model-kernels.md": {
