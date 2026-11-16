@@ -185,7 +185,7 @@ code no longer asks for a copy on every token, but nothing in this chapter
 measures which case happens on the GPU.
 
 ```bash
-pdm run test --week 2 --day 1 -- -k 'task_1 or chunk_growth'
+pdm run test --week 2 --day 1 -- -k 'task_1 or chunk_growth_returns'
 ```
 
 <a id="make-movement-observable"></a>

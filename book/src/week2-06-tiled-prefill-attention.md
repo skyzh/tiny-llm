@@ -337,7 +337,7 @@ MLP's matrix multiply.
 ## Where Week 2 Ends Up
 
 How close does a finished Week 2 model get to MLX? The supplied reference has
-all five days in place plus the extra scheduling described above. The table
+all of Week 2's kernels in place plus the extra scheduling described above. The table
 compares it with stock MLX running the same Qwen3-4B model. A value above 100% means the course model was faster.
 
 | Prompt / generated tokens | Total throughput vs. MLX | Worst paired run | Paired runs below 95% |

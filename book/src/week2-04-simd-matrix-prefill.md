@@ -81,8 +81,8 @@ Read the control replay before you write any code. Today's hypothesis is that
 the projections group leads it, because every prompt row re-reads and
 re-unpacks every weight in the readable kernel. If that is what you see, the
 tiled kernel should shrink that group and raise prefill throughput, while
-decode stays where it was. If another group leads, write it down; Days 4 and
-5 still need today's kernel, and the end-of-day comparison will show what it
+decode stays where it was. If another group leads, write it down; Days 5 and
+6 still need today's kernel, and the end-of-day comparison will show what it
 changed.
 
 When you measure again at the end, keep everything the same: model, phase,

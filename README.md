@@ -132,9 +132,9 @@ one explicit byte range through the existing loop.
 | 4.8 | Fork, Steer, and Select | ✅ | ✅ | ✅ | 🚧 |
 | 4.9 | Bound Tool Evidence | ✅ | ✅ | ✅ | 🚧 |
 
-Earlier Week 2 chapter URLs not reused by active Days 1–5 still serve their
-historical pages, which are hidden from the book's sidebar. The former Day 4
-address serves the [active fused-kernels lesson](book/src/week2-05-fused-model-kernels.md).
+Earlier Week 2 chapter URLs not reused by the active six days still serve
+their historical pages, which are hidden from the book's sidebar. The
+five-day Day 3 to 5 addresses redirect to their renumbered chapters.
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

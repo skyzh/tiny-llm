@@ -31,11 +31,11 @@ This course is divided into four weeks. We will serve Qwen3 MLX models, optimize
 small coding agent.
 
 - Week 1: Serve Qwen3 using array and matrix operations written in Python.
-- Week 2: Day 1 caches a request prefix and bounds its dense storage. Day 2
-  keeps W4 projection weights packed in the cached model. Day 3 adds a SIMD
-  matrix prefill path. Day 4 integrates fused RMSNorm, RoPE, and SwiGLU one
-  checkpoint at a time. Day 5 adds tiled dense prefill attention and runs the
-  completed `selected` single-request model.
+- Week 2: Day 1 caches a request prefix in storage that grows in chunks. Day 2
+  keeps W4 projection weights packed in the cached model. Day 3 adds a decode
+  matvec kernel. Day 4 adds a SIMD matrix prefill path. Day 5 integrates fused
+  RMSNorm, RoPE, and SwiGLU one checkpoint at a time. Day 6 adds tiled dense
+  prefill attention and runs the completed `selected` single-request model.
 - Week 3: Add further optimizations and batch requests for high-throughput serving.
 - Week 4: Reuse the serving stack in a local coding agent with tools, sessions, and evaluation.
 
@@ -64,11 +64,12 @@ operator shortcut.
 
 | Your goal | Start here | What earlier implementation is required? |
 | --- | --- | --- |
-| Build the currently shipped cache path | Week 1, then Week 2 Day 1 | Implement both cache checkpoints and their matched measurement. |
-| Build the current packed-weight path | Complete Day 1, then Week 2 Day 2 | Keep the capacity cache and implement the packed operator and model wiring. |
-| Build the current SIMD prefill path | Complete Days 1 and 2, then Week 2 Day 3 | Keep the bounded cache and packed weights; implement the SIMD matrix tile and model wiring. |
-| Build the current fused-primitives path | Complete Days 1–3, then Week 2 Day 4 | Keep the cached packed model and integrate RMSNorm, RoPE, and SwiGLU in order. |
-| Build the current tiled-attention path | Complete Days 1–4, then Week 2 Day 5 | Keep the cached packed model, implement supported BF16/D128 prefill attention, retain readable decode, and run `selected`. |
+| Build the currently shipped cache path | Week 1, then Week 2 Day 1 | Implement the cache checkpoint and its matched measurement. |
+| Build the current packed-weight path | Complete Day 1, then Week 2 Day 2 | Keep the cache and implement the packed operator, its simple kernel and model wiring. |
+| Build the current decode matvec path | Complete Days 1 and 2, then Week 2 Day 3 | Keep the cache and packed weights; implement the matvec kernel and its routing. |
+| Build the current SIMD prefill path | Complete Days 1–3, then Week 2 Day 4 | Keep the cache, packed weights and matvec; implement the SIMD matrix tile and model wiring. |
+| Build the current fused-primitives path | Complete Days 1–4, then Week 2 Day 5 | Keep the cached packed model and integrate RMSNorm, RoPE, and SwiGLU in order. |
+| Build the current tiled-attention path | Complete Days 1–5, then Week 2 Day 6 | Keep the cached packed model, implement supported BF16/D128 prefill attention, retain readable decode, and run `selected`. |
 | Study an older Week 2 experiment | Read its historical page | Its former day numbers and commands are not current gates. |
 | Read or experiment with a later week | Open that chapter and use `tiny_llm_ref` | None in your learner tree. Run the supplied reference tests or reference loader. |
 | Compare with the production-library baseline | Use `--solution mlx` | None, but this runs the full MLX model and bypasses the course implementation. |
@@ -77,12 +78,13 @@ operator shortcut.
 The cumulative dependencies are deliberate:
 
 - **Week 1 → Week 2:** Day 1 keeps the readable model, adds request-owned
-  dense K/V reuse and bounded storage, and compares the same request at both
-  cache checkpoints. Day 2 keeps W4 weights packed through the live model.
-  Day 3 adds a SIMD matrix path for prefill while keeping that model state.
-  Day 4 adds three cumulative fused primitives around those projections.
-  Day 5 tiles dense attention for eligible prompt rows and names the complete
-  single-request product `selected`.
+  dense K/V reuse in storage that grows in chunks, and compares the same
+  request with Week 1. Day 2 keeps W4 weights packed through the live model on
+  a simple kernel. Day 3 adds a matvec kernel for decode. Day 4 adds a SIMD
+  matrix path for prefill while keeping that model state. Day 5 adds three
+  cumulative fused primitives around those projections. Day 6 tiles dense
+  attention for eligible prompt rows and names the complete single-request
+  product `selected`.
 - **Week 2 → Week 3:** Week 3 selects MLX quantized projections, but it keeps
   course-owned normalization, activation, cache, attention, paging, batching,
   and scheduling. This is an explicit operator seam, not “use the MLX model for
@@ -165,10 +167,10 @@ default batch settings.
 Week 1 reads an official 4-bit checkpoint but materializes its linear and embedding weights in BF16. On an 8 GB Mac,
 keep the required path at 0.6B. On a 16–24 GB Mac, use 0.6B for the required work and treat 1.7B as an upper-end experiment.
 Week 2 Day 1 retains that dense BF16 model. In this checkout, Day 2 keeps
-projection weights packed for `quantized-matvec`, and Day 3 reuses those
-weights for `simd-matmul` prefill. Day 4 keeps the packed path while adding
-RMSNorm, RoPE, and SwiGLU. Day 5 keeps that model and adds tiled attention for
-supported prefill; the Week 3 and 4 paths expect the packed interface.
+projection weights packed for `packed-weights`, Day 3 reuses them for the
+`quantized-matvec` decode path, and Day 4 reuses them for `simd-matmul`
+prefill. Day 5 keeps the packed path while adding RMSNorm, RoPE, and SwiGLU.
+Day 6 keeps that model and adds tiled attention for supported prefill; the Week 3 and 4 paths expect the packed interface.
 More memory still helps after reaching the largest
 supported model because prompt length, batch size, KV caches, compilation, macOS, and other applications all share the
 same pool. These ceilings are therefore planning guidance, not a guarantee that every workload will avoid memory
