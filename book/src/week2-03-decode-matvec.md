@@ -28,11 +28,14 @@ The day's tests fail until you finish the tasks below.
 
 ```
 src/extensions/src/quantized_matmul.metal
+src/extensions/src/quantized_matmul.cpp
 ```
 
 Implement `quantized_matvec_x4_fast_w4a16_g128` in `quantized_matmul.metal`,
 instantiated for `bfloat16_t`. It computes the same math as Day 2's simple
-kernel, shaped for `M <= 8` rows.
+kernel, shaped for `M <= 8` rows. Then launch it from
+`QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`, as described at the
+end of this task.
 
 With `M = 1`, there is only one activation row, and each output is a dot
 product of length `N`, which is 2,560 for Qwen3-4B's hidden size. Giving that
@@ -89,36 +92,43 @@ stays in cache. Copying it into threadgroup memory first would add a barrier
 to every projection. If you try that as an experiment, keep it only if the
 whole-model measurement improves.
 
-The kernel is reached through the Python wrapper you write in Task 2, so its
-tests run after Task 2.
-
-## Task 2: Route Small Row Counts to It
-
-```
-src/extensions/src/quantized_matmul.cpp
-src/tiny_llm/quantize.py
-```
+### Launch It from `eval_gpu`
 
 Extend `QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`: when the
 binding's `use_simdgroup` flag is true and `M <= 8`, launch the matvec kernel
 with a grid of `M × ceil(K / 8)` threadgroups of 64 threads; otherwise keep
 Day 2's simple kernel.
 
-On the Python side, implement `quantized_matvec_custom` in `quantize.py`. It
-calls the extension with the default `use_simdgroup` and rejects inputs with
+Day 2's `quantized_matmul(..., use_simdgroup=True)` in `quantize.py` already
+passes that flag through, so you can check the kernel before writing any new
+Python:
+
+```bash
+pdm run build-ext
+pdm run test --week 2 --day 3 -- -k task_1
+```
+
+The `task_1` test calls `quantized_matmul` with `use_simdgroup=True` on a
+decode shape and compares the result with your simple kernel.
+
+## Task 2: Route Small Row Counts to It
+
+```
+src/tiny_llm/quantize.py
+```
+
+Implement `quantized_matvec_custom` in `quantize.py`. It calls the extension with the default `use_simdgroup` and rejects inputs with
 more than 8 rows. Then update `quantized_linear`: count the rows, and call
 `quantized_matvec_custom` when there are at most 8 and `w.use_simdgroup_matvec`
 is set; otherwise call `quantized_matmul` as on Day 2.
 
 ```bash
-pdm run build-ext
-pdm run test --week 2 --day 3 -- -k 'task_1 or task_2'
+pdm run test --week 2 --day 3 -- -k task_2
 ```
 
-The `task_1` test compares your matvec with your simple kernel on a decode
-shape. The `task_2` tests compare the matvec path with
-`mx.quantized_matmul` at `M = 1`, at `M = 8`, and at a real Qwen3-4B projection shape (one row of 2,560 inputs,
-1,024 outputs). The full Day 3 gate also runs output counts that do not fill
+These tests compare the matvec path with `mx.quantized_matmul` at `M = 1`,
+at `M = 8`, and at a real Qwen3-4B projection shape (one row of 2,560
+inputs, 1,024 outputs). The full Day 3 gate also runs output counts that do not fill
 the last tile (5 and 65 outputs).
 
 ### Optional: Tune the Schedule
