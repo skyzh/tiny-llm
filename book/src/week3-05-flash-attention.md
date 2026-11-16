@@ -101,9 +101,10 @@ two result elements back. This changes how long the matrix objects live,
 not the attention equation. Keep the same lane coordinates, row-reduction
 order, mask and BF16 conversion points.
 
-How much does it help? On one M4 Pro with Qwen3-4B, a fixed queue of eight
-prompts of 649 to 1,462 tokens, prefilled in chunks of up to 256 tokens, ran
-6.89% faster with one decode slot and 7.34% faster with four. Those are medians
+How much does it help? On one M4 Pro with Qwen3-4B, with a fixed queue of
+eight prompts of 649 to 1,462 tokens prefilled in chunks of up to 256 tokens,
+whole-queue throughput increased by 6.89% with one decode slot and 7.34% with
+four. Those are medians
 over six paired runs each, and every pair favored the new representation. Peak
 MLX allocation did not change. The measurement covers the whole queue, not the
 time to each request's first token, and it is one machine and one workload.
