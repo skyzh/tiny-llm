@@ -17,6 +17,9 @@ git-repository-url = "https://github.com/skyzh/tiny-llm"
 "/week2-05-decode-attention.html" = "week2-06-operator-lab.html"
 "/week2-06-simd-matrix-prefill.html" = "week2-05-simd-matrix-prefill.html"
 "/week2-profile-guided.html" = "week2-01-kv-cache.html#find-where-the-time-goes"
+"/week2-03-simd-matrix-prefill.html" = "week2-04-simd-matrix-prefill.html"
+"/week2-04-fused-model-kernels.html" = "week2-05-fused-model-kernels.html"
+"/week2-05-tiled-prefill-attention.html" = "week2-06-tiled-prefill-attention.html"
 
 [preprocessor.katex]
 after = ["links"]

@@ -27,11 +27,12 @@ The course follows a four-week learning path:
 - **Week 1: From Matmul to Text.** Build a Qwen3 model directly from `mlx.core`
   array operations: attention, RoPE, GQA, RMSNorm, the MLP, sampling, and
   the autoregressive loop.
-- **Week 2: A Faster Single Request.** Day 1 adds `kv-cache` and
-  request-bounded `capacity-cache`; Day 2 keeps W4 projection weights packed
-  through the `quantized-matvec` checkpoint. Day 3 adds SIMD matrix prefill at
-  `simd-matmul`. Day 4 adds cumulative RMSNorm, RoPE, and SwiGLU checkpoints.
-  Day 5 adds `tiled-prefill` and runs the completed `selected` model.
+- **Week 2: A Faster Single Request.** Day 1 adds a `kv-cache` that grows in
+  chunks; Day 2 keeps W4 projection weights packed at `packed-weights`; Day 3
+  adds the decode matvec at `quantized-matvec`. Day 4 adds SIMD matrix prefill
+  at `simd-matmul`. Day 5 adds cumulative RMSNorm, RoPE, and SwiGLU
+  checkpoints. Day 6 adds `tiled-prefill` and runs the completed `selected`
+  model.
 - **Week 3: Build a Mini vLLM.** Introduce continuous
   batching and chunked admission, then make paged KV the canonical serving
   layout. Decode attention and FlashAttention learn to read pages directly so
@@ -108,11 +109,12 @@ one explicit byte range through the existing loop.
 | 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ |
 | 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
 | 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
-| 2.1 | KV Cache (`kv-cache`, `capacity-cache`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.2 | Packed W4 Weights (`quantized-matvec`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.3 | SIMD Prefill (`simd-matmul`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.4 | Fused Kernels (`rmsnorm`, `rope`, `swiglu`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.5 | Tiled Attention (`tiled-prefill`, `selected`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.1 | KV Cache (`kv-cache`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.2 | Packed W4 Weights (`packed-weights`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.3 | Decode Matvec (`quantized-matvec`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.4 | SIMD Prefill (`simd-matmul`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.5 | Fused Kernels (`rmsnorm`, `rope`, `swiglu`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.6 | Tiled Attention (`tiled-prefill`, `selected`) | 🚧 | 🚧 | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |
@@ -132,7 +134,7 @@ one explicit byte range through the existing loop.
 
 Earlier Week 2 chapter URLs not reused by active Days 1–5 still serve their
 historical pages, which are hidden from the book's sidebar. The former Day 4
-address serves the [active fused-kernels lesson](book/src/week2-04-fused-model-kernels.md).
+address serves the [active fused-kernels lesson](book/src/week2-05-fused-model-kernels.md).
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

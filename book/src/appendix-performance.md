@@ -5,7 +5,7 @@ measurement of the finished Week 2 reference against MLX. Everything after it
 is **historical**: measurements of earlier course code that decided the course
 order, kept so you can see why each optimization is where it is. The
 [current Week 2 route](./week2-overview.md) ships Days 1–5, ending at
-[tiled dense attention and `selected`](./week2-05-tiled-prefill-attention.md).
+[tiled dense attention and `selected`](./week2-06-tiled-prefill-attention.md).
 
 ## Current Week 2 Reference Against MLX
 
@@ -72,7 +72,7 @@ versions will change the results.
 
 The Week 2 chapters use `pdm run profile-week2-kernels` to see which kind of
 work dominates a step. The current profiler is a **public-operator replay**:
-for a case such as `capacity-cache:decode:128`, it replays one step ending at
+for a case such as `kv-cache:decode:128`, it replays one step ending at
 128 cached tokens through the public operators that checkpoint selects and
 through the solution's own cache, one group at a time. Its results (schema 3,
 `profile_kind` `public-operator-replay`) record:

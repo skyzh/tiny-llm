@@ -9,12 +9,12 @@ per byte it reads. Decode spends its time waiting on memory.
 
 That is today's hypothesis, and you can check it on your own model first.
 After Day 1 you saved a request benchmark and a decode replay of
-`capacity-cache` (see [Day 1](./week2-01-kv-cache.md#find-where-the-time-goes)).
+`kv-cache` (see [Day 1](./week2-01-kv-cache.md#find-where-the-time-goes)).
 If decode takes most of the request and the projections group leads the
 decode replay, the hypothesis fits your machine: each decode step's time is
 set by the weight bytes it reads, so reading fewer bytes should shrink the
 projections group and speed up decode. If another group leads, write down
-which one. You still need today's packed weights for Days 3 to 5, and the
+which one. You still need today's packed weights for Days 3 to 6, and the
 comparison at the end of the day will show what packing actually did.
 
 The checkpoint you download is already much smaller than that. The
@@ -29,10 +29,14 @@ By the end of the day, you will have:
 
 1. an embedding lookup that unpacks only the rows it needs;
 2. a quantized-matmul operator, backed by your own MLX primitive;
-3. two Metal kernels for it: a simple one that is easy to check, and a fast
-   one shaped for decode; and
-4. a cached Qwen3 model whose projections and output head all run through that
-   operator.
+3. a simple Metal kernel for it, with one thread per output, that is easy to
+   check against the math; and
+4. a model checkpoint, `packed-weights`, whose projections and output head all
+   run through that kernel, for prompts and decode alike.
+
+The simple kernel is not fast. Today's question is only what keeping the
+weights packed does on its own. [Day 3](./week2-03-decode-matvec.md) replaces
+the kernel on the decode path with one built for a single activation row.
 
 The starter already supplies the packed-weight container
 (`QuantizedWeights` and its `from_mlx_layer` loader), the C++ declaration and
@@ -44,7 +48,7 @@ tests. They fail until you fill in the stubs:
 pdm run build-ext
 pdm run build-ext-ref
 pdm run test --week 2 --day 2 -- -k task_1
-pdm run test --week 2 --day 2 -- -k gpu
+pdm run test --week 2 --day 2 -- -k task_3
 ```
 
 **📚 Readings**
@@ -233,7 +237,7 @@ separate from this exercise.
 
 The roofline also applies only to decode, where one activation row meets each
 weight. Prefill sends many rows through the same weights, so each byte is
-reused many times and the bottleneck moves toward arithmetic. Day 3 gives
+reused many times and the bottleneck moves toward arithmetic. Day 4 gives
 prefill its own kernel.
 
 ## The Math You Will Implement
@@ -268,8 +272,7 @@ $$
 
 In words: for each group, multiply the scale by the dot product of activations
 and raw codes, add the bias times the plain sum of those activations, and add
-up the group results. The fast kernel later in this chapter uses exactly this
-form. For one group, the identity is:
+up the group results. Day 3's fast decode kernel uses exactly this form. For one group, the identity is:
 
 $$
 \sum_j a_j (s q_j + b) = s \sum_j a_j q_j + b \sum_j a_j
@@ -442,7 +445,7 @@ output buffer. Printing from thousands of GPU threads is rarely readable. Put
 optimizations back one at a time, rerunning the aligned and tail shapes after
 each.
 
-## Task 3: Write the Metal Kernels
+## Task 3: Write the Simple Metal Kernel
 
 ```
 src/extensions/src/quantized_matmul.metal
@@ -450,22 +453,15 @@ src/extensions/src/quantized_matmul.cpp
 src/tiny_llm/quantize.py
 ```
 
-You will write two kernels that compute the same math, each shaped for a
-different `M`:
+Today you write one kernel, `quantized_matmul_vanilla_w4a16_g128`, with one
+thread per output. It serves every number of activation rows: a one-row
+decode step and a 128-row prompt alike. Implement:
 
-| Activation rows | Kernel | Why |
-|---:|---|---|
-| `M <= 8` | `quantized_matvec_x4_fast_w4a16_g128` | Decode and other very small inputs. Lanes share the work of one long dot product. |
-| `M > 8` | `quantized_matmul_vanilla_w4a16_g128` | Prefill. One thread per output: correct and readable. Day 3 replaces it with a tiled kernel. |
-
-Implement these functions:
-
-- `quantized_matmul_vanilla_w4a16_g128` and
-  `quantized_matvec_x4_fast_w4a16_g128` in `quantized_matmul.metal`,
+- `quantized_matmul_vanilla_w4a16_g128` in `quantized_matmul.metal`,
   instantiated for `bfloat16_t`;
-- `QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`;
-- `quantized_matmul_vanilla` and `quantized_matvec_custom` in `quantize.py`,
-  so each kernel can be called directly in tests and comparisons.
+- `QuantizedMatmul::eval_gpu` in `quantized_matmul.cpp`, launching it;
+- `quantized_matmul` and `quantized_matmul_vanilla` in `quantize.py`, so the
+  kernel can be called directly in tests and comparisons.
 
 ### A Quick Map of the GPU
 
@@ -494,116 +490,33 @@ so it is slow. Keep it anyway. It mirrors the loop in the previous section
 almost line for line, which makes it the kernel you compare everything else
 against. `quantized_matmul_vanilla` should always reach it.
 
-### Stage 2: A Matvec Built for Decode
-
-With `M = 1`, there is only one activation row, and each output is a dot
-product of length `N`, which is 2,560 for Qwen3-4B's hidden size. Giving that
-whole product to one thread leaves most of the GPU idle. Instead, give one
-output tile to a SIMD group:
-
-- each lane takes a different slice of the `N` inputs and keeps a partial
-  sum;
-- at the end, `simd_sum` adds the 32 partial sums together;
-- lane 0 writes the result.
-
-That works for one output, but every lane still loads activations that the
-neighboring output will load again. So let each SIMD group compute **four**
-outputs at once. In the reference schedule, each lane loads two adjacent
-packed words of a row, which is 16 activations, and reuses those 16 activations
-for all four output rows. Two SIMD groups per threadgroup gives eight outputs
-per threadgroup. For `M` rows and `K` outputs, the grid has
-`M × ceil(K / 8)` threadgroups of 64 threads each.
-
-Two more tricks make the inner loop cheaper.
-
-**Apply the bias once per group.** Use the identity from the math section.
-Each lane keeps `Σ a·q` and `Σ a` separately, then adds
-`scale * Σ a·q + bias * Σ a`. The bias is applied once per group instead of
-once per weight.
-
-**Skip the shifts.** Four codes fit in one 16-bit half-word. Masking that
-half-word with `0x00F0` gives `16 * q` instead of `q`. If you divide the
-matching activation by 16 once, before the loop, the factor cancels. Call the
-pre-divided activations `a0'` to `a3'`:
-
-```plain
-hw  = 0x7620                      # codes 0, 2, 6, 7
-a0' = a0,  a1' = a1/16,  a2' = a2/256,  a3' = a3/4096
-
-a0' * (hw & 0x000F) = a0        * 0     = a0 * 0
-a1' * (hw & 0x00F0) = (a1/16)   * 32    = a1 * 2
-a2' * (hw & 0x0F00) = (a2/256)  * 1536  = a2 * 6
-a3' * (hw & 0xF000) = (a3/4096) * 28672 = a3 * 7
-```
-
-The kernel scales each lane's 16 activations once, then uses only masks and
-multiply-adds for all four outputs. Fewer integer instructions do not
-guarantee a faster kernel, though. The extra live values compete for
-registers. Judge the trick by measuring the whole model, as described below.
-
-A lane's 16 values come from two adjacent words, and a group of 128 spans 16
-words, so a lane's slice never straddles two groups. That is why one scale and
-one bias per output per loop iteration are enough.
-
-Read activations straight from device memory. One activation row is small and
-stays in cache. Copying it into threadgroup memory first would add a barrier
-to every projection. If you try that as an experiment, keep it only if the
-whole-model measurement improves.
-
 ### Connect `eval_gpu`
 
 Follow the `axpby` dispatch pattern:
 
 1. Get the Metal device and command encoder from the stream.
-2. Choose the kernel. The binding's `use_simdgroup` flag defaults to true.
-   When it is true and `M <= 8`, use the matvec kernel. When it is false, use
-   the simple kernel. (Day 3 adds the case of `use_simdgroup` with `M > 8`.)
+2. Choose the kernel. The binding's `use_simdgroup` flag selects faster
+   kernels on later days. Today, launch the simple kernel whenever
+   `use_simdgroup` is false, whatever the number of rows.
 3. Bind the inputs, the output, and the constants `M`, `N`, and `K`, in the
    order of the kernel's buffer indices.
-4. Size the grid for the chosen kernel and call `dispatchThreadgroups`.
+4. Size a 2D grid with one thread per output and call `dispatchThreadgroups`.
 
-On the Python side:
-
-- `quantized_matvec_custom` calls the extension with the default
-  `use_simdgroup` and rejects inputs with more than 8 rows.
-- `quantized_matmul_vanilla` calls `quantized_matmul` with
-  `use_simdgroup=False`.
-- `quantized_linear` counts the rows and calls `quantized_matvec_custom` when
-  there are at most 8 and `w.use_simdgroup_matvec` is set; otherwise it calls
-  `quantized_matmul`.
+On the Python side, `quantized_matmul_vanilla` calls `quantized_matmul` with
+`use_simdgroup=False`, and `quantized_linear` calls `quantized_matmul` with
+`use_simdgroup` set from the weight's `use_simdgroup_matmul` field, which is
+false today. Day 3 adds a separate branch for small row counts.
 
 Then run the GPU tests:
 
 ```bash
 pdm run build-ext
 pdm run build-ext-ref
-pdm run test --week 2 --day 2 -- -k gpu
+pdm run test --week 2 --day 2 -- -k task_3
 ```
 
-These tests compare your kernels with `mx.quantized_matmul`: the simple
-kernel on a 128-row identity input and a 3-row random input; the matvec at
-`M = 1`, at `M = 8`, and at a real Qwen3-4B projection shape (one row of
-2,560 inputs, 1,024 outputs); and the matvec against your simple kernel. The
-full Day 2 gate also runs output counts that do not fill the last tile (5
-and 65 outputs).
-
-### Optional: Tune the Schedule
-
-The four-output, two-SIMD-group layout is a measured starting point, not a
-rule. If you want to see why, change one choice at a time and measure the
-whole model each time:
-
-- **Outputs per SIMD group:** try 2, 4, and 8. More outputs reuse each
-  activation load more often but keep more accumulators alive, which uses
-  registers.
-- **SIMD groups per threadgroup:** try 2, 4, 8, and 16. More groups cover more
-  outputs per threadgroup but can lower how many threadgroups fit on a core.
-
-Adding SIMD groups to a threadgroup and adding threadgroups to the grid are
-different knobs. The first changes per-threadgroup register demand. The
-second changes how the outputs are divided. Keep the experiments separate so
-each number answers one question. If you add an experimental variant, keep
-the selected path's kernel names unchanged.
+These compare your simple kernel with `mx.quantized_matmul` on a 128-row
+identity input and a 3-row random input.
 
 ## Task 4: Use It in the Model
 
@@ -618,9 +531,8 @@ Now make the cached model use the new operator. Update
 Add the packed path next to the dense one; do not replace it. The model takes
 a `checkpoint` name, and `WEEK2_CHECKPOINT_FEATURES` in `qwen3_week2.py`
 records what each checkpoint turns on. `quantized_weights` is false for
-`kv-cache` and `capacity-cache` and true from `quantized-matvec` onward. Keep
-the dense BF16 weights, embedding, and `linear` calls for the two Day 1
-checkpoints, so `capacity-cache` stays a fair control. When
+`kv-cache` and true from `packed-weights` onward. Keep the dense BF16 weights,
+embedding, and `linear` calls for `kv-cache`, so it stays a fair control. When
 `quantized_weights` is true:
 
 - Load every attention projection (`wq`, `wk`, `wv`, `wo`) and MLP projection
@@ -636,6 +548,10 @@ checkpoints, so `capacity-cache` stays a fair control. When
   expects its projections to go through `mlx_quantized_linear`.
 - Keep `group_size` and `bits` from each loaded layer, and let the extension
   reject anything other than 128 and 4.
+- For `packed-weights`, load the weights with `use_simdgroup_matvec=False`
+  and `use_simdgroup_matmul=False`, so every projection goes to the simple
+  kernel. The checkpoint's `simdgroup_matvec` and `simdgroup_matmul` features
+  turn these on later.
 
 Leave the Week 1 model alone. Its layers still take plain `mx.array` weights.
 
@@ -648,69 +564,45 @@ Run the whole Day 2 gate, then generate text with your model:
 pdm run test --week 2 --day 2
 
 pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b --max-tokens 16
+  --week2-checkpoint packed-weights --model qwen3-0.6b --max-tokens 16
 ```
 
 ## Check That the Model Really Uses Your Kernel
 
 Passing tests is not quite enough. The tests compare outputs and call your
 operators directly, but they do not check which path the model takes
-internally. Make sure that:
+internally. Make sure that both a decode step and a long prompt go
+`quantized_linear` → `quantized_matmul` → your primitive → the simple kernel.
+An easy way to check is to put a temporary exception in `quantized_matmul`
+and confirm that the `main` command above hits it.
 
-- a decode step goes `quantized_linear` → `quantized_matvec_custom` → your
-  primitive → the matvec kernel; and
-- a prompt longer than eight tokens goes `quantized_linear` →
-  `quantized_matmul` → your primitive → the simple kernel.
-
-An easy way to check is to put a temporary exception in one branch of
-`quantized_linear` and confirm that the `main` command above hits it.
-
-Then measure. Keep the model, prompt length, output length, and logit mode
-identical across every run you compare:
-
-```bash
-pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint quantized-matvec --model qwen3-0.6b \
-  --num-seqs 1 --min-input-len 128 --max-input-len 128 \
-  --min-output-len 65 --max-output-len 65 --warmup 2 \
-  --prefill-logits last
-```
-
-Run it again with `--solution tiny_llm_ref` to compare with the reference
-solution, and again with `--week2-checkpoint capacity-cache` to compare with
-Day 1. Don't change anything else between runs.
-
-To see the whole progression, and how the replayed decode work changes:
+Then measure against Day 1, keeping the model, prompt length, output length,
+and logit mode identical. Putting both checkpoints in one benchmark run lets
+the runner alternate them, so a slow minute on your machine does not land on
+only one side:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
-  --variant week2-capacity-cache --variant week2-quantized-matvec --variant mlx \
+  --variant week2-kv-cache --variant week2-packed-weights --variant mlx \
   --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last
+  --prefill-logits last --json-output week2-day2-packed.json
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
-  --case capacity-cache:decode:128 --case quantized-matvec:decode:128 \
+  --case kv-cache:decode:128 --case packed-weights:decode:128 \
   --warmup 4 --iterations 12 \
   --json-output week2-day2-attribution.json
 ```
 
 The profiler replays one decode step that ends at 128 cached tokens through
 the public operators each checkpoint selects, as described in
-[Day 1](./week2-01-kv-cache.md). Both checkpoints use the same bounded cache,
-and in one command both cases share the same context, cache bound
-(`C = S = 128` by default), and logit setting. The only thing that changes is
-the packed-weight path: projections and the embedding. If you change
-`--cache-capacity` or `--prefill-logits`, change it for both.
-
-Putting both checkpoints in one benchmark run lets the runner alternate them,
-so a slow minute on your machine does not land on only one side.
+[Day 1](./week2-01-kv-cache.md#find-where-the-time-goes). Both cases share the
+same context and logit setting; the only thing that changes is the
+packed-weight path, for the projections and the embedding.
 
 Then answer three questions from your own runs. Did packing change the
-replayed projections group, and by how much? Did the whole-request decode
-result in the progression run improve, and by how much? Does your model
-actually route its projections through `quantized_linear` (the wiring check
-earlier in this chapter)? Three outcomes are common, and each tells you
-something:
+replayed projections group, and by how much? Did whole-request decode change?
+Did peak allocation fall, now that the weights stay packed? Three outcomes
+are common, and each tells you something:
 
 - **The projections group fell and the request got faster.** The mechanism
   you wrote down survived a test that could have disproved it. Note how much
@@ -719,38 +611,12 @@ something:
   limit: another group, the CPU, or prefill rather than decode. Check the
   prefill and decode split in the benchmark before you go further.
 - **The request got slower.** Keep the result. Check that the model still
-  calls the new path, then look for the group that grew. A new kernel can be
-  faster at the replay shape and slower at the shapes the real request uses.
+  calls the new path, then look for the group that grew. It can happen
+  today: one thread per output reads fewer bytes, but on a single decode row
+  it leaves most of the GPU idle.
 
-You will ask the same three questions at the end of every later day.
-
-Then look for the next bottleneck. Decode now runs your matvec, but a prompt
-with more than eight rows still goes to today's readable matrix kernel. Replay
-one prefill as well:
-
-```bash
-pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
-  --case quantized-matvec:prefill:128 --warmup 4 --iterations 12 \
-  --json-output week2-day2-prefill.json
-```
-
-If the projections group leads that prefill replay, you have Day 3's starting
-point. If something else does, note it before you go on.
-
-For a sense of scale, here is one older measurement of this step. It used
-Qwen3-4B on an M4 Pro, with an earlier version of the course code and an
-earlier version of the profiler whose numbers are not comparable with today's
-replay. Packing the weights cut the time spent in projections by 69.0%, and
-decode on a fixed workload went from 24.38 to 58.90 tokens per second. That
-older profile then showed normalization, positional encoding, and activation
-taking 33.5% of the time, which is what Day 4 goes after. Your 0.6B numbers will differ, and these are
-not targets to hit. The [performance appendix](./appendix-performance.md)
-has the full history.
-
-To compare at 4B yourself, download the model with
-`hf download Qwen/Qwen3-4B-MLX-4bit` and rerun **every** row with
-`--model qwen3-4b`. The dense `capacity-cache` control still needs the memory
-listed in the [model table](./preface.md#choose-a-model-for-your-mac).
+You will ask the same three questions at the end of every later day. Keep the
+`packed-weights` result: it is [Day 3](./week2-03-decode-matvec.md)'s control.
 
 ## If You Get Stuck
 

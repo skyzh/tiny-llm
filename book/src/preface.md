@@ -46,11 +46,12 @@ serving stack, or **studying and running** a later checkpoint without completing
 all earlier exercises. These are not the same path.
 
 The current route runs from Week 1 through [Week 2 Day 1](./week2-01-kv-cache.md),
-[Day 2](./week2-02-quantize-model.md), [Day 3](./week2-03-simd-matrix-prefill.md),
-[Day 4](./week2-04-fused-model-kernels.md), then
-[Day 5](./week2-05-tiled-prefill-attention.md): `kv-cache`, `capacity-cache`,
+[Day 2](./week2-02-quantize-model.md), [Day 3](./week2-03-decode-matvec.md),
+[Day 4](./week2-04-simd-matrix-prefill.md),
+[Day 5](./week2-05-fused-model-kernels.md), then
+[Day 6](./week2-06-tiled-prefill-attention.md): `kv-cache`, `packed-weights`,
 `quantized-matvec`, `simd-matmul`, `rmsnorm`, `rope`, `swiglu`,
-`tiled-prefill`, then `selected`. The five-day route supplies the dense-model
+`tiled-prefill`, then `selected`. The six-day route supplies the dense-model
 interface that Week 3 extends with paging and batching. The
 [earlier full-course roadmap diagram](./course-roadmap.svg) is
 retained as historical context; its seven-day Week 2 order is not this
@@ -106,11 +107,11 @@ The cumulative dependencies are deliberate:
 ### Week 2 operator off-ramps
 
 Day 1 requires cache state and matched measurement; it has no replaceable
-custom kernel. Days 2 and 3 have an optional `mx.quantized_matmul` substitution
-at the projection operator boundary; both still need the course-owned cache
-and model wiring. Day 4 can substitute the equivalent MLX operator or
+custom kernel. Days 2 to 4 have an optional `mx.quantized_matmul` substitution
+at the projection operator boundary; all still need the course-owned cache
+and model wiring. Day 5 can substitute the equivalent MLX operator or
 equation at one RMSNorm, RoPE, or SwiGLU boundary while preserving the other
-course-owned paths. Day 5 can substitute equivalent MLX attention at the
+course-owned paths. Day 6 can substitute equivalent MLX attention at the
 dense prefill boundary while keeping the cache and shape/mask adapter. Selecting
 `--solution mlx` runs a separate complete model, not a hybrid that completes
 learner cache TODOs.
@@ -179,11 +180,11 @@ pressure.
     [M5 MacBook Air](https://support.apple.com/en-us/126320) specifications. Higher-memory configurations are outside
     this table.
 [^week2-dense]: These conservative Week 2 model-size choices cover Day 1's
-    dense BF16 checkpoint. Days 2–5 retain the cache and keep projection
-    weights packed. Use 0.6B for the required Day 3–5 comparisons.
+    dense BF16 checkpoint. Days 2–6 retain the cache and keep projection
+    weights packed. Use 0.6B for the required Day 3–6 comparisons.
     The optional packed 4B comparison is described in
-    [Day 2](./week2-02-quantize-model.md); its matched Day 1 control still
-    needs enough memory for the dense `capacity-cache` model.
+    [Day 3](./week2-03-decode-matvec.md); its matched Day 1 control still
+    needs enough memory for the dense `kv-cache` model.
 [^moe]: 30B-A3B requires the optional Week 3 MoE implementation. In Week 4, select the Week 3 loader. Use batch size one
     and a short context when approaching this ceiling; 4B remains the required-course target.
 

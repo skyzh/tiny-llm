@@ -5,7 +5,7 @@ request is a small amount of work, so most of the GPU sits idle. Today you
 decode several requests in each model call.
 
 You start from the finished
-[Week 2 model](./week2-05-tiled-prefill-attention.md). Two of its pieces
+[Week 2 model](./week2-06-tiled-prefill-attention.md). Two of its pieces
 already handle what batching needs: RoPE accepts one position offset per
 request, and the causal mask can be rectangular. Each request still owns its
 own dense K/V cache. Today you write four things around them:
@@ -117,7 +117,7 @@ src/tiny_llm/models.py::dispatch_week3_batch_model
 ```
 
 Your Week 2 model runs its quantized projections on the kernels you wrote in
-[Week 2](./week2-03-simd-matrix-prefill.md). Week 3 is about serving, not
+[Week 2](./week2-04-simd-matrix-prefill.md). Week 3 is about serving, not
 projection kernels, so its model sends those projections to MLX instead.
 Otherwise every cache and scheduler measurement this week would also carry
 the remaining cost of the teaching kernels.
