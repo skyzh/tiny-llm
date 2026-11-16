@@ -239,7 +239,7 @@ def test_default_attribution_and_model_expose_only_canonical_checkpoints():
     checkpoints = tuple(case.checkpoint for case in cases)
     assert checkpoints == (
         "kv-cache",
-        "capacity-cache",
+        "packed-weights",
         "quantized-matvec",
         "simd-matmul",
         "rmsnorm",
@@ -254,7 +254,7 @@ def test_default_attribution_and_model_expose_only_canonical_checkpoints():
         implementation = profile.load_implementation(implementation_name)
         assert implementation.checkpoints == (
             "kv-cache",
-            "capacity-cache",
+            "packed-weights",
             "quantized-matvec",
             "simd-matmul",
             "rmsnorm",

@@ -36,7 +36,7 @@ parser.add_argument(
     "--week2-checkpoint",
     choices=(
         "kv-cache",
-        "capacity-cache",
+        "packed-weights",
         "quantized-matvec",
         "simd-matmul",
         "rmsnorm",
@@ -44,6 +44,7 @@ parser.add_argument(
         "swiglu",
         "tiled-prefill",
         "selected",
+        "capacity-cache",  # Legacy alias for kv-cache.
     ),
     help="run one cumulative Week 2 model checkpoint",
 )

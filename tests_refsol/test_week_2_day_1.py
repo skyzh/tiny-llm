@@ -55,7 +55,7 @@ def test_task_3_rejects_a_position_that_disagrees_with_the_cache():
         model(mx.array([[1]], dtype=mx.int32), 1, model.create_kv_cache())
 
 
-# Second checkpoint: request-bounded capacity.
+# One cache checkpoint; explicit bounds remain optional.
 
 
 def _chunk(start: int, length: int):
@@ -146,7 +146,7 @@ def test_capacity_rewind_and_overflow_preserve_the_logical_prefix():
 
 def test_capacity_checkpoint_runs_the_week2_engine():
     fixture = _fixed_fixture(0)
-    model = Qwen3ModelWeek2(fixture, checkpoint="capacity-cache")
+    model = Qwen3ModelWeek2(fixture, checkpoint="kv-cache")
     readable_model = Qwen3ModelWeek2(fixture, checkpoint="kv-cache")
     bounded = model.create_kv_cache(capacity=3)
     readable = readable_model.create_kv_cache()
@@ -160,3 +160,43 @@ def test_capacity_checkpoint_runs_the_week2_engine():
     assert all(cache.offset == 3 for cache in bounded)
     with pytest.raises(ValueError, match="capacity"):
         model(mx.array([[4]], dtype=mx.int32), 3, bounded)
+
+
+@pytest.mark.parametrize("length", (255, 256, 257, 513))
+def test_chunk_growth_returns_only_the_initialized_prefix(length):
+    cache = TinyKvFullCache()
+    key, value = _chunk(0, length)
+    result = cache.update_and_fetch(key, value)
+    assert result is not None, "implement chunked TinyKvFullCache storage"
+    actual_key, actual_value, offset, _ = result
+    assert offset == length
+    assert cache.allocated_capacity == ((length + 255) // 256) * 256
+    assert actual_key.shape[2] == actual_value.shape[2] == length
+    assert_allclose(actual_key, key, mx.float32)
+    assert_allclose(actual_value, value, mx.float32)
+
+
+def test_chunk_growth_rewind_and_reset_keep_storage_and_hide_abandoned_tokens():
+    cache = TinyKvFullCache(growth_step=4)
+    key, value = _chunk(0, 3)
+    cache.update_and_fetch(key, value)
+    cache.rewind(2)
+    replacement, replacement_value = _chunk(30, 4)
+    keys, values, offset, _ = cache.update_and_fetch(replacement, replacement_value)
+    assert offset == 5 and cache.allocated_capacity == 8
+    assert_allclose(keys, mx.concat([key[:, :, :1], replacement], axis=2), mx.float32)
+    assert_allclose(
+        values, mx.concat([value[:, :, :1], replacement_value], axis=2), mx.float32
+    )
+    cache.reset()
+    assert cache.offset == 0 and cache.allocated_capacity == 8
+    keys, values, offset, _ = cache.update_and_fetch(key[:, :, :1], value[:, :, :1])
+    assert offset == 1 and keys.shape[2] == values.shape[2] == 1
+
+
+def test_capacity_cache_command_is_only_a_compatibility_alias():
+    fixture = _fixed_fixture(1)
+    legacy = Qwen3ModelWeek2(fixture, checkpoint="capacity-cache")
+    current = Qwen3ModelWeek2(fixture, checkpoint="kv-cache")
+    assert legacy.checkpoint == current.checkpoint == "kv-cache"
+    assert not legacy.use_bounded_kv_capacity and not current.use_bounded_kv_capacity

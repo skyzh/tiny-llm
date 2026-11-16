@@ -12,11 +12,11 @@ from types import MappingProxyType
 
 
 PROFILE_KIND = "public-operator-replay"
-ADAPTER_VERSION = 2
+ADAPTER_VERSION = 3
 OFFSET_PREPARATION = "once-per-pointwise-sample-inside-timing"
 PUBLIC_FEATURES = (
     "bounded_kv_capacity", "quantized_weights", "fast_rms_norm", "fast_rope",
-    "fast_swiglu", "simdgroup_matmul", "tiled_prefill_attention",
+    "fast_swiglu", "simdgroup_matvec", "simdgroup_matmul", "tiled_prefill_attention",
 )
 COUNTERS = (
     "logical_copy_bytes", "physical_growth_copy_bytes", "slice_write_bytes",
@@ -121,7 +121,7 @@ class ReplayPlan:
 
     @property
     def capacity(self):
-        return self.bound if self.features["bounded_kv_capacity"] else None
+        return self.cache_capacity if self.cache_capacity is not None else (self.bound if self.features["bounded_kv_capacity"] else None)
 
     @property
     def head_rows(self):
@@ -148,7 +148,8 @@ def choose_operator(features, flag, readable, optimized):
 
 
 def packed_weight_options(features):
-    return {"use_simdgroup_matmul": features["simdgroup_matmul"]}
+    return {"use_simdgroup_matmul": features["simdgroup_matmul"],
+            "use_simdgroup_matvec": features["simdgroup_matvec"]}
 
 
 def _identity_offset(offset, batch_size):

@@ -1,95 +1,203 @@
-"""Week 2 Day 5 public tiled-attention and selected-engine tests."""
+"""Week 2 Day 5 compact model-primitive tests."""
 
-from math import prod
+import importlib
+import sys
 
 import mlx.core as mx
 import pytest
 
-from .tiny_llm_base import Qwen3ModelWeek2, dense_prefill_attention_mma
+from benches import (
+    bench,
+    bench_course_progression,
+    profile_week2_kernels,
+    week2_gpudebug,
+)
+from benches.bench_course_progression import WEEK2_VARIANTS
+from benches.profile_week2_kernels import DEFAULT_CASES
+from benches.week2_gpudebug import KNOWN_CHECKPOINTS
+from .tiny_llm_base import FastRMSNorm, FastRoPE, Qwen3ModelWeek2, swiglu
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def _fixture(shape: tuple[int, ...], phase: float) -> mx.array:
-    values = mx.sin(mx.arange(prod(shape), dtype=mx.float32) * 0.017 + phase)
-    return values.reshape(shape).astype(mx.bfloat16)
+def test_task_1_register_cached_rmsnorm_matches_readable_operator():
+    x = mx.random.normal((2, 3, 16)).astype(mx.bfloat16)
+    weight = mx.random.normal((16,)).astype(mx.bfloat16)
+    result = FastRMSNorm(16, weight, eps=1e-5)(x)
+    expected = mx.fast.rms_norm(x, weight, 1e-5)
+
+    assert result is not None, "implement the FastRMSNorm learner seam"
+    assert result.shape == expected.shape
+    assert result.dtype == expected.dtype == mx.bfloat16
+    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def _model_fixture(seed: int):
-    return tiny_qwen3_mlx_model(head_dim=128, seed=seed)
+def test_task_2_rope_matches_readable_operator():
+    x = mx.random.normal((2, 4, 2, 16)).astype(mx.bfloat16)
+    actual = FastRoPE(16, 32, base=10000)(x, [3, 7])
+    expected = mx.fast.rope(
+        x.transpose(0, 2, 1, 3),
+        16,
+        traditional=False,
+        base=10000,
+        scale=1.0,
+        offset=mx.array([3, 7], dtype=mx.int32),
+    ).transpose(0, 2, 1, 3)
 
-
-def _run(model, length: int):
-    tokens = mx.array([list(range(1, length + 1))], dtype=mx.int32)
-    output = model(tokens, 0, model.create_kv_cache(capacity=length))
-    mx.eval(output)
-    assert output.dtype == mx.bfloat16
-    assert output.shape[:2] == (1, length)
-    return output
-
-
-def test_task_1_tiled_prefill_matches_mlx_causal_gqa():
-    query = _fixture((1, 4, 33, 128), 0.1)
-    key = _fixture((1, 2, 47, 128), 0.7)
-    value = _fixture(key.shape, 1.3)
-    actual = dense_prefill_attention_mma(query, key, value, 128**-0.5, "causal")
-    expected = mx.fast.scaled_dot_product_attention(
-        query.astype(mx.float32),
-        key.astype(mx.float32),
-        value.astype(mx.float32),
-        scale=128**-0.5,
-        mask="causal",
-    ).astype(mx.bfloat16)
-    assert actual.shape == query.shape
-    assert actual.dtype == mx.bfloat16
+    assert actual is not None, "implement the FastRoPE learner seam"
+    assert actual.shape == expected.shape
+    assert actual.dtype == expected.dtype == mx.bfloat16
     assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-def test_task_2_fully_masked_rows_are_finite_zero():
-    query = _fixture((1, 4, 9, 128), 0.1)
-    key = _fixture((1, 1, 17, 128), 0.7)
-    value = _fixture(key.shape, 1.3)
-    mask = mx.full((1, 1, 9, 17), -mx.inf, dtype=mx.float32)
-    actual = dense_prefill_attention_mma(query, key, value, 128**-0.5, mask)
-    mx.eval(actual)
-    assert bool(mx.all(mx.isfinite(actual)).item())
-    assert float(mx.max(mx.abs(actual)).item()) == 0.0
+def test_task_3_swiglu_matches_readable_operator():
+    gate = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
+    up = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
+    actual = swiglu(gate, up)
+    expected = gate * mx.sigmoid(gate) * up
+
+    assert actual is not None, "implement the SwiGLU learner seam"
+    assert actual.shape == expected.shape
+    assert actual.dtype == expected.dtype == mx.bfloat16
+    assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
 
 
-@pytest.mark.parametrize("length", (3, 10))
-def test_task_3_tiled_checkpoint_matches_readable_model(length: int):
-    fixture = _model_fixture(4)
-    tiled = Qwen3ModelWeek2(fixture, checkpoint="tiled-prefill")
-    readable = Qwen3ModelWeek2(fixture, checkpoint="swiglu")
-    actual = _run(tiled, length)
-    expected = _run(readable, length)
-    assert_allclose(actual, expected, mx.bfloat16, atol=0.75, rtol=0.05)
+@pytest.mark.parametrize("seed", (0, 4))
+def test_task_4_primitive_checkpoints_compose_public_model(seed):
+    fixture = tiny_qwen3_mlx_model(seed=seed)
+
+    tokens = mx.array([list(range(1, 11))], dtype=mx.int32)
+    outputs = []
+    for checkpoint in ("simd-matmul", "rmsnorm", "rope", "swiglu"):
+        model = Qwen3ModelWeek2(fixture, checkpoint=checkpoint)
+        output = model(tokens, 0, model.create_kv_cache(capacity=10))
+        mx.eval(output)
+        assert output.dtype == mx.bfloat16
+        assert output.shape[:2] == (1, 10)
+        outputs.append(output)
+
+    assert all(output.shape == outputs[0].shape for output in outputs)
+    for earlier, later in zip(outputs, outputs[1:]):
+        assert_allclose(
+            later,
+            earlier,
+            mx.bfloat16,
+            atol=0.5,
+            rtol=2e-2,
+            message=f"fixture seed {seed}",
+        )
 
 
-@pytest.mark.parametrize(
-    "disabled",
-    (
-        {"use_bounded_kv_capacity": False},
-        {"use_register_cached_rms_norm": False},
-        {"use_tiled_prefill_attention": False},
-    ),
-)
-def test_selected_controls_can_be_disabled_independently(disabled):
-    fixture = _model_fixture(0)
-    selected = Qwen3ModelWeek2(fixture, checkpoint="selected")
-    switched = Qwen3ModelWeek2(fixture, checkpoint="selected", **disabled)
-    actual = _run(selected, 10)
-    expected = _run(switched, 10)
-    assert_allclose(actual, expected, mx.bfloat16, atol=0.75, rtol=0.05)
+def test_day5_public_selectors_remain_the_prefix_of_day5():
+    model_module = importlib.import_module(Qwen3ModelWeek2.__module__)
+    checkpoints = (
+        "kv-cache",
+        "packed-weights",
+        "quantized-matvec",
+        "simd-matmul",
+        "rmsnorm",
+        "rope",
+        "swiglu",
+    )
+    assert model_module.WEEK2_CHECKPOINTS[:7] == checkpoints
+    assert KNOWN_CHECKPOINTS[:7] == checkpoints
+    assert DEFAULT_CASES[:7] == (
+        "kv-cache:decode:128",
+        "packed-weights:decode:128",
+        "quantized-matvec:decode:128",
+        "simd-matmul:prefill:128",
+        "rmsnorm:decode:128",
+        "rope:decode:128",
+        "swiglu:decode:128",
+    )
+    assert [variant.key for variant in WEEK2_VARIANTS][:8] == [
+        "week1",
+        "week2-kv-cache",
+        "week2-packed-weights",
+        "week2-quantized-matvec",
+        "week2-simd-matmul",
+        "week2-rmsnorm",
+        "week2-rope",
+        "week2-swiglu",
+    ]
 
 
-def test_selected_is_default_and_matches_explicit_checkpoint():
-    fixture = _model_fixture(0)
-    default = Qwen3ModelWeek2(fixture)
-    explicit = Qwen3ModelWeek2(fixture, checkpoint="selected")
-    assert_allclose(_run(default, 10), _run(explicit, 10), mx.bfloat16)
+def test_day5_model_free_cli_parsers(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench",
+            "--solution",
+            "tiny_llm_ref",
+            "--loader",
+            "week2",
+            "--week2-checkpoint",
+            "swiglu",
+            "--model",
+            "qwen3-0.6b",
+            "--prefill-logits",
+            "last",
+        ],
+    )
+    bench_args = bench.parse_args()
+    bench.validate_args(bench_args)
+    assert bench_args.week2_checkpoint == "swiglu"
 
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "progression",
+            "--solution",
+            "ref",
+            "--suite",
+            "week2",
+            "--repeats",
+            "2",
+            "--variant",
+            "week2-rmsnorm",
+            "--variant",
+            "week2-rope",
+            "--variant",
+            "week2-swiglu",
+            "--prefill-logits",
+            "last",
+        ],
+    )
+    assert bench_course_progression.parse_args().variant == [
+        "week2-rmsnorm",
+        "week2-rope",
+        "week2-swiglu",
+    ]
 
-@pytest.mark.parametrize("checkpoint", ("decode-attention", "split-k"))
-def test_retired_experiments_are_not_week2_checkpoints(checkpoint):
-    with pytest.raises(ValueError, match="unknown Week 2 checkpoint"):
-        Qwen3ModelWeek2(_model_fixture(0), checkpoint=checkpoint)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["profile", "--solution", "tiny_llm_ref", "--case", "swiglu:decode:128"],
+    )
+    assert profile_week2_kernels.parse_args().case == [
+        profile_week2_kernels.ProfileCase("swiglu", "decode", 128)
+    ]
+
+    capture = week2_gpudebug.build_parser().parse_args(
+        [
+            "capture",
+            "--solution",
+            "tiny_llm_ref",
+            "--model",
+            "qwen3-0.6b",
+            "--checkpoint",
+            "swiglu",
+            "--phase",
+            "decode",
+            "--tokens",
+            "128",
+            "--trace",
+            "trace.gputrace",
+            "--metadata",
+            "metadata.json",
+            "--manifest",
+            "manifest.json",
+        ]
+    )
+    assert capture.checkpoint == "swiglu"

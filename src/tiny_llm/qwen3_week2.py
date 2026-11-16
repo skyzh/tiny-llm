@@ -22,6 +22,7 @@ class Week2CheckpointFeatures:
     fast_rms_norm: bool = False
     fast_rope: bool = False
     fast_swiglu: bool = False
+    simdgroup_matvec: bool = False
     simdgroup_matmul: bool = False
     tiled_prefill_attention: bool = False
 
@@ -29,39 +30,39 @@ class Week2CheckpointFeatures:
 WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
     {
         "kv-cache": Week2CheckpointFeatures(),
-        "capacity-cache": Week2CheckpointFeatures(bounded_kv_capacity=True),
+        "packed-weights": Week2CheckpointFeatures(quantized_weights=True),
         "quantized-matvec": Week2CheckpointFeatures(
-            bounded_kv_capacity=True, quantized_weights=True
+            quantized_weights=True, simdgroup_matvec=True
         ),
         "simd-matmul": Week2CheckpointFeatures(
-            bounded_kv_capacity=True,
             quantized_weights=True,
+            simdgroup_matvec=True,
             simdgroup_matmul=True,
         ),
         "rmsnorm": Week2CheckpointFeatures(
-            bounded_kv_capacity=True,
             quantized_weights=True,
+            simdgroup_matvec=True,
             simdgroup_matmul=True,
             fast_rms_norm=True,
         ),
         "rope": Week2CheckpointFeatures(
-            bounded_kv_capacity=True,
             quantized_weights=True,
+            simdgroup_matvec=True,
             simdgroup_matmul=True,
             fast_rms_norm=True,
             fast_rope=True,
         ),
         "swiglu": Week2CheckpointFeatures(
-            bounded_kv_capacity=True,
             quantized_weights=True,
+            simdgroup_matvec=True,
             simdgroup_matmul=True,
             fast_rms_norm=True,
             fast_rope=True,
             fast_swiglu=True,
         ),
         "tiled-prefill": Week2CheckpointFeatures(
-            bounded_kv_capacity=True,
             quantized_weights=True,
+            simdgroup_matvec=True,
             simdgroup_matmul=True,
             fast_rms_norm=True,
             fast_rope=True,
@@ -69,8 +70,8 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
             tiled_prefill_attention=True,
         ),
         "selected": Week2CheckpointFeatures(
-            bounded_kv_capacity=True,
             quantized_weights=True,
+            simdgroup_matvec=True,
             simdgroup_matmul=True,
             fast_rms_norm=True,
             fast_rope=True,
@@ -80,6 +81,13 @@ WEEK2_CHECKPOINT_FEATURES = MappingProxyType(
     }
 )
 WEEK2_CHECKPOINTS = tuple(WEEK2_CHECKPOINT_FEATURES)
+# Old cache commands select the same evolving cache, never a second cache policy.
+WEEK2_CHECKPOINT_ALIASES = MappingProxyType({"capacity-cache": "kv-cache"})
+WEEK2_CHECKPOINT_CHOICES = (*WEEK2_CHECKPOINTS, *WEEK2_CHECKPOINT_ALIASES)
+
+
+def canonical_week2_checkpoint(checkpoint: str) -> str:
+    return WEEK2_CHECKPOINT_ALIASES.get(checkpoint, checkpoint)
 
 
 class Qwen3MultiHeadAttention:
