@@ -262,8 +262,11 @@ the same flag so shared callers work; you can ignore it.
 
 How much does the schedule help? On one M4 Pro with Qwen3-4B, with a fixed
 queue of eight prompts (8,417 prompt tokens in total) prefilled in 256-token
-chunks, adding it raised whole-queue throughput by 2.38% with one decode slot
-and 3.02% with four, compared with the same server without it. Those are
+chunks, whole-queue throughput was 2.38% higher with one decode slot and
+3.02% higher with four than in the previous version of the server, built
+before this schedule and the shared matrix-helper change that came with it.
+That compares two complete builds; turning `use_mlp_prefill64` off within one
+build is a separate comparison, not these numbers. Those are
 medians over six paired runs each; five of the six one-slot pairs and all six
 four-slot pairs favored the schedule. Peak MLX allocation did not change, and
 in a separate check on a 640-token prompt the logits and K/V matched the
