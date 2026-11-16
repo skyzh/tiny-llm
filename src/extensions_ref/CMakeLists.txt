@@ -36,6 +36,7 @@ target_sources(
   tiny_llm_ext_ref
   PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/mlp_qmm_m64.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/week2_kernels.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/paged_attention.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp
