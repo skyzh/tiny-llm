@@ -258,9 +258,20 @@ instead of 32, using the same cooperative matrix code as Week 2. Decode,
 shorter last chunks and other model sizes, including the 0.6B model, take
 the ordinary path. Pass `use_mlp_prefill64=False` to the reference model to
 turn it off for a matched comparison. Your starter's constructors accept
-the same flag so shared callers work; you can ignore it. An earlier
-experiment with a different matrix implementation found this schedule
-faster, but that result does not carry over to this port.
+the same flag so shared callers work; you can ignore it.
+
+How much does the schedule help? On one M4 Pro with Qwen3-4B, with a fixed
+queue of eight prompts (8,417 prompt tokens in total) prefilled in 256-token
+chunks, whole-queue throughput was 2.38% higher with one decode slot and
+3.02% higher with four than in the previous version of the server, built
+before this schedule and the shared matrix-helper change that came with it.
+That compares two complete builds; turning `use_mlp_prefill64` off within one
+build is a separate comparison, not these numbers. Those are
+medians over six paired runs each; five of the six one-slot pairs and all six
+four-slot pairs favored the schedule. Peak MLX allocation did not change, and
+in a separate check on a 640-token prompt the logits and K/V matched the
+previous version exactly. The measurement covers the whole queue, not the time to each request's first token, and it is
+one machine and one workload.
 
 FlashAttention should matter more as prompts get longer, but treat that as a
 hypothesis until a matched benchmark measures it. It does not replace Day 4's
