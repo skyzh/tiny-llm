@@ -34,16 +34,17 @@ By the end of this chapter, you should be able to:
 - Complete Week 2 cached generation for both the draft and target models.
 - Complete the Week 3 paged cache and page-aware attention path.
 - Use compatible tokenizers for the two models. A shared token id must represent
-  the same text in both vocabularies. Validate that contract before either model
-  runs; mismatched prompt encodings, EOS ids, or vocabularies must fail closed.
+  the same text in both vocabularies. Check this before either model runs; if
+  the prompt encodings, EOS ids or vocabularies differ, stop with an error
+  rather than continuing.
 
 This extension comes after paged attention for two concrete reasons. Rejected
 draft tokens must release pages and repair the valid tail length, and verifying
 several proposed tokens at once is a long-query attention call over the paged
-prefix. The paged-cache lifecycle and page-aware long-query operator therefore
-form the stable interface on which speculative decoding is built.
+prefix. Speculative decoding is built on those two pieces: the paged cache's
+page bookkeeping and page-aware attention for queries longer than one token.
 
-## Task 1: Reuse the Cache-Rewind Contract
+## Task 1: Reuse Cache Rewind
 
 Day 3 already added `rewind(n)` to the common KV-cache interface. Verify that
 prerequisite before building the speculative loop. A dense cache removes the

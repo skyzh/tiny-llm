@@ -2,9 +2,11 @@
 
 > 🚧 This chapter is under review and may change.
 
-A long prompt can monopolize the device while active decode requests wait for
-their next token. Chunked prefill gives each scheduler iteration a prompt-token
-budget, limiting how long decode work can be delayed.
+On Day 1, a new request's whole prompt is prefilled in one go. While a
+2,000-token prompt is being prefilled, every request already in the batch waits
+for its next token. Chunked prefill gives each pass of the scheduler a budget
+of prompt tokens, so a long prompt is processed a chunk at a time, and the
+requests already decoding get a turn between chunks.
 
 The scheduler policy becomes:
 
@@ -16,14 +18,18 @@ repeat until the queue and active batch are empty
 
 ## Task 1: Bound Prefill Work
 
-Update `Request.try_prefill` in `src/tiny_llm/batch.py` to select one prompt
-slice, call the model with the slice's absolute offset, and mark the request
-ready only after the full prompt has been processed.
+Update `Request.try_prefill` in `src/tiny_llm/batch.py` so that each call
+processes one slice of the prompt, at most `prefill_max_step` tokens long,
+starting where the previous call stopped. Call the model with the slice's
+absolute position in the prompt, and mark prefill done only after the last
+slice:
 
 ```python
-for start in range(0, len(prompt_tokens), prefill_max_step):
-    chunk = prompt_tokens[start : start + prefill_max_step]
-    model(chunk, offset=start, cache=cache)
+# one call to try_prefill
+start = self.offset
+chunk = self.prefill_tokens[start : start + self.prefill_max_step]
+# run the model on `chunk` at offset `start`, then advance self.offset
+# set self.is_prefill_done once self.offset reaches the prompt length
 ```
 
 The final chunk may be smaller than the configured budget. Test prompts shorter
@@ -134,25 +140,21 @@ pdm run bench-chunked-prefill --solution tiny_llm --offline --model qwen3-0.6b \
   --json-output "$week3_result_dir/chunked-prefill-tiny-llm.json"
 ```
 
-This command measures your `tiny_llm` solution and writes a new JSON file
-outside the tracked historical corpus. For a current reference control, rerun
-the same flags with `--solution ref` and a different filename in the new
-directory; compare those new measurements with your own run. The table below
-is historical task #367 evidence from source
-`18aec8503929d80c986324578068ecac2463c2ac`, before the five-day Week 2
-revamp. Its trace used seed 0 and the same 32-token output budget for every
-request. Each chunk size ran twice in forward order and twice in reverse order
-in fresh processes. Every row used the same canonical Week 3 MLX
-quantized-projection seam and the same course-owned scheduler, dense cache, and
-attention code; only the prefill budget changed. The saved JSON stores every prompt
-token id, the per-request output budget, and their canonical SHA-256 checksum.
-Running today's reference can produce different values; it does not reproduce
-the predecessor table.
+This measures your `tiny_llm` solution and writes a new JSON file. To compare
+with the reference solution, rerun the same flags with `--solution ref` and a
+different file name.
 
-A decode-completion gap is the wall-clock interval between two consecutive
-synchronized decode calls while at least one decode request remains active. It
-therefore includes intervening prefill and scheduler work; idle time with no
-decode request is excluded. On the measured M4 Pro, the four-process medians
+For a sense of what to expect, the table below comes from an earlier run on an
+M4 Pro, made before Week 2 was rebuilt, so your numbers will differ. It used
+the same kind of trace: a fixed seed, a 32-token output budget for every
+request, and each chunk size run four times in fresh processes, twice in each
+order. Only the prefill budget changed between rows; the projections went to
+MLX, and the scheduler, cache and attention were the course's own.
+
+The last column is the one fairness is about. A **decode gap** is the wall
+time between two consecutive decode calls while at least one request is
+decoding, so it includes any prefill and scheduler work done in between. Time
+with no request decoding is not counted. The medians over the four processes
 were:
 
 | Prefill budget | Output tok/s | Prefill tok/s | Decode tok/s | Requests/s | Decode step p95 | Decode gap p95 / max |
@@ -165,10 +167,8 @@ The 512-token row was the full-prompt Day 1 control for that trace. Relative to
 that row, the 128-token budget gives up 9.8% output throughput while reducing
 the p95 completion gap by 38.3% and the maximum gap by 55.2%. The 32-token
 budget reduces the p95 gap further but gives up substantially more throughput.
-For that predecessor workload, 128 was a measured compromise, not a universal
-optimum for your current run. The ledger at
-`benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
-keeps this predecessor absolute result separate from task #360's causal
-projection-seam ablation.
+On that workload, 128 was a reasonable compromise; on yours, the best value
+may differ. The [performance appendix](./appendix-performance.md) has the full
+record of the older run.
 
 {{#include copyright.md}}

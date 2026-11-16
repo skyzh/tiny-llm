@@ -33,8 +33,8 @@ This chapter combines four prerequisites:
 - Week 3 Day 4 introduced direct page-walking attention and the decode
   schedule.
 
-No new model dtype is introduced here. Preserve the Week 2 precision contract
-at the `paged_attention` boundary.
+Today adds no new model dtype. Keep the same precision as Week 2 at the
+`paged_attention` boundary.
 
 ## Why Optimize the Paged Path
 
@@ -75,11 +75,11 @@ The reference solution puts this shape dispatch inside the extension:
 | `L > 8`, BF16, `D == 128` | Use the tiled paged FlashAttention kernel. |
 | Every other supported shape | Keep a correct direct page-walking fallback. |
 
-The completed Week 3 model therefore has one paged-attention contract and an
-optimized BF16 long-prefill region. The public tests do not grade a kernel
-name, dispatch threshold, tile shape, private route flag, helper, or source
-layout. A behaviorally equivalent implementation, including one built with an
-external low-level library, is valid.
+So the finished Week 3 model has one paged-attention interface, with a faster
+path for long BF16 prefill. The tests do not check kernel names, the dispatch
+threshold, tile shapes, private flags, helpers or file layout. Any
+implementation that behaves the same passes, including one built on an
+external low-level library.
 
 ## Task 1: Tile Queries and Paged K/V
 
@@ -110,7 +110,7 @@ The Qwen path uses 128-token pages and a 32-token K/V tile. An aligned tile is
 therefore physically contiguous even when the logical sequence as a whole is
 not. Assign each thread contiguous elements through a cooperative block loader
 so adjacent lanes issue coalesced reads. Keep a generic loader for a tile that
-crosses a page boundary. The reference reuses the course-owned
+crosses a page boundary. The reference reuses the
 `CooperativeTileLoader` and direct `simdgroup_matrix` fragments from Week 2 so
 those mechanisms remain visible. You may choose a different internal helper or
 low-level library as long as the operator retains direct page-table semantics
@@ -207,19 +207,16 @@ extension function.
 
 The Week 3 model should use the tiled paged path automatically for supported
 long prefills. Short queries continue through the vector paged-decode schedule.
-Neither path gathers a dense K/V tensor. Canonical Week 3 uses MLX quantized
-projections, but its cache, paged attention, batching, and scheduling remain
-course-owned. This hybrid course path is not the full-MLX baseline.
+Neither path gathers a dense K/V tensor. The Week 3 model sends its
+projections to MLX, but the cache, paged attention, batching and scheduling are
+yours, so it is not the same as the full-MLX baseline.
 
-The historical task #367 continuous-serving trace is useful system context,
-but it is not a matched scalar-versus-tiled Day 5 experiment. The current
-model-free runner
-also lacks that isolated long-BF16 comparison. Do not claim a Day 5 speedup
-from these rows. A separate benchmark follow-up should hold inputs, page tables,
-precision, warmup, synchronization, and every non-attention mechanism fixed
-while changing only the scalar-versus-tiled schedule.
+The course does not yet have a benchmark that compares today's tiled schedule
+with Day 4's kernel on the same long BF16 prompts, changing nothing else. The
+runs below measure the whole server, so they cannot show what today's kernel
+alone gained.
 
-Run the cumulative system check on your solution:
+Run the whole-server check on your solution:
 
 ```bash
 week3_result_root="$HOME/tiny-llm-week3-results"
@@ -234,19 +231,16 @@ pdm run bench-serving-progression --solution tiny_llm --offline --repeats 4 \
   --json-output "$week3_result_dir/serving-tiny-llm.json"
 ```
 
-This writes a new JSON file outside the tracked historical corpus. The table
-below is historical reference evidence from task #367 on source
-`18aec8503929d80c986324578068ecac2463c2ac`, not a result for the current
-five-day Week 2 baseline. To compare current reference behavior, rerun the
-same flags with `--solution ref` and a different filename in the new directory;
-the old medians need not recur.
+This writes a new JSON file. To compare with the reference solution, rerun the
+same flags with `--solution ref` and a different file name.
 
-FlashAttention is expected to matter more as prefill grows. Treat that as a
-hypothesis until a matched operator benchmark measures it. It should not
-replace the Day 4 decode schedule: a one-token query has no query-tile reuse.
+FlashAttention should matter more as prompts get longer, but treat that as a
+hypothesis until a matched benchmark measures it. It does not replace Day 4's
+decode kernel: a one-token query has nothing to reuse across a query tile.
 
-On that predecessor M4 Pro trace, all three course rows shared the same
-projection seam:
+For a sense of scale, here is an earlier run of the same command on an M4 Pro,
+made before Week 2 was rebuilt. All three rows sent projections to MLX in the
+same way:
 
 <div class="table-wrapper">
 <table>
@@ -261,22 +255,18 @@ projection seam:
 </table>
 </div>
 
-Relative to dense serving in that predecessor trace, direct paging was 5.4%
-lower on prefill, 31.6% higher on output/request throughput, 82.3% higher on
-decode, and 47.4% lower on
-measured peak KV storage, and 99.76% lower on avoidable logical copy volume.
-The compatibility row's page-pool counter excludes its temporary dense staging
-allocation, so it is not a total peak. These are cumulative Week 3 system
-results; they do not isolate the Day 5 prefill schedule from paging, direct
-decode, allocation, or scheduling, and they do not credit the MLX projection
-seam to paged attention.
+Compared with dense serving in that run, direct paging was 5.4% slower on
+prefill, 31.6% faster on output and requests, and 82.3% faster on decode. It
+used 47.4% less peak K/V storage, and the K/V copying it could have avoided
+fell by 99.76%. The middle row's counter leaves out its temporary dense copy, so it is not
+a total peak. These are results for the whole server, so they mix paging,
+direct decode, allocation and scheduling; none of it is today's prefill kernel
+alone.
 
-The existing 8K static sweep is another cumulative diagnostic. It does not
-isolate scalar versus tiled paged attention, measure request turnover, page
-reuse, or capacity. The
-[performance appendix](./appendix-performance.md) records the matched serving
-and long-context measurements. Long-context decode remains a Day 4 vector
-kernel workload; do not credit a prefill schedule with a decode gain.
+A second check runs one long 8,192-token prompt through the Week 2 model, the
+Week 3 model and MLX. It also measures the whole model, with one request and
+no pages being reused, so it says nothing about the scheduler or about
+today's kernel alone:
 
 ```bash
 week3_result_root="$HOME/tiny-llm-week3-results"
@@ -290,13 +280,9 @@ pdm run bench-course-progression --solution tiny_llm --offline --suite course \
   --json-output "$week3_result_dir/8k-tiny-llm.json"
 ```
 
-This command measures your Week 2 and Week 3 course rows while retaining MLX
-as the library baseline and writes a new user-owned JSON file. The table below
-is historical task #367 evidence from source
-`18aec8503929d80c986324578068ecac2463c2ac`.
-For a current reference control, rerun with `--solution ref` and a new filename
-in your output directory. Today's `week2` variant uses the five-day route, so
-the old table is not its expected output.
+To compare with the reference solution, rerun with `--solution ref` and a new
+file name. The earlier run gave the table below. Its Week 2 row came from the
+older version of Week 2, so your `week2` row will not match it.
 
 <div class="table-wrapper">
 <table>
@@ -304,23 +290,19 @@ the old table is not its expected output.
     <tr><th scope="col">8K static checkpoint</th><th scope="col">Prefill tok/s</th><th scope="col">Decode tok/s</th></tr>
   </thead>
   <tbody>
-    <tr><th scope="row">Week 2 course-owned projections</th><td>323.96</td><td>17.73</td></tr>
-    <tr><th scope="row">Week 3 seam + course paged path</th><td>463.69</td><td>27.42</td></tr>
+    <tr><th scope="row">Week 2: your projection kernels</th><td>323.96</td><td>17.73</td></tr>
+    <tr><th scope="row">Week 3: MLX projections + your paged path</th><td>463.69</td><td>27.42</td></tr>
     <tr><th scope="row">Full MLX</th><td>639.73</td><td>28.37</td></tr>
   </tbody>
 </table>
 </div>
 
-In that predecessor source, the cumulative Week 3 prefill row was 43.1% faster
-than the former Week 2 Split-K row and reached 72.5% of full MLX at this shape.
-The 43.1% denominator is not today's five-day `selected` checkpoint; no
-current Week 2-versus-3 percentage follows from this table. It remains a
-historical static diagnostic: it does not measure request turnover, page reuse,
-admission capacity, the
-projection seam, or the Day 5 schedule causally. Its decode row is the Day 4
-vector schedule, not evidence for the tiled prefill kernel. Full method and raw
-samples are in
-`benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`.
+In that run, Week 3 prefill was 43.1% faster than the older Week 2 and
+reached 72.5% of MLX's speed at this length. That older Week 2 is not today's
+`selected` checkpoint, so the 43.1% does not carry over. The decode column
+runs Day 4's kernel, not today's. The
+[performance appendix](./appendix-performance.md) has the full method and raw
+samples.
 
 > **Trace the implementation, not its names.** Copy the prompt below into GPT
 > or Claude after your behavior tests pass. This is learner guidance and is not

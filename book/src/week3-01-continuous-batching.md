@@ -1,27 +1,27 @@
 # 🚧 Week 3 Day 1: Continuous Batching
 
-You begin with the completed
-[Week 2 Day 5 single-request model](./week2-05-tiled-prefill-attention.md):
-multi-offset RoPE and causal masking already have stable interfaces, and each
-request can own a dense KV cache. The Day 1 starter leaves four learner-owned
-slices behind those interfaces:
+So far, each generation loop has served one request. One decode step for one
+request is a small amount of work, so most of the GPU sits idle. Today you
+decode several requests in each model call.
 
-- dense batch assembly and masking in `BatchingKvCache`;
-- `mlx_quantized_linear` plus the per-weight selector and the explicit
-  `dispatch_week3_batch_model` factory;
-- selector propagation through `Qwen3ModelWeek2`; and
-- `Request.try_prefill` plus the request-admission/decode loop in
-  `batch_generate`.
+You start from the finished
+[Week 2 model](./week2-05-tiled-prefill-attention.md). Two of its pieces
+already handle what batching needs: RoPE accepts one position offset per
+request, and the causal mask can be rectangular. Each request still owns its
+own dense K/V cache. Today you write four things around them:
 
-Complete and test those slices in order. The resulting **continuous batch**
-keeps several active requests on the device and replaces each request as soon
-as it finishes. Only quantized projections cross the Week 3 MLX seam;
-normalization, activation, RoPE, cache state, attention, and scheduling remain
-course-owned.
+- `BatchingKvCache`, which lines up several requests' caches into one batch
+  and builds the matching mask;
+- a switch that sends the model's quantized projections to MLX for Week 3
+  (`mlx_quantized_linear`, a per-weight selector, and the
+  `dispatch_week3_batch_model` factory), and passes that selector through
+  `Qwen3ModelWeek2`;
+- `Request.try_prefill`; and
+- the loop in `batch_generate` that admits requests, decodes them together
+  and retires finished ones.
 
-So far, each generation loop has processed only one request. That may not
-provide enough work to use the device efficiently, so Day 1 decodes several
-requests in each model call.
+The result is a **continuous batch**: several requests decode together, and a
+finished request's place goes to a waiting one straight away.
 
 A static batch could select five prompts and run them together until every
 request finishes. However, generated sequences have different lengths. If four
@@ -108,7 +108,7 @@ You can verify your solution by running:
 pdm run test --week 3 --day 1 -- -k task_2
 ```
 
-## Task 3: Add the Week 3 Projection Seam
+## Task 3: Send Projections to MLX
 
 ```
 src/tiny_llm/quantize.py::mlx_quantized_linear
@@ -116,27 +116,29 @@ src/tiny_llm/qwen3_week2.py::Qwen3ModelWeek2.__init__
 src/tiny_llm/models.py::dispatch_week3_batch_model
 ```
 
-Week 2 ends with course-owned quantized projections and tiled dense attention.
-The [Day 3 projection](./week2-03-simd-matrix-prefill.md) exposes its loader and
-SIMD-matrix operations. Week 3 teaches serving mechanisms,
-so it should not make every cache and scheduler measurement depend on that
-teaching kernel's remaining projection overhead.
+Your Week 2 model runs its quantized projections on the kernels you wrote in
+[Week 2](./week2-03-simd-matrix-prefill.md). Week 3 is about serving, not
+projection kernels, so its model sends those projections to MLX instead.
+Otherwise every cache and scheduler measurement this week would also carry
+the remaining cost of the teaching kernels.
 
 Add a per-weight `use_mlx_quantized_linear` selector whose default remains
 `False`, preserving every Week 2 checkpoint. When selected,
 `quantized_linear` should call `mx.quantized_matmul` with the same packed
 weight, scales, biases, group size, bits, and transposed-weight convention.
-Then implement `dispatch_week3_batch_model` as the explicit construction seam:
-it builds the completed dense-cache Week 2 model with that selector enabled.
+Then implement `dispatch_week3_batch_model`, the factory that builds the
+Week 3 model: the completed dense-cache Week 2 model with that selector
+enabled.
 
 Call this batch-ready model with several requests, one offset per batch
-element, and the mask returned by `BatchingKvCache`. Exercise requests joining
-and leaving at different positions. Only quantized projections cross the MLX
-seam; normalization, RoPE, activation, attention, cache state, and scheduling
-remain in your solution. The model remains request-agnostic; slot ownership and
-lifecycle belong to the cache and scheduler.
+element, and the mask returned by `BatchingKvCache`. Try requests joining and
+leaving at different positions. Only the quantized projections go to MLX;
+normalization, RoPE, activation, attention, cache state, and scheduling stay
+in your solution. The model does not know about requests: which request owns
+which slot, and when it joins or leaves, belong to the cache and the
+scheduler.
 
-Verify the projection seam and its batch-model factory with:
+Verify the MLX projections and the factory with:
 
 ```bash
 pdm run test --week 3 --day 1 -- -k task_3
@@ -191,16 +193,13 @@ pdm run batch-main --solution tiny_llm --loader week2
 ```
 
 By default, `batch-main` uses Qwen3-0.6B with a batch size of five and a fixed
-prompt set. Treat it as a product smoke: watch requests enter, decode, finish,
-and release their slots. Its shuffled prompt order and cumulative wall-clock
-display are not the source of a decode-gap measurement.
+set of prompts. Use it to watch the engine work: requests enter, decode,
+finish, and give up their slots. Don't time anything with it. It shuffles the
+prompt order, and its clock is cumulative.
 
-Day 2's deterministic `bench-chunked-prefill` runner owns that comparison. Its
-512-token budget processes every prompt in a 64–512-token trace in one chunk,
-so it provides a Day 1 control for your new run. The table later in Day 2 uses
-the historical task #367 trace from source `18aec850`, not a result reproduced
-on this five-day Week 2 checkout. The runner records the exact token ids,
-output budget, seed, process order, and decode-completion gaps before Day 2
-changes the prefill budget.
+Day 2 measures this properly with `bench-chunked-prefill`, which replays a
+fixed set of requests. With a 512-token prefill budget, every prompt in its
+64–512-token set fits in one chunk, which is exactly what you built today. So
+a run with that budget is your Day 1 control for Day 2.
 
 {{#include copyright.md}}

@@ -229,7 +229,9 @@ is and use `mx.quantized_matmul` inside it for the matrix case only. That is
 different from `--solution mlx`, which runs a separate complete MLX model and
 does none of your cache or model work.
 
-## Measure the matched product
+<a id="measure-the-matched-product"></a>
+
+## Measure the Change
 
 Once the full Day 3 gate passes, run the Day 2 control and the new checkpoint
 in one progression, and replay both:
