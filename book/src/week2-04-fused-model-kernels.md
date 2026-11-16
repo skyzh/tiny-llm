@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 4: Fused Model Primitives — Fewer Small Passes
+# 🚧 Week 2 Day 4: Fused Kernels
 
 After [Day 3](./week2-03-simd-matrix-prefill.md), the projections run on your
 own packed-weight kernels for both decode and prefill. Profile a decode step

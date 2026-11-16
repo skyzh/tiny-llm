@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 5: Tiled Dense Prefill Attention — No Full Score Matrix
+# 🚧 Week 2 Day 5: Tiled Attention
 
 After [Day 4](./week2-04-fused-model-kernels.md), your `swiglu` checkpoint runs
 projections, RMSNorm, RoPE, and SwiGLU on kernels you wrote. One large piece is
@@ -326,9 +326,198 @@ including rows that could not be run, as history. A 4B comparison is
 optional: cache the model and rerun every row at 4B.
 
 Look at the `selected` replay one last time and write down which group leads
-it now. That is the open question you carry into Week 3.
-[Find the Next Bottleneck](./week2-profile-guided.md) ends with a case study
-of a later build where prefill was led by the MLP's matrix multiply.
+it now. That is the open question you carry into Week 3. The case study at
+the end of this chapter shows a later build where prefill was led by the
+MLP's matrix multiply.
+
+## Where Week 2 Ends Up
+
+How close does a finished Week 2 model get to MLX? The supplied reference has
+all five days in place plus the extra scheduling described above. The table
+compares it with stock MLX running the same Qwen3-4B model. A value above 100% means the course model was faster.
+
+| Prompt / generated tokens | Total throughput vs. MLX | Worst paired run | Paired runs below 95% |
+|---|---:|---:|---:|
+| 128 / 128 | 95.1% | 91.6% | 5 of 8 |
+| 512 / 128 | 98.5% | 95.0% | 0 of 8 |
+| 2,048 / 128 | 97.9% | 97.3% | 0 of 8 |
+| 8,192 / 128 | 96.2% | 90.4% | 2 of 8 |
+| 2,048 / 16 | 97.9% | 95.5% | 0 of 8 |
+| 2,048 / 512 | 96.8% | 95.6% | 0 of 8 |
+| 32,640 / 128 | 97.7% | 96.6% | 0 of 8 |
+| 8,192 / 8,192 | 101.3% | 97.3% | 0 of 8 |
+
+*Where these numbers come from:* separate measurement runs on one
+Apple-silicon Mac, made on an earlier development revision of the reference
+before it was merged in [PR #328](https://github.com/skyzh/tiny-llm/pull/328).
+They are not a fresh timing of the merged code. Each case ran eight times on
+each model, with each course-model run paired with one MLX run. The
+throughput column is the ratio of the two medians (MLX's median total time
+divided by the course model's), not a median of the paired ratios. All runs
+used BF16 activations, W4 weights with group size 128, one request at a time,
+and the same fixed number of generated tokens. PR #328 records the
+remaining limits:
+
+- in the 128 / 128 and 8,192 / 128 rows, several paired runs fell below 95%
+  even though the medians did not;
+- one long measurement campaign was interrupted twice, and the runs on both
+  sides of each interruption are kept in the results;
+- the course model's outputs differ numerically from MLX's;
+- the course model failed a biology-answer check, and MLX's answer to a
+  factual check had its own problem;
+- runs keep generating past a natural end-of-sequence token to reach the fixed
+  count, so they say nothing about output quality over the full length.
+
+These are whole-request times, including the CPU work of preparing and
+submitting GPU commands, not isolated kernel timings. The course model was
+slower than MLX to produce the first token in every case. Decode speed was
+mixed: faster at 2,048 / 16 and 8,192 / 8,192, slower in the rest. Its peak
+allocated memory was higher than MLX's in every case except 128 / 128, by up
+to about 0.9 GB at 32,640 / 128. So the result is close to MLX, not uniformly
+faster. Your own runs will vary with your machine and model.
+
+## Case Study: Profiling a Later Build
+
+What does profiling look like further along? The two case studies below show
+the same views on a much later build.
+
+### Reading a Whole Request
+
+The numbers in the two case studies below come from the course team's own
+profiling on 6 November 2026, on one Apple silicon Mac. They measured a later
+build than yours: the Week 3 serving path with Qwen3-4B, W4 weights in groups
+of 128, paged attention and some experimental kernels that are not part of
+the course. Use them to practise reading each view, not as targets for your
+checkout. Everything you need is in the tables below; the raw captures are
+not part of the course.
+
+| Run | Wall | Prefill | Decode | Main-thread CPU | Peak MLX allocation | Of which KV |
+|---|---|---|---|---|---|---|
+| Short chat: 25 prompt tokens, 16 generated | 0.24 s | 0.045 s | 0.19 s | 0.07 s | 2.38 GB | 0.08 GB |
+| Mixed queue: 8 requests, 1 at a time | 11.8 s | 10.2 s | 1.6 s | 0.61 s | 3.37 GB | 0.60 GB |
+| Mixed queue: 8 requests, up to 4 at a time | 12.2 s | 10.9 s | 1.3 s | 0.53 s | 3.91 GB | 1.21 GB |
+
+| Capture | Kernel | Dispatches | Share of GPU shader cost |
+|---|---|---|---|
+| Short chat, first decode step, whole model | quantized matrix-vector (`affine_qmv_fast…`) | 253 | 90.5% |
+| | paged decode attention | 36 | 3.0% |
+| | RMSNorm | 145 | 1.8% |
+| First layer, 256-token prefill | MLP W4 matrix multiply (`mlp_qmm_m64_bf16`) | 3 | 65.4% |
+| | other W4 matrix multiply (`affine_qmm_t…`) | 2 | 23.1% |
+| | split-K W4 matrix multiply | 2 | 6.2% |
+| | paged prefill attention | 1 | 2.6% |
+
+Decode and prefill rows are separate captures; their shares do not add up
+across captures. The capture replays add their own overhead, so they are not
+ordinary latency either.
+
+**Request clock first.** The short chat took 0.24 s, most of it decode. The
+mixed queue of eight longer requests took about 12 s, and 86–89% of it was
+prefill. The same
+server has two different problems depending on what you ask it to do. For
+the short chat, decode is the target; for the long queue, prefill is.
+
+**Then the timeline.** On the short chat, the GPU was active for about 80% of
+the wall time; for the remaining fifth it had nothing to run. Main-thread CPU
+time was 0.07 s. CPU and GPU time overlap, so they cannot be added to get the
+wall time.
+
+**Then the kernels.** In the short chat's first decode step, a single
+quantized matrix-vector kernel accounted for about 90% of GPU shader cost. In
+one layer's 256-token prefill, the MLP matrix kernel accounted for 65%. The
+two phases point at two different kernels, which is exactly why you profile
+the phase the request clock told you to.
+
+**Memory last.** Allowing four requests at once cut decode time from 1.6 s
+to 1.3 s, but prefill grew, the whole queue took 0.4 s longer, the peak rose
+from 3.37 GB to 3.91 GB and KV storage doubled to 1.21 GB. Keep results like
+that one: the change helped the phase it targeted and cost the request. That is
+what MLX had allocated at its peak, not a measure of physical memory in use.
+When you trade memory for speed, this is the number that tells you what you
+spent.
+
+### Inside One Kernel
+
+The second case study goes one level deeper, into the prefill MLP kernel
+and a paged-attention kernel, captured once each at one representative shape
+(a 256-row prefill chunk). It shows what the source-line view from
+[Day 1](./week2-01-kv-cache.md#look-inside-the-gpu) adds, and also how easily it
+is misread.
+
+The MLP capture is the gate projection of layer 0, with its real weights: 256
+rows of activations, 2,560 inputs, 9,728 outputs. The attention capture is
+one request with 32 query heads, 8 KV heads, head size 128, 256 new rows
+over a 1,280-token context, in pages of 128.
+
+| Kernel | Source line | Weighted cost in that kernel |
+|---|---|---|
+| MLP | kernel entry (wrapper, inclusive) | 100.0% |
+| MLP | `mma_op.mma(Xs, Ws)`: SIMD tile multiply (inclusive) | 82.1% |
+| MLP | weight load and dequantize helper | 12.0% |
+| Attention | inlined `simdgroup_multiply_accumulate` (inclusive of both lines below) | 75.9% |
+| Attention | `Q·Kᵀ` score multiply | 38.0% |
+| Attention | `P·V` output multiply | 37.9% |
+
+| Counter (busy windows only) | MLP | Attention |
+|---|---|---|
+| Floating-point limiter | 96.0% | 90.5% |
+| Floating-point utilization | 90.2% | 82.7% |
+| L1 limiter | 20.2% | 18.1% |
+| Last-level cache limiter | 18.5% | 6.1% |
+
+**Two different "percentages".** GPU pipeline time split 70% MLP and 30%
+attention. Separately, the source-line view weights every line by the cost of
+the instructions it produced. That weight is a model of instruction cost, not
+a count of clock cycles. Both are useful, and neither is a share of the full
+request.
+
+**The expensive line.** Inside the MLP kernel, 82% of the weighted cost sat
+on one line: the call that multiplies a tile of activations by a tile of
+dequantized weights on the SIMD matrix units. The weight load and dequantize
+helper next to it was 12%. In the attention kernel, two lines dominated
+almost equally: the `Q·Kᵀ` score multiply (38%) and the `P·V` output
+multiply (38%).
+
+**Don't add inline rows.** The MLP kernel's wrapper, the helper it calls and
+the hardware matrix intrinsic inside that helper are all reported against
+the same instructions, because the compiler inlined them. Each of those rows
+shows between about 81% and 100% of the kernel. Summing them would count the
+same work several times. Read the innermost line that still belongs to code
+you can change.
+
+**Counters say what limits it.** Read counters only over a stretch where
+the kernel you care about was the only one running; the table above uses
+such windows. There the floating-point limiter was about 96% for the MLP
+kernel and 91% for attention, while L1 and last-level cache limiters were all
+below about 21%. The kernels are busy doing arithmetic, not waiting on
+memory. So "raise occupancy" is not the fix
+here; the next experiment has to reduce or restructure the multiply itself.
+
+**A measured kernel gap is not a request gain.** The team also timed the
+paged attention kernel against MLX's gather-then-attention path at the 13
+attention shapes the mixed queue uses. A few of them, in milliseconds per
+call:
+
+| New rows × context | Calls in the queue | Paged kernel | MLX gather + attention |
+|---|---|---|---|
+| 256 × 256 | 288 | 0.97 | 0.77 |
+| 256 × 1,024 | 216 | 0.98 | 1.00 |
+| 20 × 1,300 | 36 | 0.46 | 0.37 |
+| 60 × 1,084 | 36 | 0.40 | 0.43 |
+| All 13 shapes, weighted by calls | 1,368 | 1,254.6 ms | 1,164.5 ms |
+
+The paged kernel loses at some shapes and wins at others. Weighted by how
+often each shape occurs, it was about 90 ms slower in total, roughly 0.75% of
+the 12 s queue. That
+is an estimate built from synchronized operator timings. It tells you where
+to look, not what the request would gain.
+
+**You do not need this view.** The reader behind it is the experimental,
+version-pinned one described in Day 1, and everything you need for Week 2
+works without it. The request clock and the replay are enough for every
+checkpoint; the per-kernel capture, where you have it, narrows the choice to
+one kernel. The source-line view only tells you which line inside that
+kernel.
 
 That completes Week 2: a tested model that serves one request at a time.
 [Week 3](./week3-overview.md) starts from it and adds what serving many

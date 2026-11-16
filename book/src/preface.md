@@ -111,10 +111,7 @@ at the projection operator boundary; both still need the course-owned cache
 and model wiring. Day 4 can substitute the equivalent MLX operator or
 equation at one RMSNorm, RoPE, or SwiGLU boundary while preserving the other
 course-owned paths. Day 5 can substitute equivalent MLX attention at the
-dense prefill boundary while keeping the cache and shape/mask adapter. The
-earlier full-course book retains additional mechanisms at former URLs not
-reused for active Days 1–5 in the
-[historical Week 2 pages](./week2-02-benchmark-profile.md). Selecting
+dense prefill boundary while keeping the cache and shape/mask adapter. Selecting
 `--solution mlx` runs a separate complete model, not a hybrid that completes
 learner cache TODOs.
 

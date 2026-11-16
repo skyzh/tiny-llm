@@ -31,12 +31,11 @@ Week 1.
 
 | Day | Starting hypothesis | You build | Checkpoint | Compare with |
 |---|---|---|---|---|
-| [1: Cache and Measure](./week2-01-kv-cache.md) | Decode reruns the whole prefix | A K/V cache, so decode sends only the new token; then a cache sized from the request's limit | `kv-cache`, then `capacity-cache` | Week 1, then `kv-cache` |
-| [Find the Next Bottleneck](./week2-profile-guided.md) | — | Nothing new: learn the four profiling views on `capacity-cache` and write your first decision | — | — |
-| [2: Keep W4 Packed](./week2-02-quantize-model.md) | Decode projections are limited by reading 16-bit weights | A quantized-matmul operator with two Metal kernels, and a model that keeps its weights in 4 bits | `quantized-matvec` | `capacity-cache` |
-| [3: SIMD Matrix Prefill](./week2-03-simd-matrix-prefill.md) | Prefill projections run on the readable matrix fallback | A cooperative W4 matrix kernel for prompts and other inputs with more than eight rows | `simd-matmul` | `quantized-matvec` |
-| [4: Fused Model Primitives](./week2-04-fused-model-kernels.md) | The small operators around the projections each make their own passes | Native RMSNorm, RoPE, and SwiGLU kernels, added one checkpoint at a time | `rmsnorm`, `rope`, `swiglu` | `simd-matmul` |
-| [5: Tiled Dense Prefill Attention](./week2-05-tiled-prefill-attention.md) | Prefill attention builds a full score matrix | Tiled attention for prompts of nine or more tokens, keeping the readable path for decode | `tiled-prefill`, then `selected` | `swiglu` |
+| [1: KV Cache](./week2-01-kv-cache.md) | Decode reruns the whole prefix | A K/V cache, so decode sends only the new token; then a cache sized from the request's limit. You also take your first benchmark and profile | `kv-cache`, then `capacity-cache` | Week 1, then `kv-cache` |
+| [2: Packed W4 Weights](./week2-02-quantize-model.md) | Decode projections are limited by reading 16-bit weights | A quantized-matmul operator with two Metal kernels, and a model that keeps its weights in 4 bits | `quantized-matvec` | `capacity-cache` |
+| [3: SIMD Prefill](./week2-03-simd-matrix-prefill.md) | Prefill projections run on the readable matrix fallback | A cooperative W4 matrix kernel for prompts and other inputs with more than eight rows | `simd-matmul` | `quantized-matvec` |
+| [4: Fused Kernels](./week2-04-fused-model-kernels.md) | The small operators around the projections each make their own passes | Native RMSNorm, RoPE, and SwiGLU kernels, added one checkpoint at a time | `rmsnorm`, `rope`, `swiglu` | `simd-matmul` |
+| [5: Tiled Attention](./week2-05-tiled-prefill-attention.md) | Prefill attention builds a full score matrix | Tiled attention for prompts of nine or more tokens, keeping the readable path for decode | `tiled-prefill`, then `selected` | `swiglu` |
 
 Each starting hypothesis is something to check in your own profile before
 you change anything, not a result the course promises. The days stay in this
@@ -80,9 +79,30 @@ Every day from Day 2 on follows the same loop:
    keep the result even if it is worse. Then replay the new checkpoint: its
    largest group is the next thing to look at.
 
-[Find the Next Bottleneck](./week2-profile-guided.md), between Day 1 and
-Day 2, teaches this loop, the profiling views behind it, and how to write the
-decision down.
+A change can pass every test and still make the request slower, or move the
+cost somewhere you did not expect. Keep that result next to the control and
+write one sentence about what happened. A regression you understand is
+useful; one you deleted is not.
+
+Before you start each day, write three sentences next to your saved results:
+
+1. what dominates, for this checkpoint and this request shape;
+2. the one change you will make, and the same-workload result that would
+   support it; and
+3. the result that would make you reject or revert it.
+
+For example, after `capacity-cache`: "At `capacity-cache:decode:128`, the
+projections group dominates the replay and decode dominates the request. I
+will keep projection weights packed as W4 and rerun the same request. I will
+reject the change if decode time does not fall or the model's output
+changes." The replay tool can record this for you with `--decision-output`
+and the `--baseline-checkpoint`, `--candidate-checkpoint`,
+`--dominant-category`, `--hypothesis`, `--observed-effect`, `--decision` and
+`--next-experiment` fields.
+
+[Day 1](./week2-01-kv-cache.md) shows how to run and read the benchmark and
+the replay. It ends with an optional capture of GPU work, for when you want
+to see inside one step; no day requires it.
 
 The profiler and the benchmark answer different questions. The benchmark
 times whole requests through your model. The profiler replays one prefill or
@@ -161,18 +181,11 @@ you can see and change every part of it, not that it beats MLX.
 ## Older Week 2 Material
 
 An earlier version of Week 2 had seven days in a different order. Those
-lessons stay at their old addresses as
-[historical Week 2 material](./week2-02-benchmark-profile.md). They cover
-benchmark method, the W4 derivation, bandwidth and roofline calculations for
-Apple M1 to M4 chips, fusion and SIMD mechanisms, optional capture with
-macOS GPU tools, and the old bounded-decode and Split-K experiments. Their
-[operator-attribution diagram](./week2-kernel-profile.svg) and
-[decision diagram](./week2-performance-summary.svg) describe that older code.
-Some of their commands no longer exist. Use Days 1 to 5 above for the
-current course.
-
-The [performance appendix](./appendix-performance.md) also records results
-from that older code, so treat it as history rather than as numbers for this
+lessons still open at their old addresses, but they are no longer listed in
+the sidebar: some of their commands no longer exist, and their code differs
+from Days 1 to 5. The
+[performance appendix](./appendix-performance.md) still records results from
+that older code, so treat it as history rather than as numbers for this
 checkout.
 
 ## After Week 2

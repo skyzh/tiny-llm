@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 2: Keep W4 Packed — Decode Waits on Weights
+# 🚧 Week 2 Day 2: Packed W4 Weights
 
 At the end of [Day 1](./week2-01-kv-cache.md) your model reuses its K/V cache,
 so each decode step feeds only one new token through the network. That token
@@ -9,7 +9,7 @@ per byte it reads. Decode spends its time waiting on memory.
 
 That is today's hypothesis, and you can check it on your own model first.
 After Day 1 you saved a request benchmark and a decode replay of
-`capacity-cache` (see [Find the Next Bottleneck](./week2-profile-guided.md)).
+`capacity-cache` (see [Day 1](./week2-01-kv-cache.md#find-where-the-time-goes)).
 If decode takes most of the request and the projections group leads the
 decode replay, the hypothesis fits your machine: each decode step's time is
 set by the weight bytes it reads, so reading fewer bytes should shrink the
@@ -702,13 +702,27 @@ and in one command both cases share the same context, cache bound
 the packed-weight path: projections and the embedding. If you change
 `--cache-capacity` or `--prefill-logits`, change it for both.
 
+Putting both checkpoints in one benchmark run lets the runner alternate them,
+so a slow minute on your machine does not land on only one side.
+
 Then answer three questions from your own runs. Did packing change the
 replayed projections group, and by how much? Did the whole-request decode
 result in the progression run improve, and by how much? Does your model
 actually route its projections through `quantized_linear` (the wiring check
-earlier in this chapter)? Any of these can come out differently from what you
-expect: a kernel can be slower than the dense path, and a smaller replay group
-can still sit next to a worse whole-request result. Keep whatever you get.
+earlier in this chapter)? Three outcomes are common, and each tells you
+something:
+
+- **The projections group fell and the request got faster.** The mechanism
+  you wrote down survived a test that could have disproved it. Note how much
+  of the replay change showed up in the request; it is rarely all of it.
+- **The group fell but the request did not move.** Something else was the
+  limit: another group, the CPU, or prefill rather than decode. Check the
+  prefill and decode split in the benchmark before you go further.
+- **The request got slower.** Keep the result. Check that the model still
+  calls the new path, then look for the group that grew. A new kernel can be
+  faster at the replay shape and slower at the shapes the real request uses.
+
+You will ask the same three questions at the end of every later day.
 
 Then look for the next bottleneck. Decode now runs your matvec, but a prompt
 with more than eight rows still goes to today's readable matrix kernel. Replay
@@ -737,55 +751,6 @@ To compare at 4B yourself, download the model with
 `hf download Qwen/Qwen3-4B-MLX-4bit` and rerun **every** row with
 `--model qwen3-4b`. The dense `capacity-cache` control still needs the memory
 listed in the [model table](./preface.md#choose-a-model-for-your-mac).
-
-### Where Week 2 Ends Up
-
-Today's kernel is the first of several. Day 3 adds a SIMD matrix kernel for
-prefill, Day 4 adds RMSNorm, RoPE, and SwiGLU kernels, and Day 5 adds tiled
-prefill attention.
-The supplied reference adds further scheduling on top of those. The table
-compares that finished Week 2 reference with stock MLX running the same
-Qwen3-4B model. A value above 100% means the course model was faster.
-
-| Prompt / generated tokens | Total throughput vs. MLX | Worst paired run | Paired runs below 95% |
-|---|---:|---:|---:|
-| 128 / 128 | 95.1% | 91.6% | 5 of 8 |
-| 512 / 128 | 98.5% | 95.0% | 0 of 8 |
-| 2,048 / 128 | 97.9% | 97.3% | 0 of 8 |
-| 8,192 / 128 | 96.2% | 90.4% | 2 of 8 |
-| 2,048 / 16 | 97.9% | 95.5% | 0 of 8 |
-| 2,048 / 512 | 96.8% | 95.6% | 0 of 8 |
-| 32,640 / 128 | 97.7% | 96.6% | 0 of 8 |
-| 8,192 / 8,192 | 101.3% | 97.3% | 0 of 8 |
-
-*Where these numbers come from:* separate measurement runs on one
-Apple-silicon Mac, made on an earlier development revision of the reference
-before it was merged in [PR #328](https://github.com/skyzh/tiny-llm/pull/328).
-They are not a fresh timing of the merged code. Each case ran eight times on
-each model, with each course-model run paired with one MLX run. The
-throughput column is the ratio of the two medians (MLX's median total time
-divided by the course model's), not a median of the paired ratios. All runs
-used BF16 activations, W4 weights with group size 128, one request at a time,
-and the same fixed number of generated tokens. PR #328 records the
-remaining limits:
-
-- in the 128 / 128 and 8,192 / 128 rows, several paired runs fell below 95%
-  even though the medians did not;
-- one long measurement campaign was interrupted twice, and the runs on both
-  sides of each interruption are kept in the results;
-- the course model's outputs differ numerically from MLX's;
-- the course model failed a biology-answer check, and MLX's answer to a
-  factual check had its own problem;
-- runs keep generating past a natural end-of-sequence token to reach the fixed
-  count, so they say nothing about output quality over the full length.
-
-These are whole-request times, including the CPU work of preparing and
-submitting GPU commands, not isolated kernel timings. The course model was
-slower than MLX to produce the first token in every case. Decode speed was
-mixed: faster at 2,048 / 16 and 8,192 / 8,192, slower in the rest. Its peak
-allocated memory was higher than MLX's in every case except 128 / 128, by up
-to about 0.9 GB at 32,640 / 128. So the result is close to MLX, not uniformly
-faster. Your own runs will vary with your machine and model.
 
 ## If You Get Stuck
 

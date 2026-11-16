@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 3: SIMD Matrix Prefill — Stop Re-reading Weights per Row
+# 🚧 Week 2 Day 3: SIMD Prefill
 
 After [Day 2](./week2-02-quantize-model.md), decode is fast: one activation
 row meets each packed weight, and your SIMD matvec handles it. Prefill is a
@@ -269,10 +269,8 @@ starting point; if it is small on your machine, note that before you go on.
 The [performance appendix](./appendix-performance.md) keeps older hardware
 results separate from this exercise.
 
-Next, [Day 4: Fused Model Primitives](./week2-04-fused-model-kernels.md) starts
+Next, [Day 4: Fused Kernels](./week2-04-fused-model-kernels.md) starts
 from this `simd-matmul` result as its control, and
 [Day 5](./week2-05-tiled-prefill-attention.md) adds tiled prefill attention.
-Lessons from the older seven-day Week 2 remain as
-[historical material](./week2-02-benchmark-profile.md).
 
 {{#include copyright.md}}

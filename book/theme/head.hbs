@@ -38,3 +38,15 @@
     document.head.appendChild(twitterUrl);
   }());
 </script>
+
+<script>
+  // The historical Week 2 pages are listed after the glossary only so they keep
+  // building; custom.css hides them from the sidebar. Remove the glossary's
+  // "next" links into them, so neither the buttons nor the Right Arrow key
+  // (which follows .nav-chapters.next) can reach them.
+  document.addEventListener("DOMContentLoaded", function () {
+    document
+      .querySelectorAll('a[rel~="next"][href$="week2-02-benchmark-profile.html"]')
+      .forEach(function (link) { link.remove(); });
+  });
+</script>
