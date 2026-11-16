@@ -244,14 +244,17 @@ class BatchingKvCache(TinyKvCache):
 
 
 class TinyKvFullCache(TinyKvCache):
-    def __init__(self, capacity: int | None = None):
-        if capacity is not None and (
-            not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 0
-        ):
+    """Request-local storage grown in chunks; capacity is an optional bound."""
+
+    def __init__(self, capacity: int | None = None, growth_step: int = 256):
+        if capacity is not None and (type(capacity) is not int or capacity < 0):
             raise ValueError("capacity must be a non-negative integer or None")
+        if type(growth_step) is not int or growth_step <= 0:
+            raise ValueError("growth_step must be a positive integer")
         self.key_values = None
         self.offset = 0
         self.capacity = capacity
+        self.growth_step = growth_step
         self.logical_copy_bytes = 0
         self.physical_growth_copy_bytes = 0
         self.slice_write_bytes = 0
@@ -259,7 +262,12 @@ class TinyKvFullCache(TinyKvCache):
 
     @property
     def uses_capacity(self) -> bool:
+        """Whether the caller supplied a hard bound, not a growth policy."""
         return self.capacity is not None
+
+    @property
+    def allocated_capacity(self) -> int:
+        return 0 if self.key_values is None else self.key_values[0].shape[2]
 
     def _logical_key_values(self) -> tuple[mx.array, mx.array]:
         keys, values = self.key_values
@@ -272,78 +280,65 @@ class TinyKvFullCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
-        assert key.shape == value.shape
+        if key.ndim != 4 or key.shape != value.shape or key.dtype != value.dtype:
+            raise ValueError(
+                "K/V chunks must have matching [B, H, S, D] shapes and dtype"
+            )
         B, H, S, D = key.shape
-        if self.uses_capacity:
-            end = self.offset + S
-            if end > self.capacity:
-                raise ValueError(
-                    f"KV cache capacity {self.capacity} exceeded by append ending at {end}"
-                )
-            if self.key_values is None:
-                assert self.offset == 0
-                keys = mx.zeros((B, H, self.capacity, D), dtype=key.dtype)
-                values = mx.zeros((B, H, self.capacity, D), dtype=value.dtype)
-                self.key_values = (keys, values)
+        end = self.offset + S
+        if self.capacity is not None and end > self.capacity:
+            raise ValueError(
+                f"KV cache capacity {self.capacity} exceeded by append ending at {end}"
+            )
+        if self.key_values is not None:
+            keys, values = self.key_values
+            if (
+                keys.shape != (B, H, self.allocated_capacity, D)
+                or keys.dtype != key.dtype
+            ):
+                raise ValueError("K/V chunk layout differs from the existing cache")
+        # All rejected appends above leave storage, offset and counters intact.
+        allocated = self.allocated_capacity
+        copied_bytes = 0
+        if self.key_values is None or end > allocated:
+            target = (
+                (end + self.growth_step - 1) // self.growth_step
+            ) * self.growth_step
+            if self.capacity is not None:
+                target = min(target, self.capacity)
+            zeros = mx.zeros((B, H, target - self.offset, D), dtype=key.dtype)
+            if self.key_values is None or self.offset == 0:
+                keys, values = zeros, mx.zeros_like(zeros)
             else:
-                keys, values = self.key_values
-                assert keys.shape == (B, H, self.capacity, D)
-                assert values.shape == (B, H, self.capacity, D)
-                assert keys.dtype == key.dtype
-                assert values.dtype == value.dtype
-            if S:
-                keys, values = self.key_values
-                start = mx.array([self.offset])
-                keys = mx.slice_update(keys, key, start_indices=start, axes=(2,))
-                values = mx.slice_update(values, value, start_indices=start, axes=(2,))
-                self.key_values = (keys, values)
-                self.slice_write_bytes += key.nbytes + value.nbytes
-            self.offset = end
-            logical_keys, logical_values = self._logical_key_values()
-            return logical_keys, logical_values, self.offset, mask
-
-        if self.key_values is None:
-            assert self.offset == 0
-            self.key_values = (key, value)
-            self.offset = S
-            return key, value, self.offset, mask
+                old_keys, old_values = self._logical_key_values()
+                copied_bytes = old_keys.nbytes + old_values.nbytes
+                keys = mx.concatenate([old_keys, zeros], axis=2)
+                values = mx.concatenate([old_values, mx.zeros_like(zeros)], axis=2)
         else:
-            prev_keys, prev_values = self.key_values
-            assert prev_keys.shape == (B, H, self.offset, D)
-            assert prev_values.shape == (B, H, self.offset, D)
-            copied_bytes = prev_keys.nbytes + prev_values.nbytes
-            self.logical_copy_bytes += copied_bytes
-            self.physical_growth_copy_bytes += copied_bytes
-            self.growth_copy_bytes += copied_bytes
-            new_keys = mx.concat([prev_keys, key], axis=2)
-            new_values = mx.concat([prev_values, value], axis=2)
-            self.key_values = (new_keys, new_values)
-            self.offset += S
-            return new_keys, new_values, self.offset, mask
+            keys, values = self.key_values
+        if S:
+            start = mx.array([self.offset])
+            keys = mx.slice_update(keys, key, start_indices=start, axes=(2,))
+            values = mx.slice_update(values, value, start_indices=start, axes=(2,))
+        self.key_values = (keys, values)
+        self.offset = end
+        # These count requested copies/writes, not observed GPU traffic or donation.
+        self.logical_copy_bytes += copied_bytes
+        self.physical_growth_copy_bytes += copied_bytes
+        self.growth_copy_bytes += copied_bytes
+        self.slice_write_bytes += key.nbytes + value.nbytes
+        keys, values = self._logical_key_values()
+        return keys, values, self.offset, mask
 
     def materialize(self):
         if self.key_values is not None:
             mx.eval(*self.key_values)
 
     def reset(self):
-        """Reset the logical request while retaining bounded physical storage."""
+        """Drop the logical prefix while retaining allocated chunks for reuse."""
         self.offset = 0
-        if not self.uses_capacity:
-            self.key_values = None
 
     def rewind(self, n: int):
-        if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= self.offset:
+        if type(n) is not int or not 0 <= n <= self.offset:
             raise ValueError("rewind length must be between zero and the cache length")
-        if n == 0:
-            return
         self.offset -= n
-        if self.offset == 0:
-            if not self.uses_capacity:
-                self.key_values = None
-            return
-        if self.uses_capacity:
-            return
-        self.key_values = (
-            self.key_values[0][:, :, : self.offset],
-            self.key_values[1][:, :, : self.offset],
-        )

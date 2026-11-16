@@ -1,10 +1,11 @@
-# 🚧 Week 2 Day 3: SIMD Prefill
+# 🚧 Week 2 Day 4: SIMD Prefill
 
-After [Day 2](./week2-02-quantize-model.md), decode is fast: one activation
+After [Day 3](./week2-03-decode-matvec.md), decode is fast: one activation
 row meets each packed weight, and your SIMD matvec handles it. Prefill is a
 different shape. A 128-token prompt sends 128 activation rows through every
-projection at once, and with more than eight rows, Day 2 routes them to the
-simple kernel, where each thread computes one output on its own.
+projection at once, and with more than eight rows, your routing still sends
+them to Day 2's simple kernel, where each thread computes one output on its
+own.
 
 Count what that costs. To compute row `i` of the output, a thread reads all of
 weight row `k`. The thread for row `i + 1` reads weight row `k` again, and so
@@ -20,7 +21,7 @@ instead of one. Apple GPUs have hardware support for small matrix products,
 build the tile out of those.
 
 The weights stay packed, `quantized_linear` keeps its interface, and decode
-keeps Day 2's matvec. Only the path for more than eight rows changes, and the
+keeps Day 3's matvec. Only the path for more than eight rows changes, and the
 new checkpoint is called `simd-matmul`.
 
 ## A Shape That Does Not Fit
@@ -43,14 +44,14 @@ shape.
 
 ## Keep the Pre-Edit Control
 
-Build both extensions. The reference tests show what a finished Day 3 does;
-your own Day 3 test will fail at the SIMD kernel until you write it:
+Build both extensions. The reference tests show what a finished Day 4 does;
+your own Day 4 test will fail at the SIMD kernel until you write it:
 
 ```bash
 pdm run build-ext
 pdm run build-ext-ref
-pdm run test-refsol --week 2 --day 3
-pdm run test --week 2 --day 3 -- -k partial_tiles
+pdm run test-refsol --week 2 --day 4
+pdm run test --week 2 --day 4 -- -k partial_tiles
 ```
 
 Before you change anything, time the current `quantized-matvec` model and
@@ -61,11 +62,11 @@ already. Save both files; they are today's control:
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
   --variant week2-quantized-matvec --variant mlx \
   --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day3-control.json
+  --prefill-logits last --json-output week2-day4-control.json
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --case quantized-matvec:prefill:128 --warmup 4 --iterations 12 \
-  --json-output week2-day3-control-attribution.json
+  --json-output week2-day4-control-attribution.json
 ```
 
 The profiler case `quantized-matvec:prefill:128` replays one prefill of 128
@@ -80,8 +81,8 @@ Read the control replay before you write any code. Today's hypothesis is that
 the projections group leads it, because every prompt row re-reads and
 re-unpacks every weight in the readable kernel. If that is what you see, the
 tiled kernel should shrink that group and raise prefill throughput, while
-decode stays where it was. If another group leads, write it down; Days 4 and
-5 still need today's kernel, and the end-of-day comparison will show what it
+decode stays where it was. If another group leads, write it down; Days 5 and
+6 still need today's kernel, and the end-of-day comparison will show what it
 changed.
 
 When you measure again at the end, keep everything the same: model, phase,
@@ -144,7 +145,7 @@ output row.
 ### What to Write
 
 The starter's `cooperative_matrix.h` contains two helpers with
-`TODO(Week 2 Day 3)` markers. `CooperativeTileLoader::load` copies a tile
+`TODO(Week 2 Day 4)` markers. `CooperativeTileLoader::load` copies a tile
 into threadgroup memory, with a fast path for full tiles and a careful path
 for edges. `CooperativeBlockMMA` maps each SIMD lane to its fragment elements,
 zeroes the accumulators, multiplies fragments, and stores the result with
@@ -170,7 +171,7 @@ correctness controls.
 Now route prefill to the new kernel. In `QuantizedMatmul::eval_gpu` in
 `quantized_matmul.cpp`:
 
-- keep Day 2's matvec when the flattened row count `M <= 8`;
+- keep Day 3's matvec when the flattened row count `M <= 8`;
 - for `M > 8`, use `quantized_matmul_simdgroup_w4a16_g128` when the
   `use_simdgroup` flag is set; and
 - keep the simple matrix kernel reachable when the flag is not set, as your
@@ -183,8 +184,8 @@ Python side, `quantized_matmul(..., use_simdgroup=True)` in
 `src/tiny_llm/quantize.py` should already pass the flag through.
 
 Then turn it on in the model. The `simd-matmul` checkpoint sets
-`simdgroup_matmul` in `WEEK2_CHECKPOINT_FEATURES`, on top of Day 1's bounded
-cache and Day 2's packed weights. The choice travels in three steps:
+`simdgroup_matmul` in `WEEK2_CHECKPOINT_FEATURES`, on top of Day 1's cache,
+Day 2's packed weights and Day 3's matvec. The choice travels in three steps:
 
 1. the model loader passes it to each packed projection as
    `QuantizedWeights.from_mlx_layer(..., use_simdgroup_matmul=...)`,
@@ -194,15 +195,15 @@ cache and Day 2's packed weights. The choice travels in three steps:
 3. the native primitive sees `use_simdgroup` and selects your kernel.
 
 If any step drops the flag, prompts quietly keep using the simple kernel.
-Normalization, RoPE, and SwiGLU kernels are Day 4; this checkpoint has no
+Normalization, RoPE, and SwiGLU kernels are Day 5; this checkpoint has no
 other new kernels.
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 3 -- -k task_1
-pdm run test --week 2 --day 3 -- -k test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu
-pdm run test --week 2 --day 3 -- -k test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu
-pdm run test --week 2 --day 3
+pdm run test --week 2 --day 4 -- -k task_1
+pdm run test --week 2 --day 4 -- -k test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu
+pdm run test --week 2 --day 4 -- -k test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu
+pdm run test --week 2 --day 4
 
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint simd-matmul --model qwen3-0.6b --max-tokens 16
@@ -213,7 +214,7 @@ what each command checks:
 
 - **`-k task_1`** runs a 3-token input through the `simd-matmul` and
   `quantized-matvec` checkpoints of a tiny model and compares the outputs.
-  Three rows is at most eight, so this still uses Day 2's matvec and can pass
+  Three rows is at most eight, so this still uses Day 3's matvec and can pass
   before your new kernel works. It checks that the checkpoint is wired up.
 - **The `task_2` test** compares your new kernel with the simple kernel on the
   10 × 97 partial-tile shape.
@@ -222,7 +223,7 @@ what each command checks:
   model.
 
 None of them check which kernel actually ran; they compare outputs. Run the
-full Day 3 gate and the live model once both kernel checks pass.
+full Day 4 gate and the live model once both kernel checks pass.
 
 If you need to move on without the tiled kernel, keep `quantized_linear` as it
 is and use `mx.quantized_matmul` inside it for the matrix case only. That is
@@ -233,19 +234,19 @@ does none of your cache or model work.
 
 ## Measure the Change
 
-Once the full Day 3 gate passes, run the Day 2 control and the new checkpoint
+Once the full Day 4 gate passes, run the Day 3 control and the new checkpoint
 in one progression, and replay both:
 
 ```bash
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
   --variant week2-quantized-matvec --variant week2-simd-matmul --variant mlx \
   --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day3-product.json
+  --prefill-logits last --json-output week2-day4-product.json
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --case quantized-matvec:prefill:128 --case simd-matmul:prefill:128 \
   --warmup 4 --iterations 12 \
-  --json-output week2-day3-attribution.json
+  --json-output week2-day4-attribution.json
 ```
 
 First check that this run's `quantized-matvec` row is close to the control you
@@ -257,7 +258,7 @@ itself mean a faster model, and the replay does not show that your model
 routes prompts to the new kernel; that is what the three-step flag check in
 Task 2 and the full-model tests are for.
 
-Decode still runs Day 2's matvec, so expect the change to show up mainly in
+Decode still runs Day 3's matvec, so expect the change to show up mainly in
 prefill. If you
 repeat this with the optional 4B model, cache it first and rerun every row at
 4B; do not mix model sizes or logit modes.
@@ -266,13 +267,13 @@ Write down which group took the most replayed prefill time before the change,
 whether the new kernel reduced it, how the whole-model prefill result moved,
 and what result would make you rethink the tiling. Then replay decode for the
 new checkpoint (`--case simd-matmul:decode:128`) and look at the groups other
-than projections. The normalization, position, and activation group is Day 4's
+than projections. The normalization, position, and activation group is Day 5's
 starting point; if it is small on your machine, note that before you go on.
 The [performance appendix](./appendix-performance.md) keeps older hardware
 results separate from this exercise.
 
-Next, [Day 4: Fused Kernels](./week2-04-fused-model-kernels.md) starts
+Next, [Day 5: Fused Kernels](./week2-05-fused-model-kernels.md) starts
 from this `simd-matmul` result as its control, and
-[Day 5](./week2-05-tiled-prefill-attention.md) adds tiled prefill attention.
+[Day 6](./week2-06-tiled-prefill-attention.md) adds tiled prefill attention.
 
 {{#include copyright.md}}

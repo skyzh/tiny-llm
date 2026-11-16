@@ -1,6 +1,6 @@
-# 🚧 Week 2 Day 5: Tiled Attention
+# 🚧 Week 2 Day 6: Tiled Attention
 
-After [Day 4](./week2-04-fused-model-kernels.md), your `swiglu` checkpoint runs
+After [Day 5](./week2-05-fused-model-kernels.md), your `swiglu` checkpoint runs
 projections, RMSNorm, RoPE, and SwiGLU on kernels you wrote. One large piece is
 still the readable Week 1 code: attention.
 
@@ -19,7 +19,7 @@ or more tokens. One-token decode keeps the readable path, which is already
 cheap at that size.
 
 That is the starting hypothesis for today: in your `swiglu` prefill replay
-from Day 4, the attention group should have grown into a large share, and it
+from Day 5, the attention group should have grown into a large share, and it
 should grow faster than the others as prompts get longer, because the score
 matrix grows with `L × S`. If your replay shows that, tiled attention should
 shrink the attention group without changing the result. If attention is still
@@ -45,16 +45,16 @@ pdm run build-ext
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
   --variant week2-swiglu --variant mlx \
   --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day5-control.json
+  --prefill-logits last --json-output week2-day6-control.json
 ```
 
 The `mlx` row is a separate complete model, there for scale. Build the
-reference extension and run its Day 5 tests to see the finished behavior;
+reference extension and run its Day 6 tests to see the finished behavior;
 your own extension still has its TODOs:
 
 ```bash
 pdm run build-ext-ref
-pdm run test-refsol --week 2 --day 5
+pdm run test-refsol --week 2 --day 6
 ```
 
 ## Softmax One Tile at a Time
@@ -155,7 +155,7 @@ positions, so both the last query tile and the last source tile are partial:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5 -- -k task_1
+pdm run test --week 2 --day 6 -- -k task_1
 ```
 
 It compares your BF16 output with MLX's causal grouped attention. Passing it
@@ -185,7 +185,7 @@ is `-inf` everywhere:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5 -- -k task_2
+pdm run test --week 2 --day 6 -- -k task_2
 ```
 
 **Keep the readable path.** In `Qwen3MultiHeadAttention.__call__`, use the
@@ -206,12 +206,12 @@ separate complete model.
 ## Task 3: Run `tiled-prefill` in the Model
 
 Route eligible attention calls through your kernel inside `Qwen3ModelWeek2`.
-The `tiled-prefill` checkpoint keeps the bounded cache, packed projections,
-and all three Day 4 kernels; only supported prefill attention changes:
+The `tiled-prefill` checkpoint keeps Day 1's cache, the packed projections,
+and all three Day 5 kernels; only supported prefill attention changes:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 5 -- -k task_3
+pdm run test --week 2 --day 6 -- -k task_3
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint tiled-prefill --model qwen3-0.6b --max-tokens 16
 ```
@@ -224,16 +224,18 @@ in the real model.
 
 ## Finish the Cumulative `selected` Model
 
-`selected` has the same features as `tiled-prefill`: request-bounded KV
-capacity, packed W4 projections, SIMD matrix prefill, register-cached
-RMSNorm, RoPE, SwiGLU, and tiled prefill attention, with the short-query and
-wide-row fallbacks. Three of these can be switched off one at a time through
-the constructor (`use_bounded_kv_capacity`, `use_register_cached_rms_norm`,
-`use_tiled_prefill_attention`), so you can measure what each one is worth.
-`selected` is also the model's default checkpoint.
+`selected` has the same features as `tiled-prefill`: the chunked KV cache,
+packed W4 projections, the decode matvec, SIMD matrix prefill,
+register-cached RMSNorm, RoPE, SwiGLU, and tiled prefill attention, with the
+short-query and wide-row fallbacks. Two of these can be switched off one at a
+time through the constructor (`use_register_cached_rms_norm` and
+`use_tiled_prefill_attention`), so you can measure what each one is worth. A
+third switch, `use_bounded_kv_capacity`, is off by default; turning it on
+gives each request's cache a hard bound of prompt plus `max_tokens`. `selected`
+is also the model's default checkpoint.
 
 ```bash
-pdm run test --week 2 --day 5 -- -k selected
+pdm run test --week 2 --day 6 -- -k selected
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint selected --model qwen3-0.6b --max-tokens 16
 ```
@@ -242,7 +244,7 @@ The test checks that `selected` is the default, and that switching off each of
 the three controls still gives close outputs. Then run the whole day:
 
 ```bash
-pdm run test --week 2 --day 5
+pdm run test --week 2 --day 6
 ```
 
 Even though `selected` is the default, name it explicitly in measurements so
@@ -275,7 +277,7 @@ pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --re
   --variant week2-swiglu --variant week2-tiled-prefill \
   --variant week2-selected --variant mlx \
   --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day5-product.json
+  --prefill-logits last --json-output week2-day6-product.json
 ```
 
 A 128-token prompt is above the nine-token threshold, so prefill uses your
@@ -294,7 +296,7 @@ three checkpoints:
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --case swiglu:prefill:128 --case tiled-prefill:prefill:128 \
   --case selected:prefill:128 --warmup 4 --iterations 12 \
-  --json-output week2-day5-attribution.json
+  --json-output week2-day6-attribution.json
 ```
 
 Each case replays one 128-token prefill through the public operators that
@@ -335,7 +337,7 @@ MLP's matrix multiply.
 ## Where Week 2 Ends Up
 
 How close does a finished Week 2 model get to MLX? The supplied reference has
-all five days in place plus the extra scheduling described above. The table
+all of Week 2's kernels in place plus the extra scheduling described above. The table
 compares it with stock MLX running the same Qwen3-4B model. A value above 100% means the course model was faster.
 
 | Prompt / generated tokens | Total throughput vs. MLX | Worst paired run | Paired runs below 95% |

@@ -1,4 +1,4 @@
-"""Focused request-bounded dense KV capacity controls."""
+"""Chunked dense KV growth and optional caller bounds."""
 
 import mlx.core as mx
 import pytest
@@ -42,23 +42,30 @@ def test_capacity_cache_writes_only_new_slices_and_hides_the_tail():
     )
 
 
-def test_disabled_control_keeps_concatenate_accounting():
-    cache = TinyKvFullCache()
-    key_1, value_1 = _chunk(0, 2)
-    key_2, value_2 = _chunk(4, 1)
-
+def test_chunked_growth_copies_only_at_a_storage_boundary():
+    cache = TinyKvFullCache(growth_step=4)
+    key_1, value_1 = _chunk(0, 3)
+    key_2, value_2 = _chunk(6, 1)
+    key_3, value_3 = _chunk(8, 2)
     cache.update_and_fetch(key_1, value_1)
-    cached_key, cached_value, offset, _ = cache.update_and_fetch(key_2, value_2)
-
-    copied = key_1.nbytes + value_1.nbytes
-    assert offset == 3
-    assert_allclose(cached_key, mx.concat([key_1, key_2], axis=2), mx.float32)
-    assert_allclose(cached_value, mx.concat([value_1, value_2], axis=2), mx.float32)
-    assert cache.capacity is None
-    assert cache.logical_copy_bytes == copied
-    assert cache.physical_growth_copy_bytes == copied
-    assert cache.growth_copy_bytes == copied
-    assert cache.slice_write_bytes == 0
+    cache.update_and_fetch(key_2, value_2)
+    assert cache.allocated_capacity == 4
+    assert cache.growth_copy_bytes == 0
+    cached_key, cached_value, offset, _ = cache.update_and_fetch(key_3, value_3)
+    assert cache.allocated_capacity == 8
+    assert offset == 6
+    copied = key_1.nbytes + value_1.nbytes + key_2.nbytes + value_2.nbytes
+    assert (
+        cache.logical_copy_bytes
+        == cache.physical_growth_copy_bytes
+        == cache.growth_copy_bytes
+        == copied
+    )
+    assert cache.slice_write_bytes == copied + key_3.nbytes + value_3.nbytes
+    assert_allclose(cached_key, mx.concat([key_1, key_2, key_3], axis=2), mx.float32)
+    assert_allclose(
+        cached_value, mx.concat([value_1, value_2, value_3], axis=2), mx.float32
+    )
 
 
 def test_capacity_boundary_is_transactional_and_zero_append_is_a_noop():
@@ -123,7 +130,7 @@ def test_capacity_rewind_reuses_storage_and_overwrites_the_logical_suffix():
     assert cache.key_values is not None
 
 
-def test_capacity_mode_matches_the_legacy_model_cache():
+def test_bounded_and_unbounded_chunked_model_caches_agree():
     model = Qwen3ModelWeek2(tiny_qwen3_mlx_model(), checkpoint="kv-cache")
     bounded = model.create_kv_cache(capacity=3)
     legacy = model.create_kv_cache()
@@ -138,11 +145,11 @@ def test_capacity_mode_matches_the_legacy_model_cache():
 
     for bounded_layer, legacy_layer in zip(bounded, legacy):
         bounded_keys, bounded_values = bounded_layer._logical_key_values()
-        legacy_keys, legacy_values = legacy_layer.key_values
+        legacy_keys, legacy_values = legacy_layer._logical_key_values()
         assert_allclose(bounded_keys, legacy_keys, mx.bfloat16)
         assert_allclose(bounded_values, legacy_values, mx.bfloat16)
         assert bounded_layer.physical_growth_copy_bytes == 0
-        assert legacy_layer.physical_growth_copy_bytes > 0
+        assert legacy_layer.physical_growth_copy_bytes == 0
 
 
 def test_week2_factory_and_generation_bind_the_request_capacity(capsys):
@@ -205,9 +212,9 @@ def test_week2_factory_and_generation_bind_the_request_capacity(capsys):
     simple_generate_with_kv_cache(disabled, Tokenizer(), "hi", max_tokens=2)
     assert disabled.capacities == [None]
     assert disabled.caches[0][0].offset == 3
-    assert disabled.caches[0][0].logical_copy_bytes > 0
+    assert disabled.caches[0][0].logical_copy_bytes == 0
     enabled_keys, enabled_values = enabled.caches[0][0].key_values
-    disabled_keys, disabled_values = disabled.caches[0][0].key_values
+    disabled_keys, disabled_values = disabled.caches[0][0]._logical_key_values()
     assert_allclose(enabled_keys[:, :, :3], disabled_keys, mx.float32)
     assert_allclose(enabled_values[:, :, :3], disabled_values, mx.float32)
     assert capsys.readouterr().out == ""

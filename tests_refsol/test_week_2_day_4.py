@@ -1,4 +1,4 @@
-"""Week 2 Day 4 compact model-primitive tests."""
+"""Week 2 Day 4 SIMD-matrix prefill tests."""
 
 import importlib
 import sys
@@ -15,109 +15,98 @@ from benches import (
 from benches.bench_course_progression import WEEK2_VARIANTS
 from benches.profile_week2_kernels import DEFAULT_CASES
 from benches.week2_gpudebug import KNOWN_CHECKPOINTS
-from .tiny_llm_base import FastRMSNorm, FastRoPE, Qwen3ModelWeek2, swiglu
+from .tiny_llm_base import Qwen3ModelWeek2, quantized_matmul, quantized_matmul_vanilla
 from .utils import assert_allclose, tiny_qwen3_mlx_model
 
 
-def test_task_1_register_cached_rmsnorm_matches_readable_operator():
-    x = mx.random.normal((2, 3, 16)).astype(mx.bfloat16)
-    weight = mx.random.normal((16,)).astype(mx.bfloat16)
-    result = FastRMSNorm(16, weight, eps=1e-5)(x)
-    expected = mx.fast.rms_norm(x, weight, 1e-5)
+def test_task_1_simd_matmul_checkpoint_runs_the_week2_engine():
+    fixture = tiny_qwen3_mlx_model()
+    tokens = mx.array([[1, 2, 3]], dtype=mx.int32)
+    with mx.stream(mx.gpu):
+        simd_model = Qwen3ModelWeek2(fixture, checkpoint="simd-matmul")
+        readable_model = Qwen3ModelWeek2(fixture, checkpoint="quantized-matvec")
+        simd_output = simd_model(tokens, 0, simd_model.create_kv_cache(capacity=3))
+        readable_output = readable_model(
+            tokens, 0, readable_model.create_kv_cache(capacity=3)
+        )
+        mx.eval(simd_output, readable_output)
 
-    assert result is not None, "implement the FastRMSNorm learner seam"
-    assert result.shape == expected.shape
-    assert result.dtype == expected.dtype == mx.bfloat16
-    assert_allclose(result, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
-
-
-def test_task_2_rope_matches_readable_operator():
-    x = mx.random.normal((2, 4, 2, 16)).astype(mx.bfloat16)
-    actual = FastRoPE(16, 32, base=10000)(x, [3, 7])
-    expected = mx.fast.rope(
-        x.transpose(0, 2, 1, 3),
-        16,
-        traditional=False,
-        base=10000,
-        scale=1.0,
-        offset=mx.array([3, 7], dtype=mx.int32),
-    ).transpose(0, 2, 1, 3)
-
-    assert actual is not None, "implement the FastRoPE learner seam"
-    assert actual.shape == expected.shape
-    assert actual.dtype == expected.dtype == mx.bfloat16
-    assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
+    assert simd_output.dtype == readable_output.dtype == mx.bfloat16
+    assert simd_output.shape == readable_output.shape
+    assert simd_output.shape[:2] == (1, 3)
+    assert_allclose(simd_output, readable_output, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
-def test_task_3_swiglu_matches_readable_operator():
-    gate = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
-    up = mx.random.normal((2, 4, 16)).astype(mx.bfloat16)
-    actual = swiglu(gate, up)
-    expected = gate * mx.sigmoid(gate) * up
-
-    assert actual is not None, "implement the SwiGLU learner seam"
-    assert actual.shape == expected.shape
-    assert actual.dtype == expected.dtype == mx.bfloat16
-    assert_allclose(actual, expected, mx.bfloat16, atol=2e-2, rtol=2e-2)
+def test_task_2_simdgroup_matmul_matches_readable_partial_tiles_gpu():
+    with mx.stream(mx.gpu):
+        inputs = mx.random.normal((10, 256)).astype(mx.bfloat16)
+        weight = mx.random.normal((97, 256)).astype(mx.bfloat16)
+        packed, scales, biases = mx.quantize(weight, group_size=128, bits=4)
+        tiled = quantized_matmul(
+            scales,
+            biases,
+            128,
+            4,
+            inputs,
+            packed,
+            transpose_b=True,
+            use_simdgroup=True,
+        )
+        readable = quantized_matmul_vanilla(
+            scales, biases, 128, 4, inputs, packed, transpose_b=True
+        )
+        assert tiled is not None, "implement the SIMD quantized_matmul learner seam"
+        assert_allclose(tiled, readable, mx.bfloat16, atol=0.25, rtol=1e-2)
 
 
 @pytest.mark.parametrize("seed", (0, 4))
-def test_task_4_primitive_checkpoints_compose_public_model(seed):
+def test_task_3_simd_matmul_model_prefill_matches_readable_control_gpu(seed):
     fixture = tiny_qwen3_mlx_model(seed=seed)
 
     tokens = mx.array([list(range(1, 11))], dtype=mx.int32)
-    outputs = []
-    for checkpoint in ("simd-matmul", "rmsnorm", "rope", "swiglu"):
-        model = Qwen3ModelWeek2(fixture, checkpoint=checkpoint)
-        output = model(tokens, 0, model.create_kv_cache(capacity=10))
-        mx.eval(output)
-        assert output.dtype == mx.bfloat16
-        assert output.shape[:2] == (1, 10)
-        outputs.append(output)
-
-    assert all(output.shape == outputs[0].shape for output in outputs)
-    for earlier, later in zip(outputs, outputs[1:]):
-        assert_allclose(
-            later,
-            earlier,
-            mx.bfloat16,
-            atol=0.5,
-            rtol=2e-2,
-            message=f"fixture seed {seed}",
+    with mx.stream(mx.gpu):
+        simd_model = Qwen3ModelWeek2(fixture, checkpoint="simd-matmul")
+        readable_model = Qwen3ModelWeek2(fixture, checkpoint="quantized-matvec")
+        simd_output = simd_model(tokens, 0, simd_model.create_kv_cache(capacity=10))
+        readable_output = readable_model(
+            tokens, 0, readable_model.create_kv_cache(capacity=10)
         )
+        mx.eval(simd_output, readable_output)
+
+    assert simd_output.dtype == readable_output.dtype == mx.bfloat16
+    assert simd_output.shape == readable_output.shape
+    assert_allclose(
+        simd_output,
+        readable_output,
+        mx.bfloat16,
+        atol=0.75,
+        rtol=5e-2,
+        message=f"fixture seed {seed}",
+    )
 
 
-def test_day4_public_selectors_remain_the_prefix_of_day5():
+def test_day4_public_selectors_keep_simd_prefix():
     model_module = importlib.import_module(Qwen3ModelWeek2.__module__)
     checkpoints = (
         "kv-cache",
-        "capacity-cache",
+        "packed-weights",
         "quantized-matvec",
         "simd-matmul",
-        "rmsnorm",
-        "rope",
-        "swiglu",
     )
-    assert model_module.WEEK2_CHECKPOINTS[:7] == checkpoints
-    assert KNOWN_CHECKPOINTS[:7] == checkpoints
-    assert DEFAULT_CASES[:7] == (
+    assert model_module.WEEK2_CHECKPOINTS[:4] == checkpoints
+    assert KNOWN_CHECKPOINTS[:4] == checkpoints
+    assert DEFAULT_CASES[:4] == (
         "kv-cache:decode:128",
-        "capacity-cache:decode:128",
+        "packed-weights:decode:128",
         "quantized-matvec:decode:128",
         "simd-matmul:prefill:128",
-        "rmsnorm:decode:128",
-        "rope:decode:128",
-        "swiglu:decode:128",
     )
-    assert [variant.key for variant in WEEK2_VARIANTS][:8] == [
+    assert [variant.key for variant in WEEK2_VARIANTS][:5] == [
         "week1",
         "week2-kv-cache",
-        "week2-capacity-cache",
+        "week2-packed-weights",
         "week2-quantized-matvec",
         "week2-simd-matmul",
-        "week2-rmsnorm",
-        "week2-rope",
-        "week2-swiglu",
     ]
 
 
@@ -132,7 +121,7 @@ def test_day4_model_free_cli_parsers(monkeypatch):
             "--loader",
             "week2",
             "--week2-checkpoint",
-            "swiglu",
+            "simd-matmul",
             "--model",
             "qwen3-0.6b",
             "--prefill-logits",
@@ -141,7 +130,7 @@ def test_day4_model_free_cli_parsers(monkeypatch):
     )
     bench_args = bench.parse_args()
     bench.validate_args(bench_args)
-    assert bench_args.week2_checkpoint == "swiglu"
+    assert bench_args.week2_checkpoint == "simd-matmul"
 
     monkeypatch.setattr(
         sys,
@@ -155,28 +144,31 @@ def test_day4_model_free_cli_parsers(monkeypatch):
             "--repeats",
             "2",
             "--variant",
-            "week2-rmsnorm",
+            "week2-quantized-matvec",
             "--variant",
-            "week2-rope",
-            "--variant",
-            "week2-swiglu",
+            "week2-simd-matmul",
             "--prefill-logits",
             "last",
         ],
     )
     assert bench_course_progression.parse_args().variant == [
-        "week2-rmsnorm",
-        "week2-rope",
-        "week2-swiglu",
+        "week2-quantized-matvec",
+        "week2-simd-matmul",
     ]
 
     monkeypatch.setattr(
         sys,
         "argv",
-        ["profile", "--solution", "tiny_llm_ref", "--case", "swiglu:decode:128"],
+        [
+            "profile",
+            "--solution",
+            "tiny_llm_ref",
+            "--case",
+            "simd-matmul:prefill:128",
+        ],
     )
     assert profile_week2_kernels.parse_args().case == [
-        profile_week2_kernels.ProfileCase("swiglu", "decode", 128)
+        profile_week2_kernels.ProfileCase("simd-matmul", "prefill", 128)
     ]
 
     capture = week2_gpudebug.build_parser().parse_args(
@@ -187,9 +179,9 @@ def test_day4_model_free_cli_parsers(monkeypatch):
             "--model",
             "qwen3-0.6b",
             "--checkpoint",
-            "swiglu",
+            "simd-matmul",
             "--phase",
-            "decode",
+            "prefill",
             "--tokens",
             "128",
             "--trace",
@@ -200,4 +192,4 @@ def test_day4_model_free_cli_parsers(monkeypatch):
             "manifest.json",
         ]
     )
-    assert capture.checkpoint == "swiglu"
+    assert capture.checkpoint == "simd-matmul"

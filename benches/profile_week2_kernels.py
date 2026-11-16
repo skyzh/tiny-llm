@@ -21,7 +21,7 @@ if str(SRC_ROOT) not in sys.path:
 
 DEFAULT_CASES = (
     "kv-cache:decode:128",
-    "capacity-cache:decode:128",
+    "packed-weights:decode:128",
     "quantized-matvec:decode:128",
     "simd-matmul:prefill:128",
     "rmsnorm:decode:128",
@@ -58,6 +58,7 @@ def parse_case(value: str) -> ProfileCase:
         raise argparse.ArgumentTypeError("phase must be decode or prefill")
     if tokens <= 0:
         raise argparse.ArgumentTypeError("tokens must be positive")
+    checkpoint = "kv-cache" if checkpoint == "capacity-cache" else checkpoint
     return ProfileCase(checkpoint, phase, tokens)
 
 

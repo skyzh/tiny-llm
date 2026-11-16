@@ -51,57 +51,57 @@ WEEK2_VARIANTS = (
         ("--week2-checkpoint", "kv-cache"),
     ),
     Variant(
-        "week2-capacity-cache",
-        "2.1 + Bound KV-cache movement",
+        "week2-packed-weights",
+        "2.2 Keep W4 packed",
         "ref",
         "week2",
-        ("--week2-checkpoint", "capacity-cache"),
+        ("--week2-checkpoint", "packed-weights"),
     ),
     Variant(
         "week2-quantized-matvec",
-        "2.2 Keep W4 packed",
+        "2.3 Decode matvec",
         "ref",
         "week2",
         ("--week2-checkpoint", "quantized-matvec"),
     ),
     Variant(
         "week2-simd-matmul",
-        "2.3 SIMD matrix prefill",
+        "2.4 SIMD matrix prefill",
         "ref",
         "week2",
         ("--week2-checkpoint", "simd-matmul"),
     ),
     Variant(
         "week2-rmsnorm",
-        "2.4 Compact RMSNorm",
+        "2.5 Compact RMSNorm",
         "ref",
         "week2",
         ("--week2-checkpoint", "rmsnorm"),
     ),
     Variant(
         "week2-rope",
-        "2.4 + Compact RoPE",
+        "2.5 + Compact RoPE",
         "ref",
         "week2",
         ("--week2-checkpoint", "rope"),
     ),
     Variant(
         "week2-swiglu",
-        "2.4 + Compact SwiGLU",
+        "2.5 + Compact SwiGLU",
         "ref",
         "week2",
         ("--week2-checkpoint", "swiglu"),
     ),
     Variant(
         "week2-tiled-prefill",
-        "2.5 Tiled dense prefill attention",
+        "2.6 Tiled dense prefill attention",
         "ref",
         "week2",
         ("--week2-checkpoint", "tiled-prefill"),
     ),
     Variant(
         "week2-selected",
-        "2.5 + Run the selected inference engine",
+        "2.6 + Run the selected inference engine",
         "ref",
         "week2",
         ("--week2-checkpoint", "selected"),
@@ -164,7 +164,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--variant",
         action="append",
-        choices=tuple(VARIANTS_BY_KEY),
+        choices=(*VARIANTS_BY_KEY, "week2-capacity-cache"),
         help="run only this checkpoint; repeat the option to select several",
     )
     parser.add_argument(
@@ -194,6 +194,11 @@ def parse_args() -> argparse.Namespace:
         parser.error("--repeats must be positive")
     if args.cooldown_seconds < 0:
         parser.error("--cooldown-seconds must be non-negative")
+    if args.variant:
+        args.variant = [
+            "week2-kv-cache" if key == "week2-capacity-cache" else key
+            for key in args.variant
+        ]
     if args.variant:
         suite_variants = WEEK2_VARIANTS if args.suite == "week2" else COURSE_VARIANTS
         suite_keys = {variant.key for variant in suite_variants}

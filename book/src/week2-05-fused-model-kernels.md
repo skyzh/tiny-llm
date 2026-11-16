@@ -1,6 +1,6 @@
-# 🚧 Week 2 Day 4: Fused Kernels
+# 🚧 Week 2 Day 5: Fused Kernels
 
-After [Day 3](./week2-03-simd-matrix-prefill.md), the projections run on your
+After [Day 4](./week2-04-simd-matrix-prefill.md), the projections run on your
 own packed-weight kernels for both decode and prefill. Profile a decode step
 now and a different set of operators shows up. Every layer still runs RMSNorm
 (four times: before attention, on the queries, on the keys, and before the
@@ -16,7 +16,7 @@ into several small GPU operations, each with its own launch and its own pass
 over memory, and that one kernel per operator removes most of that overhead.
 If the normalization, position, and activation group is large in your replay,
 the three kernels below should shrink it. If it is small, the whole-request
-gain will be small too; write that down, and still do the day, since Day 5
+gain will be small too; write that down, and still do the day, since Day 6
 builds on this model.
 
 Each of those operators does very little arithmetic. They are slow because of
@@ -43,7 +43,7 @@ pdm run build-ext
 pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --repeats 2 \
   --variant week2-simd-matmul --variant mlx \
   --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits last --json-output week2-day4-control.json
+  --prefill-logits last --json-output week2-day5-control.json
 ```
 
 Today's files already exist in the starter:
@@ -61,8 +61,8 @@ test, which should stop at the `FastRMSNorm` TODO:
 
 ```bash
 pdm run build-ext-ref
-pdm run test-refsol --week 2 --day 4
-pdm run test --week 2 --day 4 -- -k task_1
+pdm run test-refsol --week 2 --day 5
+pdm run test --week 2 --day 5 -- -k task_1
 ```
 
 For each operator, check its numbers against a readable version first, then
@@ -152,7 +152,7 @@ starting RoPE:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4 -- -k task_1
+pdm run test --week 2 --day 5 -- -k task_1
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint rmsnorm --model qwen3-0.6b --max-tokens 16
 ```
@@ -161,7 +161,7 @@ The test compares your BF16 output with `mx.fast.rms_norm` on a narrow,
 16-value row, so it exercises only your register-cached path. The repository
 also has tests for rows at and past the 4,096 limit
 (`tests_refsol/test_rmsnorm_register_cache.py`), but they import the
-reference solution, not yours, and the Day 4 test command does not run them
+reference solution, not yours, and the Day 5 test command does not run them
 against your code. Check your wide-row fallback yourself, for example by
 comparing a 4,097-wide row with the readable equation.
 
@@ -205,7 +205,7 @@ operator, then run the model before starting SwiGLU:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4 -- -k task_2
+pdm run test --week 2 --day 5 -- -k task_2
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint rope --model qwen3-0.6b --max-tokens 16
 ```
@@ -238,7 +238,7 @@ Use it in the MLP. The `swiglu` checkpoint keeps your RMSNorm and RoPE:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 4 -- -k task_3
+pdm run test --week 2 --day 5 -- -k task_3
 pdm run main --solution tiny_llm --loader week2 \
   --week2-checkpoint swiglu --model qwen3-0.6b --max-tokens 16
 ```
@@ -265,8 +265,8 @@ Run the whole day:
 ```bash
 pdm run build-ext
 pdm run build-ext-ref
-pdm run test-refsol --week 2 --day 4
-pdm run test --week 2 --day 4
+pdm run test-refsol --week 2 --day 5
+pdm run test --week 2 --day 5
 ```
 
 Keep `qwen3_week1.py` on its Week 1 operators, and keep the Week 2 interfaces
@@ -285,7 +285,7 @@ operation. The supplied operator benchmark already does this. Remember to call
 
 ## Measure the Change
 
-Once the full Day 4 gate passes, run the Day 3 control and all three Day 4
+Once the full Day 5 gate passes, run the Day 4 control and all three Day 5
 checkpoints together with the same cached 0.6B model and workload. Keeping the
 `simd-matmul` row in the same run means a gain from one operator cannot hide a
 loss from another:
@@ -296,19 +296,19 @@ pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 --re
   --variant week2-rmsnorm --variant week2-rope --variant week2-swiglu \
   --variant mlx --model qwen3-0.6b \
   --input-len 128 --output-len 129 --warmup 2 --prefill-logits last \
-  --json-output week2-day4-product.json
+  --json-output week2-day5-product.json
 
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
   --case simd-matmul:decode:128 --case swiglu:decode:128 \
   --case simd-matmul:prefill:128 --case swiglu:prefill:128 \
   --warmup 4 --iterations 12 \
-  --json-output week2-day4-attribution.json
+  --json-output week2-day5-attribution.json
 ```
 
 First check that this run's `simd-matmul` row is close to the control you
 saved. The profiler replays the same decode and prefill steps for `simd-matmul`
 and `swiglu`, with the same 128-token context, cache bound, and logit setting.
-The normalization, position, and activation group is where Day 4's kernels
+The normalization, position, and activation group is where Day 5's kernels
 show up; the other groups replay the same operators in both cases. Report each
 checkpoint's whole-model change and the replayed group change separately: the
 replay times your operators, not your model, so a faster group alone does not
@@ -316,7 +316,7 @@ mean a faster request, and it does not show which kernel your model called.
 Write down which group now takes the most replayed time, and what result would
 make you undo one of these kernels. Look closely at the `swiglu:prefill:128`
 case: with projections and the small operators faster, the attention group
-should now be a larger share of prefill. That is Day 5's starting point; if it
+should now be a larger share of prefill. That is Day 6's starting point; if it
 is not on your machine, note what leads instead. The
 [performance appendix](./appendix-performance.md) keeps older M4 Pro and 4B
 results as history, not as claims about your checkout. A 4B comparison is
@@ -327,7 +327,7 @@ and use the matching MLX operator or the readable equation behind it. The rest
 of your model still runs your code. That is different from `--solution mlx`,
 which runs a separate complete model.
 
-Next is [Day 5: Tiled Dense Prefill Attention](./week2-05-tiled-prefill-attention.md),
+Next is [Day 6: Tiled Dense Prefill Attention](./week2-06-tiled-prefill-attention.md),
 with this `swiglu` measurement as its control.
 
 {{#include copyright.md}}

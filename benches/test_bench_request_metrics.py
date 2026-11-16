@@ -61,12 +61,13 @@ def worker_definitions():
 
 
 class RequestMetricsTests(unittest.TestCase):
-    def test_selected_checkpoint_capacity_and_other_routes(self):
+    def test_public_checkpoints_do_not_infer_a_bound_from_max_output(self):
         request = SimpleNamespace(prompt_token_ids=list(range(128)), max_new_tokens=129)
         for checkpoint in (
             None,
             "selected",
             "capacity-cache",
+            "packed-weights",
             "quantized-matvec",
             "simd-matmul",
             "rmsnorm",
@@ -76,7 +77,7 @@ class RequestMetricsTests(unittest.TestCase):
         ):
             with self.subTest(checkpoint=checkpoint):
                 self.assertEqual(
-                    request_cache_capacity("week2", checkpoint, request), 257
+                    request_cache_capacity("week2", checkpoint, request), None
                 )
         for loader, checkpoint in (
             ("week2", "kv-cache"),
@@ -112,9 +113,9 @@ class RequestMetricsTests(unittest.TestCase):
 
     def test_real_main_routes_capacity_and_saves_worker_allocation(self):
         for solution, loader, checkpoint, expected in (
-            ("ref", "week2", "capacity-cache", 257),
+            ("ref", "week2", "capacity-cache", None),
             ("tiny_llm", "week2", "kv-cache", None),
-            ("ref", "week2", None, 257),
+            ("ref", "week2", None, None),
             ("ref", "week3", None, None),
             ("ref", "week1", None, "other"),
             ("mlx", "week2", None, "other"),

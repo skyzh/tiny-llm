@@ -25,9 +25,9 @@ block table; the dense loading schedule cannot read paged state directly.
 
 This chapter combines four prerequisites:
 
-- [Week 2 Day 5](./week2-05-tiled-prefill-attention.md) introduced the
+- [Week 2 Day 6](./week2-06-tiled-prefill-attention.md) introduced the
   online-softmax recurrence for tiled dense prefill attention.
-- [Week 2 Day 3](./week2-03-simd-matrix-prefill.md) introduced cooperative
+- [Week 2 Day 4](./week2-04-simd-matrix-prefill.md) introduced cooperative
   SIMD-matrix fragments for quantized projection prefill.
 - Week 3 Day 3 introduced physical pages and block tables.
 - Week 3 Day 4 introduced direct page-walking attention and the decode
@@ -178,7 +178,7 @@ Complete the long-query selection in `PagedAttention::eval_gpu` in
 `tiny_llm_ext::paged_attention` and the Python `paged_attention` signature
 unchanged.
 
-Use the GPU-debugging ladder from Week 2 Day 3:
+Use the [GPU-debugging ladder from Week 2 Day 2](./week2-02-quantize-model.md#before-you-write-metal-how-to-debug-a-kernel):
 
 1. compare Day 4 page-walking attention with the readable equation written
    with `mlx.core`;

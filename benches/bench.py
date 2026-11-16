@@ -95,7 +95,7 @@ def parse_args() -> argparse.Namespace:
         "--week2-checkpoint",
         choices=(
             "kv-cache",
-            "capacity-cache",
+            "packed-weights",
             "quantized-matvec",
             "simd-matmul",
             "rmsnorm",
@@ -103,6 +103,7 @@ def parse_args() -> argparse.Namespace:
             "swiglu",
             "tiled-prefill",
             "selected",
+            "capacity-cache",  # Legacy alias for kv-cache.
         ),
         help="run one cumulative Week 2 end-to-end checkpoint",
     )

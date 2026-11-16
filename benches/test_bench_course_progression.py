@@ -98,19 +98,19 @@ def _assert_required_progression_is_profile_free(chapter: str, day: int) -> None
     assert optional_blocks, f"Day {day} must label its optional evidence"
 
 
-def test_week2_live_labels_follow_the_five_day_book():
+def test_week2_live_labels_follow_the_six_day_book():
     labels = {variant.key: variant.label for variant in WEEK2_VARIANTS}
     assert labels == {
         "week1": "Week 1 readable",
         "week2-kv-cache": "2.1 Reuse the prefix",
-        "week2-capacity-cache": "2.1 + Bound KV-cache movement",
-        "week2-quantized-matvec": "2.2 Keep W4 packed",
-        "week2-simd-matmul": "2.3 SIMD matrix prefill",
-        "week2-rmsnorm": "2.4 Compact RMSNorm",
-        "week2-rope": "2.4 + Compact RoPE",
-        "week2-swiglu": "2.4 + Compact SwiGLU",
-        "week2-tiled-prefill": "2.5 Tiled dense prefill attention",
-        "week2-selected": "2.5 + Run the selected inference engine",
+        "week2-packed-weights": "2.2 Keep W4 packed",
+        "week2-quantized-matvec": "2.3 Decode matvec",
+        "week2-simd-matmul": "2.4 SIMD matrix prefill",
+        "week2-rmsnorm": "2.5 Compact RMSNorm",
+        "week2-rope": "2.5 + Compact RoPE",
+        "week2-swiglu": "2.5 + Compact SwiGLU",
+        "week2-tiled-prefill": "2.6 Tiled dense prefill attention",
+        "week2-selected": "2.6 + Run the selected inference engine",
         "mlx": "MLX",
     }
 
@@ -119,20 +119,22 @@ def test_week2_live_labels_follow_the_five_day_book():
     for title in (
         "Day 1: KV Cache",
         "Day 2: Packed W4 Weights",
-        "Day 3: SIMD Prefill",
-        "Day 4: Fused Kernels",
+        "Day 3: Decode Matvec",
+        "Day 4: SIMD Prefill",
+        "Day 5: Fused Kernels",
     ):
         assert title in week2_summary
-    day5_doc = ROOT / "book/src/week2-05-tiled-prefill-attention.md"
+    day5_doc = ROOT / "book/src/week2-06-tiled-prefill-attention.md"
     if day5_doc.exists():
-        assert "Day 5: Tiled Attention" in week2_summary
-    assert len(re.findall(r"\[🚧 Day \d:", week2_summary)) == 4 + day5_doc.exists()
+        assert "Day 6: Tiled Attention" in week2_summary
+    assert len(re.findall(r"\[🚧 Day \d:", week2_summary)) == 6
 
     chapter_headings = {
         "week2-01-kv-cache.md": "# 🚧 Week 2 Day 1: KV Cache",
         "week2-02-quantize-model.md": "# 🚧 Week 2 Day 2: Packed W4 Weights",
-        "week2-03-simd-matrix-prefill.md": "# 🚧 Week 2 Day 3: SIMD Prefill",
-        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Kernels",
+        "week2-03-decode-matvec.md": "# 🚧 Week 2 Day 3: Decode Matvec",
+        "week2-04-simd-matrix-prefill.md": "# 🚧 Week 2 Day 4: SIMD Prefill",
+        "week2-05-fused-model-kernels.md": "# 🚧 Week 2 Day 5: Fused Kernels",
     }
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
@@ -140,8 +142,7 @@ def test_week2_live_labels_follow_the_five_day_book():
 
     if day5_doc.exists():
         assert (
-            day5_doc.read_text().splitlines()[0]
-            == "# 🚧 Week 2 Day 5: Tiled Attention"
+            day5_doc.read_text().splitlines()[0] == "# 🚧 Week 2 Day 6: Tiled Attention"
         )
 
     readme = (ROOT / "README.md").read_text()
@@ -151,13 +152,13 @@ def test_week2_live_labels_follow_the_five_day_book():
     for row in (
         "| 2.1 | KV Cache",
         "| 2.2 | Packed W4 Weights",
-        "| 2.3 | SIMD Prefill",
-        "| 2.4 | Fused Kernels",
+        "| 2.3 | Decode Matvec",
+        "| 2.4 | SIMD Prefill",
+        "| 2.5 | Fused Kernels",
     ):
         assert row in readme
     if day5_doc.exists():
-        assert "| 2.5 | Tiled Attention" in readme
-    assert "| 2.6 |" not in readme
+        assert "| 2.6 | Tiled Attention" in readme
     assert "| 2.7 |" not in readme
 
 
@@ -169,7 +170,7 @@ def test_week2_progression_checkpoints_parse_through_public_bench(monkeypatch):
     )
     assert checkpoints == (
         "kv-cache",
-        "capacity-cache",
+        "packed-weights",
         "quantized-matvec",
         "simd-matmul",
         "rmsnorm",
@@ -228,10 +229,10 @@ def test_week2_profile_boundary_is_optional_and_quantization_is_day_2():
     overview = (ROOT / "book/src/week2-overview.md").read_text()
 
     assert "--week2-checkpoint kv-cache" in day1
-    assert "--week2-checkpoint capacity-cache" in day1
+    assert "--week2-checkpoint packed-weights" in day2
     assert "pdm run test --week 2 --day 1" in day1
     assert "pdm run test --week 2 --day 2" in day2
-    assert "--week2-checkpoint quantized-matvec" in day2
+    assert "--week2-checkpoint packed-weights" in day2
     assert "optional capture" in overview
     assert "It is never an acceptance gate." in optional_capture
     scripts = (ROOT / "pyproject.toml").read_text()
@@ -245,21 +246,23 @@ def test_required_week2_progression_uses_portable_checks_not_local_capture():
         for day, filename in {
             1: "week2-01-kv-cache.md",
             2: "week2-02-quantize-model.md",
-            3: "week2-03-simd-matrix-prefill.md",
-            4: "week2-04-fused-model-kernels.md",
+            3: "week2-03-decode-matvec.md",
+            4: "week2-04-simd-matrix-prefill.md",
+            5: "week2-05-fused-model-kernels.md",
             **(
-                {5: "week2-05-tiled-prefill-attention.md"}
-                if (ROOT / "book/src/week2-05-tiled-prefill-attention.md").exists()
+                {6: "week2-06-tiled-prefill-attention.md"}
+                if (ROOT / "book/src/week2-06-tiled-prefill-attention.md").exists()
                 else {}
             ),
         }.items()
     }
     expected_checkpoints = {
-        1: ("kv-cache", "capacity-cache"),
-        2: ("quantized-matvec",),
-        3: ("simd-matmul",),
-        4: ("rmsnorm", "rope", "swiglu"),
-        5: ("tiled-prefill", "selected"),
+        1: ("kv-cache",),
+        2: ("packed-weights",),
+        3: ("quantized-matvec",),
+        4: ("simd-matmul",),
+        5: ("rmsnorm", "rope", "swiglu"),
+        6: ("tiled-prefill", "selected"),
     }
     for day, chapter in days.items():
         assert all(checkpoint in chapter for checkpoint in expected_checkpoints[day])

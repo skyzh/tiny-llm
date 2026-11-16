@@ -18,9 +18,7 @@ REQUEST_ELAPSED_SCOPE = (
 
 
 def request_cache_capacity(loader, checkpoint, request):
-    """Apply the taught prompt-plus-output bound only to bounded Week 2."""
-    if loader == "week2" and (checkpoint or "selected") != "kv-cache":
-        return len(request.prompt_token_ids) + request.max_new_tokens
+    """Default caches grow in chunks; request length is not an allocation bound."""
     return None
 
 

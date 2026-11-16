@@ -92,7 +92,30 @@ def main():
     test_refsol_parser.add_argument("--day", type=int, required=False)
     test_refsol_parser.add_argument("remainders", nargs="*")
     test_refsol_parser.set_defaults(test_refsol_parser=True)
+    for command in (test_parser, test_refsol_parser):
+        command.add_argument(
+            "--legacy-week2-days",
+            action="store_true",
+            help="use the previous five-day Week 2 numbering",
+        )
     args = parser.parse_args()
+    if getattr(args, "legacy_week2_days", False):
+        if args.week != 2 or args.day not in range(1, 6):
+            parser.error("--legacy-week2-days requires --week 2 --day 1..5")
+        # Old Day 2 spans the new packed and decode days; remaining days shift.
+        if args.day == 2:
+            status = (
+                test_refsol(
+                    argparse.Namespace(week=2, day=2, remainders=args.remainders)
+                )
+                if hasattr(args, "test_refsol_parser")
+                else test(argparse.Namespace(week=2, day=2, remainders=args.remainders))
+            )
+            if status:
+                return status
+            args.day = 3
+        elif args.day >= 3:
+            args.day += 1
     if hasattr(args, "copy_test_parser"):
         return copy_test(args, force=args.force)
     if hasattr(args, "test_parser"):

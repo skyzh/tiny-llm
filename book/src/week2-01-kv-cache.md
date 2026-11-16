@@ -17,13 +17,10 @@ than the one before, because the sequence it reprocesses keeps growing. No
 kernel you write later can make up for work that grows like that, so Week 2
 starts by removing it.
 
-Today you build two checkpoints:
-
-1. **`kv-cache`** keeps each layer's keys and values from earlier steps, so a
-   decode step sends only the newest token through the model.
-2. **`capacity-cache`** stores that cache in one buffer sized for the whole
-   request, so your code no longer concatenates the old cache with each new
-   token.
+Today you build one checkpoint, **`kv-cache`**. It keeps each layer's keys
+and values from earlier steps, so a decode step sends only the newest token
+through the model. The cache stores them in buffers with spare room that grow
+in 256-token chunks, so adding a token doesn't copy everything cached so far.
 
 You will write four pieces:
 
@@ -43,12 +40,11 @@ days do, so if you have not built it since Day 7, build it now:
 
 ```bash
 pdm run build-ext
-pdm run test --week 2 --day 1 -- -k 'not capacity'
+pdm run test --week 2 --day 1
 ```
 
-Those three tests cover the `kv-cache` checkpoint. They fail until you finish
-Tasks 1 to 3; rerun them after Task 4. The full day's tests come after the
-`capacity-cache` work.
+The day's tests fail until you finish the tasks below; each task names the
+focused filter to rerun.
 
 **📚 Readings**
 
@@ -132,40 +128,113 @@ src/tiny_llm/kv_cache.py
 Each transformer layer gets its own cache. Its `update_and_fetch` method:
 
 1. receives `K` and `V` for the incoming tokens, each shaped `B, H, L_new, D`;
-2. appends them along the sequence axis (axis 2);
-3. returns the full cached `K` and `V`, the new offset, and the mask.
+2. adds them after the tokens already cached, along the sequence axis (axis 2);
+3. returns the cached `K` and `V` so far, the new offset, and the mask.
 
 Pass `mask` through unchanged and ignore `mask_length` for now; Week 3 uses
 both when several requests share a batch.
 
-Start with the simplest version in `TinyKvFullCache`, used when `capacity` is
-`None`:
+The obvious version concatenates on every call:
 
 ```plain
-update_and_fetch(key, value, mask_length, mask) -> key, value, offset, mask
-
-if self.key_values is None:
-    self.key_values = (key, value)
-else:
-    cached_key, cached_value = self.key_values
-    self.key_values = (
-        concat(cached_key, key, axis=2),
-        concat(cached_value, value, axis=2),
-    )
-
-self.offset += L_new
-key, value = self.key_values   # B, H, offset, D
-return key, value, self.offset, mask
+self.key_values = (concat(cached_key, key, axis=2),
+                   concat(cached_value, value, axis=2))
 ```
 
-This works, but each `mx.concat` allocates a bigger buffer and copies
-everything already cached into it. Over `S` decode steps those copies add up to
-`O(S²)` bytes. That is still far cheaper than recomputing the model over the
-prefix, but it is not free. The starter's constructor already creates byte
-counters for this; add the size of the copied old K/V to
-`logical_copy_bytes`, `physical_growth_copy_bytes`, and `growth_copy_bytes`
-on each concatenation, so the benchmark can report it. The `capacity-cache`
-checkpoint later today removes the concatenation.
+It gives the right answer, and the tests use it as the reference. But each
+`concat` allocates a bigger buffer and copies everything already cached into
+it, so over `S` decode steps the copies add up to `O(S²)` bytes.
+
+`TinyKvFullCache` avoids most of that copying by keeping spare room. It stores
+K and V in buffers with more slots than it needs, writes new tokens into the
+free slots, and grows the buffers only when an append does not fit. It then
+grows them to the next multiple of `growth_step` (256 by default), so a long
+decode copies the cache once every 256 tokens instead of once per token. This
+is how mlx-lm's own `KVCache` works.
+
+Two numbers now matter, and they are different:
+
+```text
+physical storage: [token 0][token 1][unused] ... [unused]   (256 slots)
+logical prefix:   [token 0][token 1]
+offset = 2, allocated_capacity = 256
+```
+
+`allocated_capacity` is how many slots exist. `offset` is how many hold real
+tokens. Attention must see only the first `offset` slots: if it sees the
+unused tail, it attends to zeros that are not part of the sequence.
+
+Implement these in `TinyKvFullCache`:
+
+- `allocated_capacity`: the number of slots in the storage, or 0 before the
+  first append.
+- `_logical_key_values`: `storage[:, :, :offset, :]` for both keys and values.
+  Never work out the logical length from the storage's shape.
+- `update_and_fetch`, on every append:
+  1. compute `end = offset + L_new`;
+  2. if `end` is past the allocated slots, allocate zeroed storage rounded up
+     to the next multiple of `growth_step`, and copy the existing logical
+     prefix into its start;
+  3. write the new K and V into slots `offset` to `end` with `mx.slice_update`
+     on axis 2;
+  4. set `offset = end` and return the logical prefix.
+
+Whether `mx.slice_update` then updates the buffer in place or copies it first
+is up to MLX: it reuses the buffer when MLX can donate it to the result. Your
+code no longer asks for a copy on every token, but nothing in this chapter
+measures which case happens on the GPU.
+
+```bash
+pdm run test --week 2 --day 1 -- -k 'task_1 or chunk_growth_returns'
+```
+
+<a id="make-movement-observable"></a>
+
+### Count What Moves
+
+The starter's constructor creates four byte counters. Keep them up to date:
+
+| Counter | What it counts |
+|---|---|
+| `logical_copy_bytes` | Old K/V copied into new storage when the cache grows |
+| `physical_growth_copy_bytes` | The same copies, counted as storage growth |
+| `slice_write_bytes` | New K/V written, one append at a time |
+| `growth_copy_bytes` | Older name for the growth-copy total |
+
+These are bookkeeping counts kept by your Python code: what it asked to copy
+and what it asked to write. They do not observe what the GPU actually moves,
+and they don't tell you whether a whole request got faster; only a timed,
+matched comparison does.
+
+<a id="reset-and-rewind-without-leaking-a-suffix"></a>
+
+### Rewind, Reset and an Optional Bound
+
+`rewind(n)` drops the newest `n` tokens by lowering `offset`. Raise
+`ValueError` if `n` is negative, larger than `offset`, or not an `int`. The
+next append may overwrite the abandoned slots, but attention must never see
+slots past the new offset. Speculative decoding in Week 3 uses this to throw
+away rejected draft tokens.
+
+`reset()` sets the logical length back to zero and keeps the allocated
+storage for reuse. The counters are totals over the cache's lifetime and are
+not cleared by rewind or reset, so subtract before-and-after values when you
+want numbers for one request.
+
+A caller may also pass `capacity=N`. That is a hard upper bound, not a
+request to allocate `N` slots up front: if an append would end past `N`, raise
+`ValueError` with a message that includes `capacity N exceeded`, before
+changing anything, and never grow the storage past `N`. Most of the course
+leaves `capacity` as `None`, because a server can't know in advance how many
+tokens a request will generate. Tests use the bound to check that a rejected
+append leaves the cache exactly as it was.
+
+```bash
+pdm run test --week 2 --day 1 -- -k 'rewind or overflow'
+```
+
+These tests append, rewind, append again, then overflow on purpose,
+checking each time that only the right tokens are visible.
 
 ## Task 2: Build the Cached Week 2 Model
 
@@ -206,7 +275,7 @@ not the precision: the model still stores BF16 weights and activations.
 
 Every later Week 2 day builds on this model. It selects features through its
 `checkpoint` argument (see `WEEK2_CHECKPOINT_FEATURES` in the same file); today
-you need `kv-cache` and, later, `capacity-cache`.
+you need `kv-cache`.
 
 ## Task 3: Create Request-Scoped Caches
 
@@ -220,11 +289,11 @@ Pass layer `i`'s cache to layer `i`. Two requests must never share cache
 objects.
 
 ```bash
-pdm run test --week 2 --day 1 -- -k 'not capacity'
+pdm run test --week 2 --day 1 -- -k tasks_2_and_3
 ```
 
-These tests append chunks to a cache, check that prefill-then-decode gives the
-same last-row logits as running the full sequence at once, and check that a
+This test checks that prefill-then-decode gives the same last-row logits as
+running the full sequence at once. A separate `task_3` test checks that a
 mismatched offset raises `ValueError`.
 
 ## Task 4: Connect the Serving Loop
@@ -276,170 +345,12 @@ pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 \
 Week 1 always computes logits for every prompt position, so this comparison
 uses `--prefill-logits all` for both rows. That makes it a fair comparison of
 the two algorithms, but not a measurement of a serving setup, which needs only
-the last logit. Keep `week2-day1-cache.json`; the capacity checkpoint below
-adds to it. The speedup you see depends on your machine, so record it rather
+the last logit. Keep `week2-day1-cache.json`. The speedup you see depends on your machine, so record it rather
 than expecting a particular number.
 
-## Second Checkpoint: Bound the Request Cache
-
-`kv-cache` removed the repeated model work, but every append still asks for a
-bigger buffer and concatenates the old K/V into it. The alternative is to
-size the storage once.
-
-The generation loop knows how long a request can get: the prompt length plus
-`max_tokens`. If each layer's cache allocates that much space up front, an
-append only has to describe a write of the new tokens into the next free
-slots. Whether the GPU then updates that buffer in place or copies it first is
-up to MLX: `mx.slice_update` reuses the existing buffer when MLX can donate it
-to the result, and copies it otherwise. Your code no longer asks for the
-copy, but nothing in this chapter measures which case happens.
-
-With storage sized up front, two numbers matter, and they are different:
-
-```text
-physical storage: [token 0][token 1][unused][unused]
-logical prefix:   [token 0][token 1]
-offset = 2, capacity = 4
-```
-
-The **capacity** is how many slots exist. The **offset** is how many hold real
-tokens. Attention must see only the first `offset` slots. If it sees the unused
-tail, it attends to zeros that are not part of the sequence.
-
-Allocating the full request up front can raise peak memory for some shapes,
-in exchange for removing the repeated concatenation. The `capacity-cache` checkpoint
-keeps the same serving loop and the same Week 1 operators; only the cache's
-storage changes.
-
 <a id="first-diagnostic-hide-unused-capacity"></a>
-
-### Show Only the Logical Prefix
-
-Start with the failing test:
-
-```bash
-pdm run test --week 2 --day 1 -- -k logical_prefix
-```
-
-It points at `_logical_key_values` or the capacity branch of
-`update_and_fetch`. For storage shaped `B, H, capacity, D`,
-`_logical_key_values` returns `storage[:, :, :offset, :]` for both keys and
-values. Never work out the logical length from the storage's shape.
-
 <a id="allocate-from-the-request-bound"></a>
-
-### Allocate from the Request's Limit
-
-When `capacity` is set, on every append:
-
-1. compute `end = offset + L_new`;
-2. if `end > capacity`, raise `ValueError` with a message that includes
-   `capacity N exceeded` (N is the capacity), before changing anything;
-3. on the first append, allocate zeroed K and V storage with room for
-   `capacity` tokens;
-4. write the new K and V into slots `offset` to `end` with `mx.slice_update`
-   on axis 2, and add their size to `slice_write_bytes`;
-5. set `offset = end`;
-6. return the logical prefix.
-
-Because the check comes first, a rejected append leaves the cache exactly as
-it was, and the caller can still use it.
-
-Then wire the limit through. The model constructor has a
-`use_bounded_kv_capacity` argument; when it is `None`, take the value from the
-checkpoint's `bounded_kv_capacity` feature (true for `capacity-cache` and every
-later checkpoint), and store it on the model as `use_bounded_kv_capacity`. In
-`simple_generate_with_kv_cache`, use the caller's `use_bounded_kv_capacity`
-if given, otherwise the model's, and when it is true create the caches with
-`capacity = len(prompt tokens) + max_tokens`. The capacity belongs to this
-request only, and the cache must never grow past it.
-
-<a id="make-movement-observable"></a>
-
-### Count What Moves
-
-The cache keeps four byte counters:
-
-| Counter | What it counts | With `capacity-cache` |
-|---|---|---|
-| `logical_copy_bytes` | Old K/V copied by concatenation | stays zero |
-| `physical_growth_copy_bytes` | Old K/V copied while storage grows | stays zero |
-| `slice_write_bytes` | New K/V written | grows by each append's K/V size |
-| `growth_copy_bytes` | Older name for the growth-copy total | stays zero |
-
-These are bookkeeping counts kept by your Python code: what it asked to
-concatenate and what it asked to write. They do not observe what the GPU
-actually copies, so zero growth bytes means your code stopped concatenating,
-not that no copy happened underneath. They also do not tell you whether a
-whole request got faster or used less memory; only a timed, matched
-comparison does.
-
-<a id="reset-and-rewind-without-leaking-a-suffix"></a>
-
-### Rewind and Reset
-
-`rewind(n)` drops the newest `n` tokens by lowering `offset`. Raise
-`ValueError` if `n` is negative, larger than `offset`, or not an `int`. The
-next append may overwrite the abandoned slots, but attention must never see
-slots past the new offset. Speculative decoding in Week 3 uses this to throw
-away rejected draft tokens.
-
-`reset()` sets the logical length back to zero. With a capacity, keep the
-allocated storage for reuse; without one, drop it. The counters are totals
-over the cache's lifetime and are not cleared by rewind or reset, so subtract
-before-and-after values when you want numbers for one request.
-
-```bash
-pdm run test --week 2 --day 1 -- -k 'rewind or overflow'
-```
-
-This test appends, rewinds, appends again, then overflows on purpose,
-checking each time that only the right tokens are visible. It catches caches
-that show unused slots or change state before rejecting an append.
-
 <a id="complete-the-capacity-cache-checkpoint"></a>
-
-### Finish `capacity-cache`
-
-```bash
-pdm run test --week 2 --day 1
-pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint capacity-cache --model qwen3-0.6b --max-tokens 16
-```
-
-If you cannot get bounded storage working, `kv-cache` is still a correct
-fallback: same algorithm, same model, just with concatenation. Fall back to it
-rather than let attention see unused storage.
-
-## Compare the Two Cache Checkpoints
-
-For a quick look, run both checkpoints with the same prompt and output limit:
-
-```bash
-/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint kv-cache --model qwen3-0.6b --max-tokens 16
-/usr/bin/time -p pdm run main --solution tiny_llm --loader week2 \
-  --week2-checkpoint capacity-cache --model qwen3-0.6b --max-tokens 16
-```
-
-These times include process startup, so they are rough. For separate prefill
-and decode numbers over repeated fresh runs, add the capacity checkpoint to
-the earlier comparison, using the same model, lengths, warmup, and logit mode,
-and save it to a new file so the first result stays intact:
-
-```bash
-pdm run bench-week2-progression --offline --solution tiny_llm --suite week2 \
-  --repeats 2 --variant week1 --variant week2-kv-cache \
-  --variant week2-capacity-cache --model qwen3-0.6b \
-  --input-len 128 --output-len 129 --warmup 2 \
-  --prefill-logits all --json-output week2-day1-cache-ladder.json
-```
-
-Compare it with `week2-day1-cache.json` only if the recorded workload and
-device match. One older run of this change, with earlier course code, saw
-peak memory rise by 88.0 MiB (2.276%) at a 2,048-token prompt with 512 output
-tokens. That is the trade-off described above, shown on one machine, not a
-result for your checkout.
 
 ## Benchmark the Cached Model
 
@@ -474,7 +385,7 @@ your solution and MLX. The required baseline uses the 0.6B model from setup:
 
 ```bash
 pdm run bench --solution tiny_llm --loader week2 \
-  --week2-checkpoint capacity-cache --model qwen3-0.6b \
+  --week2-checkpoint kv-cache --model qwen3-0.6b \
   --num-seqs 1 --min-input-len 128 --max-input-len 128 \
   --min-output-len 65 --max-output-len 65 --warmup 2 \
   --prefill-logits last
@@ -491,7 +402,7 @@ reference solution instead of MLX. Or run both rows in fresh processes:
 ```bash
 pdm run bench-week2-progression --offline --repeats 2 \
   --solution tiny_llm --suite week2 \
-  --variant week2-capacity-cache --variant mlx \
+  --variant week2-kv-cache --variant mlx \
   --model qwen3-0.6b --input-len 128 --output-len 129 --warmup 2 \
   --prefill-logits last --json-output week2-day1-baseline.json
 ```
@@ -511,7 +422,7 @@ variants are within that noise, rerun them before you draw a conclusion.
 
 ### Read the Result
 
-Look at three things in the `capacity-cache` row:
+Look at three things in the `kv-cache` row:
 
 - **Which phase is larger.** With 128 prompt tokens and 129 output tokens,
   one prefill pass produces the first token and 128 one-token decode steps
@@ -571,11 +482,11 @@ operators, one group at a time:
 
 ```bash
 pdm run profile-week2-kernels --solution tiny_llm --model qwen3-0.6b \
-  --case capacity-cache:decode:128 --warmup 4 --iterations 12 \
+  --case kv-cache:decode:128 --warmup 4 --iterations 12 \
   --json-output week2-day1-attribution.json
 ```
 
-Here is what that case means. `capacity-cache:decode:128` replays one decode
+Here is what that case means. `kv-cache:decode:128` replays one decode
 step that ends with **S = 128** tokens in the cache: the first 127 tokens are
 put in the cache before timing starts, and the timed step adds one more at
 position 127. The profiler builds this from the loaded Qwen weights and your
@@ -598,10 +509,9 @@ of each:
 
 A few options shape the replay, and the output records all of them:
 
-- `--cache-capacity C` sets the bound for checkpoints that use a bounded
-  cache. It defaults to `C = S`, just enough for this one replayed step, which
-  is smaller than the prompt-plus-output bound a real request would use.
-  `C` must be at least `S`. `kv-cache` always uses an unbounded cache.
+- `--cache-capacity C` gives the replayed cache an explicit bound, which
+  must be at least `S`. Without it, the cache has no bound and grows in
+  chunks, as it does in your model.
 - `--prefill-logits last|all` decides how many rows go through the final norm
   and output head in a prefill case; it defaults to `last`. A decode case
   always uses one row.
@@ -718,7 +628,7 @@ course uses BF16.
 One floating-point operation per byte means the GPU spends most of each decode
 step waiting for weights. The checkpoint on disk already stores them in 4 bits.
 [Day 2](./week2-02-quantize-model.md) keeps them that way in memory. Save your
-`capacity-cache` benchmark result: it is Day 2's control.
+`kv-cache` benchmark result: it is Day 2's control.
 
 <a id="look-inside-the-gpu"></a>
 
@@ -757,29 +667,30 @@ mkdir -p out
 
 MTL_CAPTURE_ENABLED=1 pdm run capture-week2 \
   --solution tiny_llm --model qwen3-0.6b \
-  --checkpoint capacity-cache --phase decode --tokens 128 \
+  --checkpoint kv-cache --phase decode --tokens 128 \
   --prefill-logits last \
-  --trace out/capacity-cache-decode-128.gputrace \
-  --metadata out/capacity-cache-decode-128.capture.json \
-  --manifest out/capacity-cache-decode-128.trace-manifest.sha256
+  --trace out/kv-cache-decode-128.gputrace \
+  --metadata out/kv-cache-decode-128.capture.json \
+  --manifest out/kv-cache-decode-128.trace-manifest.sha256
 
-gpudebug --json -t out/capacity-cache-decode-128.gputrace --timeout 1800 \
+gpudebug --json -t out/kv-cache-decode-128.gputrace --timeout 1800 \
   -c 'profile run --gpu-state default --exec serial' \
-  > out/capacity-cache-decode-128.profile.jsonl
+  > out/kv-cache-decode-128.profile.jsonl
 
 pdm run reduce-week2-gpudebug \
-  --capture-metadata out/capacity-cache-decode-128.capture.json \
-  --manifest out/capacity-cache-decode-128.trace-manifest.sha256 \
-  --profile-jsonl out/capacity-cache-decode-128.profile.jsonl \
-  --output out/capacity-cache-decode-128.gpudebug.json
+  --capture-metadata out/kv-cache-decode-128.capture.json \
+  --manifest out/kv-cache-decode-128.trace-manifest.sha256 \
+  --profile-jsonl out/kv-cache-decode-128.profile.jsonl \
+  --output out/kv-cache-decode-128.gpudebug.json
 ```
 
 The capture helper compiles and warms the shape first, so the trace holds one
 steady-state region rather than start-up work. Its logit setting defaults to
 `all` for older captures, so pass `--prefill-logits last` to match the
-benchmark and replay above. The cache bound defaults to the context length,
-as in the replay. Later days can capture their own checkpoints the same way,
-by changing `--checkpoint`.
+benchmark and replay above. For `kv-cache` the captured cache has no bound,
+as in your model. Later days can capture their own checkpoints the same way,
+by changing `--checkpoint`; for those the helper bounds the cache at the
+context length unless you pass `--cache-capacity`.
 
 Trace packages can be large: check free disk space before you start. Once you
 have kept the reduced JSON, you can delete the `.gputrace` package and the raw

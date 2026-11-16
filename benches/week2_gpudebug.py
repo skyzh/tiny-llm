@@ -19,7 +19,7 @@ PROMPT_RULE = "synthetic-token-ids"
 PREFILL_LOGITS = "all"
 KNOWN_CHECKPOINTS = (
     "kv-cache",
-    "capacity-cache",
+    "packed-weights",
     "quantized-matvec",
     "simd-matmul",
     "rmsnorm",
@@ -442,7 +442,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     capture_parser.add_argument("--model", required=True)
     capture_parser.add_argument(
-        "--checkpoint", required=True, choices=KNOWN_CHECKPOINTS
+        "--checkpoint", required=True, choices=(*KNOWN_CHECKPOINTS, "capacity-cache")
     )
     capture_parser.add_argument("--phase", required=True, choices=("decode", "prefill"))
     capture_parser.add_argument("--tokens", required=True, type=int)
@@ -467,6 +467,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    if getattr(args, "checkpoint", None) == "capacity-cache":
+        args.checkpoint = "kv-cache"
     if hasattr(args, "tokens") and args.tokens <= 0:
         parser.error("--tokens must be positive")
     if (

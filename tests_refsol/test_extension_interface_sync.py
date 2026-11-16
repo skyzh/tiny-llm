@@ -11,10 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 INTERFACES = {
     "quantized_matmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
-    "rms_norm": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "rope": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "swiglu": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "_dense_attention_prefill_mma": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "rms_norm": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "rope": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "swiglu": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "_dense_attention_prefill_mma": ("Week 2, Day 6", "week2_kernels.cpp"),
     "paged_cache_update": ("Week 3, Day 3", "paged_attention.cpp"),
     "quantized_embedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "paged_attention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -22,10 +22,10 @@ INTERFACES = {
 
 PRIMITIVE_CLASSES = {
     "QuantizedMatmul": ("Week 2, Day 2", "quantized_matmul.cpp"),
-    "Week2RMSNorm": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2RoPE": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2SwiGLU": ("Week 2, Day 4", "week2_kernels.cpp"),
-    "Week2DensePrefillMMA": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2RMSNorm": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2RoPE": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2SwiGLU": ("Week 2, Day 5", "week2_kernels.cpp"),
+    "Week2DensePrefillMMA": ("Week 2, Day 6", "week2_kernels.cpp"),
     "PagedCacheUpdate": ("Week 3, Day 3", "paged_attention.cpp"),
     "QuantizedEmbedding": ("Week 3, Day 4", "quantized_matmul.cpp"),
     "PagedAttention": ("Week 3, Day 4", "paged_attention.cpp"),
@@ -34,15 +34,15 @@ PRIMITIVE_CLASSES = {
 METAL_CHECKPOINTS = {
     "quantized_matmul.metal": {
         "quantized_matmul_vanilla_w4a16_g128": "Week 2, Day 2",
-        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 2",
-        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 3",
+        "quantized_matvec_x4_fast_w4a16_g128": "Week 2, Day 3",
+        "quantized_matmul_simdgroup_w4a16_g128": "Week 2, Day 4",
         "quantized_embedding_w4a16_g128": "Week 3, Day 4",
     },
     "week2_kernels.metal": {
-        "week2_rms_norm_register_cached": "Week 2, Day 4",
-        "week2_rope": "Week 2, Day 4",
-        "week2_swiglu": "Week 2, Day 4",
-        "week2_dense_prefill_mma_bf16_d128": "Week 2, Day 5",
+        "week2_rms_norm_register_cached": "Week 2, Day 5",
+        "week2_rope": "Week 2, Day 5",
+        "week2_swiglu": "Week 2, Day 5",
+        "week2_dense_prefill_mma_bf16_d128": "Week 2, Day 6",
     },
     "paged_attention.metal": {
         "paged_cache_update_kernel": "Week 3, Day 3",
@@ -59,11 +59,15 @@ DOC_TASK_MARKERS = {
         "Task 3": {
             "QuantizedMatmul::eval_gpu",
             "quantized_matmul_vanilla_w4a16_g128",
-            "quantized_matvec_x4_fast_w4a16_g128",
         },
         "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MultiHeadAttention.__call__"},
     },
-    "book/src/week2-04-fused-model-kernels.md": {
+    "book/src/week2-03-decode-matvec.md": {
+        "Task 1": {"quantized_matvec_x4_fast_w4a16_g128", "QuantizedMatmul::eval_gpu"},
+        "Task 2": {"quantized_matvec_custom", "quantized_linear"},
+        "Task 3": {"Qwen3ModelWeek2.__init__"},
+    },
+    "book/src/week2-05-fused-model-kernels.md": {
         "Task 1": {
             "tiny_llm_ext::rms_norm",
             "Week2RMSNorm::eval_gpu",
@@ -73,7 +77,7 @@ DOC_TASK_MARKERS = {
         "Task 3": {"tiny_llm_ext::swiglu", "Week2SwiGLU::eval_gpu", "week2_swiglu"},
         "Task 4": {"Qwen3ModelWeek2.__init__", "Qwen3MLP.__call__"},
     },
-    "book/src/week2-03-simd-matrix-prefill.md": {
+    "book/src/week2-04-simd-matrix-prefill.md": {
         "Task 1": {"quantized_matmul_simdgroup_w4a16_g128"},
         "Task 2": {"QuantizedMatmul::eval_gpu"},
     },
@@ -133,13 +137,15 @@ EXTENSION_TASK_PAIRS = {
                 "src/extensions/src/quantized_matmul.metal",
                 "quantized_matmul_vanilla_w4a16_g128",
             ),
-            (
-                "src/extensions/src/quantized_matmul.metal",
-                "quantized_matvec_x4_fast_w4a16_g128",
-            ),
         },
     },
-    "book/src/week2-04-fused-model-kernels.md": {
+    "book/src/week2-03-decode-matvec.md": {
+        "Task 1": {
+            ("src/extensions/src/quantized_matmul.metal", "quantized_matvec_x4_fast_w4a16_g128"),
+            ("src/extensions/src/quantized_matmul.cpp", "QuantizedMatmul::eval_gpu"),
+        },
+    },
+    "book/src/week2-05-fused-model-kernels.md": {
         "Task 1": {
             ("src/extensions/src/week2_kernels.cpp", "tiny_llm_ext::rms_norm"),
             ("src/extensions/src/week2_kernels.cpp", "Week2RMSNorm::eval_cpu"),
@@ -162,7 +168,7 @@ EXTENSION_TASK_PAIRS = {
             ("src/extensions/src/week2_kernels.metal", "week2_swiglu"),
         },
     },
-    "book/src/week2-03-simd-matrix-prefill.md": {
+    "book/src/week2-04-simd-matrix-prefill.md": {
         "Task 1": {
             (
                 "src/extensions/src/quantized_matmul.metal",
@@ -544,13 +550,13 @@ def test_optional_future_interfaces_do_not_leak_into_earlier_checkpoints():
 def test_cpp_fail_closed_guard_rejects_a_fake_success_body():
     source = _read("src/extensions/src/week2_kernels.cpp")
     fake_success = source.replace(
-        'checkpoint_todo("rms_norm", "Week 2, Day 4");',
+        'checkpoint_todo("rms_norm", "Week 2, Day 5");',
         "return mx::zeros({1});",
         1,
     )
     assert fake_success != source
     with pytest.raises(AssertionError):
-        _assert_checkpoint_call(fake_success, "rms_norm", "Week 2, Day 4")
+        _assert_checkpoint_call(fake_success, "rms_norm", "Week 2, Day 5")
 
 
 def test_built_starter_extension_fails_closed_for_every_public_operation(monkeypatch):
@@ -620,7 +626,7 @@ def test_day_3_metal_guard_rejects_a_missing_simd_matmul_kernel():
         _assert_metal_checkpoint_marker(
             missing_kernel,
             "quantized_matmul_simdgroup_w4a16_g128",
-            "Week 2, Day 3",
+            "Week 2, Day 4",
         )
 
 

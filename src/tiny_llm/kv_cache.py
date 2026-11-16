@@ -82,14 +82,17 @@ class BatchingKvCache(TinyKvCache):
 
 
 class TinyKvFullCache(TinyKvCache):
-    def __init__(self, capacity: int | None = None):
+    def __init__(self, capacity: int | None = None, growth_step: int = 256):
         if capacity is not None and (
             not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 0
         ):
             raise ValueError("capacity must be a non-negative integer or None")
+        if type(growth_step) is not int or growth_step <= 0:
+            raise ValueError("growth_step must be a positive integer")
         self.key_values = None
         self.offset = 0
         self.capacity = capacity
+        self.growth_step = growth_step
         self.logical_copy_bytes = 0
         self.physical_growth_copy_bytes = 0
         self.slice_write_bytes = 0
@@ -98,6 +101,11 @@ class TinyKvFullCache(TinyKvCache):
     @property
     def uses_capacity(self) -> bool:
         return self.capacity is not None
+
+    @property
+    def allocated_capacity(self) -> int:
+        """Number of allocated slots; distinct from the optional hard bound."""
+        pass
 
     def _logical_key_values(self) -> tuple[mx.array, mx.array]:
         """Return only initialized tokens, never the unused physical tail."""
@@ -116,7 +124,7 @@ class TinyKvFullCache(TinyKvCache):
         pass
 
     def reset(self):
-        """Reset logical length while retaining bounded physical storage."""
+        """Reset logical length while retaining the allocated chunks."""
         pass
 
     def rewind(self, n: int):

@@ -4,8 +4,8 @@ This appendix has two parts. The first section below is the most recent
 measurement of the finished Week 2 reference against MLX. Everything after it
 is **historical**: measurements of earlier course code that decided the course
 order, kept so you can see why each optimization is where it is. The
-[current Week 2 route](./week2-overview.md) ships Days 1–5, ending at
-[tiled dense attention and `selected`](./week2-05-tiled-prefill-attention.md).
+[current Week 2 route](./week2-overview.md) ships Days 1–6, ending at
+[tiled dense attention and `selected`](./week2-06-tiled-prefill-attention.md).
 
 ## Current Week 2 Reference Against MLX
 
@@ -72,7 +72,7 @@ versions will change the results.
 
 The Week 2 chapters use `pdm run profile-week2-kernels` to see which kind of
 work dominates a step. The current profiler is a **public-operator replay**:
-for a case such as `capacity-cache:decode:128`, it replays one step ending at
+for a case such as `kv-cache:decode:128`, it replays one step ending at
 128 cached tokens through the public operators that checkpoint selects and
 through the solution's own cache, one group at a time. Its results (schema 3,
 `profile_kind` `public-operator-replay`) record:
@@ -307,7 +307,7 @@ balanced synchronized iterations. With n=2, product medians can reject a
 large contradiction; they cannot turn a sub-percent change into a portable
 claim.
 
-To apply the method on the current five-day checkout, use its live checkpoint
+To apply the method on the current six-day checkout, use its live checkpoint
 selectors and fresh user-owned output files. These commands produce new
 measurements; they do not reproduce the historical results below:
 
@@ -470,7 +470,7 @@ The projection boundary must be fixed before interpreting any Week 3 table:
 
 Task #360 and task #367 answer different questions. The former is a causal
 ablation; the latter is representative absolute evidence for predecessor
-`18aec850`, not today's five-day Week 2 baseline. Do not
+`18aec850`, not today's six-day Week 2 baseline. Do not
 splice one campaign's absolute values into the other or credit its projection
 gain to paging, FlashAttention, or scheduling.
 
@@ -561,7 +561,7 @@ The predecessor's 8K static run remains a secondary kernel diagnostic, not a
 current Week 3 headline or acceptance result. At that shape, its Week 3 seam
 plus course paged path raised prefill from the former Week 2 Split-K path's
 323.96 to 463.69 tok/s, a 43.1% gain, and reached 72.5% of the 639.73 tok/s
-full-MLX row. The old Week 2 denominator is not today's five-day `selected`
+full-MLX row. The old Week 2 denominator is not today's six-day `selected`
 checkpoint; a current percentage needs a fresh matched run. This does not
 isolate the projection seam, measure request turnover or admission capacity,
 or establish long-context support. One-token decode continues to dispatch to
@@ -634,7 +634,7 @@ checkpoint and reason from the portable artifact.
 ## Historical Optimization Map
 
 This map records the predecessor course's seven-day Week 2 sequence. Its Day
-5–7 labels do not name the [active five-day route](./week2-overview.md).
+5–7 labels do not name the [active six-day route](./week2-overview.md).
 
 | Measured bottleneck | Retained change | Chapter |
 |---|---|---|

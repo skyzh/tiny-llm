@@ -156,8 +156,8 @@ class PublicContractTests(unittest.TestCase):
                 selected()
                 self.assertEqual(calls[-1], expected)
         self.assertEqual(adapter.packed_weight_options(features(simdgroup_matmul=True)),
-                         {"use_simdgroup_matmul": True})
-        self.assertEqual(adapter.packed_weight_options(features()), {"use_simdgroup_matmul": False})
+                         {"use_simdgroup_matmul": True, "use_simdgroup_matvec": False})
+        self.assertEqual(adapter.packed_weight_options(features()), {"use_simdgroup_matmul": False, "use_simdgroup_matvec": False})
 
     def test_runtime_registry_namespaces_are_injected_without_importing_a_backend(self):
         for solution in ("tiny_llm", "tiny_llm_ref"):

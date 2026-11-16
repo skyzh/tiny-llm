@@ -14,7 +14,7 @@ ROOT = gpu.ROOT
 def test_capture_parser_exposes_only_current_week2_checkpoints(monkeypatch, capsys):
     assert gpu.KNOWN_CHECKPOINTS == (
         "kv-cache",
-        "capacity-cache",
+        "packed-weights",
         "quantized-matvec",
         "simd-matmul",
         "rmsnorm",

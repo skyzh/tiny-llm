@@ -52,6 +52,9 @@
         <loc>https://skyzh.github.io/tiny-llm/week2-02-quantize-model</loc>
     </url>
     <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-03-decode-matvec</loc>
+    </url>
+    <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-03-quantize-model</loc>
     </url>
     <url>
@@ -61,7 +64,13 @@
         <loc>https://skyzh.github.io/tiny-llm/week2-04-fused-model-kernels</loc>
     </url>
     <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-04-simd-matrix-prefill</loc>
+    </url>
+    <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-05-decode-attention</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-05-fused-model-kernels</loc>
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-05-simd-matrix-prefill</loc>
@@ -74,6 +83,9 @@
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-06-simd-matrix-prefill</loc>
+    </url>
+    <url>
+        <loc>https://skyzh.github.io/tiny-llm/week2-06-tiled-prefill-attention</loc>
     </url>
     <url>
         <loc>https://skyzh.github.io/tiny-llm/week2-07-split-k-prefill</loc>
