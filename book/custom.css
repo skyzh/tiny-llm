@@ -99,3 +99,8 @@ pre {
 .chapter li.chapter-item:has(> .chapter-link-wrapper > a[href$="week2-advanced-profiling.html"]) {
     display: none;
 }
+
+/* The glossary is the last visible page; don't let its "next" button lead into the hidden pages. */
+a[rel~="next"][href$="week2-02-benchmark-profile.html"] {
+    display: none;
+}
