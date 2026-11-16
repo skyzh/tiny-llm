@@ -166,7 +166,7 @@ METAL_FUNC void course_fragment_multiply_accumulate(
 template <typename T, typename OutT, int TILE_STRIDE, int OUTPUT_ROWS = 32>
 struct CooperativeBlockMMA {
     static_assert(OUTPUT_ROWS == 32 || OUTPUT_ROWS == 64);
-    static constexpr int ROW_FRAGMENTS = OUTPUT_ROWS / 16;
+    enum : int { ROW_FRAGMENTS = OUTPUT_ROWS / 16 };
     float2 accumulators[ROW_FRAGMENTS][2];
     ushort simdgroup_index;
     ushort lane_index;
