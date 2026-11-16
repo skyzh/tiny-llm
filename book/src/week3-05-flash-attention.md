@@ -270,8 +270,7 @@ build is a separate comparison, not these numbers. Those are
 medians over six paired runs each; five of the six one-slot pairs and all six
 four-slot pairs favored the schedule. Peak MLX allocation did not change, and
 in a separate check on a 640-token prompt the logits and K/V matched the
-version without it exactly. The measurement
-covers the whole queue, not the time to each request's first token, and it is
+previous version exactly. The measurement covers the whole queue, not the time to each request's first token, and it is
 one machine and one workload.
 
 FlashAttention should matter more as prompts get longer, but treat that as a
