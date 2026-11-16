@@ -224,9 +224,9 @@ extension function.
 
 The Week 3 model should use the tiled paged path automatically for supported
 long prefills. Short queries continue through the vector paged-decode schedule.
-Neither path gathers a dense K/V tensor. The Week 3 model sends its
-projections to MLX, but the cache, paged attention, batching and scheduling are
-yours, so it is not the same as the full-MLX baseline.
+Neither path gathers a dense K/V tensor. Your Week 3 model sends its
+projections to MLX, while its cache, paged attention, batching and scheduling
+are yours, so it is not the same as the full-MLX baseline.
 
 The course does not yet have a benchmark that compares today's tiled schedule
 with Day 4's kernel on the same long BF16 prompts, changing nothing else. The
@@ -250,6 +250,17 @@ pdm run bench-serving-progression --solution tiny_llm --offline --repeats 4 \
 
 This writes a new JSON file. To compare with the reference solution, rerun the
 same flags with `--solution ref` and a different file name.
+
+When you compare with `--solution ref` on Qwen3-4B, note that the reference
+has one extra MLP schedule. For a supported 256-token BF16 prefill chunk,
+its gate, up and down projections reuse each W4 weight tile across 64 rows
+instead of 32, using the same cooperative matrix code as Week 2. Decode,
+shorter last chunks and other model sizes, including the 0.6B model, take
+the ordinary path. Pass `use_mlp_prefill64=False` to the reference model to
+turn it off for a matched comparison. Your starter's constructors accept
+the same flag so shared callers work; you can ignore it. An earlier
+experiment with a different matrix implementation found this schedule
+faster, but that result does not carry over to this port.
 
 FlashAttention should matter more as prompts get longer, but treat that as a
 hypothesis until a matched benchmark measures it. It does not replace Day 4's

@@ -43,6 +43,7 @@ class Qwen3MLP:
         w_gate: QuantizedWeights,
         w_up: QuantizedWeights,
         w_down: QuantizedWeights,
+        use_mlp_prefill64: bool = True,
     ):
         pass
 
@@ -94,6 +95,7 @@ class Qwen3ModelWeek3:
         page_size: int = 128,
         enable_paged_attention: bool = True,
         use_mlx_quantized_linear: bool = True,
+        use_mlp_prefill64: bool = True,
     ):
         self.num_hidden_layers = mlx_model.args.num_hidden_layers
         pass
