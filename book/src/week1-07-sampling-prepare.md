@@ -61,8 +61,8 @@ The complete non-greedy order is:
 `None` or a non-positive value disables its corresponding filter.
 `top_k == vocab_size` and `top_p == 1` leave the vocabulary unfiltered. The
 existing implementation raises `ValueError` when `top_k` is larger than the
-vocabulary; inputs outside these boundaries are not part of this lesson's
-contract.
+vocabulary. The tests don't cover other out-of-range inputs, so you don't need
+to handle them.
 
 Run the deterministic, no-download checkpoint first:
 

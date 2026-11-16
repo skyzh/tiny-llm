@@ -19,17 +19,17 @@ your code. Day 7 adds sampling and prepares the toolchain for Week 2.
 
 ## Model and Precision
 
-We will use `Qwen/Qwen3-0.6B-MLX-4bit`. The course model uses BF16 weights and
-activations by default, so start with the 0.6B model before trying larger Qwen3
-models. The required model path runs on the GPU. Small operator fixtures may
-use a different dtype as a readable correctness reference; they do not define
-the model-storage dtype.
+We will use `Qwen/Qwen3-0.6B-MLX-4bit`. Your model runs on the GPU and stores
+its weights and activations in BF16, a 16-bit floating-point format. Start with
+the 0.6B model; larger Qwen3 models need more memory. Some tests use small
+inputs in other dtypes, because they are easier to check by hand; that does not
+change the dtype your model uses.
 
-Numerically sensitive operations may promote arithmetic to FP32 and cast the
-result back to BF16. Week 1 favors readable array expressions, even when that
-means materializing an FP32 intermediate. Week 2 replaces those full-tensor
-promotions with kernels that keep model-sized storage in BF16 and accumulate in
-FP32 registers.
+A few operations, such as attention and RMSNorm, lose accuracy in BF16. For
+those, your code converts to FP32, does the arithmetic, and converts the result
+back to BF16. Week 1 keeps this simple and readable, even though it creates a
+full FP32 copy of the tensor. In Week 2 you write kernels that keep the tensors
+in BF16 and use FP32 only inside the kernel's registers.
 
 ## What We Will Cover
 
