@@ -1,4 +1,4 @@
-# 🚧 Week 2 Day 1: Reuse the Prefix, Then Bound the Cache
+# 🚧 Week 2 Day 1: KV Cache
 
 Watch how your Week 1 model generates text. Every step feeds it the whole
 sequence so far:
@@ -496,12 +496,50 @@ pdm run bench-week2-progression --offline --repeats 2 \
   --prefill-logits last --json-output week2-day1-baseline.json
 ```
 
+Keep `week2-day1-baseline.json`. Every later day compares against a saved
+result like it, on the same model, prompt length, output length and logit
+setting. The `mlx` row is a separate full model, there to show scale; it is
+not your control.
+
 Run benchmarks on an otherwise idle machine. Close other heavy CPU and GPU
 work, keep the power mode fixed, and let the machine settle to a steady
 temperature. Repeat each command and report the median. Write down the
 hardware, the MLX and mlx-lm versions, the logit mode, and the exact model.
 After upgrading a dependency, measure MLX again instead of reusing the old
-number.
+number. Two short runs on a busy laptop can differ by several percent. If two
+variants are within that noise, rerun them before you draw a conclusion.
+
+### Read the Result
+
+Look at three things in the `capacity-cache` row:
+
+- **Which phase is larger.** With 128 prompt tokens and 129 output tokens,
+  one prefill pass produces the first token and 128 one-token decode steps
+  produce the rest. If decode dominates total time, the next change should
+  make each decode step cheaper.
+- **Decode tokens per second.** One decode step sends one token through every
+  layer. For a 0.6B model that is little arithmetic, but every projection
+  weight still has to be read from memory once per step. If the step time is
+  close to "weight bytes divided by memory bandwidth", the step is limited by
+  reading weights, not by arithmetic.
+  [The roofline at the end of this chapter](#why-quantize-the-decode-roofline)
+  works this out for Qwen3-4B.
+- **Peak allocation.** The benchmark's peak-allocation column (and
+  `peak_mlx_bytes` in the JSON) is the most memory MLX had allocated at once
+  during each measured request. It is reset just before that request, after
+  loading and warmup, so it covers that request alone. It still includes the
+  model weights MLX keeps resident, so it is not "the extra memory this
+  request needed", and it is not the physical memory your Mac is using. Note
+  it now: Day 2 changes how weights are stored, so check it again there. If a
+  later change raises it, that is a cost you must report. A result file from
+  before this column existed has no value for it; treat that as missing, not
+  zero.
+
+The memory check itself (synchronizing the GPU, then resetting and reading
+the counter) runs outside the request clocks. Whole-request throughput adds
+up each request's full interval, including setting up its input and cache
+and releasing them afterwards; prefill and decode keep their own, narrower
+clocks.
 
 <a id="synchronize-lazy-work"></a>
 
@@ -577,6 +615,21 @@ capacity, whether the update started from an empty cache
 allocation), and the change in the counters from Task 1. Those counters are
 your code's bookkeeping, as before, not a measure of what the GPU copied.
 
+Three rules for reading it:
+
+- **Read the largest group, not the total.** A real decode step does not
+  synchronize between groups, so the GPU can overlap work that the replay
+  keeps apart.
+- **A share is not a prediction.** If projections are 70% of the replay, a
+  projection twice as fast does not make the request 35% faster. Only the
+  benchmark can tell you that.
+- **Compare like with like.** Each complete row names its `checkpoint` and has
+  a `workload` block: the phase, context length `S`, cache capacity `C` and
+  logit setting. Two replays can only be compared when their `workload` blocks
+  match, so change the checkpoint and nothing else. A case the tool cannot
+  replay reports `coverage.complete` as false, with a reason and no total.
+  Treat that as a missing measurement, never as zero.
+
 The replay does not check that your model uses these operators, and it is not
 a whole-request timing. Those are separate checks: your tests check the
 behavior they cover (outputs, offsets, capacity, and failures), reading your
@@ -595,10 +648,11 @@ Turn what you see into a plan you can test, in three sentences:
 3. "If replayed projection time does not drop, or whole-model decode gets
    slower on the same workload, I will drop or revise this idea."
 
-Use whichever category your replay shows. The benchmark, the replay, and
-this plan finish Day 1. The
-[earlier macOS 27 capture lab](./week2-advanced-profiling.md) is optional
-history: no trace, `gpudebug` output, screenshot, or device-specific counter gates your move to Day 2.
+Use whichever category your replay shows. The
+[overview](./week2-overview.md#how-each-day-works) has the same three
+sentences as a template you will reuse every day. The benchmark, the replay,
+and this plan finish Day 1. [Look Inside the GPU](#look-inside-the-gpu), at
+the end of this chapter, is optional: no trace, `gpudebug` output, screenshot, or device-specific counter gates your move to Day 2.
 
 For an optional run with Qwen3-4B, you need enough unified memory for the
 dense BF16 Week 2 model; the [model table](./preface.md#choose-a-model-for-your-mac)
@@ -666,9 +720,130 @@ step waiting for weights. The checkpoint on disk already stores them in 4 bits.
 [Day 2](./week2-02-quantize-model.md) keeps them that way in memory. Save your
 `capacity-cache` benchmark result: it is Day 2's control.
 
-Before you start Day 2, read
-[Find the Next Bottleneck](./week2-profile-guided.md). It shows the loop every
-remaining day follows, the different ways to look at where time goes, and how
-to check whether this roofline story actually matches your own replay.
+<a id="look-inside-the-gpu"></a>
+
+## Optional: Look Inside the GPU
+
+The benchmark and the replay are all Week 2 needs. This section describes two
+deeper views, for when you want to know why a group is expensive. Neither is
+required for any checkpoint. It is never an acceptance gate.
+
+### Is the GPU Even Busy?
+
+A replay hides one question: is the GPU busy at all? During decode, Python
+prepares each small step, MLX records it, and the GPU runs it. If the GPU
+finishes a step before the CPU has the next one ready, it sits idle, and a
+faster kernel does nothing about that idle time.
+
+A system timeline puts CPU samples and GPU work on one clock, so you can see
+those gaps. The course does not supply a timeline command yet. When you
+cannot record one, keep two rules in mind: a request whose decode steps are
+very short is the one most likely to be waiting on the CPU, and a kernel
+improvement that the replay sees but the benchmark does not is a hint that
+the GPU was not the limit.
+
+### Capture One Step on the GPU
+
+The deepest view captures one synchronized stretch of GPU work and replays it
+under Apple's GPU profiler. It needs macOS 27 with `/usr/bin/gpudebug`. Run
+the day's tests first: there is no point profiling a kernel that gives wrong
+answers.
+
+Create `out/` first and choose file names that do not exist yet. The helper
+refuses to overwrite a trace, metadata file or manifest:
+
+```bash
+mkdir -p out
+
+MTL_CAPTURE_ENABLED=1 pdm run capture-week2 \
+  --solution tiny_llm --model qwen3-0.6b \
+  --checkpoint capacity-cache --phase decode --tokens 128 \
+  --prefill-logits last \
+  --trace out/capacity-cache-decode-128.gputrace \
+  --metadata out/capacity-cache-decode-128.capture.json \
+  --manifest out/capacity-cache-decode-128.trace-manifest.sha256
+
+gpudebug --json -t out/capacity-cache-decode-128.gputrace --timeout 1800 \
+  -c 'profile run --gpu-state default --exec serial' \
+  > out/capacity-cache-decode-128.profile.jsonl
+
+pdm run reduce-week2-gpudebug \
+  --capture-metadata out/capacity-cache-decode-128.capture.json \
+  --manifest out/capacity-cache-decode-128.trace-manifest.sha256 \
+  --profile-jsonl out/capacity-cache-decode-128.profile.jsonl \
+  --output out/capacity-cache-decode-128.gpudebug.json
+```
+
+The capture helper compiles and warms the shape first, so the trace holds one
+steady-state region rather than start-up work. Its logit setting defaults to
+`all` for older captures, so pass `--prefill-logits last` to match the
+benchmark and replay above. The cache bound defaults to the context length,
+as in the replay. Later days can capture their own checkpoints the same way,
+by changing `--checkpoint`.
+
+Trace packages can be large: check free disk space before you start. Once you
+have kept the reduced JSON, you can delete the `.gputrace` package and the raw
+`.jsonl` stream, unless you also want to try the source-line reader below. It
+reads the raw trace and its companion files, which the reduced JSON cannot
+replace.
+
+The reduced file can contain three kinds of information. Any of them may be
+missing on your machine; a missing part stays "unavailable", never zero.
+
+- **Per-kernel cost.** Each kernel's share of GPU shader time in the captured
+  region. Read this first: one kernel name usually dominates.
+- **Hardware counters.** Limiters and utilization for units such as the
+  floating-point ALUs, L1 cache and last-level cache. A limiter near 100%
+  says that unit is the bottleneck. Low occupancy alone is not a diagnosis;
+  check the limiters before you blame it.
+- **Source-line cost.** Apple's shader cost view can weight each line of
+  Metal source by the instructions it produced. The reducer does not produce
+  it; the reader below is an experiment for that view.
+
+### Experimental: Source-Line Costs
+
+```bash
+pdm run source-costs-week2 CAPTURE.gputrace --out NEW_DIRECTORY
+```
+
+This writes CSV and JSON files that list source locations and their weighted
+costs, without copying any source text. Its input is narrower than the
+capture above:
+
+- it needs an existing `.gputrace` that already holds sampled shader-profile
+  data, with exactly one profiler session inside it and its companion
+  library and symbol files;
+- keep `sources-manifest.json` and a `sources/` directory beside the trace if
+  you want the source locations marked as verified; without them they are
+  reported as unverified;
+- it reads Apple's profiler data through a private framework. The decoder
+  behind it was exercised only on one machine with macOS 27.0.1 on Apple
+  silicon, Python 3.12.13 and Xcode 27.2. This course command wraps that
+  decoder and has not yet been run against a real capture. A different Xcode
+  can change or break it.
+
+It is not established that a trace made with `capture-week2` and
+`gpudebug … profile run` contains the samples this reader needs. Treat it as
+an experiment, not as part of the Week 2 route. Day 5 ends with a case study
+of what this view showed on a later build.
+
+### If You Cannot Capture
+
+Many setups will not have `gpudebug`, and not every capture exposes every
+part. That does not block anything in Week 2. The benchmark and the replay
+only need the environment from [Setting Up the Environment](./setup.md), and
+together they answer the two questions every day needs: did the request get
+faster, and which group of operators changed?
+
+To practise reading a capture without making one, open the compact example
+the repository ships at
+`benchmark_results/m4-pro-qwen3-4b-week2-gpudebug-macos27-mlx-0.32.0.json`.
+It comes from an earlier version of this course, on an M4 Pro with
+Qwen3-4B, so its checkpoint names and kernels will not match yours. Look at
+how it is organized instead. It records which source, host, software and
+fixed workload produced it. Each capture lists what was available and what
+was not. Each `decisions` entry names the change, what dominated before, the
+evidence and whether the change was kept. Your own notes should have the same
+shape.
 
 {{#include copyright.md}}

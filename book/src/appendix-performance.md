@@ -426,7 +426,7 @@ command ranking. The 32-token Split-K capture exposed only static dispatch.
 Missing trees remain unavailable; they are not recorded as zero and do not
 support inferred counters.
 
-The optional [macOS 27 profiling lab](./week2-advanced-profiling.md) shows how
+The optional [GPU capture section of Day 1](./week2-01-kv-cache.md#look-inside-the-gpu) shows how
 to create a trace package, hash its files, reduce gpudebug output, record a
 three-sentence decision, and remove the raw package after preserving compact
 evidence. The portable benchmark and attribution path remains sufficient for

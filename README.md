@@ -108,11 +108,11 @@ one explicit byte range through the existing loop.
 | 1.5 | Load the Model | ✅ | ✅ | ✅ | ✅ |
 | 1.6 | Generate Responses (aka Decoding) | ✅ | ✅ | ✅ | ✅ |
 | 1.7 | Sampling | ✅ | ✅ | ✅ | ✅ |
-| 2.1 | Cache and Measure (`kv-cache`, `capacity-cache`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.2 | Keep W4 Packed (`quantized-matvec`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.3 | SIMD Matrix Prefill (`simd-matmul`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.4 | Fused Model Primitives (`rmsnorm`, `rope`, `swiglu`) | 🚧 | 🚧 | ✅ | 🚧 |
-| 2.5 | Tiled Dense Prefill Attention (`tiled-prefill`, `selected`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.1 | KV Cache (`kv-cache`, `capacity-cache`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.2 | Packed W4 Weights (`quantized-matvec`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.3 | SIMD Prefill (`simd-matmul`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.4 | Fused Kernels (`rmsnorm`, `rope`, `swiglu`) | 🚧 | 🚧 | ✅ | 🚧 |
+| 2.5 | Tiled Attention (`tiled-prefill`, `selected`) | 🚧 | 🚧 | ✅ | 🚧 |
 | 3.1 | Continuous Batching | ✅ | ✅ | ✅ | 🚧 |
 | 3.2 | Chunked Prefill | ✅ | ✅ | ✅ | 🚧 |
 | 3.3 | Paged KV Cache | ✅ | ✅ | ✅ | 🚧 |
@@ -130,11 +130,9 @@ one explicit byte range through the existing loop.
 | 4.8 | Fork, Steer, and Select | ✅ | ✅ | ✅ | 🚧 |
 | 4.9 | Bound Tool Evidence | ✅ | ✅ | ✅ | 🚧 |
 
-Earlier Week 2 chapter URLs not reused by active Days 1–5 remain available as
-[historical material](book/src/week2-02-benchmark-profile.md). The former Day 4
-address now serves the [active fused-primitives lesson](book/src/week2-04-fused-model-kernels.md).
-Those historical pages describe an earlier test and checkpoint order, separate
-from the current Day 1 → Day 2 → Day 3 → Day 4 → Day 5 route.
+Earlier Week 2 chapter URLs not reused by active Days 1–5 still serve their
+historical pages, which are hidden from the book's sidebar. The former Day 4
+address serves the [active fused-kernels lesson](book/src/week2-04-fused-model-kernels.md).
 
 Other topics not covered include quantized or compressed KV caches,
 cross-request prefix caching, fine-tuning, and long-context techniques.

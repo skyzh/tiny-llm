@@ -117,22 +117,22 @@ def test_week2_live_labels_follow_the_five_day_book():
     summary = (ROOT / "book/src/SUMMARY.md").read_text()
     week2_summary = summary.split("Week 2:", 1)[1].split("Week 3:", 1)[0]
     for title in (
-        "Day 1: Cache and Measure",
-        "Day 2: Keep W4 Packed",
-        "Day 3: SIMD Matrix Prefill",
-        "Day 4: Fused Model Primitives",
+        "Day 1: KV Cache",
+        "Day 2: Packed W4 Weights",
+        "Day 3: SIMD Prefill",
+        "Day 4: Fused Kernels",
     ):
         assert title in week2_summary
     day5_doc = ROOT / "book/src/week2-05-tiled-prefill-attention.md"
     if day5_doc.exists():
-        assert "Day 5: Tiled Dense Prefill Attention" in week2_summary
+        assert "Day 5: Tiled Attention" in week2_summary
     assert len(re.findall(r"\[🚧 Day \d:", week2_summary)) == 4 + day5_doc.exists()
 
     chapter_headings = {
-        "week2-01-kv-cache.md": "# 🚧 Week 2 Day 1: Reuse the Prefix, Then Bound the Cache",
-        "week2-02-quantize-model.md": "# 🚧 Week 2 Day 2: Keep W4 Packed — Decode Waits on Weights",
-        "week2-03-simd-matrix-prefill.md": "# 🚧 Week 2 Day 3: SIMD Matrix Prefill — Stop Re-reading Weights per Row",
-        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Model Primitives — Fewer Small Passes",
+        "week2-01-kv-cache.md": "# 🚧 Week 2 Day 1: KV Cache",
+        "week2-02-quantize-model.md": "# 🚧 Week 2 Day 2: Packed W4 Weights",
+        "week2-03-simd-matrix-prefill.md": "# 🚧 Week 2 Day 3: SIMD Prefill",
+        "week2-04-fused-model-kernels.md": "# 🚧 Week 2 Day 4: Fused Kernels",
     }
     for filename, expected_heading in chapter_headings.items():
         heading = (ROOT / "book/src" / filename).read_text().splitlines()[0]
@@ -141,7 +141,7 @@ def test_week2_live_labels_follow_the_five_day_book():
     if day5_doc.exists():
         assert (
             day5_doc.read_text().splitlines()[0]
-            == "# 🚧 Week 2 Day 5: Tiled Dense Prefill Attention — No Full Score Matrix"
+            == "# 🚧 Week 2 Day 5: Tiled Attention"
         )
 
     readme = (ROOT / "README.md").read_text()
@@ -149,14 +149,14 @@ def test_week2_live_labels_follow_the_five_day_book():
     assert "decode attention" not in week2_overview.lower()
     assert "split-k" not in week2_overview.lower()
     for row in (
-        "| 2.1 | Cache and Measure",
-        "| 2.2 | Keep W4 Packed",
-        "| 2.3 | SIMD Matrix Prefill",
-        "| 2.4 | Fused Model Primitives",
+        "| 2.1 | KV Cache",
+        "| 2.2 | Packed W4 Weights",
+        "| 2.3 | SIMD Prefill",
+        "| 2.4 | Fused Kernels",
     ):
         assert row in readme
     if day5_doc.exists():
-        assert "| 2.5 | Tiled Dense Prefill Attention" in readme
+        assert "| 2.5 | Tiled Attention" in readme
     assert "| 2.6 |" not in readme
     assert "| 2.7 |" not in readme
 

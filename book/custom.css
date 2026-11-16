@@ -89,3 +89,13 @@ pre {
     overflow-x: auto;
     max-width: 100%;
 }
+
+/* Historical Week 2 pages: published at their old addresses, hidden from the sidebar. */
+.chapter li.chapter-item:has(> .chapter-link-wrapper > a[href$="week2-02-benchmark-profile.html"]),
+.chapter li.chapter-item:has(> .chapter-link-wrapper > a[href$="week2-03-quantize-model.html"]),
+.chapter li.chapter-item:has(> .chapter-link-wrapper > a[href$="week2-05-simd-matrix-prefill.html"]),
+.chapter li.chapter-item:has(> .chapter-link-wrapper > a[href$="week2-06-operator-lab.html"]),
+.chapter li.chapter-item:has(> .chapter-link-wrapper > a[href$="week2-07-split-k-prefill.html"]),
+.chapter li.chapter-item:has(> .chapter-link-wrapper > a[href$="week2-advanced-profiling.html"]) {
+    display: none;
+}

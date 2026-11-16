@@ -26,6 +26,7 @@ https://skyzh.github.io/tiny-llm/week2-06-simd-matrix-prefill
 https://skyzh.github.io/tiny-llm/week2-07-split-k-prefill
 https://skyzh.github.io/tiny-llm/week2-advanced-profiling
 https://skyzh.github.io/tiny-llm/week2-overview
+https://skyzh.github.io/tiny-llm/week2-profile-guided
 https://skyzh.github.io/tiny-llm/week3-01-continuous-batching
 https://skyzh.github.io/tiny-llm/week3-02-chunked-prefill
 https://skyzh.github.io/tiny-llm/week3-03-paged-attention-part1
