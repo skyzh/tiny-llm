@@ -93,6 +93,19 @@ Use eight SIMD groups to cover a 64-row query block. Each SIMD group owns eight
 query rows and represents matrix operands as 8×8 fragments. Stage 32 logical
 K/V positions per iteration.
 
+Keep each lane's two fragment elements in ordinary vectors between matrix
+operations: `float2` for FP32 scores and output accumulators, and
+`vec<bfloat, 2>` for Q, K, V and the rounded probabilities. Build the
+`simdgroup_matrix` operands at the multiply-accumulate call, then copy its
+two result elements back. This changes how long the matrix objects live,
+not the attention equation. Keep the same lane coordinates, row-reduction
+order, mask and BF16 conversion points.
+
+The supplied reference uses this representation. It helped an earlier
+matched serving experiment, but that percentage belongs to its original
+revision and workload; measure your own complete request before claiming
+a gain for this checkout.
+
 For every logical key row in a tile:
 
 ```plain

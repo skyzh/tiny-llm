@@ -18,63 +18,61 @@ inline ushort2 matrix_coord(ushort lane) {
     return ushort2(col, row);
 }
 
+// Keep the two lane-owned fragment values in ordinary vectors between MMA
+// calls. Construct matrix objects only at the hardware intrinsic boundary.
 template <typename T>
-inline void load_matrix(
-    thread simdgroup_matrix<T, MMA_SIZE, MMA_SIZE>& matrix,
-    threadgroup const T* source,
-    int row_stride,
-    ushort lane) {
+inline void load_matrix(thread vec<T, 2>& matrix, threadgroup const T* source,
+                        int row_stride, ushort lane) {
     const ushort2 coord = matrix_coord(lane);
-    matrix.thread_elements()[0] = source[coord.y * row_stride + coord.x];
-    matrix.thread_elements()[1] = source[coord.y * row_stride + coord.x + 1];
+    matrix[0] = source[coord.y * row_stride + coord.x];
+    matrix[1] = source[coord.y * row_stride + coord.x + 1];
 }
-
 template <int N>
-inline float row_max(
-    thread const simdgroup_matrix<float, MMA_SIZE, MMA_SIZE>* matrices) {
+inline float row_max(thread const float2* matrices) {
     float value = -INFINITY;
     for (int fragment_idx = 0; fragment_idx < N; fragment_idx++) {
-        const auto values = matrices[fragment_idx].thread_elements();
+        const auto values = matrices[fragment_idx];
         value = max(value, max(values[0], values[1]));
     }
     value = max(value, simd_shuffle_xor(value, ushort(1)));
     value = max(value, simd_shuffle_xor(value, ushort(8)));
     return value;
 }
-
 template <int N>
-inline float row_sum(
-    thread const simdgroup_matrix<float, MMA_SIZE, MMA_SIZE>* matrices) {
+inline float row_sum(thread const float2* matrices) {
     float value = 0.0f;
     for (int fragment_idx = 0; fragment_idx < N; fragment_idx++) {
-        const auto values = matrices[fragment_idx].thread_elements();
+        const auto values = matrices[fragment_idx];
         value += values[0] + values[1];
     }
     value += simd_shuffle_xor(value, ushort(1));
     value += simd_shuffle_xor(value, ushort(8));
     return value;
 }
-
-inline void clear_matrix(thread simdgroup_matrix<float, MMA_SIZE, MMA_SIZE>& matrix) {
-    matrix.thread_elements()[0] = 0.0f;
-    matrix.thread_elements()[1] = 0.0f;
+inline void clear_matrix(thread float2& matrix) {
+    matrix[0] = 0.0f;
+    matrix[1] = 0.0f;
 }
-
-inline void scale_matrix_rows(
-    thread simdgroup_matrix<float, MMA_SIZE, MMA_SIZE>& matrix,
-    float scale) {
-    matrix.thread_elements()[0] *= scale;
-    matrix.thread_elements()[1] *= scale;
+inline void scale_matrix_rows(thread float2& matrix, float scale) {
+    matrix[0] *= scale;
+    matrix[1] *= scale;
 }
-
 template <typename T>
-inline void matrix_multiply_accumulate(
-    thread simdgroup_matrix<float, MMA_SIZE, MMA_SIZE>& accumulator,
-    thread simdgroup_matrix<T, MMA_SIZE, MMA_SIZE>& left,
-    thread simdgroup_matrix<T, MMA_SIZE, MMA_SIZE>& right) {
+inline void matrix_multiply_accumulate(thread float2& accumulator,
+    thread vec<T, 2>& left, thread vec<T, 2>& right) {
+    simdgroup_matrix<float, MMA_SIZE, MMA_SIZE> previous;
     simdgroup_matrix<float, MMA_SIZE, MMA_SIZE> result;
-    simdgroup_multiply_accumulate(result, left, right, accumulator);
-    accumulator = result;
+    simdgroup_matrix<T, MMA_SIZE, MMA_SIZE> left_matrix;
+    simdgroup_matrix<T, MMA_SIZE, MMA_SIZE> right_matrix;
+    previous.thread_elements()[0] = accumulator[0];
+    previous.thread_elements()[1] = accumulator[1];
+    left_matrix.thread_elements()[0] = left[0];
+    left_matrix.thread_elements()[1] = left[1];
+    right_matrix.thread_elements()[0] = right[0];
+    right_matrix.thread_elements()[1] = right[1];
+    simdgroup_multiply_accumulate(result, left_matrix, right_matrix, previous);
+    accumulator[0] = result.thread_elements()[0];
+    accumulator[1] = result.thread_elements()[1];
 }
 
 }  // namespace
@@ -311,7 +309,7 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
         HEAD_DIM);
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    simdgroup_matrix<float, MMA_SIZE, MMA_SIZE> output[OUTPUT_FRAGMENTS];
+    float2 output[OUTPUT_FRAGMENTS];
     for (int output_fragment = 0; output_fragment < OUTPUT_FRAGMENTS; output_fragment++) {
         clear_matrix(output[output_fragment]);
     }
@@ -377,22 +375,22 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        simdgroup_matrix<float, MMA_SIZE, MMA_SIZE> scores[SCORE_FRAGMENTS];
+        float2 scores[SCORE_FRAGMENTS];
         for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; key_fragment++) {
             clear_matrix(scores[key_fragment]);
         }
         for (int dim = 0; dim < HEAD_DIM; dim += MMA_SIZE) {
-            simdgroup_matrix<bfloat, MMA_SIZE, MMA_SIZE> q_fragment;
+            vec<bfloat, 2> q_fragment;
             load_matrix(q_fragment, q_tile + simd_gid * MMA_SIZE * LDQ + dim, LDQ, lane);
             for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; key_fragment++) {
-                simdgroup_matrix<bfloat, MMA_SIZE, MMA_SIZE> k_fragment;
+                vec<bfloat, 2> k_fragment;
                 load_matrix(k_fragment, kv_tile + dim * LDK + key_fragment * MMA_SIZE, LDK, lane);
                 matrix_multiply_accumulate(scores[key_fragment], q_fragment, k_fragment);
             }
         }
 
         for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; key_fragment++) {
-            thread auto& score_values = scores[key_fragment].thread_elements();
+            thread auto& score_values = scores[key_fragment];
             for (int element = 0; element < 2; element++) {
                 const int tile_key = key_fragment * MMA_SIZE + coord.x + element;
                 const int key = tile_start + tile_key;
@@ -414,7 +412,7 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
             ? 0.0f
             : fast::exp2(running_max - new_max);
         for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; key_fragment++) {
-            thread auto& score_values = scores[key_fragment].thread_elements();
+            thread auto& score_values = scores[key_fragment];
             for (int element = 0; element < 2; element++) {
                 score_values[element] = score_values[element] == -INFINITY || !finite_row
                     ? 0.0f
@@ -428,11 +426,11 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
             scale_matrix_rows(output[output_fragment], previous_scale);
         }
 
-        simdgroup_matrix<bfloat, MMA_SIZE, MMA_SIZE> probabilities[SCORE_FRAGMENTS];
+        vec<bfloat, 2> probabilities[SCORE_FRAGMENTS];
         for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; key_fragment++) {
-            const auto score_values = scores[key_fragment].thread_elements();
-            probabilities[key_fragment].thread_elements()[0] = bfloat(score_values[0]);
-            probabilities[key_fragment].thread_elements()[1] = bfloat(score_values[1]);
+            const auto score_values = scores[key_fragment];
+            probabilities[key_fragment][0] = bfloat(score_values[0]);
+            probabilities[key_fragment][1] = bfloat(score_values[1]);
         }
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -468,7 +466,7 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
 
         for (int output_fragment = 0; output_fragment < OUTPUT_FRAGMENTS; output_fragment++) {
             for (int key_fragment = 0; key_fragment < SCORE_FRAGMENTS; key_fragment++) {
-                simdgroup_matrix<bfloat, MMA_SIZE, MMA_SIZE> v_fragment;
+                vec<bfloat, 2> v_fragment;
                 load_matrix(
                     v_fragment,
                     kv_tile + key_fragment * MMA_SIZE * LDV + output_fragment * MMA_SIZE,
@@ -482,7 +480,7 @@ instantiate_kernel("paged_attention_decode_bf16_d128", paged_attention_decode, b
 
     if (query_valid) {
         for (int output_fragment = 0; output_fragment < OUTPUT_FRAGMENTS; output_fragment++) {
-            const auto output_values = output[output_fragment].thread_elements();
+            const auto output_values = output[output_fragment];
             for (int element = 0; element < 2; element++) {
                 const int dim = output_fragment * MMA_SIZE + coord.x + element;
                 out[n * L * HEAD_DIM + query_row * HEAD_DIM + dim] = running_sum == 0.0f
