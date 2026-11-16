@@ -445,18 +445,20 @@ long queries is valid when it preserves the public behavior. Day 5 may replace
 only the internal supported BF16 long-query region while preserving the same
 API, generic fallback, and page-table semantics.
 
-### Your solution's boundary
+### What Is Up to You
 
-The walkthrough keeps page translation and online softmax in a course-owned
-Metal operation so you can inspect them. The public checkpoint does not grade
-an internal helper, tile, symbol, or library choice: a behaviorally equivalent
-implementation or external low-level library is valid. To preserve the
-chapter's systems outcome, the completed operator still consumes page storage
-and its block table directly rather than rebuilding dense K/V in Python. MLX
-SDPA remains a useful correctness oracle and performance baseline.
+The walkthrough writes page translation and online softmax as one Metal
+operation so you can see both. The tests do not check internal helpers, tile
+sizes, symbol names or which library you use: any implementation that behaves
+the same passes, including one built on an external low-level library. What
+must stay true is that the operator reads page storage and its block table
+directly, rather than rebuilding dense K/V in Python. MLX's fused attention
+(`mx.fast.scaled_dot_product_attention`) is still useful, as a correctness
+check and a speed baseline.
 
-Both prefill and decode read page storage through this interface. Do not add a
-dense-only special case: Day 5 optimizes this same paged contract.
+Both prefill and decode read page storage through this interface. Don't add a
+special case that goes back to dense K/V: Day 5 speeds up this same paged
+interface.
 
 ## Task 3: Dispatch from the Model
 
@@ -483,8 +485,9 @@ optional split -> scalar prefill and vector decode
 ```
 
 Day 5 replaces the long-query schedule with paged FlashAttention without
-changing this model-facing policy. `--disable-paged-attention` is a Day 4
-dense-gather teaching ablation, not the completed serving path.
+changing what the model sees. `--disable-paged-attention` switches back to
+Day 3's gather into dense tensors, so you can compare the two; it is not the
+finished server.
 
 This test decodes incrementally through the Week 3 model and compares each
 step with the Week 2 dense model:
@@ -551,21 +554,21 @@ pdm run bench-week3-attention --solution tiny_llm --offline --contexts 128 1024 
   --json-output "$week3_result_dir/attention-tiny-llm.json"
 ```
 
-This command measures your `tiny_llm` operators into a new JSON file outside
-the tracked historical corpus. For a current reference control, use the same
-flags with `--solution ref` and a different filename in the new directory.
-The table below instead records historical task #367 results from source
-`18aec8503929d80c986324578068ecac2463c2ac`: medians of four balanced
-fresh-process medians, with 60 synchronized calls after five warmups per
-process. A current run measures this checkout; it need not reproduce those
-values.
+This measures your `tiny_llm` operators and writes a new JSON file. To
+compare with the reference solution, rerun the same flags with
+`--solution ref` and a different file name.
+
+The table below comes from an earlier run, made before Week 2 was rebuilt.
+Each value is the median over four fresh processes, each timing 60
+synchronized calls after five warmups. Your run measures this checkout, so
+expect different numbers.
 
 | Context | Dense + gather | Direct paged | MLX fused |
 |---:|---:|---:|---:|
 | 128 | 201.26 us | 228.58 us | 188.79 us |
 | 1,024 | 468.39 us | 299.14 us | 250.04 us |
 
-In that predecessor trace, direct traversal was 13.6% slower than
+In that run, direct traversal was 13.6% slower than
 dense-plus-gather at 128 tokens, but 36.1% faster at 1,024 tokens. MLX was
 faster at both shapes. The recorded BF16 outputs matched the readable dense
 equation within 0.00439453125 at
@@ -624,12 +627,12 @@ end-to-end workload with requests entering and leaving the batch, then report:
 - paged-attention latency relative to the dense Week 2 path in your solution
   and MLX.
 
-Keep the dense path as a teaching ablation so you can measure when contiguous
-attention is faster. The completed serving route stays paged: it eliminates
-repacks, reuses pages across scheduler steps, and leaves more measured KV
-headroom in the fixed-batch trace. Proving that it admits more concurrent
-requests requires a memory-capped admission sweep. Day 5 optimizes its
-long-prefill schedule rather than routing around the page-table contract.
+Keep the dense path working, so you can measure when contiguous attention is
+faster. The finished server stays paged: it never repacks K/V, reuses pages
+across scheduler steps, and in the fixed-batch run leaves more K/V memory
+free. Showing that it fits more requests at once would take a separate run
+with memory capped. Day 5 speeds up long prefill while still reading pages,
+rather than going back to dense tensors.
 
 Use the paired serving runner rather than a preallocated static request:
 
@@ -646,27 +649,24 @@ pdm run bench-serving-progression --solution tiny_llm --offline --repeats 4 \
   --json-output "$week3_result_dir/serving-tiny-llm.json"
 ```
 
-This command compares your Week 2 dense batch reconstruction, Week 3 paged
-storage with the
-dense-gather compatibility path, and Week 3 direct paged attention. All three
-course rows use the same MLX quantized-projection seam; they differ in KV
-representation and attention path. The runner resets page capacity after
-warmup and reports prefill, output, and decode throughput alongside peak KV
-bytes, copy volume, page reuse, and tail fragmentation. It writes a new JSON
-file outside the tracked historical corpus. The numbers that follow are from
-task #367 on predecessor source `18aec8503929d80c986324578068ecac2463c2ac`;
-they do not describe today's five-day Week 2 baseline. The direct path's
-four-process medians are 672.68 prefill tok/s, 46.36 output tok/s, 105.01 decode
-tok/s, and 0.618 requests/s. Its synchronized decode calls take
-28.97/36.78/63.04 ms at median/p95/max; the completion gaps, which include
-intervening scheduler and prefill work, are 30.16/222.18/239.49 ms.
+This compares three versions of your server: Week 2's dense batching, Day
+3's paged storage (which still gathers pages back into dense tensors), and
+today's direct paged attention. All three send projections to MLX in the
+same way; they differ only in how K/V is stored and read. The runner resets
+page capacity after warmup and reports prefill, output and decode throughput,
+peak K/V bytes, bytes copied, page reuse, and space left unused in partly
+filled last pages. It writes a new JSON file. To compare with the reference
+solution, rerun with `--solution ref` and a different file name.
 
-Those are historical cumulative system results, not an isolated Day 4 kernel
-speedup. The ledger at
-`benchmark_results/task367-final-main/task367-final-main-benchmark-ledger.md`
-records the fixed trace, balanced process order, and denominator boundary.
-For a current reference comparison, rerun with `--solution ref` and a new
-filename in your output directory; do not overwrite the predecessor JSON.
+In an earlier run, made before Week 2 was rebuilt, the direct path's medians
+over four processes were 672.68 prefill tok/s, 46.36 output tok/s, 105.01
+decode tok/s, and 0.618 requests/s. Its decode calls took
+28.97/36.78/63.04 ms at median/p95/max; the gaps between decode steps, which
+include any scheduler and prefill work in between, were
+30.16/222.18/239.49 ms. Those are whole-system results for that version of
+the course, not the speedup of today's kernel alone. The
+[performance appendix](./appendix-performance.md) records how they were
+measured.
 
 ```bash
 pdm run test --week 3 --day 4

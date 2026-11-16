@@ -1,14 +1,15 @@
 # 🚧 Week 3 Day 6 (Optional): Mixture of Experts
 
 > 🚧 This chapter is under review and may change.
-In this chapter, we will implement the feed-forward shape of **Mixture of
-Experts**, or **MoE**, for the Qwen3 family.
 
-This extension is optional. It changes the model's feed-forward layers but not
-the scheduler, paged cache, or attention contract, so students can complete the
-Week 3 serving engine without it.
+Today you add **Mixture of Experts** (**MoE**) feed-forward layers, the shape
+the larger Qwen3 MoE models use.
 
-Start from the learner checkpoint and keep it running as you complete each task:
+This day is optional. It changes the model's feed-forward layers but not the
+scheduler, the paged cache or attention, so you can finish the Week 3 serving
+engine without it.
+
+Run the day's tests as you complete each task:
 
 ```bash
 pdm run test --week 3 --day 6
@@ -16,8 +17,8 @@ pdm run test --week 3 --day 6
 
 The focused suite uses small generated weights. It checks the expert mapping,
 router, sparse block, and a complete mixed dense/sparse model without downloading
-a model. The 30B commands at the end are optional product smokes after this loop
-is green.
+a model. The 30B commands at the end are optional: try them once the tests
+pass, to see a real MoE model run.
 
 So far, every transformer block in tiny-llm has used the same dense Qwen3 MLP:
 

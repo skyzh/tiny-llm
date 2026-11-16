@@ -262,7 +262,9 @@ pdm run main-week2 --solution tiny_llm_ref --model qwen3-0.6b --max-tokens 16
 This runs the reference, not your code, and your solution does not need to
 reproduce those internals.
 
-## Measure the Matched Product
+<a id="measure-the-matched-product"></a>
+
+## Measure the Change
 
 First compare a new `swiglu` row with the one you saved before editing. Then
 compare `swiglu`, `tiled-prefill`, `selected`, and MLX with the same cached

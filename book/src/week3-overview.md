@@ -3,60 +3,64 @@
 > 🚧 This overview and chapters carrying the same marker are under review and
 > may change.
 
-Week 3 turns the optimized single-request model into a multi-request serving
-engine. Students add scheduling, request-owned cache state, shared page pools,
-and the runtime metadata needed to read noncontiguous K/V directly. The final
-model uses one page-aware attention interface. A correct direct page-walking
-implementation may serve every query shape; the completed reference adds a
-tiled schedule for the supported BF16 long-prefill hot case.
+At the end of Week 2 your model serves one request at a time, and serves it
+quickly. A real server has many users at once. Their prompts arrive at
+different times, have different lengths, and finish at different times. This
+week you turn the model into a small serving engine that keeps several
+requests moving together.
 
-The [Week 2 `selected` model](./week2-05-tiled-prefill-attention.md) completes
-the single-request route with tiled dense attention; its course-owned quantized
-projections remain an inspectable kernel lesson. Week 3 deliberately switches
-dense-model projections to `mx.quantized_matmul` at model construction, while retaining the
-course-owned normalization, activation, cache, attention, paging, and
-scheduler paths. This keeps Week 3 focused on serving-system mechanisms rather
-than carrying the teaching kernel's projection cost through every benchmark.
+By the end of Week 3 your engine:
 
+- decodes several requests in one model call, and gives a finished request's
+  place to a waiting one straight away (**continuous batching**, Day 1);
+- splits a long prompt into chunks, so one long prefill cannot hold up
+  everyone else's next token (**chunked prefill**, Day 2);
+- stores each request's keys and values in fixed-size pages from one shared
+  pool, instead of one growing buffer per request (**paged KV cache**, Day 3);
+- reads those pages directly inside attention, with no copy back into one
+  dense buffer (**direct paged attention**, Day 4); and
+- runs long prompts through a tiled attention schedule that reads the same
+  pages (**paged FlashAttention**, Day 5).
 
-## What We’ll Cover
+Days 3 to 5 introduce page translation before optimizing it. Day 3 still has a
+simple path that gathers pages back into dense tensors, so you can check the
+page bookkeeping on its own. Day 4 removes that gather with a straightforward
+kernel that walks the page table and can serve every query shape. Day 5 adds a
+faster tiled schedule for the common long-prefill case (BF16 prompts), and
+keeps Day 4's kernel for short queries and other shapes. Every schedule reads
+the same page pool through the same page-table interface.
 
-- Continuous batching and request-slot reuse
-- Chunked prefill and scheduler fairness
-- Paged KV storage and page-walking attention
-- Paged FlashAttention for long prefill
-- Optional Day 6 Mixture-of-Experts model support
-- Optional Day 7 speculative decoding over rewindable caches
+Two optional days follow. Day 6 adds Mixture-of-Experts model support, which
+is independent of the cache and scheduler. Day 7 adds speculative decoding,
+which needs to rewind the cache exactly when a guess is rejected, and needs
+the page-aware attention path for queries longer than one token to check
+several guesses at once.
 
-Day 1 introduces that projection seam and batches independent request states. Day 2
-splits long prefills so they cannot monopolize the scheduler. Day 3 replaces a
-growing dense cache with fixed-size pages while retaining a dense-gather
-compatibility path. Day 4 removes that gather by teaching attention to walk the
-page table directly with a correctness-first implementation; one kernel may
-serve all query shapes. Day 5 then replaces the supported BF16 long-prefill hot
-case with a tiled schedule. Page translation is therefore introduced before
-it is optimized.
+## One Change to the Model
 
-These five days form the required path in your solution. The final model in
-your solution runs paged FlashAttention for supported BF16 long prefill and
-retains correct direct fallbacks for short queries and generic shapes. Every
-schedule reads the same page pool through the same block-table interface;
-none rebuilds dense K/V.
+Week 3 is about the serving system, not the projection kernels. From Day 1 on,
+the Week 3 model sends its quantized projections to MLX's own
+`mx.quantized_matmul` instead of your Week 2 kernels. Everything else stays
+yours: normalization, activation, RoPE, the cache, attention, paging and the
+scheduler. Your Week 2 checkpoints keep working unchanged. Day 1 shows the
+switch.
 
-Paged attention is not an automatic single-request latency win. The historical
-task #367 trace, measured on source
-`18aec8503929d80c986324578068ecac2463c2ac` before the five-day Week 2
-revamp, showed lower KV storage, page reuse, incremental growth, and batching;
-page-table indirection can make one request slower. Those figures do not
-describe the current Week 2 `selected` baseline or establish an
-admission-capacity gain without a memory-capped sweep. Each chapter ends with a
-focused measurement you can run on this checkout. The
-[performance appendix](./appendix-performance.md) preserves the older matched
-chapter-by-chapter results with their source boundary.
+Without it, every scheduler and cache measurement in Week 3 would also carry
+the remaining cost of the teaching kernels, and that cost would hide the
+effects you are trying to see.
 
-Optional Day 6 adds MoE model support independently of the cache and scheduler.
-Optional Day 7 then adds speculative decoding, whose rejection path needs a
-precise cache rewind operation and whose multi-token verification needs the
-page-aware long-query path. Neither extension is required to complete Week 3.
+## What Paging Buys, and What It Costs
+
+Paging is not a free speedup for a single request. Looking up each page adds
+work, so one request on its own can get slower. What paging buys is memory:
+storage that grows a page at a time, pages that can be reused as soon as a
+request finishes, and room for more requests in the same batch.
+
+An earlier measurement, made before Week 2 was rebuilt, showed those memory
+benefits and the single-request cost. It was not made on this checkout, and it
+does not show that more requests fit in a fixed amount of memory; that would
+need a sweep with the memory capped. Each chapter ends with a measurement you
+can run yourself. The [performance appendix](./appendix-performance.md) keeps
+the older results and exactly where they came from.
 
 {{#include copyright.md}}

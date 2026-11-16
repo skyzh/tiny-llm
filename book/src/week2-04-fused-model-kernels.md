@@ -281,7 +281,9 @@ benchmark treats the heads as sequence positions and times a different
 operation. The supplied operator benchmark already does this. Remember to call
 `mx.eval` inside every timed iteration.
 
-## Measure the Cumulative Product
+<a id="measure-the-cumulative-product"></a>
+
+## Measure the Change
 
 Once the full Day 4 gate passes, run the Day 3 control and all three Day 4
 checkpoints together with the same cached 0.6B model and workload. Keeping the
