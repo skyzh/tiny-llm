@@ -66,8 +66,10 @@ The book is published at
 existing checkout with:
 
 ```bash
-pdm install -v
+pdm use 3.14.10
+pdm install -v --check --frozen-lockfile
 pdm run check-installation
+pdm run build-ext-ref
 pdm run test-refsol -- -- -k week_1
 ```
 

@@ -118,6 +118,8 @@ def test_task_0_supplied_capstone_composes_the_completed_active_package(tmp_path
 
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(completed_package.parent)
+    # Keep the base library paths when PYTHONEXECUTABLE points outside the install.
+    environment["PYTHONHOME"] = os.pathsep.join((sys.base_prefix, sys.base_exec_prefix))
     records = []
     for interpreter_path in interpreter_paths:
         interpreter_environment = {

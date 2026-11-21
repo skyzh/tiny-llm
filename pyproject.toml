@@ -1,19 +1,20 @@
 [build-system]
-requires = ["pdm-backend"]
+requires = ["pdm-backend==2.5.0"]
 build-backend = "pdm.backend"
 
 [project]
 name = "tiny-llm-course"
 version = "0.1.0"
-requires-python = ">=3.10, <3.13"
+requires-python = ">=3.12, <3.15"
 readme = "README.md"
 dependencies = [
     "mlx>=0.32.4",
-    "torch>=2.6.0",
+    "torch>=2.13.0,<2.14",
     "torchtune>=0.6.1",
-    "torchao>=0.10.0",
-    "mlx-lm>=0.31.3",
-    "numpy>=2.2.4",
+    # TorchTune 0.6.1 imports the NF4 module path that moved in TorchAO 0.18.
+    "torchao>=0.17.0,<0.18",
+    "mlx-lm>=0.32.2,<0.33",
+    "numpy>=2.2.6",
     "pytest>=8.3.5",
     "ruff>=0.11.6",
     # this should not usually appear in a project dependency list but we add it to simplify the setup process
