@@ -146,10 +146,9 @@ CMake 3.27 or newer.
     xcrun metal --version
     ```
 
-    With Xcode 26, the Metal toolchain may be a separate component. If the
-    command reports that it is missing, use the conditional component workflow
-    described in [Downloading and installing additional Xcode components](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components),
-    then verify the compiler again:
+    If `xcrun` reports that `metal` is missing, check that it points to full
+    Xcode using step 3. Then install the Metal component and check the compiler
+    again. See [Downloading and installing additional Xcode components](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components).
 
     ```bash
     xcodebuild -downloadComponent MetalToolchain

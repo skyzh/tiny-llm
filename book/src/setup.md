@@ -2,9 +2,17 @@
 
 To follow this course, you need a Mac with Apple silicon. The project uses PDM for dependency and environment management.
 
+## Install Python
+
+Download and run the macOS installer for
+[Python 3.14.10](https://www.python.org/downloads/release/python-31410/).
+After installation, `python3.14 --version` should print `Python 3.14.10`.
+The lock file supports Python 3.12 through 3.14.
+
 ## Install PDM
 
-Follow the [official installation guide](https://pdm-project.org/en/latest/) to install PDM.
+Use PDM 2.26.7 to install the course dependencies. See the
+[PDM installation guide](https://pdm-project.org/en/latest/#installation).
 
 ## Clone the Repository
 
@@ -28,9 +36,13 @@ Reference implementations are available if you get stuck during the course.
 
 ```bash
 cd tiny-llm
-# This creates a virtual environment and installs all dependencies.
-pdm install -v
+pdm use 3.14.10
+pdm install -v --check --frozen-lockfile
 ```
+
+This selects the interpreter for this checkout and installs the versions in
+`pdm.lock`. If PDM cannot find 3.14.10, run the macOS installer above and repeat
+`pdm use 3.14.10` from the repository root.
 
 ## Check the Installation
 
@@ -51,7 +63,8 @@ need it built first.
 
 Building it needs full Xcode, its Metal compiler, and CMake 3.27 or newer; the
 [toolchain steps in Week 1 Day 7](./week1-07-sampling-prepare.md#task-2-prepare-for-week-2)
-give the installation checks. Then, from the repository root, run:
+give the installation checks. The Python 3.14 environment was verified with
+Xcode 27.2 and Metal compiler 32023.922. Then, from the repository root, run:
 
 ```bash
 pdm run build-ext-ref
