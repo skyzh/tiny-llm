@@ -41,14 +41,45 @@ pdm install -v --check --frozen-lockfile
 ```
 
 This selects the interpreter for this checkout and installs the versions in
-`pdm.lock`. If PDM cannot find 3.14.10, run the macOS installer above and repeat
-`pdm use 3.14.10` from the repository root.
+`pdm.lock`. If Python 3.14.10 is already installed and PDM cannot find it by
+version, select it by absolute path. From the repository root, run the following
+for the python.org installation, or substitute the path to your interpreter.
+
+```bash
+/Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14 --version
+pdm use /Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14
+pdm install -v --check --frozen-lockfile
+```
+
+If you still need Python 3.14.10, run the macOS installer above and retry the
+installation commands.
 
 ## Check the Installation
 
 ```bash
 pdm run check-installation
 ```
+
+## Run Your Tests
+
+Start with [Week 1 Day 1](./week1-01-attention.md) immediately after the
+installation check. The starter checkpoint uses small arrays from the tests.
+It needs only the course Python environment.
+
+From the repository root, run:
+
+```bash
+pdm run test --week 1 --day 1 -- -k task_1
+```
+
+This copies the Day 1 tests from `tests_refsol/` into `tests/` and runs the
+focused attention checkpoint against your code in `src/tiny_llm`. On the
+untouched starter, the supplied `softmax` tests pass and the attention tests
+fail. Run the same command after implementing the attention task.
+
+Run all of Day 1 with `pdm run test --week 1 --day 1`. Once you have copied
+a few days, `pdm run test` reruns every test file in `tests/`. Week 1 Day 7
+revisits the toolchain before the Week 2 C++ and Metal kernel lessons.
 
 <a id="build-the-native-extensions-before-tests"></a>
 
@@ -73,29 +104,22 @@ pdm run build-ext-ref
 The build does not fill in the learner TODOs in `src/tiny_llm`. You build your
 own extension with `pdm run build-ext` on Week 1 Day 7, before Week 2.
 
-If you do not have the toolchain yet, you can still start. Download the model,
-skip [Run the Reference Model](#run-the-reference-model), and go on to
-[Run Your Tests](#run-your-tests). To see the finished model generate text
-without any native build, run `pdm run main --solution mlx`, which uses plain
-MLX instead of the reference implementation.
-
 ## Download the Model Parameters
 
-We use the official 4-bit Qwen3 MLX model files. The default model is `Qwen/Qwen3-0.6B-MLX-4bit`, which is small enough
-for the dequantized Python implementation in Week 1. If your device has more memory, you can also try larger Qwen3 models.
-
-Follow the [Hugging Face CLI guide](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli) to install the `hf`
-command-line tool.
-
-The model parameters are hosted on Hugging Face. After authenticating the CLI with your credentials, download them with:
+Download the default `Qwen/Qwen3-0.6B-MLX-4bit` weights when you reach Week 1
+Day 5 or want to run the reference model below. Use the Hugging Face CLI that
+comes with the course environment. If your device has more memory, you can
+also try the larger Qwen3 models.
 
 ```bash
-hf auth login
-hf download Qwen/Qwen3-0.6B-MLX-4bit
+pdm run hf download Qwen/Qwen3-0.6B-MLX-4bit
 # Optional larger models:
-hf download Qwen/Qwen3-1.7B-MLX-4bit
-hf download Qwen/Qwen3-4B-MLX-4bit
+pdm run hf download Qwen/Qwen3-1.7B-MLX-4bit
+pdm run hf download Qwen/Qwen3-4B-MLX-4bit
 ```
+
+To see the finished model generate text before building the reference
+extension, use `pdm run main --solution mlx` after downloading the weights.
 
 ## Run the Reference Model
 
@@ -117,23 +141,5 @@ pdm run test-refsol --week 1 --day 1 -- -k task_1
 # The reference solution should pass all Week 1 tests.
 pdm run test-refsol -- -- -k week_1
 ```
-
-## Run Your Tests
-
-Your code is in `src/tiny_llm`, and its tests start out absent: `tests/` holds
-only shared helpers. Each day's command copies that day's tests from
-`tests_refsol/` into `tests/` and runs them:
-
-```bash
-pdm run test --week 1 --day 1
-```
-
-On the untouched starter, the supplied `softmax` tests pass and the attention
-and `linear` tests fail. That red result is your starting point for
-[Week 1 Day 1](./week1-01-attention.md). Once you have copied a few days,
-`pdm run test` with no arguments reruns every test file in `tests/`.
-
-Week 1 Day 7 revisits the toolchain before the Week 2 C++ and Metal kernel
-lessons.
 
 {{#include copyright.md}}

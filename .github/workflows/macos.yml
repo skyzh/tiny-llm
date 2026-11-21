@@ -15,18 +15,29 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install HuggingFace weights
+      - name: Install audited Python and PDM
+        shell: bash
         run: |
-          brew install huggingface-cli
-          hf download Qwen/Qwen3-0.6B-MLX-4bit
+          tools_dir=$(mktemp -d "$RUNNER_TEMP/tiny-llm-tools.XXXXXX")
+          cd "$tools_dir"
+          curl --fail --location --silent --show-error --output python.tar.gz \
+            https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.14.10%2B20261110-aarch64-apple-darwin-install_only_stripped.tar.gz
+          curl --fail --location --silent --show-error --output pdm.tar.gz \
+            https://github.com/pdm-project/pdm/releases/download/2.26.7/pdm-2.26.7-aarch64-apple-darwin.tar.gz
+          shasum -a 256 -c <<'SHA256'
+          f15ec3d15460dd66c2eb88639b152cd9040e7d1ece11e38bf89e8f53f0171e02  python.tar.gz
+          b7ae12b66a28f094cf144ab50d490c9436c4b3ac9e4b4d44bc11bab57acde0c6  pdm.tar.gz
+          SHA256
+          tar -xzf python.tar.gz
+          tar -xzf pdm.tar.gz
+          printf '%s\n' "$tools_dir/python/bin" "$tools_dir" >> "$GITHUB_PATH"
 
-      - uses: pdm-project/setup-pdm@v4
-        with:
-          python-version: "3.14.10"
-          version: "2.26.7"
-          cache: true
+      - run: |
+          pdm use "$(command -v python3.14)"
+          pdm install --check --frozen-lockfile
 
-      - run: pdm install --check --frozen-lockfile
+      - name: Download Hugging Face weights
+        run: pdm run hf download Qwen/Qwen3-0.6B-MLX-4bit
 
       - run: pdm run check-installation
 
