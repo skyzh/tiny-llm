@@ -1,5 +1,5 @@
 import mlx.core as mx
-from mlx_lm.tokenizer_utils import TokenizerWrapper
+from mlx_lm.tokenizer_utils import BPEStreamingDetokenizer, TokenizerWrapper
 from datetime import datetime
 
 from .kv_cache import BatchingKvCache
@@ -25,7 +25,7 @@ class Request:
     ):
         self.prompt = prompt
         self.model = model
-        self.detokenizer = tokenizer.detokenizer.__class__(tokenizer._tokenizer)
+        self.detokenizer = self._make_detokenizer(tokenizer)
         self.prefill_tokens = mx.array(
             tokenizer.encode(prompt, add_special_tokens=False)
         )
@@ -44,6 +44,10 @@ class Request:
         self.next_token = None
         self.offset = 0
         self.prompt_idx = prompt_idx
+
+    @staticmethod
+    def _make_detokenizer(tokenizer):
+        return tokenizer.detokenizer.__class__(tokenizer._tokenizer)
 
     def try_prefill(self):
         """
@@ -141,6 +145,40 @@ def batch_generate(
     batch_size=5,
     prefill_step=128,
 ):
+    return _batch_generate(
+        model, tokenizer, prompts, max_seq_len, batch_size, prefill_step, Request
+    )
+
+
+class _CliRequest(Request):
+    @staticmethod
+    def _make_detokenizer(tokenizer):
+        instance = tokenizer.detokenizer
+        if (
+            type(tokenizer) is TokenizerWrapper
+            and type(instance) is BPEStreamingDetokenizer
+            and len(instance.tokenmap) == len(tokenizer._tokenizer)
+        ):
+            return instance
+        return instance.__class__(tokenizer._tokenizer)
+
+
+def _batch_generate_with_cli_tokenizer(
+    model, tokenizer, prompts, *, max_seq_len, batch_size, prefill_step
+):
+    """Run the reference CLI queue with its freshly loaded tokenizer.
+
+    The CLI owns the tokenizer for the queue and keeps its vocabulary stable.
+    Each stock BPE detokenizer still has request-local mutable state.
+    """
+    return _batch_generate(
+        model, tokenizer, prompts, max_seq_len, batch_size, prefill_step, _CliRequest
+    )
+
+
+def _batch_generate(
+    model, tokenizer, prompts, max_seq_len, batch_size, prefill_step, request_type
+):
     if max_seq_len <= 0:
         raise ValueError("max_seq_len must be positive")
     if batch_size <= 0:
@@ -171,7 +209,7 @@ def batch_generate(
             # prefill until no idle slots
             if len(prompts) > 0 and pending_prefill_request is None:
                 prompt = prompts.pop(0)
-                pending_prefill_request = Request(
+                pending_prefill_request = request_type(
                     model,
                     tokenizer,
                     prompt,

@@ -54,7 +54,8 @@ if args.solution == "tiny_llm":
 
 elif args.solution == "tiny_llm_ref" or args.solution == "ref":
     print("Using tiny_llm_ref solution")
-    from tiny_llm_ref import models, batch_generate
+    from tiny_llm_ref import models
+    from tiny_llm_ref.batch import _batch_generate_with_cli_tokenizer as batch_generate
 
 else:
     raise ValueError(f"Solution {args.solution} not supported")
