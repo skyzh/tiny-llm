@@ -1,6 +1,7 @@
 # tiny-llm
 
 [![CI (main)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml/badge.svg)](https://github.com/skyzh/tiny-llm/actions/workflows/main.yml)
+[![Built with Raft](https://raw.githubusercontent.com/raft-builders/awesome-raft-build/main/badge/built-with-raft.svg)](https://raft.build)
 
 tiny-llm is a hands-on course for systems engineers who want to understand LLM
 inference end to end. You can think of it as an LLM-serving counterpart to
