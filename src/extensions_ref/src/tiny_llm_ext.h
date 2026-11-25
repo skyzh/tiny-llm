@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "mlx/primitives.h"
 #include "mlx/utils.h"
 
@@ -8,6 +10,8 @@ namespace mx = mlx::core;
 namespace tiny_llm_ext_ref {
 
 void load_library(const char *path);
+
+std::optional<mx::array> try_week1_sampled_head(const mx::array &normalized, const mx::array &weight);
 
 mx::array quantized_matmul(const mx::array &scales,  // Input array scales
                            const mx::array &biases,  // Input array biases

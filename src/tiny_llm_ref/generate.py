@@ -34,7 +34,11 @@ def simple_generate(
         return
 
     def _step(model, y):
-        logits = model(y[None])
+        inputs = y[None]
+        if type(model) is Qwen3ModelWeek1:
+            logits = model._generation_logits(inputs)
+        else:
+            logits = model(inputs)
         logits = logits[:, -1, :]
         logprobs = logits - mx.logsumexp(
             logits, keepdims=True
