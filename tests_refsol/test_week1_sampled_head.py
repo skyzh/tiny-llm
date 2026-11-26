@@ -49,7 +49,7 @@ def test_week1_sampled_head_is_used_only_for_generation(monkeypatch, tied, avail
         return None
 
     monkeypatch.setattr(
-        tiny_llm_ext_ref, "try_week1_sampled_head", sampled_head, raising=False
+        tiny_llm_ext_ref._ext, "_try_week1_sampled_head", sampled_head, raising=False
     )
     for length in (127, 128, 129):
         tokenizer = Tokenizer(length)

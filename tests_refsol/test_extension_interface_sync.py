@@ -445,6 +445,7 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "_qk_norm_rope4",
         "_decode_attention_online",
         "_submit_decode_prefix_if_ordinary",
+        "_try_week1_sampled_head",
         "_try_mlp_qmm_m64",
         "_mlp_qmm_m64_route_counts",
         "_mlp_qmm_m64_pipeline_state",

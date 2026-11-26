@@ -220,7 +220,8 @@ class Qwen3ModelWeek1:
 
     def _generation_logits(self, inputs: mx.array) -> mx.array:
         # Generation only samples the final row. Other callers still get all logits.
-        sampled_head = getattr(tiny_llm_ext_ref, "try_week1_sampled_head", None)
+        native = getattr(tiny_llm_ext_ref, "_ext", None)
+        sampled_head = getattr(native, "_try_week1_sampled_head", None)
         if inputs.shape != (1, 128) or sampled_head is None:
             return self(inputs)
 
