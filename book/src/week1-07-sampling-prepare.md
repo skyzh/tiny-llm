@@ -60,7 +60,7 @@ The complete non-greedy order is:
 
 `None` or a non-positive value disables its corresponding filter.
 `top_k == vocab_size` and `top_p == 1` leave the vocabulary unfiltered. The
-existing implementation raises `ValueError` when `top_k` is larger than the
+sampler you write must raise `ValueError` when `top_k` is larger than the
 vocabulary; inputs outside these boundaries are not part of this lesson's
 contract.
 
@@ -88,7 +88,7 @@ These commands require the cached 0.6B model. If it is missing, download it and
 rerun them:
 
 ```bash
-hf download Qwen/Qwen3-0.6B-MLX-4bit
+pdm run hf download Qwen/Qwen3-0.6B-MLX-4bit
 ```
 
 Larger models remain optional and are not a Day 7 completion gate.

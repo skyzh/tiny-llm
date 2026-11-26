@@ -5,11 +5,13 @@ that generates text. We will implement the neural network layers used by Qwen3 w
 
 ## Where You Start
 
-After [setup](./setup.md), you have run the reference model and watched it
-generate text. Your own package, `src/tiny_llm`, has the same files and
-function signatures, but the functions you will write are stubs whose bodies
-are just `pass`. Each day, you fill in a few of them, copy that day's tests
-with `pdm run test --week 1 --day N`, and work until they pass.
+[Setup](./setup.md) sends you to the focused Day 1 test right after the
+installation check. Running the reference model to watch it generate text is
+an optional preview. Your own package, `src/tiny_llm`, has the same files and
+function signatures as the reference, but the functions you will write are
+stubs whose bodies are just `pass`. Each day, you fill in a few of them, copy
+that day's tests with `pdm run test --week 1 --day N`, and work until they
+pass.
 
 Days 1 to 4 build the layers one at a time. Day 5 assembles them into the
 Qwen3 model and loads the real weights. Day 6 adds the generation loop, and

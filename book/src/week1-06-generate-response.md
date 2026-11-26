@@ -52,7 +52,7 @@ inside the prompt is context and does not stop generation; only a newly generate
 Before the loop, bind one streaming detokenizer with `detokenizer = tokenizer.detokenizer`, then call
 `detokenizer.reset()` once. Keep and reuse that same stateful object throughout generation: feed every non-EOS output
 token to `detokenizer.add_token(...)` and print each `detokenizer.last_segment` as it becomes available. With the locked
-mlx-lm 0.31.3 dependency, each separate access to the `tokenizer.detokenizer` property creates a fresh streaming
+mlx-lm 0.32.2 dependency, each separate access to the `tokenizer.detokenizer` property creates a fresh streaming
 detokenizer, so repeatedly accessing the property would discard the buffered text. On either termination path, call
 `detokenizer.finalize()` on the saved object and print its final `last_segment` so buffered text is not lost. The
 function returns `None` after streaming the response.
@@ -79,7 +79,7 @@ pdm run test --week 1 --day 6
 Then complete the required product check with the default 0.6B model:
 
 ```bash
-hf download Qwen/Qwen3-0.6B-MLX-4bit
+pdm run hf download Qwen/Qwen3-0.6B-MLX-4bit
 pdm run main --solution tiny_llm --loader week1 --model qwen3-0.6b \
   --prompt "Give me a short introduction to large language model"
 ```
