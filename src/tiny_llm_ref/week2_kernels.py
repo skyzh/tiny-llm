@@ -2,12 +2,37 @@ import mlx.core as mx
 from extensions_ref import tiny_llm_ext_ref
 from extensions_ref.tiny_llm_ext_ref import _ext as tiny_llm_ext_ref_private
 
+from .attention import _grouped_attention_weights
 from .basics import softmax
 
 
 _NO_ATTENTION_MASK = mx.zeros((1,), dtype=mx.float32)
 
 DENSE_PREFILL_MIN_QUERY = 9
+
+
+def _try_bf16_history_attention(
+    query: mx.array,
+    key: mx.array,
+    value: mx.array,
+    scale: float,
+    mask: mx.array | str | None,
+) -> mx.array | None:
+    # Keep unusual masks on the readable path.
+    explicit_mask = mask if isinstance(mask, mx.array) else None
+    if explicit_mask is not None and explicit_mask.dtype != mx.float32:
+        return None
+    try_scores = getattr(tiny_llm_ext_ref_private, "_try_week2_bf16_history_scores", None)
+    values = getattr(tiny_llm_ext_ref_private, "_week2_bf16_history_values", None)
+    if try_scores is None or values is None:
+        return None
+    scores = try_scores(query, key, value, explicit_mask)
+    if scores is None:
+        return None
+    weights = _grouped_attention_weights(
+        scores * mx.array(scale).astype(mx.float32), mask, query.shape
+    )
+    return values(value, weights).reshape(query.shape)
 
 
 class FastRMSNorm:

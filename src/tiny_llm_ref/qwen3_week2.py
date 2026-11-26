@@ -15,6 +15,7 @@ from .quantize import QuantizedWeights, dequantize_linear, quantized_linear
 from .week2_kernels import (
     DENSE_PREFILL_MIN_QUERY,
     _qk_norm_rope4,
+    _try_bf16_history_attention,
     FastRMSNorm,
     FastRoPE,
     dense_prefill_attention_mma,
@@ -262,13 +263,24 @@ class Qwen3MultiHeadAttention:
             )
         else:
             self.attention_dispatch_counts["readable"] += 1
-            x = scaled_dot_product_attention_grouped(
-                projection_q.astype(mx.float32),
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
-                scale=self.scale,
-                mask=mask,
-            ).astype(x.dtype)
+            attended = None
+            if (
+                L == 1
+                and type(cache) is TinyKvFullCache
+                and projection_k.shape[2] in (4092, 4096)
+            ):
+                attended = _try_bf16_history_attention(
+                    projection_q, projection_k, projection_v, self.scale, mask
+                )
+            if attended is None:
+                attended = scaled_dot_product_attention_grouped(
+                    projection_q.astype(mx.float32),
+                    projection_k.astype(mx.float32),
+                    projection_v.astype(mx.float32),
+                    scale=self.scale,
+                    mask=mask,
+                )
+            x = attended.astype(x.dtype)
         x = x.transpose(0, 2, 1, 3).reshape(B, L, self.num_heads * self.head_dim)
         return _linear(x, self.wo)
 

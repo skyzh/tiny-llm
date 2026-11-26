@@ -41,7 +41,9 @@ target_sources(
   ${CMAKE_CURRENT_LIST_DIR}/src/paged_attention.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp
 )
-target_sources(tiny_llm_ext_ref PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/week1_sampled_head.cpp)
+target_sources(tiny_llm_ext_ref PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/src/week1_sampled_head.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/week2_bf16_history.cpp)
 
 # Add include headers
 target_include_directories(tiny_llm_ext_ref PUBLIC ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/src)
@@ -56,24 +58,40 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # so that clangd can pick this up
 # Build metallib
 if(MLX_BUILD_METAL)
   set(WEEK1_HEAD_METAL "")
+  set(WEEK2_HISTORY_METAL "")
   if(MLX_VERSION VERSION_EQUAL "0.32.4")
-    list(GET MLX_INCLUDE_DIRS 0 WEEK1_MLX_INCLUDE)
+    list(GET MLX_INCLUDE_DIRS 0 INSTALLED_MLX_INCLUDE)
     set(WEEK1_HEAD_GENERATOR "${CMAKE_CURRENT_LIST_DIR}/generate_week1_sampled_head.py")
     set(WEEK1_HEAD_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/week1_sampled_head.metal")
-    set(WEEK1_STEEL_DIR "${WEEK1_MLX_INCLUDE}/mlx/backend/metal/kernels/steel/gemm")
+    set(WEEK1_STEEL_DIR "${INSTALLED_MLX_INCLUDE}/mlx/backend/metal/kernels/steel/gemm")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
       "${WEEK1_HEAD_GENERATOR}"
       "${WEEK1_STEEL_DIR}/kernels/steel_gemm_fused.h"
       "${WEEK1_STEEL_DIR}/mma.h"
       "${WEEK1_STEEL_DIR}/params.h")
     execute_process(
-      COMMAND "${Python_EXECUTABLE}" "${WEEK1_HEAD_GENERATOR}" "${WEEK1_MLX_INCLUDE}" "${WEEK1_HEAD_OUTPUT}"
+      COMMAND "${Python_EXECUTABLE}" "${WEEK1_HEAD_GENERATOR}" "${INSTALLED_MLX_INCLUDE}" "${WEEK1_HEAD_OUTPUT}"
       RESULT_VARIABLE WEEK1_HEAD_RESULT)
     if(WEEK1_HEAD_RESULT STREQUAL "0")
       set(WEEK1_HEAD_METAL "${WEEK1_HEAD_OUTPUT}")
       target_compile_definitions(tiny_llm_ext_ref PRIVATE TINY_LLM_WEEK1_SAMPLED_HEAD)
     elseif(NOT WEEK1_HEAD_RESULT STREQUAL "2")
       message(FATAL_ERROR "Could not derive the Week 1 sampled head")
+    endif()
+
+    set(WEEK2_HISTORY_GENERATOR "${CMAKE_CURRENT_LIST_DIR}/generate_week2_bf16_history.py")
+    set(WEEK2_HISTORY_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/week2_bf16_history.metal")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+      "${WEEK2_HISTORY_GENERATOR}"
+      "${INSTALLED_MLX_INCLUDE}/mlx/backend/metal/kernels/gemv.h")
+    execute_process(
+      COMMAND "${Python_EXECUTABLE}" "${WEEK2_HISTORY_GENERATOR}" "${INSTALLED_MLX_INCLUDE}" "${WEEK2_HISTORY_OUTPUT}"
+      RESULT_VARIABLE WEEK2_HISTORY_RESULT)
+    if(WEEK2_HISTORY_RESULT STREQUAL "0")
+      set(WEEK2_HISTORY_METAL "${WEEK2_HISTORY_OUTPUT}")
+      target_compile_definitions(tiny_llm_ext_ref PRIVATE TINY_LLM_WEEK2_BF16_HISTORY)
+    elseif(NOT WEEK2_HISTORY_RESULT STREQUAL "2")
+      message(FATAL_ERROR "Could not derive the Week 2 BF16 history loads")
     endif()
   endif()
   mlx_build_metallib(
@@ -86,6 +104,7 @@ if(MLX_BUILD_METAL)
     ${CMAKE_CURRENT_LIST_DIR}/src/week2_kernels.metal
     ${CMAKE_CURRENT_LIST_DIR}/src/paged_attention.metal
     ${WEEK1_HEAD_METAL}
+    ${WEEK2_HISTORY_METAL}
     INCLUDE_DIRS
     ${PROJECT_SOURCE_DIR}
     ${MLX_INCLUDE_DIRS}

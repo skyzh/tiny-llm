@@ -54,7 +54,17 @@ def scaled_dot_product_attention_grouped(
     value = value.reshape(*B, -1, H, 1, S, D)
 
     scores = mx.matmul(query, key.swapaxes(-2, -1)) * factor
+    weights = _grouped_attention_weights(scores, mask, expected_shape)
+    return mx.matmul(weights, value).reshape(expected_shape)
+
+
+def _grouped_attention_weights(
+    scores: mx.array, mask: mx.array | str | None, query_shape: tuple[int, ...]
+) -> mx.array:
     if mask is not None:
+        H_q, L, _ = query_shape[-3:]
+        B = query_shape[:-3]
+        H, n_repeats, _, S = scores.shape[-4:]
         if mask == "causal":
             if L > S:
                 raise ValueError("causal attention requires S >= L")
@@ -64,8 +74,7 @@ def scaled_dot_product_attention_grouped(
             mask = mx.broadcast_to(mask, (*B, H_q, L, S))
             mask = mask.reshape(*B, 1, H, n_repeats, L, S)
             scores = scores + mask
-    result = mx.matmul(softmax(scores, axis=-1), value)
-    return result.reshape(expected_shape)
+    return softmax(scores, axis=-1)
 
 
 def paged_attention(
