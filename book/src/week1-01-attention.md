@@ -14,8 +14,8 @@ Start by running the focused Task 1 tests. The command copies the supplied Day 1
 pdm run test --week 1 --day 1 -- -k task_1
 ```
 
-The supplied `softmax` cases pass in the untouched starter, while the attention cases fail. This expected red checkpoint
-shows the behavior that your attention implementation must add.
+The `softmax` cases already pass, because the starter supplies `softmax`. The attention cases fail, and that is
+expected: they describe what your attention function must do.
 
 An attention layer processes an input sequence and weighs the relevance of its different positions when producing each
 output. Attention is a key building block of Transformer models.
