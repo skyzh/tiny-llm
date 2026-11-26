@@ -2,6 +2,7 @@ import mlx.core as mx
 from mlx_lm.tokenizer_utils import BPEStreamingDetokenizer, TokenizerWrapper
 from datetime import datetime
 
+from ._prefix_page import _FirstPageCopy
 from .kv_cache import BatchingKvCache
 
 
@@ -164,20 +165,49 @@ class _CliRequest(Request):
 
 
 def _batch_generate_with_cli_tokenizer(
-    model, tokenizer, prompts, *, max_seq_len, batch_size, prefill_step
+    model,
+    tokenizer,
+    prompts,
+    *,
+    max_seq_len,
+    batch_size,
+    prefill_step,
+    _reuse_first_page=True,
 ):
     """Run the reference CLI queue with its freshly loaded tokenizer.
 
     The CLI owns the tokenizer for the queue and keeps its vocabulary stable.
     Each stock BPE detokenizer still has request-local mutable state.
     """
-    return _batch_generate(
-        model, tokenizer, prompts, max_seq_len, batch_size, prefill_step, _CliRequest
+    prefix_copy = (
+        _FirstPageCopy.for_queue(model, prefill_step) if _reuse_first_page else None
     )
+    try:
+        return _batch_generate(
+            model,
+            tokenizer,
+            prompts,
+            max_seq_len,
+            batch_size,
+            prefill_step,
+            _CliRequest,
+            prefix_copy=prefix_copy,
+        )
+    finally:
+        if prefix_copy is not None:
+            prefix_copy.close()
 
 
 def _batch_generate(
-    model, tokenizer, prompts, max_seq_len, batch_size, prefill_step, request_type
+    model,
+    tokenizer,
+    prompts,
+    max_seq_len,
+    batch_size,
+    prefill_step,
+    request_type,
+    *,
+    prefix_copy=None,
 ):
     if max_seq_len <= 0:
         raise ValueError("max_seq_len must be positive")
@@ -223,7 +253,11 @@ def _batch_generate(
             if pending_prefill_request is not None:
                 made_progress = False
                 if not pending_prefill_request.is_prefill_done:
-                    pending_prefill_request.try_prefill()
+                    if prefix_copy is not None and pending_prefill_request.offset == 0:
+                        # A copied page consumes this round's prefill step.
+                        prefix_copy.prefill(pending_prefill_request)
+                    else:
+                        pending_prefill_request.try_prefill()
                     made_progress = True
                 if pending_prefill_request.is_prefill_done:
                     request_finished = (
