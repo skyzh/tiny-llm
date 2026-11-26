@@ -448,6 +448,8 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "_dense_attention_prefill_mma_batch_mask",
         "_submit_decode_prefix_if_ordinary",
         "_try_week1_sampled_head",
+        "_try_week2_bf16_history_scores",
+        "_week2_bf16_history_values",
         "_try_mlp_qmm_m64",
         "_mlp_qmm_m64_route_counts",
         "_mlp_qmm_m64_pipeline_state",

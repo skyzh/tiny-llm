@@ -7,6 +7,7 @@
 
 #include "mlx/transforms.h"
 #include "src/mlp_qmm_m64.h"
+#include "src/week2_bf16_history.h"
 #include "tiny_llm_ext.h"
 
 namespace nb = nanobind;
@@ -18,6 +19,9 @@ NB_MODULE(_ext, m) {
     m.def("load_library", &tiny_llm_ext_ref::load_library, "path"_a);
     m.def("_try_week1_sampled_head", &tiny_llm_ext_ref::try_week1_sampled_head, "normalized"_a, "weight"_a,
           nb::call_guard<nb::gil_scoped_release>());
+    m.def("_try_week2_bf16_history_scores", &tiny_llm_ext_ref::try_week2_bf16_history_scores,
+          "query"_a, "key"_a, "value"_a, "mask"_a = nb::none(), nb::call_guard<nb::gil_scoped_release>());
+    m.def("_week2_bf16_history_values", &tiny_llm_ext_ref::week2_bf16_history_values, "value"_a, "weights"_a);
 
     m.def("_submit_decode_prefix_if_ordinary", [](const mx::array &root) {
         if (root.is_tracer() || !root.has_primitive() ||
