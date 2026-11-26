@@ -12,6 +12,7 @@ constant bool decode_split_sequence128 [[function_constant(103)]];
 constant bool prefill_is_causal [[function_constant(120)]];
 constant bool prefill_has_mask [[function_constant(121)]];
 constant bool prefill_full_tiles [[function_constant(122)]];
+constant bool prefill_batch_mask [[function_constant(123)]];
 
 namespace {
 
@@ -969,7 +970,8 @@ template <typename T>
                 }
                 float score = valid ? values[element] * scale_log2 : -INFINITY;
                 if (valid && prefill_has_mask) {
-                    score += mask[(query_row_group * length + query_position) * context + key_position] * LOG2_E;
+                    const int mask_row = prefill_batch_mask ? batch : query_row_group;
+                    score += mask[(mask_row * length + query_position) * context + key_position] * LOG2_E;
                 }
                 values[element] = score;
             }

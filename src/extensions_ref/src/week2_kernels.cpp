@@ -147,26 +147,47 @@ mx::array _decode_attention_online(const mx::array &q, const mx::array &k, const
                                                num_heads, num_kv_heads, true), {q, k, v, mask});
 }
 
-mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
+namespace {
+
+mx::array dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
                                        const mx::array &mask, float scale, bool is_causal, bool has_mask, int num_heads,
-                                       int num_kv_heads, mx::StreamOrDevice s) {
+                                       int num_kv_heads, bool batch_mask, mx::StreamOrDevice s) {
     if (q.dtype() != mx::bfloat16 || k.dtype() != mx::bfloat16 || v.dtype() != mx::bfloat16 ||
         mask.dtype() != mx::float32) {
         throw std::runtime_error("dense_attention_prefill_mma: expected BF16 q/k/v and float32 mask");
     }
-    if (q.ndim() != 3 || k.ndim() != 3 || v.ndim() != 3 || q.shape()[2] != 128 || k.shape()[2] != 128 ||
+    if (num_heads <= 0 || num_kv_heads <= 0 || q.ndim() != 3 || k.ndim() != 3 || v.ndim() != 3 || q.shape()[2] != 128 || k.shape()[2] != 128 ||
         v.shape()[2] != 128 || k.shape() != v.shape() || q.shape()[1] <= 8 || num_heads % num_kv_heads != 0 ||
         q.shape()[0] % num_heads != 0 || k.shape()[0] * num_heads != q.shape()[0] * num_kv_heads) {
         throw std::runtime_error("dense_attention_prefill_mma: incompatible BF16/D128 attention shapes");
     }
-    if (has_mask && (mask.ndim() != 3 || mask.shape()[0] != q.shape()[0] || mask.shape()[1] != q.shape()[1] ||
-                     mask.shape()[2] != k.shape()[1])) {
-        throw std::runtime_error("dense_attention_prefill_mma: mask must have shape [B*Hq,L,S]");
+    const int mask_planes = batch_mask ? q.shape()[0] / num_heads : q.shape()[0];
+    if (has_mask && mask.shape() != mx::Shape{mask_planes, q.shape()[1], k.shape()[1]}) {
+        throw std::runtime_error(batch_mask ? "dense_attention_prefill_mma: mask must have shape [B,L,S]"
+                                            : "dense_attention_prefill_mma: mask must have shape [B*Hq,L,S]");
     }
     return mx::array(
         q.shape(), q.dtype(),
         std::make_shared<Week2DensePrefillMMA>(to_stream(s), scale, is_causal, has_mask, num_heads, num_kv_heads),
         {q, k, v, mask});
+}
+
+}  // namespace
+
+mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
+                                      const mx::array &mask, float scale, bool is_causal, bool has_mask,
+                                      int num_heads, int num_kv_heads, mx::StreamOrDevice s) {
+    return dense_attention_prefill_mma(q, k, v, mask, scale, is_causal, has_mask, num_heads, num_kv_heads, false, s);
+}
+
+mx::array _dense_attention_prefill_mma_batch_mask(const mx::array &q, const mx::array &k, const mx::array &v,
+                                                 const mx::array &mask, float scale, bool is_causal, bool has_mask,
+                                                 int num_heads, int num_kv_heads, mx::StreamOrDevice s) {
+    if (is_causal || !has_mask) {
+        throw std::runtime_error("dense_attention_prefill_mma: expected an explicit batch mask");
+    }
+    return dense_attention_prefill_mma(q, k, v, mx::contiguous(mask, false, s), scale, false, true,
+                                       num_heads, num_kv_heads, true, s);
 }
 
 void Week2RMSNorm::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
@@ -398,15 +419,18 @@ void Week2DensePrefillMMA::eval_gpu(const std::vector<mx::array> &inputs, std::v
     constexpr int key_block = 16;
     const bool causal = is_causal_;
     const bool masked = has_mask_;
+    const bool batch_mask = masked && mask.shape()[0] != q_rows;
     const bool full_tiles = length % query_block == 0 && context % key_block == 0;
     const mx::metal::MTLFCList constants = {
         {&causal, MTL::DataType::DataTypeBool, 120},
         {&masked, MTL::DataType::DataTypeBool, 121},
         {&full_tiles, MTL::DataType::DataTypeBool, 122},
+        {&batch_mask, MTL::DataType::DataTypeBool, 123},
     };
     const std::string kernel_name = "week2_dense_prefill_mma_bf16_d128";
     const std::string hash_name = kernel_name + (causal ? "_causal" : "_noncausal") +
-        (masked ? "_masked" : "_unmasked") + (full_tiles ? "_full" : "_tail");
+        (masked ? "_masked" : "_unmasked") + (full_tiles ? "_full" : "_tail") +
+        (batch_mask ? "_batch_mask" : "");
     auto kernel = d.get_kernel(kernel_name, d.get_library("tiny_llm_ext_ref"), hash_name, constants);
     auto &encoder = mx::metal::get_command_encoder(stream());
     encoder.set_compute_pipeline_state(kernel);
