@@ -174,9 +174,10 @@ learner does not need a second parser or a replacement generation interface.
 
 ## Manual Cached-Qwen Walkthrough
 
-Complete the Day 9 TODOs first. Create separate disposable workspace and
-artifact directories, put a large UTF-8 `build.log` in the workspace, and use
-the same local-model adapter as the exploratory Week 4 exercise:
+Complete the Day 9 TODOs first. The fragment creates separate disposable
+workspace and artifact directories and adds a large UTF-8 `build.log`.
+It calls `mlx_lm.generate` directly for model responses and uses the
+learner's Day 9 evidence workspace and agent loop.
 
 ```python
 import hashlib
@@ -236,11 +237,17 @@ for artifact_path in artifact_root.iterdir():
     print(artifact_path.name, len(data), hashlib.sha256(data).hexdigest())
 ```
 
-Save that fragment as `/tmp/tiny-llm-day9.py`, then run the repository source
-explicitly so an older editable install cannot be imported by accident:
+Create a fresh directory for the script.
 
 ```bash
-PYTHONPATH=src pdm run python /tmp/tiny-llm-day9.py
+DAY9_SCRIPT_DIR="$(mktemp -d)"
+```
+
+Save the fragment as `day9.py` in that directory. Run it from the checkout
+root with the checkout's source on the Python import path.
+
+```bash
+PYTHONPATH=src pdm run python "$DAY9_SCRIPT_DIR/day9.py"
 ```
 
 Model choices vary. Inspect the actual first observation, requested artifact

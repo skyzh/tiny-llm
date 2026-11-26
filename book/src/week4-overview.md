@@ -31,24 +31,15 @@ The deterministic learner checkpoint is cumulative within Week 4:
 Days 1 through N, then runs those files together. A later checkpoint therefore
 rechecks every earlier mechanism it builds on.
 
-For a fixed demonstration of Days 2 and 3 after repository setup, run
-`PDM_CHECK_UPDATE=false pdm run --skip pre_run agent -- --autoreject-fixture` from the checkout root. It uses the
-reference loop in a fresh temporary workspace. It approves one greeting
-edit, one fixed notes write and one in-process byte check. The JSON report
-includes an unapproved write denial and the three effect receipts. The
-fixture needs no model weights or network.
+After repository setup, start with the [Day 2 fixed fixture](week4-02-tools.md#inspect-the-supplied-fixture).
+It runs the reference loop offline in a temporary workspace and checks the
+approved Day 3 greeting edit, notes write and validation.
 
-The real-model `pdm run agent` command currently exercises the learner loop,
-workspace, approvals, and receipts from Days 1--3, but its MLX-LM adapter calls
-`mlx_lm.generate` directly. It does **not** exercise the learner-owned
-`generate_response` helper or the Week 1--3 course model/cache path. Day 1 now
-tests that helper directly, and Day 8 reconnects to the course model/cache path
-in a deterministic test and a manual walkthrough. After all nine days are
-complete, `pdm run week4-capstone` composes the deterministic mechanisms in one
-disposable scenario.
-
-These limits are visible course state, not goals for the learner to repair in
-the prose-only checkpoint.
+The interactive `pdm run agent` command uses the Week 2 model,
+`generate_response()` and a fresh growing cache per response. Day 2 shows
+how to use a cached Qwen3 model with read-only access to the fixed sample.
+After all nine days are complete, `pdm run week4-capstone` exercises the
+deterministic flow through sessions, branches and bounded evidence.
 
 ## The Nine-Day Progression
 
@@ -77,11 +68,11 @@ tests use scripted models and temporary workspaces, so they need no model
 download.
 
 The supported native environment is macOS on Apple Silicon with the project
-dependencies installed. Real-model sections are manual and nondeterministic.
-An uncached run also needs network access, free disk space, and enough unified
-memory for the selected MLX weights. Use only disposable workspaces with no
-secrets: tool observations become model input, and Day 3 can enable file
-changes plus one exact allowlisted command.
+dependencies installed. The interactive fixture uses a locally cached Qwen3
+model. Download the weights during setup and budget disk space and unified
+memory for the chosen size. Use disposable workspaces with public fixture
+data for manual runs. Tool observations become model input, and Day 3 can
+enable approved file effects and exact commands.
 
 ## Work Through One Chapter
 
