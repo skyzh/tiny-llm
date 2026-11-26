@@ -585,7 +585,7 @@ dense BF16 Week 2 model; the [model table](./preface.md#choose-a-model-for-your-
 suggests at least 32 GB. Download it before using `--offline`:
 
 ```bash
-hf download Qwen/Qwen3-4B-MLX-4bit
+pdm run hf download Qwen/Qwen3-4B-MLX-4bit
 ```
 
 Then rerun every compared row with `--model qwen3-4b`, and keep those results

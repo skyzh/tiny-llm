@@ -222,7 +222,7 @@ hit. The [performance appendix](./appendix-performance.md) has the full
 history.
 
 To compare at 4B yourself, download the model with
-`hf download Qwen/Qwen3-4B-MLX-4bit` and rerun **every** row with
+`pdm run hf download Qwen/Qwen3-4B-MLX-4bit` and rerun **every** row with
 `--model qwen3-4b`.
 
 {{#include copyright.md}}
