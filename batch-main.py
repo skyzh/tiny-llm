@@ -48,6 +48,7 @@ args = parser.parse_args()
 if args.device != "gpu":
     parser.error("The completed Week 2 and Week 3 models require --device gpu")
 
+batch_options = {}
 if args.solution == "tiny_llm":
     print("Using your tiny_llm solution")
     from tiny_llm import models, batch_generate
@@ -56,6 +57,9 @@ elif args.solution == "tiny_llm_ref" or args.solution == "ref":
     print("Using tiny_llm_ref solution")
     from tiny_llm_ref import models
     from tiny_llm_ref.batch import _batch_generate_with_cli_tokenizer as batch_generate
+
+    if args.loader == "week3":
+        batch_options["_release_snapshot_after_last_lookup"] = True
 
 else:
     raise ValueError(f"Solution {args.solution} not supported")
@@ -99,6 +103,7 @@ with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
         max_seq_len=args.max_seq_len,
         batch_size=args.batch_size,
         prefill_step=args.prefill_step,
+        **batch_options,
     )
     for prompt_idx, text in result:
         print(f"--- {prompt_idx} ---")
