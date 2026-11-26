@@ -1,4 +1,5 @@
 import mlx.core as mx
+from extensions_ref import tiny_llm_ext_ref
 from .basics import linear, silu
 from .attention import scaled_dot_product_attention_grouped
 from .layer_norm import RMSNorm
@@ -203,15 +204,28 @@ class Qwen3ModelWeek1:
             self.w_lm_head = None
         self.mlx_model = mlx_model
 
-    def __call__(
-        self,
-        inputs: mx.array,
-    ) -> mx.array:
+    def _normalized_hidden(self, inputs: mx.array) -> mx.array:
         h = self.embedding(inputs)
         for layer in range(self.num_hidden_layers):
             h = self.layers_inner[layer](h, mask="causal")
-        h = self.norm(h)
+        return self.norm(h)
+
+    def _project(self, h: mx.array) -> mx.array:
         if self.w_lm_head is not None:
             return linear(h, self.w_lm_head)
-        else:
-            return self.embedding.as_linear(h)
+        return self.embedding.as_linear(h)
+
+    def __call__(self, inputs: mx.array) -> mx.array:
+        return self._project(self._normalized_hidden(inputs))
+
+    def _generation_logits(self, inputs: mx.array) -> mx.array:
+        # Generation only samples the final row. Other callers still get all logits.
+        native = getattr(tiny_llm_ext_ref, "_ext", None)
+        sampled_head = getattr(native, "_try_week1_sampled_head", None)
+        if inputs.shape != (1, 128) or sampled_head is None:
+            return self(inputs)
+
+        h = self._normalized_hidden(inputs)
+        weight = self.embedding.weight if self.w_lm_head is None else self.w_lm_head
+        sampled = sampled_head(h, weight)
+        return self._project(h) if sampled is None else sampled

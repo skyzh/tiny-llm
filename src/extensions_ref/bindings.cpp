@@ -16,6 +16,8 @@ NB_MODULE(_ext, m) {
     m.doc() = "tiny-llm extensions for MLX";
 
     m.def("load_library", &tiny_llm_ext_ref::load_library, "path"_a);
+    m.def("_try_week1_sampled_head", &tiny_llm_ext_ref::try_week1_sampled_head, "normalized"_a, "weight"_a,
+          nb::call_guard<nb::gil_scoped_release>());
 
     m.def("_submit_decode_prefix_if_ordinary", [](const mx::array &root) {
         if (root.is_tracer() || !root.has_primitive() ||
