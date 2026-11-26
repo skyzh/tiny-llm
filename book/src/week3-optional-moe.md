@@ -308,7 +308,7 @@ generation entrypoints. This optional check downloads a large model and is not
 required for checkpoint feedback:
 
 ```bash
-hf download Qwen/Qwen3-30B-A3B-MLX-4bit
+pdm run hf download Qwen/Qwen3-30B-A3B-MLX-4bit
 
 pdm run main --solution tiny_llm --loader week3 --model qwen3-30b-a3b \
   --prompt "Give me a short introduction to mixture of experts."
