@@ -173,6 +173,7 @@ def _batch_generate_with_cli_tokenizer(
     batch_size,
     prefill_step,
     _reuse_first_page=True,
+    _release_snapshot_after_last_lookup=False,
 ):
     """Run the reference CLI queue with its freshly loaded tokenizer.
 
@@ -192,6 +193,7 @@ def _batch_generate_with_cli_tokenizer(
             prefill_step,
             _CliRequest,
             prefix_copy=prefix_copy,
+            release_snapshot_after_last_lookup=_release_snapshot_after_last_lookup,
         )
     finally:
         if prefix_copy is not None:
@@ -208,6 +210,7 @@ def _batch_generate(
     request_type,
     *,
     prefix_copy=None,
+    release_snapshot_after_last_lookup=False,
 ):
     if max_seq_len <= 0:
         raise ValueError("max_seq_len must be positive")
@@ -256,6 +259,19 @@ def _batch_generate(
                     if prefix_copy is not None and pending_prefill_request.offset == 0:
                         # A copied page consumes this round's prefill step.
                         prefix_copy.prefill(pending_prefill_request)
+                        if (
+                            release_snapshot_after_last_lookup
+                            and not prompts
+                            and type(prefix_copy) is _FirstPageCopy
+                            and request_type is _CliRequest
+                            and prefix_copy.snapshot is not None
+                            and (
+                                pending_prefill_request.offset > 0
+                                or pending_prefill_request.is_prefill_done
+                            )
+                        ):
+                            # The final request has completed its lookup and any copy.
+                            prefix_copy.snapshot = None
                     else:
                         pending_prefill_request.try_prefill()
                     made_progress = True
