@@ -67,6 +67,7 @@ if(MLX_BUILD_METAL)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
       "${WEEK1_HEAD_GENERATOR}"
       "${WEEK1_STEEL_DIR}/kernels/steel_gemm_fused.h"
+      "${WEEK1_STEEL_DIR}/gemm.h"
       "${WEEK1_STEEL_DIR}/mma.h"
       "${WEEK1_STEEL_DIR}/params.h")
     execute_process(
