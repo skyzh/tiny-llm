@@ -389,7 +389,7 @@ def test_real_model_cli_exposes_only_the_learner_package():
         isinstance(node, ast.ImportFrom)
         and node.module == "tiny_llm"
         and any(alias.name == "agent" for alias in node.names)
-        for node in tree.body
+        for node in ast.walk(tree)
     )
 
     spec = importlib.util.spec_from_file_location(

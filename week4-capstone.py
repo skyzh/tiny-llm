@@ -192,7 +192,10 @@ def run_capstone(agent_api=learner_agent) -> dict[str, object]:
         (workspace_root / "app.py").write_text("answer = 1\n", encoding="utf-8")
         (workspace_root / "build-source.txt").write_text(_BUILD_LOG, encoding="utf-8")
         (workspace_root / _VALIDATION_INTERPRETER).symlink_to(sys.executable)
-        receipts = agent_api.ReceiptStore(base / "receipts.jsonl")
+        receipt_root = root / "receipts"
+        receipt_root.mkdir()
+        base_ledger = receipt_root / "base.jsonl"
+        receipts = agent_api.ReceiptStore(base_ledger)
         workspace = agent_api.Workspace(
             agent_api.ToolPolicy(
                 workspace_root,
@@ -245,18 +248,17 @@ def run_capstone(agent_api=learner_agent) -> dict[str, object]:
         )
         status = agent_api.inspect_checkpoint(compact_checkpoint)
 
-        branch_roots = {}
+        branch_ledgers = {}
         branch_workspaces = {}
         branch_receipts = {}
-        initial_receipt_bytes = (base / "receipts.jsonl").read_bytes()
+        initial_receipt_bytes = base_ledger.read_bytes()
         for name in ("validate-only", "try-extra-edit"):
             branch_root = root / name
             shutil.copytree(base, branch_root, symlinks=True)
-            branch_roots[name] = branch_root
-            receipt_path = branch_root / "receipts.jsonl"
-            branch_receipts[name] = agent_api.ReceiptStore(receipt_path)
-            if branch_receipts[name].path != branch_root / "receipts.jsonl":
-                raise RuntimeError("each branch must own its copied receipt log")
+            ledger = receipt_root / f"{name}.jsonl"
+            ledger.write_bytes(initial_receipt_bytes)
+            branch_ledgers[name] = ledger
+            branch_receipts[name] = agent_api.ReceiptStore(ledger)
             if name == "validate-only":
                 approve = _approve
             else:
@@ -270,8 +272,6 @@ def run_capstone(agent_api=learner_agent) -> dict[str, object]:
                 approve,
                 branch_receipts[name],
             )
-            if (branch_root / "receipts.jsonl").read_bytes() != initial_receipt_bytes:
-                raise RuntimeError("each branch must begin with the copied receipts")
 
         case = agent_api.EvaluationCase(
             final_contains="validated branch",
@@ -331,12 +331,8 @@ def run_capstone(agent_api=learner_agent) -> dict[str, object]:
             for event in selected.run.events
         ):
             raise RuntimeError("the selected branch must not replay the completed edit")
-        selected_receipt_bytes = (
-            branch_roots["validate-only"] / "receipts.jsonl"
-        ).read_bytes()
-        denied_receipt_bytes = (
-            branch_roots["try-extra-edit"] / "receipts.jsonl"
-        ).read_bytes()
+        selected_receipt_bytes = branch_ledgers["validate-only"].read_bytes()
+        denied_receipt_bytes = branch_ledgers["try-extra-edit"].read_bytes()
         if not selected_receipt_bytes.startswith(initial_receipt_bytes):
             raise RuntimeError("selected receipts must retain the copied base")
         if denied_receipt_bytes != initial_receipt_bytes:
@@ -401,7 +397,9 @@ def run_capstone(agent_api=learner_agent) -> dict[str, object]:
                 "the selected artifact range must be the exact E42 bytes"
             )
 
-        app_bytes = (branch_roots[selected.name] / "workspace" / "app.py").read_bytes()
+        app_bytes = (
+            branch_workspaces[selected.name].policy.root / "app.py"
+        ).read_bytes()
         base_receipt_ids = _receipt_ids(receipts)
         selected_receipt_ids = _receipt_ids(branch_receipts[selected.name])
         return {

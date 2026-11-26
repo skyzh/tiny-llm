@@ -31,6 +31,13 @@ The deterministic learner checkpoint is cumulative within Week 4:
 Days 1 through N, then runs those files together. A later checkpoint therefore
 rechecks every earlier mechanism it builds on.
 
+For a fixed demonstration of Days 2 and 3 after repository setup, run
+`PDM_CHECK_UPDATE=false pdm run --skip pre_run agent -- --autoreject-fixture` from the checkout root. It uses the
+reference loop in a fresh temporary workspace. It approves one greeting
+edit, one fixed notes write and one in-process byte check. The JSON report
+includes an unapproved write denial and the three effect receipts. The
+fixture needs no model weights or network.
+
 The real-model `pdm run agent` command currently exercises the learner loop,
 workspace, approvals, and receipts from Days 1--3, but its MLX-LM adapter calls
 `mlx_lm.generate` directly. It does **not** exercise the learner-owned

@@ -1,4 +1,4 @@
-"""Run the Week 4 agent loop with a real local MLX model."""
+"""Run the Week 4 agent with a local model or a fixed fixture."""
 
 from __future__ import annotations
 
@@ -9,17 +9,20 @@ import sys
 from pathlib import Path
 
 from model_names import shortcut_name_to_full_name
-from tiny_llm import agent
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Explore the current Week 4 agent with a real local model."
+        description="Explore the Week 4 agent with a local model or a fixed fixture."
     )
-    parser.add_argument("task", nargs="+", help="one natural-language goal")
+    parser.add_argument("task", nargs="*", help="one natural-language goal")
+    parser.add_argument(
+        "--autoreject-fixture",
+        action="store_true",
+        help="run the fixed reference fixture without a model or shell",
+    )
     parser.add_argument(
         "--root",
-        required=True,
         type=Path,
         help="pre-created disposable workspace containing no secrets",
     )
@@ -59,17 +62,6 @@ def parse_allowed_commands(values: list[str]) -> tuple[tuple[str, ...], ...]:
     return tuple(commands)
 
 
-def receipt_path(root: Path, raw: Path | None) -> Path | None:
-    if raw is None:
-        return None
-    if raw.is_absolute() or ".." in raw.parts or not raw.name:
-        raise ValueError("--receipt-log must be a workspace-relative file path")
-    path = root.joinpath(raw)
-    if not path.parent.is_dir():
-        raise ValueError("--receipt-log parent directory must exist")
-    return path
-
-
 def confirm_tool(action) -> bool:
     payload = {"tool": action.tool, **action.arguments}
     print("\napproval requested> " + json.dumps(payload, sort_keys=True))
@@ -106,16 +98,27 @@ def show_file_tool_changes(paths) -> None:
     print("file-tool changes> " + json.dumps(list(paths)))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    argv = sys.argv[1:] if argv is None else argv
+    args = parser.parse_args(argv)
+    if args.autoreject_fixture:
+        if argv != ["--autoreject-fixture"]:
+            parser.error("--autoreject-fixture takes no other arguments")
+        from week4_fixture import run_fixture
+
+        print(json.dumps(run_fixture(), sort_keys=True))
+        return 0
     task = " ".join(args.task).strip()
     if not task:
         parser.error("task must not be empty")
     if args.max_steps <= 0 or args.max_tokens <= 0:
         parser.error("generation limits must be positive")
-    if not args.root.is_dir():
+    if args.root is None or not args.root.is_dir():
         parser.error("--root must be a pre-created directory")
+    from agent_cli_receipts import manual_workspace
+    from tiny_llm import agent
+
     try:
         commands = parse_allowed_commands(args.allow_command)
         policy = agent.ToolPolicy(
@@ -123,12 +126,12 @@ def main() -> int:
             allow_writes=args.allow_writes,
             allowed_commands=commands,
         )
-        log_path = receipt_path(policy.root, args.receipt_log)
-        store = agent.ReceiptStore(log_path)
+        workspace, log_path = manual_workspace(
+            agent, policy, args.receipt_log, confirm_tool
+        )
     except ValueError as error:
         parser.error(str(error))
 
-    workspace = agent.Workspace(policy, confirm_tool, store)
     limits = agent.AgentLimits(max_steps=args.max_steps)
     model_name = shortcut_name_to_full_name(args.model)
 

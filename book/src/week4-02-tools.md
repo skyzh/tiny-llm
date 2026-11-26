@@ -232,6 +232,18 @@ find "$INSPECT_ROOT" -type f -print
 cat "$INSPECT_ROOT/README.md" "$INSPECT_ROOT/src/weather.py"
 ```
 
+For a repeatable inspection of the supplied reference dispatcher after
+repository setup, run the fixed fixture from the checkout root.
+
+```bash
+PDM_CHECK_UPDATE=false pdm run --skip pre_run agent -- --autoreject-fixture
+```
+
+It starts in a fresh temporary directory containing only `app.py`. Look
+for `listed` and `read` in its JSON report to see the first two observations.
+The script continues with the fixed Day 3 edits and byte check. Run the
+Day 2 checkpoint tests to check your own implementation.
+
 ## Checkpoint
 
 Confirm that the deterministic run listed a directory, read exact UTF-8 file
