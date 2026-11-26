@@ -186,54 +186,10 @@ pdm run test-refsol --week 4 --day 2
 The course-code guard compares the starter and reference public
 signatures, dataclass fields, package exports, and solution-free method bodies.
 
-## Explore with a Real Model
+## Inspect the Supplied Fixture
 
-The scripted checkpoint above is the reproducible mechanics proof. This
-separate manual run is exploratory: a real model chooses the tools, so its
-wording and exact tool order may vary. Use only a disposable directory that
-contains no secrets or private source.
-
-The CLI defaults to `qwen3-4b` (`Qwen/Qwen3-4B-MLX-4bit`), whose cached weights
-use about 2 GiB; use that lower-resource option when needed. The recorded
-exploratory run below used `mlx-community/Qwen3-30B-A3B-4bit`, whose cached
-weights use about 16 GiB and require sufficient Apple unified memory. Model
-behavior and tool order vary with either choice. Both use the local MLX model
-path already used by this repository. You need macOS on Apple Silicon and the
-installed MLX dependencies. The first run downloads the selected weights from
-Hugging Face when they are not cached, so it also needs network access and the
-corresponding free disk space. If MLX is unavailable or the weights cannot be
-loaded, the command exits before the agent calls a workspace tool; it does not
-substitute scripted output.
-
-This CLI uses a supplied MLX-LM generation adapter. It exercises your Day 1
-loop and Day 2 workspace, but it does not call the learner-owned
-`generate_response()` helper or prove the Weeks 1--3 course model/cache path.
-
-Create a tiny read-only workspace, then give the model one goal:
-
-```bash
-INSPECT_ROOT="$(mktemp -d)"
-mkdir "$INSPECT_ROOT/src"
-printf '%s\n' '# Pocket Weather' 'A tiny terminal forecast project.' > "$INSPECT_ROOT/README.md"
-printf '%s\n' 'def forecast(city):' '    return f"Sunny in {city}"' > "$INSPECT_ROOT/src/weather.py"
-
-pdm run agent -- --model mlx-community/Qwen3-30B-A3B-4bit --root "$INSPECT_ROOT" \
-  "Inspect this workspace and explain its purpose and the behavior implemented in its source file. Use the available workspace tools to gather evidence from both the project overview and the source file. Your first response must be one tool request, every response must contain exactly one JSON object, and you must not finish until you have read the source file."
-```
-
-Watch the printed goal, model responses, parsed actions, and tool observations.
-There is no predefined action list: the model decides what to list and read
-before returning a final answer.
-The policy is read-only, so no approval prompt or receipt is expected. Compare
-the final answer with the actual disposable files:
-
-```bash
-find "$INSPECT_ROOT" -type f -print
-cat "$INSPECT_ROOT/README.md" "$INSPECT_ROOT/src/weather.py"
-```
-
-For a repeatable inspection of the supplied reference dispatcher after
-repository setup, run the fixed fixture from the checkout root.
+From the checkout root after repository setup and `pdm run build-ext-ref`,
+run the scripted reference fixture.
 
 ```bash
 PDM_CHECK_UPDATE=false pdm run --skip pre_run agent -- --autoreject-fixture
@@ -243,6 +199,35 @@ It starts in a fresh temporary directory containing only `app.py`. Look
 for `listed` and `read` in its JSON report to see the first two observations.
 The script continues with the fixed Day 3 edits and byte check. Run the
 Day 2 checkpoint tests to check your own implementation.
+
+## Try a Cached Week 2 Model
+
+The guarded interactive command starts with the same greeting file. The
+Week 2 engine reads its cached weights and uses the Day 1
+`generate_response()` helper with a fresh growing cache for each response.
+The guarded example uses the supplied implementation. For a manual
+run with your completed Weeks 1–2 and Day 1–2 code, pass `--root` and a
+task to the CLI.
+
+On macOS with Apple Silicon, download the Qwen3-4B weights during setup.
+
+```bash
+pdm run hf download Qwen/Qwen3-4B-MLX-4bit
+```
+
+Run the inspection from the checkout root. The fixture loads existing
+local weights and exposes only `list_files` and `read_file` in its
+temporary workspace.
+
+```bash
+PDM_CHECK_UPDATE=false pdm run --skip pre_run agent -- --inspect-fixture \
+  --model qwen3-4b
+```
+
+Look for `action> ... "tool": "read_file"`, the following `observation>`
+with the source text, then `fixture> observed the expected app.py bytes`
+and `finished>`. A final answer before the read exits with an error. If
+the local weights are missing, run the download command and retry.
 
 ## Checkpoint
 

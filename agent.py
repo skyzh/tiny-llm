@@ -8,7 +8,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from model_names import shortcut_name_to_full_name
+from model_names import MODEL_SHORTCUTS, shortcut_name_to_full_name
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,10 +16,16 @@ def build_parser() -> argparse.ArgumentParser:
         description="Explore the Week 4 agent with a local model or a fixed fixture."
     )
     parser.add_argument("task", nargs="*", help="one natural-language goal")
-    parser.add_argument(
+    profiles = parser.add_mutually_exclusive_group()
+    profiles.add_argument(
         "--autoreject-fixture",
         action="store_true",
         help="run the fixed reference fixture without a model or shell",
+    )
+    profiles.add_argument(
+        "--inspect-fixture",
+        action="store_true",
+        help="give a cached Week 2 model read-only access to the fixed sample",
     )
     parser.add_argument(
         "--root",
@@ -98,6 +104,87 @@ def show_file_tool_changes(paths) -> None:
     print("file-tool changes> " + json.dumps(list(paths)))
 
 
+def run_interactive(parser, args, agent, models, task, workspace, log_path):
+    import mlx.core as mx
+    from mlx_lm import load
+
+    model_name = shortcut_name_to_full_name(args.model)
+    if not model_name.startswith("Qwen/Qwen3"):
+        parser.error("--model must be a Qwen/Qwen3 model supported by Week 2")
+    model_path = model_name
+    if args.inspect_fixture:
+        if model_name not in MODEL_SHORTCUTS.values():
+            parser.error("--inspect-fixture requires a supported Qwen3 shortcut")
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError
+        from week4_fixture import inspection_messages, observed_fixture_read
+
+        try:
+            model_path = snapshot_download(model_name, local_files_only=True)
+        except LocalEntryNotFoundError:
+            parser.exit(
+                1,
+                f"error: {model_name} is missing from the local model cache. "
+                "Download it during course setup, then retry the fixture.\n",
+            )
+
+    with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
+        try:
+            loaded, tokenizer = load(
+                model_path, tokenizer_config={"trust_remote_code": False}
+            )
+            options = (
+                {"checkpoint": "packed-weights", "use_mlx_quantized_linear": True}
+                if args.device == "cpu"
+                else {}
+            )
+            model = models.dispatch_model(model_name, loaded, week=2, **options)
+        except Exception as error:
+            parser.exit(
+                1, f"error: could not load the Week 2 model {model_name}: {error}\n"
+            )
+
+        def generate(messages):
+            if args.inspect_fixture:
+                messages = inspection_messages(messages)
+            return agent.generate_response(
+                model,
+                tokenizer,
+                messages,
+                model.create_kv_cache,
+                args.max_tokens,
+                enable_thinking=args.enable_thinking,
+            )
+
+        print("model> " + model_name)
+        implementation = "reference" if args.inspect_fixture else "learner"
+        print("backend> Week 2 " + implementation)
+        print("workspace> " + str(workspace.policy.root))
+        print("goal> " + task)
+        print("tools> " + ", ".join(sorted(workspace.available_tools)))
+        if log_path is not None:
+            print("receipt log> " + str(log_path))
+        result = agent.run_agent(
+            task,
+            generate,
+            workspace,
+            agent.AgentLimits(max_steps=args.max_steps),
+            lambda event: show_event(agent, event),
+        )
+
+    if args.inspect_fixture:
+        if not observed_fixture_read(agent, result):
+            print("\nstopped> the required read of app.py was not observed")
+            return 1
+        print("fixture> observed the expected app.py bytes")
+    if result.completed:
+        print("\nfinished> " + (result.final or ""))
+    else:
+        print("\nstopped> " + result.reason)
+    show_file_tool_changes(workspace.modified_files)
+    return 0 if result.completed else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     argv = sys.argv[1:] if argv is None else argv
@@ -109,22 +196,40 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(run_fixture(), sort_keys=True))
         return 0
-    task = " ".join(args.task).strip()
-    if not task:
-        parser.error("task must not be empty")
+
     if args.max_steps <= 0 or args.max_tokens <= 0:
         parser.error("generation limits must be positive")
-    if args.root is None or not args.root.is_dir():
-        parser.error("--root must be a pre-created directory")
+    task = " ".join(args.task).strip()
+    if args.inspect_fixture:
+        if (
+            task
+            or args.root is not None
+            or args.allow_writes
+            or args.allow_command
+            or args.receipt_log
+        ):
+            parser.error("--inspect-fixture uses only the supplied read-only sample")
+    else:
+        if not task:
+            parser.error("task must not be empty")
+        if args.root is None or not args.root.is_dir():
+            parser.error("--root must be a pre-created directory")
+
+    if args.inspect_fixture:
+        from week4_fixture import inspection_backend, inspection_workspace
+
+        agent, models = inspection_backend()
+        task = "Read app.py and describe the greeting in one sentence."
+        with inspection_workspace(agent) as workspace:
+            return run_interactive(parser, args, agent, models, task, workspace, None)
+
     from agent_cli_receipts import manual_workspace
-    from tiny_llm import agent
+    from tiny_llm import agent, models
 
     try:
         commands = parse_allowed_commands(args.allow_command)
         policy = agent.ToolPolicy(
-            args.root,
-            allow_writes=args.allow_writes,
-            allowed_commands=commands,
+            args.root, allow_writes=args.allow_writes, allowed_commands=commands
         )
         workspace, log_path = manual_workspace(
             agent, policy, args.receipt_log, confirm_tool
@@ -132,56 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         parser.error(str(error))
 
-    limits = agent.AgentLimits(max_steps=args.max_steps)
-    model_name = shortcut_name_to_full_name(args.model)
-
-    try:
-        import mlx.core as mx
-        from mlx_lm import load
-
-        mlx_model, tokenizer = load(model_name)
-    except Exception as error:
-        parser.exit(1, f"error: could not load local model {model_name}: {error}\n")
-
-    def generate(messages):
-        from mlx_lm import generate as mlx_generate
-
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=args.enable_thinking,
-        )
-        return mlx_generate(
-            mlx_model,
-            tokenizer,
-            prompt,
-            max_tokens=args.max_tokens,
-            verbose=False,
-        )
-
-    print("model> " + model_name)
-    print("workspace> " + str(policy.root))
-    print("goal> " + task)
-    print("tools> " + ", ".join(sorted(workspace.available_tools)))
-    if log_path is not None:
-        print("receipt log> " + str(log_path))
-
-    with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-        result = agent.run_agent(
-            task,
-            generate,
-            workspace,
-            limits,
-            lambda event: show_event(agent, event),
-        )
-
-    if result.completed:
-        print("\nfinished> " + (result.final or ""))
-    else:
-        print("\nstopped> " + result.reason)
-    show_file_tool_changes(workspace.modified_files)
-    return 0 if result.completed else 1
+    return run_interactive(parser, args, agent, models, task, workspace, log_path)
 
 
 if __name__ == "__main__":

@@ -238,8 +238,10 @@ Day 3 checkpoint tests to check your learner implementation.
 
 ## Try the Interactive CLI
 
-The optional real-model CLI described on Day 2 exercises your loop,
-workspace, approvals and receipts through an MLX-LM generation adapter.
+The optional real-model CLI uses the Week 2 engine and the Day 1
+generation helper. Day 2 shows the cached model and reference build setup.
+For a manual run, use `--root` and a task, and add `--allow-writes` to
+enable edit and write proposals.
 Use a disposable directory with no secrets. Each write, edit or command
 needs a default-No approval at the terminal. A command
 gets the process permissions of the CLI, even with an exact allowlist. The

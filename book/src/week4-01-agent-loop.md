@@ -40,17 +40,6 @@ Implement the TODO bodies in these Day 1 starter files:
 | `src/tiny_llm/agent/protocol.py` | `AgentError`, `FinalAction`, `ToolAction`, `parse_action`, `build_system_prompt` | Represent and validate one final answer or one enabled tool request. |
 | `src/tiny_llm/agent/loop.py` | `AgentLimits`, `AgentEvent`, `AgentRun`, `run_agent` | Bound a run, propagate observations, and retain an inspectable trace. |
 
-`generate_response()` remains part of the public Day 1 surface. It renders the
-messages with the course tokenizer, decodes at most `max_tokens` with a fresh
-cache, stops at EOS, and releases every cache in a `finally` block.
-
-The supplied Day 1 test checks `generate_response()` with the course tokenizer
-and model boundary: exact prompt and thinking offsets, EOS stopping, the token
-limit, a fresh cache for each call, and cache release on normal and exceptional
-paths. The `pdm run agent` CLI still uses its own MLX-LM generation adapter, so
-a successful live CLI run is not evidence for this helper; the cumulative Day
-1 checkpoint is.
-
 Run the cumulative learner checkpoint from the repository root:
 
 ```bash
@@ -185,6 +174,24 @@ with `context_limit` when it is too large. Count invalid actions and stop with
 `invalid_action_limit` when that budget is exhausted. Together with the step
 and repeated-action limits, every run has an explicit terminal reason.
 
+## Task 10: Generate One Response with the Week 2 Engine
+
+Implement `generate_response()` in `src/tiny_llm/agent/generation.py`.
+Apply the conversation template with the generation prompt and the supplied
+thinking flag. Encode the rendered prompt without adding special tokens.
+
+At each call, create a fresh cache with `cache_factory()` and set the offset
+to zero. Run the whole prompt first. Then feed one token at a time, increasing
+the offset by the number of input tokens just processed. Select the next token
+with argmax on the last row's logits. Stop at EOS or `max_tokens` and decode
+the collected tokens. Reject a nonpositive token budget and release every
+cache in a `finally` block.
+
+The Day 1 test uses a small model double to check prompt handling, offsets,
+EOS, token limits, and cache release. The interactive CLI uses the same
+helper with the Week 2 model and its growing cache. Day 2 links the guarded
+cached-model command.
+
 ## Checkpoint
 
 When Day 1 is green, inspect the focused test rather than only its final pass:
@@ -194,9 +201,8 @@ budgeted stop reason. Revisit your opening prediction: a disabled or malformed
 request must not reach the workspace, and the exact error must remain visible
 to the following model turn.
 
-This checkpoint proves the scripted protocol and loop, plus the focused
-`generate_response()` model/cache boundary. It does not make the separate
-real-model CLI exercise that helper.
+This checkpoint checks the scripted protocol and loop and the
+`generate_response()` model/cache boundary.
 
 You now have a validated, bounded model → action → observation loop. Continue
 with [Day 2: Inspect a Workspace](week4-02-tools.md) to replace the fake tool

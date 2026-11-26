@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -19,7 +20,9 @@ _WRITE = {"tool": "write_file", "path": "NOTES.md", "content": _NOTES}
 _VALIDATE = {"tool": "run_command", "argv": list(_VALIDATION)}
 
 
-def _fixture_workspace(api, root: Path, store, *, approve=True):
+def _fixture_workspace(api, root: Path, store, *, approve=True, allow_effects=True):
+    paths = _PATHS if allow_effects else frozenset({"app.py"})
+
     class FixtureWorkspace(api.Workspace):
         @property
         def available_tools(self):
@@ -27,7 +30,7 @@ def _fixture_workspace(api, root: Path, store, *, approve=True):
 
         def resolve_path(self, raw, *, must_exist=True):
             path = super().resolve_path(raw, must_exist=must_exist)
-            if raw != "." and raw not in _PATHS:
+            if raw != "." and raw not in paths:
                 raise api.AgentError("path is outside the fixture allowlist")
             return path
 
@@ -36,7 +39,7 @@ def _fixture_workspace(api, root: Path, store, *, approve=True):
             visible = [
                 line
                 for line in listing.splitlines()
-                if line.removeprefix("file ") in _PATHS and line.startswith("file ")
+                if line.removeprefix("file ") in paths and line.startswith("file ")
             ]
             return "\n".join(visible) or "(empty directory)"
 
@@ -64,9 +67,53 @@ def _fixture_workspace(api, root: Path, store, *, approve=True):
         )
 
     return FixtureWorkspace(
-        api.ToolPolicy(root, allow_writes=True, allowed_commands=(_VALIDATION,)),
+        api.ToolPolicy(
+            root,
+            allow_writes=allow_effects,
+            allowed_commands=(_VALIDATION,) if allow_effects else (),
+        ),
         confirm,
         store,
+    )
+
+
+def inspection_backend():
+    from tiny_llm_ref import agent, models
+
+    return agent, models
+
+
+@contextmanager
+def inspection_workspace(api):
+    """Give the cached model read-only access to the supplied greeting."""
+    with TemporaryDirectory(prefix="tiny-llm-week4-inspect-") as temporary:
+        root = Path(temporary)
+        (root / "app.py").write_bytes(_APP)
+        yield _fixture_workspace(api, root, api.ReceiptStore(), allow_effects=False)
+
+
+def inspection_messages(messages):
+    file_result = {"role": "user", "content": "Tool result:\n" + _APP.decode()}
+    if file_result in messages[2:]:
+        instruction = (
+            "The file has been read. Use the tool result to describe the greeting. "
+            'Return one JSON object with only a "final" string.'
+        )
+    else:
+        instruction = (
+            "Request the file by replying with exactly this JSON: "
+            '{"tool":"read_file","path":"app.py"}'
+        )
+    return [{"role": "system", "content": instruction}, *messages[1:]]
+
+
+def observed_fixture_read(api, run):
+    return any(
+        isinstance(event.action, api.ToolAction)
+        and event.action.tool == "read_file"
+        and event.action.arguments == {"path": "app.py"}
+        and event.result == _APP.decode()
+        for event in run.events
     )
 
 
