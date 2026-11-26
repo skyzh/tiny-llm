@@ -430,6 +430,7 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "decode_attention",
         "_qk_norm_rope4",
         "_decode_attention_online",
+        "_dense_attention_prefill_mma_batch_mask",
     }
     assert _header_functions("src/extensions/src/tiny_llm_ext.h") == expected
 
@@ -444,6 +445,7 @@ def test_starter_and_reference_publish_the_same_learner_extension_functions():
         "decode_attention",
         "_qk_norm_rope4",
         "_decode_attention_online",
+        "_dense_attention_prefill_mma_batch_mask",
         "_submit_decode_prefix_if_ordinary",
         "_try_week1_sampled_head",
         "_try_mlp_qmm_m64",

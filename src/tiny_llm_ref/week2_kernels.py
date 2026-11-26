@@ -163,6 +163,8 @@ def _prepare_dense_attention_inputs(
     key: mx.array,
     value: mx.array,
     mask: mx.array | str | None,
+    *,
+    batch_mask: bool = False,
 ) -> tuple[mx.array, mx.array, mx.array, mx.array, bool, bool]:
     if query.ndim != 4 or key.ndim != 4 or value.ndim != 4:
         raise ValueError("dense attention expects [B,H,L,D] query, key, and value")
@@ -185,14 +187,15 @@ def _prepare_dense_attention_inputs(
     is_causal = isinstance(mask, str) and mask == "causal"
     has_mask = isinstance(mask, mx.array)
     if has_mask:
+        mask_heads = 1 if batch_mask else num_heads
         mask = mx.broadcast_to(
-            mask, (batch_size, num_heads, query_length, context_length)
+            mask, (batch_size, mask_heads, query_length, context_length)
         )
-        mask = mx.contiguous(
-            mask.astype(mx.float32).reshape(
-                batch_size * num_heads, query_length, context_length
-            )
+        mask = mask.astype(mx.float32).reshape(
+            batch_size * mask_heads, query_length, context_length
         )
+        if not batch_mask:
+            mask = mx.contiguous(mask)
     else:
         mask = _NO_ATTENTION_MASK
     return query, key, value, mask, is_causal, has_mask
@@ -214,10 +217,28 @@ def dense_prefill_attention_mma(
         raise ValueError("tiled dense prefill requires BF16 query/key/value with D=128")
     if query_length < DENSE_PREFILL_MIN_QUERY:
         raise ValueError(f"tiled dense prefill requires L >= {DENSE_PREFILL_MIN_QUERY}")
-    query, key, value, mask, is_causal, has_mask = _prepare_dense_attention_inputs(
-        query, key, value, mask
+    batch_prefill = getattr(
+        tiny_llm_ext_ref_private, "_dense_attention_prefill_mma_batch_mask", None
     )
-    result = tiny_llm_ext_ref_private._dense_attention_prefill_mma(
+    batch_mask = (
+        batch_prefill is not None
+        and mx.default_device().type == mx.gpu
+        and batch_size > 0
+        and num_heads > 1
+        and key.shape[2] > 0
+        and isinstance(mask, mx.array)
+        and mask.shape == (batch_size, 1, query_length, key.shape[2])
+        and mask.dtype in (mx.float32, mx.bfloat16)
+    )
+    query, key, value, mask, is_causal, has_mask = _prepare_dense_attention_inputs(
+        query, key, value, mask, batch_mask=batch_mask
+    )
+    prefill = (
+        batch_prefill
+        if batch_mask
+        else tiny_llm_ext_ref_private._dense_attention_prefill_mma
+    )
+    result = prefill(
         query,
         key,
         value,

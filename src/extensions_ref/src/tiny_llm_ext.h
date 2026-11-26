@@ -74,6 +74,9 @@ mx::array _decode_attention_online(const mx::array &q, const mx::array &k, const
 mx::array _dense_attention_prefill_mma(const mx::array &q, const mx::array &k, const mx::array &v,
                                        const mx::array &mask, float scale, bool is_causal, bool has_mask,
                                        int num_heads, int num_kv_heads, mx::StreamOrDevice s = {});
+mx::array _dense_attention_prefill_mma_batch_mask(const mx::array &q, const mx::array &k, const mx::array &v,
+                                                 const mx::array &mask, float scale, bool is_causal, bool has_mask,
+                                                 int num_heads, int num_kv_heads, mx::StreamOrDevice s = {});
 
 class Week2RMSNorm : public mx::Primitive {
 public:
