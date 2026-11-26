@@ -213,71 +213,41 @@ The course-code guard checks exact public signatures, dataclass fields,
 package exports, and TODO-only starter bodies across the final declaration
 scaffold.
 
-## Explore the Full Cycle with a Real Model
+## Run the Fixed Autoreject Fixture
 
-Keep the scripted checkpoint as the deterministic proof. This manual exercise
-lets a real model plan the same Day 3 cycle from one natural-language goal.
-Its wording and tool order can vary, and completion is not an automated test.
-Use a fresh disposable directory with no secrets.
-
-The CLI default is `qwen3-4b` (`Qwen/Qwen3-4B-MLX-4bit`), whose cached weights
-use about 2 GiB; use that lower-resource option when needed. The recorded
-exploratory run below used `mlx-community/Qwen3-30B-A3B-4bit`, whose cached
-weights use about 16 GiB and require sufficient Apple unified memory. Model
-behavior and tool order vary with either choice. Both require macOS on Apple
-Silicon and the installed MLX dependencies. An uncached first run downloads
-the selected weights from Hugging Face and needs network access plus the
-corresponding free disk space. If MLX, network access, disk space, unified
-memory, or the weights are unavailable, model loading fails before any tool
-call; do not treat a scripted checkpoint as evidence that this live run
-occurred.
-
-As on Day 2, this CLI's supplied MLX-LM adapter bypasses the learner-owned
-`generate_response()` helper. It does exercise your loop, workspace,
-approval, effect, and receipt paths.
-
-Pre-create the workspace, an existing file, and one focused validation fixture:
+From the checkout root after repository setup and `pdm run build-ext-ref`,
+run the supplied reference fixture. The command uses the installed packages
+and skips PDM's dependency sync and update check.
 
 ```bash
-EDIT_ROOT="$(mktemp -d)"
-printf '%s\n' \
-  'def greeting(name):' \
-  '    return f"Hello, {name}!"' > "$EDIT_ROOT/app.py"
-cat > "$EDIT_ROOT/validate.py" <<'PY'
-from pathlib import Path
-from app import greeting
-
-assert greeting("Ada") == "Welcome, Ada!"
-assert Path("NOTES.md").read_text() == "Greeting now says Welcome.\n"
-print("validation passed")
-PY
+PDM_CHECK_UPDATE=false pdm run --skip pre_run agent -- --autoreject-fixture
 ```
 
-Now give the real model one goal. `--allow-command` names the only command it
-may run, including its exact arguments. Each proposed write, edit, or command
-still pauses at a default-No learner approval prompt:
+The run uses scripted responses and creates a fresh temporary workspace with
+one file, `app.py`. It lists and reads that file, denies a write with unapproved
+content, changes `Hello` to `Welcome` and creates `NOTES.md` with the line
+`Greeting now says Welcome.` and a trailing newline. The approved
+`validate_fixture` action compares the two files with fixed expected bytes
+inside the harness. It runs offline with scripted responses.
+The harness keeps the receipt log outside the tool workspace.
 
-```bash
-pdm run agent -- --model mlx-community/Qwen3-30B-A3B-4bit --root "$EDIT_ROOT" \
-  --allow-writes \
-  --allow-command "python validate.py" \
-  --receipt-log .agent-receipts.jsonl \
-  "Inspect the workspace. Create NOTES.md containing exactly 'Greeting now says Welcome.' followed by a newline, precisely change app.py so greeting says Welcome instead of Hello, run the allowed validation, react to its evidence, and finish with a brief summary. Use workspace tools to gather evidence before any effect. Your first response must be one tool request, every response must contain exactly one JSON object, and do not finish until the requested files and validation evidence have been inspected."
-```
+Read the JSON report for the denial, the two changed paths, the successful
+validation and the three effect receipts. The harness checks these against
+the actual files and receipts and removes the temporary directory. Use the
+Day 3 checkpoint tests to check your learner implementation.
 
-Read every approval payload before answering `y`. The live trace shows the
-model response, parsed action, tool observation, validation status/output, and
-final answer. Afterward, inspect the changed bytes and the durable effect
-receipts rather than trusting the final prose alone:
+## Try the Interactive CLI
 
-```bash
-cat "$EDIT_ROOT/app.py" "$EDIT_ROOT/NOTES.md"
-cat "$EDIT_ROOT/.agent-receipts.jsonl"
-```
+The optional real-model CLI described on Day 2 exercises your loop,
+workspace, approvals and receipts through an MLX-LM generation adapter.
+Use a disposable directory with no secrets. Each write, edit or command
+needs a default-No approval at the terminal. A command
+gets the process permissions of the CLI, even with an exact allowlist. The
+fixed fixture above is the validation run for this walkthrough.
 
-The receipt records preserve the approved `write_file`, `edit_file`, and
-`run_command` arguments and outcomes. The status and captured output in the
-validation receipt are the evidence to compare with the changed bytes.
+`--receipt-log` accepts a workspace-relative path with existing real
+directories and a regular, single-link file, or a new filename. Read the
+log yourself after the run. The model's file tools cannot access it.
 
 ## Checkpoint
 
