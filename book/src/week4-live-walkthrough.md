@@ -57,8 +57,10 @@ written. The run then pauses and prints a `pause>` line that summarizes
 this first stage:
 
 - `last_action`: the model's last action, a `read_file` of `app.py`.
-- `last_observation`: the `app.py` text that read returned, which
-  includes `Welcome`.
+- `last_observation`: the edited `app.py`, which now returns
+  `Welcome, {name}!`.
+- `checkpoint_tokens`: how many tokens the paused conversation holds, 671
+  in the verified run.
 - `denied_unapproved_write`: `true`, for the refused note.
 - `receipts`: the edit and validation receipts. Each records an approved
   effect.
@@ -101,18 +103,23 @@ The capstone counts characters. This run counts the model's own tokens.
 ## Branches: Shared Prefix, Separate Effects, Your Choice
 
 The run continues twice from the compacted checkpoint, each branch with its
-own steering message. The `validate-only` branch validates without another
-edit. The `add-notes` branch writes a fixed note first, then validates.
+own steering message. For example, `validate-only` adds "Keep the changed
+greeting and only validate the existing files." The `validate-only` branch
+validates without another edit. The `add-notes` branch writes a fixed note first, then validates.
 Each prints a `branch>` line.
 
 - **Cache reuse:** `reused_tokens` and the `cache` object's
   `layer_offsets` show that both branches started from the same KV prefix,
   built by the Week 2 tokenizer and cache. In the verified run, each branch
-  reused the whole 494-token compacted prefix at all 36 layers.
+  reused the whole 494-token compacted prefix at all 36 layers. The
+  `cache` object's `input_tokens` shows what each branch still had to
+  prefill: only its steering message and the tokens after it, 65 and 77
+  tokens.
 - **Separate effects:** each branch works in its own copy of the workspace,
   with its own receipt log. `changed` lists the files that branch modified,
-  and `receipts` its effects. In the verified run, `validate-only` wrote no
-  new file and added one validation receipt. `add-notes` wrote `NOTES.md` and
+  and `receipts` its effects. Each branch starts with the receipts from before
+  the pause. In the verified run, `validate-only` wrote no new file and
+  added one validation receipt. `add-notes` wrote `NOTES.md` and
   added write and validation receipts. Before you choose, the run checks
   that neither branch touched the original workspace or the other branch.
 - **Report:** `report` is that branch's Day 7 evaluation, and `passed` is
