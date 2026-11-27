@@ -41,22 +41,39 @@ how to use a cached Qwen3 model with read-only access to the fixed sample.
 After all nine days are complete, `pdm run week4-capstone` exercises the
 deterministic flow through sessions, branches and bounded evidence.
 
-## The Nine-Day Progression
+<a id="the-nine-day-progression"></a>
 
-| Day | Product pressure | Learner-owned mechanism | Evidence to inspect |
-| --- | --- | --- | --- |
-| [1](week4-01-agent-loop.md) | Model text is not yet a safe next step. | A validated JSON action protocol and bounded loop. | Parsed events, exact observations, and stop reasons. |
-| [2](week4-02-tools.md) | A fake workspace cannot inspect a project. | Contained directory listing and UTF-8 reads. | Listed paths, returned bytes, and recoverable errors. |
-| [3](week4-03-safe-editing.md) | A read-only agent cannot finish a coding task. | Approval, exact edits and commands, and effect receipts. | Changed bytes, validation status, and receipt facts. |
-| [4](week4-04-sessions.md) | A stopped process loses its conversation/model position. | One complete-observation checkpoint and resume boundary. | Saved messages/cache metadata and no effect replay. |
-| [5](week4-05-compaction.md) | Completed evidence consumes prompt space. | Receipt-backed deterministic compaction. | Tokens before/after, saved tokens, and unchanged receipts. |
-| [6](week4-06-steering.md) | An operator needs a visible correction point. | Inspect, append one steering message, and resume. | Public status and message ordering. |
-| [7](week4-07-evaluation.md) | A final sentence is not proof. | A report over declared observable outcomes. | Named file/result/receipt checks. |
-| [8](week4-08-fork-steer-select.md) | Two continuations should not prefill one identical prefix twice. | Dense token/KV-prefix reuse, isolated effects, and explicit selection. | Prefix offsets, avoided logical prefill, branch-local facts, and reports. |
-| [9](week4-09-bound-tool-evidence.md) | A large result should not fill every later prompt. | Content-addressed bytes, bounded previews, and exact range retrieval. | Artifact size/digest, omitted interval, and returned range. |
+## Five Modules, Nine Days
 
-The mechanisms compose in that order. Days 4--9 remain library APIs rather
-than additions to the real-model `agent` CLI. The supplied deterministic
+The week teaches five ideas. Each is built over one or two days:
+
+| Module | What it teaches | Days |
+| --- | --- | --- |
+| **Control** | Turn model text into one validated action, and stop at a limit | 1 |
+| **Effects** | Read a workspace, then make approved edits and commands that leave receipts | 2, 3 |
+| **Sessions** | Pause after a complete observation, inspect it, steer it and resume | 4, 6 |
+| **Context** | Keep prompts small: compact completed work and move oversized evidence out of line | 5, 9 |
+| **Branches** | Judge a run by what it observably did, then run two continuations and pick one explicitly | 7, 8 |
+
+Work through the days in number order. Each day's check reruns every earlier
+day, so the modules interleave: Day 6 steers the checkpoint you made on Day 4,
+and Day 8 chooses a branch using the report you built on Day 7.
+
+| Day | Module | Product pressure | Learner-owned mechanism | Evidence to inspect |
+| --- | --- | --- | --- | --- |
+| [1](week4-01-agent-loop.md) | Control | Model text is not yet a safe next step. | A validated JSON action protocol and bounded loop. | Parsed events, exact observations, and stop reasons. |
+| [2](week4-02-tools.md) | Effects | A fake workspace cannot inspect a project. | Contained directory listing and UTF-8 reads. | Listed paths, returned bytes, and recoverable errors. |
+| [3](week4-03-safe-editing.md) | Effects | A read-only agent cannot finish a coding task. | Approval, exact edits and commands, and effect receipts. | Changed bytes, validation status, and receipt facts. |
+| [4](week4-04-sessions.md) | Sessions | A stopped process loses its conversation/model position. | One complete-observation checkpoint and resume boundary. | Saved messages/cache metadata and no effect replay. |
+| [5](week4-05-compaction.md) | Context | Completed evidence consumes prompt space. | Receipt-backed deterministic compaction. | Tokens before/after, saved tokens, and unchanged receipts. |
+| [6](week4-06-steering.md) | Sessions | An operator needs a visible correction point. | Inspect, append one steering message, and resume. | Public status and message ordering. |
+| [7](week4-07-evaluation.md) | Branches | A final sentence is not proof. | A report over declared observable outcomes. | Named file/result/receipt checks. |
+| [8](week4-08-fork-steer-select.md) | Branches | Two continuations should not prefill one identical prefix twice. | Dense token/KV-prefix reuse, isolated effects, and explicit selection. | Prefix offsets, avoided logical prefill, branch-local facts, and reports. |
+| [9](week4-09-bound-tool-evidence.md) | Context | A large result should not fill every later prompt. | Content-addressed bytes, bounded previews, and exact range retrieval. | Artifact size/digest, omitted interval, and returned range. |
+
+The mechanisms compose in that order. After Day 9, the
+[live walkthrough](week4-live-walkthrough.md) runs all five modules with a
+cached Qwen3-4B on the Week 2 engine. The supplied deterministic
 capstone is the orchestration shell that exercises those completed APIs
 together; it does not replace the mechanisms you implement here.
 
