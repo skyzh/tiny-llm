@@ -19,7 +19,8 @@ The [deterministic capstone](week4-overview.md#work-through-one-chapter)
 (`pdm run week4-capstone`) and the
 [confined fixture](week4-02-tools.md#inspect-the-supplied-fixture)
 (`--autoreject-fixture`) stay as they are. They are the repeatable checks.
-This walkthrough is the live run, and model choices vary from run to run.
+This walkthrough is the live run. The real model can depart from the
+fixture's guide, so a run doesn't always finish.
 
 ## Before You Start
 
@@ -42,11 +43,16 @@ effect. Tool calls and generated tokens both have fixed budgets.
 
 ## What You Will See
 
+The fixture guides the model. At each step, its prompt gives the exact
+JSON action to take next and asks the model to copy it. The guide, the
+allowed effects and the Day 7 evaluation criteria are fixed. The model's
+reply still goes through your harness like any other, and it can depart
+from the guide. If it does, the run stops early or a branch report fails.
+
 The run prints one labelled line for each stage, such as `pause>`,
 `context>`, `branch>` and `selected>`. Most carry a JSON object. The
-numbers below come from one verified run. A real model can phrase its
-actions differently from run to run, so your counts may differ slightly.
-What stays the same is which checks pass and which effects are allowed.
+counts and passing reports below are what one successful run observed.
+They aren't guaranteed for every run.
 
 ## Control and Effects
 
@@ -139,8 +145,9 @@ Each prints a `branch>` line.
 It shows the week's mechanisms working around a real model: effects confined to
 the fixture, receipts that survive a pause, real token and cache
 accounting, and a selection the Day 7 report gates. It doesn't prove
-the model is good at the task, and it doesn't measure speed. Different
-runs can make different choices, so use the day checks and the capstone
-for repeatable results.
+the model can plan the task on its own, since it follows a fixed guide,
+and it doesn't measure speed. A run can stop early or fail a report when
+the model departs from the guide. Use the day checks and the capstone for
+repeatable results.
 
 {{#include copyright.md}}
