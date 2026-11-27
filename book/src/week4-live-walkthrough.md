@@ -1,8 +1,5 @@
 # 🚧 Week 4 Live Walkthrough: One Real Model Through Five Modules
 
-<!-- DRAFT for TINYLLM-928. Every line marked TBD-927 waits for Forge's
-command and output contract from TINYLLM-927; nothing here is verified yet. -->
-
 The nine day checks prove your mechanisms with scripted models. This
 walkthrough shows the same mechanisms working with a real model: the
 supplied Week 4 implementation on the Week 2 reference engine and a cached
@@ -43,66 +40,92 @@ files. It allows only the named reads and edits, validates fixture bytes
 with a fixed in-process check, and refuses anything else before it has an
 effect. Tool calls and generated tokens both have fixed budgets.
 
+## What You Will See
+
+The run prints one labelled line for each stage, such as `pause>`,
+`context>`, `branch>` and `selected>`. Most carry a JSON object. The
+numbers below come from one verified run. A real model can phrase its
+actions differently from run to run, so your counts may differ slightly.
+What stays the same is which checks pass and which effects are allowed.
+
 ## Control and Effects
 
-The model proposes actions, and your harness decides what happens. Look
-for:
+The model proposes actions, and the harness decides what happens. In the
+fixture, the model reads `app.py`, makes the approved edit and validates
+it. A write it wasn't approved to make is refused before anything is
+written. The run then pauses and prints a `pause>` line that summarizes
+this first stage:
 
-- TBD-927: the action and observation lines for the first read, and the
-  exact `app.py` bytes it returns.
-- TBD-927: the approved edits, the refused unapproved effect, and the
-  validation result.
-- TBD-927: where the receipts are written and what each receipt records.
+- `last_action`: the model's last action, a `read_file` of `app.py`.
+- `last_observation`: the `app.py` text that read returned, which
+  includes `Welcome`.
+- `denied_unapproved_write`: `true`, for the refused note.
+- `receipts`: the edit and validation receipts. Each records an approved
+  effect.
 
 If the model answers before it has read the file, the run stops with an
 error. A guess never counts as success.
 
-## Sessions: Pause, Steer and Resume
+## Sessions: Pause and Resume
 
 The run pauses after a complete action and observation, never in the
-middle of a tool call. At the `pause>` prompt, inspect the completed
-observation, then type `resume` to continue from the same conversation.
-Steering comes later. Each branch adds its own visible, fixed Day 6
-steering message to the checkpoint before it continues.
+middle of a tool call. After the `pause>` line it prints
+`resume> type resume to continue`. Inspect the paused state, then type
+`resume`.
 
 - **How long the checkpoint lasts:** it lives inside the running process
-  until you resume it or the process exits. Exit at `pause>` and the
-  checkpoint is gone. There is no resuming it from a new process.
-- **What to check after resume:** the resumed conversation is the saved
-  one plus your steering message, and no completed effect runs again. The
-  receipts from before the pause are unchanged. TBD-927: the lines that
-  show this.
+  until you resume it or the process exits. Exit at the prompt and the
+  checkpoint is gone. There is no resuming it from a new process. Typing
+  anything other than `resume` stops the run.
+- **What resume keeps:** the run continues from the saved conversation,
+  and no completed effect runs again. Before you choose a branch, the run
+  checks that the original workspace and receipt log are unchanged.
+
+Steering comes in the next stage. Each branch adds its own visible, fixed
+Day 6 steering message to the checkpoint before it continues.
 
 ## Context: Real Token Counts
 
 The capstone counts characters. This run counts the model's own tokens.
-Look for the `context>` lines.
 
-- **Compaction:** TBD-927: the tokens before and after, measured with the
-  Week 2 tokenizer, and the receipts that stay exactly as they were.
-- **Oversized evidence:** TBD-927: the artifact size, the bytes the model
-  sees, and the exact range it reads back.
+- **Compaction:** the first `context>` line shows `tokens_before` and
+  `tokens_after`, measured with the Week 2 tokenizer, plus the
+  `receipt_ids` the compacted view keeps. In the verified run it went from
+  671 to 494 tokens.
+- **Oversized evidence:** each branch prints a `context>` line with its
+  `branch` name. It shows the full `artifact_bytes`, the `inline_bytes` the
+  model sees, and the exact `range_bytes` and `range_text` it reads back. In
+  the verified run, both branches stored 1,053 bytes, showed the model 512,
+  and read back the exact first 63 bytes.
 
 ## Branches: Shared Prefix, Separate Effects, Your Choice
 
-The run continues twice from one checkpoint, each branch with its own
-steering message. The `validate-only` branch
-validates without another edit. The `add-notes` branch writes a fixed note
-first, then validates. Look for one `branch>` block per branch, with that
-branch's effects, receipts, observed cache offsets and Day 7 report.
+The run continues twice from the compacted checkpoint, each branch with its
+own steering message. The `validate-only` branch validates without another
+edit. The `add-notes` branch writes a fixed note first, then validates.
+Each prints a `branch>` line.
 
-- **Cache reuse:** both branches start from the same KV prefix, built by
-  the Week 2 tokenizer and cache. TBD-927: the reused-token count and layer
-  offsets the run actually observes.
-- **Separate effects:** each branch works in its own copy of the
-  workspace, with its own receipt log. TBD-927: where each branch's files
-  and receipts appear.
-- **Selection:** you name the branch you want. The run accepts it only if
-  that branch's Day 7 report passes every check. A named branch that fails
-  its report is refused, as on [Day 8](week4-08-fork-steer-select.md). The
-  run never picks a winner for you. At the `select>` prompt, after
-  you have seen both reports, type `validate-only` or `add-notes`. TBD-927: the accepted and refused
-  output.
+- **Cache reuse:** `reused_tokens` and the `cache` object's
+  `layer_offsets` show that both branches started from the same KV prefix,
+  built by the Week 2 tokenizer and cache. In the verified run, each branch
+  reused the whole 494-token compacted prefix at all 36 layers.
+- **Separate effects:** each branch works in its own copy of the workspace,
+  with its own receipt log. `changed` lists the files that branch modified,
+  and `receipts` its effects. In the verified run, `validate-only` wrote no
+  new file and added one validation receipt. `add-notes` wrote `NOTES.md` and
+  added write and validation receipts. Before you choose, the run checks
+  that neither branch touched the original workspace or the other branch.
+- **Report:** `report` is that branch's Day 7 evaluation, and `passed` is
+  its result. In the verified run, `validate-only` passed 8 checks and
+  `add-notes` passed 10.
+- **Selection:** after both reports, the run prints
+  `select> type validate-only or add-notes`. Type the branch you want. The
+  run accepts it only if that branch's Day 7 report passes, as on
+  [Day 8](week4-08-fork-steer-select.md). A failing branch is refused with
+  an error. The run never picks a winner for you. An accepted choice
+  prints, for example, `selected> {"name": "validate-only", "passed": true}`.
+  In the verified run both branches passed, so either name would have been
+  accepted.
 
 ## What This Run Proves, and What It Doesn't
 
