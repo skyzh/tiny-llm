@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,10 +19,22 @@ _TOOLS = frozenset(
 _EDIT = {"tool": "edit_file", "path": "app.py", "old": "Hello", "new": "Welcome"}
 _WRITE = {"tool": "write_file", "path": "NOTES.md", "content": _NOTES}
 _VALIDATE = {"tool": "run_command", "argv": list(_VALIDATION)}
+_EXPECTED_FILES = (("app.py", _EXPECTED_APP), ("NOTES.md", _NOTES.encode()))
 
 
-def _fixture_workspace(api, root: Path, store, *, approve=True, allow_effects=True):
-    paths = _PATHS if allow_effects else frozenset({"app.py"})
+def _fixture_workspace(
+    api,
+    root: Path,
+    store,
+    *,
+    approve=True,
+    allow_effects=True,
+    paths=_PATHS,
+    allowed_effects=(_EDIT, _WRITE, _VALIDATE),
+    expected_files=_EXPECTED_FILES,
+    detailed_validation=False,
+):
+    paths = paths if allow_effects else frozenset({"app.py"})
 
     class FixtureWorkspace(api.Workspace):
         @property
@@ -45,26 +58,26 @@ def _fixture_workspace(api, root: Path, store, *, approve=True, allow_effects=Tr
 
         def run_command(self, argv):
             self._allowed_command(argv)
-            for name, expected in (
-                ("app.py", _EXPECTED_APP),
-                ("NOTES.md", _NOTES.encode()),
-            ):
+            report = ["status: 0", "output:", "fixture bytes match"]
+            for name, expected in expected_files:
                 try:
                     path = self.resolve_path(name)
                     with path.open("rb") as source:
-                        matched = source.read(len(expected) + 1) == expected
+                        observed = source.read(len(expected) + 1)
                 except (OSError, api.AgentError):
-                    matched = False
-                if not matched:
                     return "status: 1\noutput:\nfixture bytes differ"
-            return "status: 0\noutput:\nfixture bytes match"
+                if observed != expected:
+                    return "status: 1\noutput:\nfixture bytes differ"
+                if detailed_validation:
+                    report.append(
+                        f"{name} matched all {len(observed)} bytes.\n"
+                        f"Observed SHA-256 {hashlib.sha256(observed).hexdigest()}\n"
+                        f"Expected SHA-256 {hashlib.sha256(expected).hexdigest()}"
+                    )
+            return "\n".join(report)
 
     def confirm(action):
-        return approve and {"tool": action.tool, **action.arguments} in (
-            _EDIT,
-            _WRITE,
-            _VALIDATE,
-        )
+        return approve and {"tool": action.tool, **action.arguments} in allowed_effects
 
     return FixtureWorkspace(
         api.ToolPolicy(

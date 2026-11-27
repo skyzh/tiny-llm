@@ -27,6 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="give a cached Week 2 model read-only access to the fixed sample",
     )
+    profiles.add_argument(
+        "--live-fixture",
+        action="store_true",
+        help="pause and branch a cached Week 2 run on the fixed sample",
+    )
     parser.add_argument(
         "--root",
         type=Path,
@@ -104,9 +109,41 @@ def show_file_tool_changes(paths) -> None:
     print("file-tool changes> " + json.dumps(list(paths)))
 
 
+def cached_model_path(parser, model_name):
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        return snapshot_download(model_name, local_files_only=True)
+    except LocalEntryNotFoundError:
+        parser.exit(
+            1,
+            f"error: {model_name} is missing from the local model cache. "
+            "Download it during course setup, then retry the fixture.\n",
+        )
+
+
+def load_week_two(parser, models, model_name, model_path, device):
+    from mlx_lm import load
+
+    try:
+        loaded, tokenizer = load(
+            model_path, tokenizer_config={"trust_remote_code": False}
+        )
+        options = (
+            {"checkpoint": "packed-weights", "use_mlx_quantized_linear": True}
+            if device == "cpu"
+            else {}
+        )
+        return models.dispatch_model(model_name, loaded, week=2, **options), tokenizer
+    except Exception as error:
+        parser.exit(
+            1, f"error: could not load the Week 2 model {model_name}: {error}\n"
+        )
+
+
 def run_interactive(parser, args, agent, models, task, workspace, log_path):
     import mlx.core as mx
-    from mlx_lm import load
 
     model_name = shortcut_name_to_full_name(args.model)
     if not model_name.startswith("Qwen/Qwen3"):
@@ -115,34 +152,14 @@ def run_interactive(parser, args, agent, models, task, workspace, log_path):
     if args.inspect_fixture:
         if model_name not in MODEL_SHORTCUTS.values():
             parser.error("--inspect-fixture requires a supported Qwen3 shortcut")
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.errors import LocalEntryNotFoundError
         from week4_fixture import inspection_messages, observed_fixture_read
 
-        try:
-            model_path = snapshot_download(model_name, local_files_only=True)
-        except LocalEntryNotFoundError:
-            parser.exit(
-                1,
-                f"error: {model_name} is missing from the local model cache. "
-                "Download it during course setup, then retry the fixture.\n",
-            )
+        model_path = cached_model_path(parser, model_name)
 
     with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-        try:
-            loaded, tokenizer = load(
-                model_path, tokenizer_config={"trust_remote_code": False}
-            )
-            options = (
-                {"checkpoint": "packed-weights", "use_mlx_quantized_linear": True}
-                if args.device == "cpu"
-                else {}
-            )
-            model = models.dispatch_model(model_name, loaded, week=2, **options)
-        except Exception as error:
-            parser.exit(
-                1, f"error: could not load the Week 2 model {model_name}: {error}\n"
-            )
+        model, tokenizer = load_week_two(
+            parser, models, model_name, model_path, args.device
+        )
 
         def generate(messages):
             if args.inspect_fixture:
@@ -185,6 +202,35 @@ def run_interactive(parser, args, agent, models, task, workspace, log_path):
     return 0 if result.completed else 1
 
 
+def run_live(parser):
+    model_name = shortcut_name_to_full_name("qwen3-4b")
+    model_path = cached_model_path(parser, model_name)
+    import mlx.core as mx
+
+    from week4_fixture import inspection_backend
+    from week4_live_fixture import run_live_fixture
+
+    try:
+        agent, models = inspection_backend()
+    except ImportError:
+        parser.exit(1, "error: complete Setup and run `pdm run build-ext-ref` first.\n")
+
+    with mx.stream(mx.gpu):
+        model, tokenizer = load_week_two(parser, models, model_name, model_path, "gpu")
+        print("model> " + model_name)
+        print("backend> Week 2 reference")
+        try:
+            run_live_fixture(agent, model, tokenizer)
+        except (agent.AgentError, EOFError) as error:
+            reason = (
+                "the process ended before continuation"
+                if isinstance(error, EOFError)
+                else str(error)
+            )
+            parser.exit(1, f"stopped> {reason}\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     argv = sys.argv[1:] if argv is None else argv
@@ -196,6 +242,10 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(run_fixture(), sort_keys=True))
         return 0
+    if args.live_fixture:
+        if argv != ["--live-fixture"]:
+            parser.error("--live-fixture takes no other arguments")
+        return run_live(parser)
 
     if args.max_steps <= 0 or args.max_tokens <= 0:
         parser.error("generation limits must be positive")
