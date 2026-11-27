@@ -13,6 +13,10 @@ void load_library(const char *path);
 
 std::optional<mx::array> try_week1_sampled_head(const mx::array &normalized, const mx::array &weight);
 
+std::optional<std::vector<mx::array>> try_grouped_paged_cache_update(
+    const mx::array &key_pages, const mx::array &value_pages, const mx::array &keys,
+    const mx::array &values, const std::vector<int32_t> &records);
+
 mx::array quantized_matmul(const mx::array &scales,  // Input array scales
                            const mx::array &biases,  // Input array biases
                            const int group_size,     // Group size

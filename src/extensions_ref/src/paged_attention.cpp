@@ -1,12 +1,17 @@
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "tiny_llm_ext.h"
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
+#include "mlx/backend/metal/metal.h"
 #include "mlx/backend/metal/utils.h"
+#include "mlx/transforms.h"
+#include "mlx/version.h"
 #endif
 
 namespace tiny_llm_ext_ref {
@@ -73,6 +78,137 @@ void PagedCacheUpdate::eval_gpu(const std::vector<mx::array> &, std::vector<mx::
     throw std::runtime_error("PagedCacheUpdate has no GPU implementation.");
 }
 #endif
+
+#ifdef _METAL_
+namespace {
+
+constexpr int grouped_width = 5;
+constexpr int grouped_heads = 8;
+constexpr int grouped_page_size = 128;
+constexpr int grouped_head_dim = 128;
+constexpr int record_size = 4;
+
+bool compact_binding(const mx::array &array) {
+    if (!array.data_shared_ptr() || !array.data_shared_ptr()->is_owned() ||
+        !array.flags().row_contiguous || array.data_size() != array.size() || array.offset() < 0 ||
+        array.offset() % array.itemsize() != 0 || !array.buffer().ptr()) {
+        return false;
+    }
+    const auto capacity = array.buffer_size();
+    const auto offset = static_cast<size_t>(array.offset());
+    return offset <= capacity && array.nbytes() <= capacity - offset;
+}
+
+bool separate_projection(const mx::array &key_pages, const mx::array &value_pages, const mx::array &projected) {
+    return compact_binding(projected) && projected.buffer().ptr() != key_pages.buffer().ptr() &&
+           projected.buffer().ptr() != value_pages.buffer().ptr();
+}
+
+bool valid_tail_records(const std::vector<int32_t> &records, int capacity) {
+    if (records.size() < 2 * record_size || records.size() > grouped_width * record_size ||
+        records.size() % record_size != 0) {
+        return false;
+    }
+    int previous_slot = -1;
+    for (size_t i = 0; i < records.size(); i += record_size) {
+        const int slot = records[i], page = records[i + 1], tail = records[i + 2];
+        if (slot <= previous_slot || slot >= grouped_width || page < 0 || page >= capacity ||
+            tail <= 0 || tail >= grouped_page_size) {
+            return false;
+        }
+        for (size_t j = 1; j < i; j += record_size) {
+            if (records[j] == page) {
+                return false;
+            }
+        }
+        previous_slot = slot;
+    }
+    return true;
+}
+
+class GroupedPagedCacheUpdate final : public mx::Primitive {
+public:
+    GroupedPagedCacheUpdate(mx::Stream stream, const std::vector<int32_t> &records)
+        : mx::Primitive(stream), records_(records) {}
+
+    const char *name() const override { return "GroupedPagedCacheUpdate"; }
+
+    void eval_cpu(const std::vector<mx::array> &, std::vector<mx::array> &) override {
+        throw std::runtime_error("Grouped paged cache update requires Metal");
+    }
+
+    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override {
+        auto &out = outputs[0];
+        out.copy_shared_buffer(inputs[0]);
+        auto &device = mx::metal::device(stream().device);
+        auto *library = device.get_library("tiny_llm_ext_ref");
+        auto *kernel = device.get_kernel("paged_cache_update_grouped_bf16", library);
+        auto &encoder = mx::metal::get_command_encoder(stream());
+        encoder.set_compute_pipeline_state(kernel);
+        encoder.set_input_array(inputs[1], 0);
+        encoder.set_output_array(out, 1);
+        encoder.set_vector_bytes(records_, 2);
+        const int threads = std::min<int>(kernel->maxTotalThreadsPerThreadgroup(), 256);
+        encoder.dispatch_threads(MTL::Size(grouped_heads * grouped_head_dim, records_.size() / record_size, 1),
+                                 MTL::Size(threads, 1, 1));
+    }
+
+private:
+    std::vector<int32_t> records_;
+};
+
+}  // namespace
+#endif
+
+std::optional<std::vector<mx::array>> try_grouped_paged_cache_update(
+    const mx::array &key_pages, const mx::array &value_pages, const mx::array &keys,
+    const mx::array &values, const std::vector<int32_t> &records) {
+#ifdef _METAL_
+    const auto stream = mx::to_stream(mx::StreamOrDevice{});
+    if (stream.device.type != mx::Device::gpu || !mx::metal::is_available() ||
+        std::string_view(mx::version()) != "0.32.4" ||
+        key_pages.ndim() != 4 || key_pages.shape() != value_pages.shape() ||
+        key_pages.shape(1) != grouped_heads || key_pages.shape(2) != grouped_page_size ||
+        key_pages.shape(3) != grouped_head_dim || key_pages.size() > std::numeric_limits<int32_t>::max() ||
+        keys.shape() != mx::Shape{grouped_width, grouped_heads, 1, grouped_head_dim} || values.shape() != keys.shape() ||
+        key_pages.dtype() != mx::bfloat16 || value_pages.dtype() != mx::bfloat16 ||
+        keys.dtype() != mx::bfloat16 || values.dtype() != mx::bfloat16 ||
+        key_pages.is_tracer() || value_pages.is_tracer() || keys.is_tracer() || values.is_tracer() ||
+        !valid_tail_records(records, key_pages.shape(0))) {
+        return std::nullopt;
+    }
+    const std::string_view architecture = mx::metal::device(stream.device).get_architecture();
+    if (architecture != "applegpu_g16s" ||
+        key_pages.status() == mx::array::Status::unscheduled || value_pages.status() == mx::array::Status::unscheduled ||
+        !compact_binding(key_pages) || !compact_binding(value_pages) ||
+        key_pages.buffer().ptr() == value_pages.buffer().ptr()) {
+        return std::nullopt;
+    }
+    if ((keys.status() != mx::array::Status::unscheduled && !separate_projection(key_pages, value_pages, keys)) ||
+        (values.status() != mx::array::Status::unscheduled && !separate_projection(key_pages, value_pages, values))) {
+        return std::nullopt;
+    }
+
+    // Lazy views can change strides or share the backing only when encoded.
+    // Resolve both descriptors before constructing either mutating writer.
+    mx::async_eval(keys, values);
+    if (!separate_projection(key_pages, value_pages, keys) || !separate_projection(key_pages, value_pages, values)) {
+        return std::nullopt;
+    }
+
+    auto primitive = std::make_shared<GroupedPagedCacheUpdate>(stream, records);
+    auto key_root = mx::array(key_pages.shape(), key_pages.dtype(), primitive, {key_pages, keys});
+    auto value_root = mx::array(value_pages.shape(), value_pages.dtype(), std::move(primitive), {value_pages, values});
+    return std::vector<mx::array>{std::move(key_root), std::move(value_root)};
+#else
+    (void)key_pages;
+    (void)value_pages;
+    (void)keys;
+    (void)values;
+    (void)records;
+    return std::nullopt;
+#endif
+}
 
 mx::array paged_attention(const mx::array &q, const mx::array &key_pages, const mx::array &value_pages,
                           const mx::array &block_table, const mx::array &context_lens, const float scale,

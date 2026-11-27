@@ -193,6 +193,59 @@ class TinyKvPagedPool:
         self.copied_pages_on_growth = 0
         self.copied_bytes_on_growth = 0
 
+    def _try_update_warm_tails(
+        self,
+        active: list[tuple[int, "TinyKvPagedCache"]],
+        keys: mx.array,
+        values: mx.array,
+    ) -> bool:
+        native = getattr(tiny_llm_ext_ref, "_ext", None)
+        update = getattr(native, "_try_grouped_paged_cache_update", None)
+        if (
+            update is None
+            or self.page_size != 128
+            or len(active) < 2
+            or keys.shape != (5, 8, 1, 128)
+            or keys.dtype != mx.bfloat16
+            or self._key_pages is None
+            or self._value_pages is None
+            or not 0 < self.num_pages <= self.capacity
+        ):
+            return False
+
+        records = []
+        owned = set()
+        for slot, cache in active:
+            if (
+                type(cache) is not TinyKvPagedCache
+                or cache.page_size != self.page_size
+                or not cache.page_ids
+                or len(cache.page_lens) != len(cache.page_ids)
+            ):
+                return False
+            tail = cache.page_lens[-1]
+            if (
+                not 0 < tail < self.page_size
+                or cache.offset != (cache.num_pages - 1) * self.page_size + tail
+            ):
+                return False
+            for page in cache.page_ids:
+                if (
+                    type(page) is not int
+                    or not 0 <= page < self.num_pages
+                    or page not in self.used_page_ids
+                    or page in owned
+                ):
+                    return False
+                owned.add(page)
+            records.extend((slot, cache.page_ids[-1], tail, 0))
+
+        roots = update(self._key_pages, self._value_pages, keys, values, records)
+        if roots is None:
+            return False
+        self._key_pages, self._value_pages = roots
+        return True
+
     def write_page_slice(
         self,
         page_id: int,
