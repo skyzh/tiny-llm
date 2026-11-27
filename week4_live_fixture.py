@@ -50,7 +50,8 @@ class _GuidedGenerator:
         )
         guide = {"role": "user", "content": instruction}
         if self._guide_system:
-            messages = [{"role": "system", "content": instruction}, *messages[1:]]
+            guide["content"] = messages[-1]["content"] + "\n\n" + instruction
+            messages = [{"role": "system", "content": instruction}]
         return self._generate([*messages, guide])
 
     def save_checkpoint(self, messages):
