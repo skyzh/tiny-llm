@@ -91,6 +91,8 @@ def simple_generate_with_kv_cache(
         return y, logprobs.squeeze(0)
 
     kv_cache = None
+    disposable_prefill = False
+    default_capacity = use_bounded_kv_capacity is None
     try:
         # prefill with the prompt
         tokens = mx.array(
@@ -108,6 +110,15 @@ def simple_generate_with_kv_cache(
             kv_cache = model.create_kv_cache()
         else:
             raise ValueError("bounded KV capacity requires a capacity-aware cache")
+        if (
+            max_tokens == 1
+            and default_capacity
+            and not use_bounded_kv_capacity
+            and type(model) is Qwen3ModelWeek2
+        ):
+            disposable_prefill = model._mark_disposable_prefill(
+                kv_cache, int(tokens.size)
+            )
         detokenizer = tokenizer.detokenizer
         detokenizer.reset()
         offset = 0
@@ -128,6 +139,9 @@ def simple_generate_with_kv_cache(
             offset += tokens.size
             tokens = token
     finally:
+        if disposable_prefill:
+            for layer_cache in kv_cache:
+                del layer_cache._disposable_prefill_length
         _release_kv_cache(kv_cache)
 
 

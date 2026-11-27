@@ -223,9 +223,29 @@ class Qwen3MultiHeadAttention:
         projection_q = projection_q.transpose(0, 2, 1, 3)
         projection_k = projection_k.transpose(0, 2, 1, 3)
         projection_v = projection_v.transpose(0, 2, 1, 3)
-        projection_k, projection_v, _, mask = cache.update_and_fetch(
-            projection_k, projection_v, mask_length=L, mask=mask
+        disposable_prefill = (
+            type(cache) is TinyKvFullCache
+            and getattr(cache, "_disposable_prefill_length", None) == L
+            and type(self) is Qwen3MultiHeadAttention
+            and self.use_tiled_prefill_attention
+            and _fresh_unbounded_cache(cache)
+            and type(mask) is str
+            and mask == "causal"
+            and mx.default_device().type == mx.gpu
+            and projection_q.shape == (1, 32, L, 128)
+            and projection_k.shape == projection_v.shape == (1, 8, L, 128)
+            and projection_q.dtype
+            == projection_k.dtype
+            == projection_v.dtype
+            == mx.bfloat16
         )
+        if disposable_prefill:
+            # The greedy generator releases this cache at its first output or EOS.
+            cache.offset = L
+        else:
+            projection_k, projection_v, _, mask = cache.update_and_fetch(
+                projection_k, projection_v, mask_length=L, mask=mask
+            )
         can_tiled_prefill = (
             L >= DENSE_PREFILL_MIN_QUERY
             and projection_q.dtype == mx.bfloat16
@@ -552,6 +572,33 @@ class Qwen3ModelWeek2:
             TinyKvFullCache(capacity=capacity) for _ in range(self.num_hidden_layers)
         ]
 
+    def _mark_disposable_prefill(self, cache, length: int) -> bool:
+        if (
+            self.checkpoint != "selected"
+            or self.precision != mx.bfloat16
+            or self.num_hidden_layers != 36
+            or getattr(self.create_kv_cache, "__func__", None)
+            is not _WEEK2_CACHE_FACTORY
+            or length < DENSE_PREFILL_MIN_QUERY
+            or length % 256 == 0
+            or type(cache) is not list
+            or len(cache) != 36
+            or len({id(owner) for owner in cache}) != 36
+            or len(self.layers_inner) != 36
+        ):
+            return False
+        if not all(
+            _fresh_unbounded_cache(owner)
+            and type(layer) is Qwen3TransformerBlock
+            and type(layer.self_attn) is Qwen3MultiHeadAttention
+            and layer.self_attn.use_tiled_prefill_attention
+            for owner, layer in zip(cache, self.layers_inner, strict=True)
+        ):
+            return False
+        for owner in cache:
+            owner._disposable_prefill_length = length
+        return True
+
     def __call__(
         self,
         inputs: mx.array,
@@ -604,3 +651,16 @@ class Qwen3ModelWeek2:
             return _linear(h, self.w_lm_head)
         else:
             return self.embedding.as_linear(h)
+
+
+_WEEK2_CACHE_FACTORY = Qwen3ModelWeek2.create_kv_cache
+
+
+def _fresh_unbounded_cache(cache: TinyKvCache) -> bool:
+    return (
+        type(cache) is TinyKvFullCache
+        and cache.capacity is None
+        and cache.growth_step == 256
+        and cache.offset == 0
+        and cache.key_values is None
+    )
