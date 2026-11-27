@@ -3,14 +3,16 @@
 <!-- DRAFT for TINYLLM-928. Every line marked TBD-927 waits for Forge's
 command and output contract from TINYLLM-927; nothing here is verified yet. -->
 
-The nine day checks prove each mechanism with scripted models. This
-walkthrough runs the same mechanisms with a real model: the Week 2 engine
-on a cached Qwen3-4B, through all five modules of the week. Do it after all
-nine day checks pass.
+The nine day checks prove your mechanisms with scripted models. This
+walkthrough shows the same mechanisms working with a real model: the
+supplied Week 4 implementation on the Week 2 reference engine and a cached
+Qwen3-4B, through all five modules of the week. It doesn't run your code, so
+it works at any point. It makes the most sense after Day 9, once you have
+built every piece it uses.
 
 | Module | Days | What you watch the real model do |
 | --- | --- | --- |
-| Control | 1 | Propose one JSON action at a time, through your `generate_response()` and a fresh growing cache |
+| Control | 1 | Propose one JSON action at a time, through `generate_response()` and a fresh growing cache |
 | Effects | 2, 3 | Read the fixture, make the approved edits, and leave receipts |
 | Sessions | 4, 6 | Pause after a complete observation, take a steering message, and resume |
 | Context | 5, 9 | Compact completed work and read oversized evidence by range, measured in real tokens |
@@ -26,8 +28,6 @@ This walkthrough is the live run, and model choices vary from run to run.
 
 - Complete [Setup](setup.md) and build the reference extension with
   `pdm run build-ext-ref`.
-- Pass `pdm run test --week 4 --day 9`. That command reruns all nine day
-  checks.
 - Have the `Qwen/Qwen3-4B-MLX-4bit` snapshot in your local Hugging Face
   cache from Setup. The walkthrough never downloads. If the snapshot is
   missing, it stops with an error instead of fetching it.
@@ -62,7 +62,8 @@ error. A guess never counts as success.
 The run pauses after a complete action and observation, never in the
 middle of a tool call. At the `pause>` prompt, inspect the completed
 observation, then type `resume` to continue from the same conversation.
-TBD-927: whether you can add a steering message at this prompt.
+Steering comes later. Each branch adds its own visible, fixed Day 6
+steering message to the checkpoint before it continues.
 
 - **How long the checkpoint lasts:** it lives inside the running process
   until you resume it or the process exits. Exit at `pause>` and the
@@ -84,7 +85,8 @@ Look for the `context>` lines.
 
 ## Branches: Shared Prefix, Separate Effects, Your Choice
 
-The run continues twice from one checkpoint. The `validate-only` branch
+The run continues twice from one checkpoint, each branch with its own
+steering message. The `validate-only` branch
 validates without another edit. The `add-notes` branch writes a fixed note
 first, then validates. Look for one `branch>` block per branch, with that
 branch's effects, receipts, observed cache offsets and Day 7 report.
@@ -98,13 +100,13 @@ branch's effects, receipts, observed cache offsets and Day 7 report.
 - **Selection:** you name the branch you want. The run accepts it only if
   that branch's Day 7 report passes every check. A named branch that fails
   its report is refused, as on [Day 8](week4-08-fork-steer-select.md). The
-  run never picks a winner for you. At the `select>` prompt, type
-  `validate-only` or `add-notes`. TBD-927: the accepted and refused
+  run never picks a winner for you. At the `select>` prompt, after
+  you have seen both reports, type `validate-only` or `add-notes`. TBD-927: the accepted and refused
   output.
 
 ## What This Run Proves, and What It Doesn't
 
-It shows your mechanisms working around a real model: effects confined to
+It shows the week's mechanisms working around a real model: effects confined to
 the fixture, receipts that survive a pause, real token and cache
 accounting, and a selection the Day 7 report gates. It doesn't prove
 the model is good at the task, and it doesn't measure speed. Different
