@@ -35,7 +35,7 @@ This walkthrough is the live run, and model choices vary from run to run.
 Run it from the checkout root:
 
 ```bash
-TBD-927: the supported live command
+PDM_CHECK_UPDATE=false pdm run --skip pre_run agent -- --live-fixture
 ```
 
 It starts in a fresh temporary workspace that holds only the fixture
@@ -60,12 +60,13 @@ error. A guess never counts as success.
 ## Sessions: Pause, Steer and Resume
 
 The run pauses after a complete action and observation, never in the
-middle of a tool call. It shows the checkpoint, accepts one visible
-steering message, and resumes from the same conversation.
+middle of a tool call. At the `pause>` prompt, inspect the completed
+observation, then type `resume` to continue from the same conversation.
+TBD-927: whether you can add a steering message at this prompt.
 
-- **How long the checkpoint lasts:** TBD-927. The checkpoint lives inside
-  the running process, so it is gone when that process exits. Forge's
-  contract fixes the exact rule. Resume is only possible before then.
+- **How long the checkpoint lasts:** it lives inside the running process
+  until you resume it or the process exits. Exit at `pause>` and the
+  checkpoint is gone. There is no resuming it from a new process.
 - **What to check after resume:** the resumed conversation is the saved
   one plus your steering message, and no completed effect runs again. The
   receipts from before the pause are unchanged. TBD-927: the lines that
@@ -74,6 +75,7 @@ steering message, and resumes from the same conversation.
 ## Context: Real Token Counts
 
 The capstone counts characters. This run counts the model's own tokens.
+Look for the `context>` lines.
 
 - **Compaction:** TBD-927: the tokens before and after, measured with the
   Week 2 tokenizer, and the receipts that stay exactly as they were.
@@ -82,8 +84,10 @@ The capstone counts characters. This run counts the model's own tokens.
 
 ## Branches: Shared Prefix, Separate Effects, Your Choice
 
-The run continues twice from one checkpoint, with a different steering
-message for each branch.
+The run continues twice from one checkpoint. The `validate-only` branch
+validates without another edit. The `add-notes` branch writes a fixed note
+first, then validates. Look for one `branch>` block per branch, with that
+branch's effects, receipts, observed cache offsets and Day 7 report.
 
 - **Cache reuse:** both branches start from the same KV prefix, built by
   the Week 2 tokenizer and cache. TBD-927: the reused-token count and layer
@@ -94,8 +98,9 @@ message for each branch.
 - **Selection:** you name the branch you want. The run accepts it only if
   that branch's Day 7 report passes every check. A named branch that fails
   its report is refused, as on [Day 8](week4-08-fork-steer-select.md). The
-  run never picks a winner for you. TBD-927: how you pass the name, and
-  the accepted and refused output.
+  run never picks a winner for you. At the `select>` prompt, type
+  `validate-only` or `add-notes`. TBD-927: the accepted and refused
+  output.
 
 ## What This Run Proves, and What It Doesn't
 
