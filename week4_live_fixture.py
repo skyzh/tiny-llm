@@ -11,7 +11,11 @@ from tempfile import TemporaryDirectory
 from week4_fixture import _APP, _EDIT, _EXPECTED_APP, _NOTES, _VALIDATE, _WRITE
 from week4_fixture import _fixture_workspace
 
-_TASK = "Inspect the greeting, change Hello to Welcome, and validate the fixture bytes."
+_TASK = (
+    "Inspect the greeting, change Hello to Welcome, and validate the fixture bytes. "
+    "This is a guided fixture. Transcribe the JSON from the latest fixture step. "
+    "Return a final response only when that step shows a final action."
+)
 _DIAGNOSTIC = "Greeting fixture validation: inspect the recorded byte checks.\n"
 _BUILD_LOG = _DIAGNOSTIC + "".join(
     f"Fixture check {number:02d} compared the expected greeting bytes.\n"
@@ -32,17 +36,21 @@ _MAX_TOKENS = 160
 class _GuidedGenerator:
     """Give the model a reproducible next-action prompt for this fixture."""
 
-    def __init__(self, prefix, generate, actions):
+    def __init__(self, prefix, generate, actions, *, guide_system=False):
         self._prefix = prefix
         self._generate = generate
         self._actions = iter(actions)
+        self._guide_system = guide_system
 
     def __call__(self, messages):
         action = json.dumps(next(self._actions), separators=(",", ":"))
-        guide = {
-            "role": "user",
-            "content": f"For this fixture step, reply with exactly this JSON and no markdown:\n{action}",
-        }
+        instruction = (
+            "Transcribe this one fixture action. Copy the next line verbatim as "
+            f"your entire reply, without markdown or commentary:\n{action}"
+        )
+        guide = {"role": "user", "content": instruction}
+        if self._guide_system:
+            messages = [{"role": "system", "content": instruction}, *messages[1:]]
         return self._generate([*messages, guide])
 
     def save_checkpoint(self, messages):
@@ -112,7 +120,7 @@ def _start(api, model, tokenizer, root):
 
     checkpoint = api.run_to_checkpoint(
         _TASK,
-        _GuidedGenerator(prefix, generate, _BASE_ACTIONS),
+        _GuidedGenerator(prefix, generate, _BASE_ACTIONS, guide_system=True),
         workspace,
         after_tool_calls=len(_BASE_ACTIONS),
         limits=api.AgentLimits(max_steps=len(_BASE_ACTIONS)),
