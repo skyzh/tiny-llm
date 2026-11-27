@@ -51,10 +51,6 @@ class _GuidedGenerator:
     def restore_checkpoint(self, checkpoint):
         self._prefix.restore_checkpoint(checkpoint)
 
-    @property
-    def reuse(self):
-        return self._prefix.reuse
-
 
 class _ObservedModel:
     """Record the input and cache positions of the first model call in a branch."""
@@ -171,17 +167,13 @@ def _run_branch(api, model, base, root, checkpoint, generator, name, steering):
         allowed_effects=(_WRITE, _VALIDATE) if add_notes else (_VALIDATE,),
     )
 
-    class EvidenceWorkspace(api.BoundedEvidenceWorkspace):
-        def resolve_path(self, raw, *, must_exist=True):
-            return self.workspace.resolve_path(raw, must_exist=must_exist)
-
     artifact_dir = root / f"{name}-evidence"
     artifact_dir.mkdir()
     store = api.ArtifactStore(artifact_dir)
     range_end = len(_DIAGNOSTIC.encode())
     log_bytes = _BUILD_LOG.encode()
     artifact_id = "artifact-" + hashlib.sha256(log_bytes).hexdigest()
-    bounded = EvidenceWorkspace(workspace, store, max_range_bytes=range_end)
+    bounded = api.BoundedEvidenceWorkspace(workspace, store, max_range_bytes=range_end)
     range_action = {
         "tool": "read_file",
         "path": store.range_path(artifact_id, 0, range_end),
@@ -225,16 +217,15 @@ def _run_branch(api, model, base, root, checkpoint, generator, name, steering):
         receipts=effect_receipts,
     )
     model.first_call = None
-    outcome = api.run_branch(
-        name,
-        steering,
+    run = api.resume_with_steering(
         checkpoint,
+        steering,
         _GuidedGenerator(generator, generator, actions),
         bounded,
-        receipts,
-        case,
         api.AgentLimits(max_steps=len(actions)),
     )
+    report = api.evaluate_run(run, workspace, receipts, case)
+    outcome = api.BranchOutcome(name, steering, run, report, generator.reuse)
     prefix = len(checkpoint.model.cached_token_ids)
     call = model.first_call
     if (
