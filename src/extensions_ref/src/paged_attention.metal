@@ -103,6 +103,20 @@ template <typename T>
 instantiate_kernel("paged_cache_update_f32", paged_cache_update_kernel, float);
 instantiate_kernel("paged_cache_update_bf16", paged_cache_update_kernel, bfloat16_t);
 
+// One grid row per live request; K and V each get their own dispatch.
+[[kernel]] void paged_cache_update_grouped_bf16(
+    device const ushort* values [[buffer(0)]],
+    device ushort* pages [[buffer(1)]],
+    constant const int4* records [[buffer(2)]],
+    uint2 position [[thread_position_in_grid]]) {
+    const int4 slot = records[position.y];
+    const uint head = position.x / 128u;
+    const uint column = position.x % 128u;
+    const uint source = uint(slot.x) * 1024u + position.x;
+    const uint target = ((uint(slot.y) * 8u + head) * 128u + uint(slot.z)) * 128u + column;
+    pages[target] = values[source];
+}
+
 template <typename T, int FIXED_D = 0>
 [[kernel]] void paged_attention_decode(
     device const T* q [[buffer(0)]],

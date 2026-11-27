@@ -72,6 +72,9 @@ NB_MODULE(_ext, m) {
           "num_kv_heads"_a, "stream"_a = nb::none());
     m.def("paged_cache_update", &tiny_llm_ext_ref::paged_cache_update, "pages"_a, "values"_a, "page_id"_a, "start"_a,
           "stream"_a = nb::none());
+    m.def("_try_grouped_paged_cache_update", &tiny_llm_ext_ref::try_grouped_paged_cache_update,
+          "key_pages"_a, "value_pages"_a, "keys"_a, "values"_a, "records"_a,
+          nb::call_guard<nb::gil_scoped_release>());
     m.def("paged_attention", &tiny_llm_ext_ref::paged_attention, "query"_a, "key_pages"_a, "value_pages"_a,
           "block_table"_a, "context_lens"_a, "scale"_a = 1.0, "is_causal"_a = false, "num_kv_heads"_a, "num_heads"_a,
           "stream"_a = nb::none(), R"(

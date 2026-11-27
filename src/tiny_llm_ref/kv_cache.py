@@ -148,7 +148,7 @@ class BatchingKvCache(TinyKvCache):
         mask_length: int | None = None,
         mask: mx.array | str | None = None,
     ) -> "PagedKvMetadata":
-        from .paged_kv_cache import PagedKvMetadata, TinyKvPagedCache
+        from .paged_kv_cache import PagedKvMetadata, TinyKvPagedCache, TinyKvPagedPool
 
         if len(keys.shape) != 4 or len(values.shape) != 4:
             raise ValueError("Batched K/V chunks must be 4D [B, H, S, D]")
@@ -188,13 +188,23 @@ class BatchingKvCache(TinyKvCache):
         context_lens = [0] * B
         max_pages = 0
         try:
+            grouped = (
+                type(self) is BatchingKvCache
+                and type(pool) is TinyKvPagedPool
+                and pool._try_update_warm_tails(active_caches, keys, values)
+            )
             for b, cache in active_caches:
-                cache.update_and_fetch_paged(
-                    keys[b : b + 1],
-                    values[b : b + 1],
-                    mask_length=mask_length,
-                    mask=mask,
-                )
+                if grouped:
+                    cache.page_lens[-1] += S
+                    cache.offset += S
+                    cache.paged_metadata(mask=mask)
+                else:
+                    cache.update_and_fetch_paged(
+                        keys[b : b + 1],
+                        values[b : b + 1],
+                        mask_length=mask_length,
+                        mask=mask,
+                    )
                 context_lens[b] = cache.offset
                 max_pages = max(max_pages, cache.num_pages)
             self.HD = (H, D)
