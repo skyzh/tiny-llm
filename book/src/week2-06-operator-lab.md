@@ -104,7 +104,7 @@ produce the same public attention behavior and preserve the fallback.
 
 If you completed the old Week 2 Day 5 attention exercise before the course was
 reordered, keep that work. The current SIMD checkpoint is
-[Day 3](./week2-03-simd-matrix-prefill.md); this historical optional lab and
+[Day 4](./week2-04-simd-matrix-prefill.md); this historical optional lab and
 its former Day 6 commands are separate from the current learner route.
 
 ## Task 3: Re-measure and Decide
